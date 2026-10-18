@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
-import { Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { user } from "~/db/schema/index.ts";
@@ -161,7 +161,10 @@ describe("a document's version history", () => {
         }),
       ),
     );
-    expect(Exit.isFailure(pushed)).toBe(true);
+    expect(Exit.isFailure(pushed) && Cause.squash(pushed.cause)).toMatchObject({
+      _tag: "DocumentRejected",
+      reason: "invalid document step",
+    });
   });
 
   it("is an editor's only, and keeps nothing it does not hold", async () => {

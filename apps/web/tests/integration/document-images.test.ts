@@ -257,14 +257,20 @@ describe("claiming a document image", () => {
         s.read({ userId: owner, attachmentId: claimedId(claimed) }),
       ),
     );
-    expect(Exit.isFailure(owners)).toBe(true);
+    expect(Exit.isFailure(owners) && Cause.squash(owners.cause)).toMatchObject({
+      _tag: "AttachmentNotAvailable",
+      attachmentId: claimedId(claimed),
+    });
     // The plain file route caches for good and outlives project access, so it refuses.
     const after = await runtime.runPromiseExit(
       Effect.flatMap(AttachmentService, (s) =>
         s.read({ userId: editor, attachmentId: upload1.id }),
       ),
     );
-    expect(Exit.isFailure(after)).toBe(true);
+    expect(Exit.isFailure(after) && Cause.squash(after.cause)).toMatchObject({
+      _tag: "AttachmentNotAvailable",
+      attachmentId: upload1.id,
+    });
   });
 
   it("refuses someone else's upload, a viewer, a stranger and a non-image alike", async () => {

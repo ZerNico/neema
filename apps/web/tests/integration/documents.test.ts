@@ -636,9 +636,11 @@ describe("ownership, limits and sync", () => {
     const created = await create(owner, conversationId);
     expect(await get(stranger, created)).toBeNull();
     expect(await service((s) => s.list(stranger, { conversationId: conversationId }))).toEqual([]);
+    await expect(
+      service((s) => s.create(stranger, { conversationId, title: "Intruder", content: "" })),
+    ).rejects.toMatchObject({ _tag: "DocumentNotAvailable", conversationId });
     await Promise.all(
       [
-        service((s) => s.create(stranger, { conversationId, title: "Intruder", content: "" })),
         edit(stranger, created, { old: "ship", new: "sink" }),
         service((s) =>
           s.apply(stranger, {
@@ -655,7 +657,12 @@ describe("ownership, limits and sync", () => {
             steps: [JSON.stringify({ stepType: "replace", from: 1, to: 1 })],
           }),
         ),
-      ].map((action) => expect(action).rejects.toThrow()),
+      ].map((action) =>
+        expect(action).rejects.toMatchObject({
+          _tag: "DocumentNotAvailable",
+          documentId: created.id,
+        }),
+      ),
     );
     expect(
       await service((s) =>
@@ -970,7 +977,7 @@ describe("comments", () => {
     const stranger = await createUser();
     await expect(
       service((s) => s.deleteComment(stranger, { documentId: created.id, commentId: thread })),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ _tag: "DocumentNotAvailable", documentId: created.id });
     await service((s) => s.deleteComment(owner, { documentId: created.id, commentId: thread }));
     read = await service((s) => s.read(owner, created.id));
     expect(read!.comments).toEqual([]);
