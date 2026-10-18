@@ -1,38 +1,25 @@
 import { Cancel01Icon, Delete02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import { EMPTY_AGENT_DRAFT } from "../draft-schema.ts";
 import { AGENT_LIMITS, AgentIcon } from "../schema.ts";
-import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
 import { ImageModelSettingRow } from "~/modules/images/ui/image-model-select.tsx";
 import { AGENT_ICONS } from "~/modules/chat/ui/agent-icons.ts";
-import { ModelPicker } from "~/modules/chat/ui/model-picker.tsx";
+import { PreferredModelRow } from "~/modules/chat/ui/preferred-model-row.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
 import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import { ResourcePicker } from "~/ui/resource-picker.tsx";
-import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
-import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/schema.ts";
+import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
+import { CollectionsField } from "~/modules/knowledge/ui/collections-field.tsx";
 import { CollectionDialog } from "~/modules/knowledge/ui/knowledge-page.tsx";
-import { skillsQuery } from "~/modules/skills/client/queries.ts";
-import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
+import { SkillsField } from "~/modules/skills/ui/skills-field.tsx";
 import { withForm } from "~/ui/form/app-form.ts";
-import { ErrorState, ListCard, ListRow, ListSkeleton, Section } from "~/ui/page-shell.tsx";
-import { Badge } from "~/ui/primitives/badge";
+import { ErrorState, ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxTrigger,
-} from "~/ui/primitives/combobox";
 import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
@@ -43,14 +30,7 @@ export const AgentSettingsFields = withForm({
   defaultValues: EMPTY_AGENT_DRAFT,
   render: function AgentSettingsFields({ form }) {
     const integrations = useIntegrationDirectory();
-    const modelsQuery = useQuery(chatModelsQuery);
-    const models = modelsQuery.data ?? [];
-    const collections = useQuery(knowledgeCollectionsQuery);
-    const skills = useQuery(skillsQuery);
     const customTools = useQuery(usableCustomToolsQuery);
-    const selectedModel = (id: string | null) => models.find((model) => model.id === id) ?? null;
-    const [skillPickerOpen, setSkillPickerOpen] = useState(false);
-    const [skillAnchor, setSkillAnchor] = useState<HTMLButtonElement | null>(null);
     const [customToolPickerOpen, setCustomToolPickerOpen] = useState(false);
     const [customToolAnchor, setCustomToolAnchor] = useState<HTMLButtonElement | null>(null);
     const [creatingCollection, setCreatingCollection] = useState(false);
@@ -103,152 +83,14 @@ export const AgentSettingsFields = withForm({
           }
         >
           <form.Field name="collectionIds">
-            {(field) => {
-              if (collections.isError)
-                return (
-                  <ErrorState
-                    title="Could not load collections"
-                    onRetry={() => void collections.refetch()}
-                  />
-                );
-              if (collections.data === undefined)
-                return <ListSkeleton rows={2} media="none" label="Loading collections" />;
-              const known = collections.data;
-              const attached = field.state.value.flatMap((id) => {
-                const collection = known.find((candidate) => candidate.id === id);
-                return collection ? [collection] : [];
-              });
-              const unavailable = field.state.value.filter(
-                (id) => !known.some((candidate) => candidate.id === id),
-              );
-              const addable = known.filter(
-                (collection) => !field.state.value.includes(collection.id),
-              );
-              const atLimit =
-                field.state.value.length >= KNOWLEDGE_LIMITS.maxCollectionsPerSelection;
-              const detach = (id: string) =>
-                field.handleChange(field.state.value.filter((current) => current !== id));
-              return (
-                <div
-                  role="group"
-                  aria-label="Knowledge collections"
-                  tabIndex={-1}
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  className="flex flex-col gap-3"
-                >
-                  {attached.length > 0 || unavailable.length > 0 ? (
-                    <ListCard>
-                      {attached.map((collection) => (
-                        <ListRow key={collection.id}>
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <span className="truncate text-sm font-medium">{collection.name}</span>
-                            <span className="text-muted-foreground truncate text-xs">
-                              {collection.documentCount} documents
-                              {collection.ownerName ? ` · shared by ${collection.ownerName}` : ""}
-                            </span>
-                          </div>
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            className="text-muted-foreground hover:text-foreground"
-                            aria-label={`Remove ${collection.name}`}
-                            onClick={() => detach(collection.id)}
-                          >
-                            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-                          </Button>
-                        </ListRow>
-                      ))}
-                      {unavailable.map((id) => (
-                        <ListRow key={id}>
-                          <span className="flex-1 text-sm">
-                            A collection you can no longer read
-                          </span>
-                          <Badge variant="destructive">Unavailable</Badge>
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            className="text-muted-foreground hover:text-foreground"
-                            aria-label="Remove unavailable collection"
-                            onClick={() => detach(id)}
-                          >
-                            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-                          </Button>
-                        </ListRow>
-                      ))}
-                    </ListCard>
-                  ) : null}
-                  {known.length === 0 && unavailable.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">
-                      No collections yet.{" "}
-                      <Link to="/knowledge" className="underline underline-offset-2">
-                        Manage knowledge
-                      </Link>
-                    </p>
-                  ) : (
-                    // A searchable picker rather than a switch per row: the list
-                    // grows with the account, the attached ones do not.
-                    <Combobox
-                      items={addable}
-                      value={null}
-                      disabled={atLimit || addable.length === 0}
-                      onValueChange={(collection: CollectionSummary | null) => {
-                        if (collection && !atLimit)
-                          field.handleChange([...field.state.value, collection.id]);
-                      }}
-                      itemToStringLabel={(collection: CollectionSummary) => collection.name}
-                      isItemEqualToValue={(a: CollectionSummary, b: CollectionSummary) =>
-                        a.id === b.id
-                      }
-                      autoHighlight
-                    >
-                      <ComboboxTrigger
-                        render={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-fit"
-                            disabled={atLimit || addable.length === 0}
-                            aria-label="Add collection"
-                          />
-                        }
-                      >
-                        <HugeiconsIcon
-                          icon={PlusSignIcon}
-                          strokeWidth={2}
-                          data-icon="inline-start"
-                        />
-                        Add collection
-                      </ComboboxTrigger>
-                      <ComboboxContent align="start" className="w-72">
-                        <ComboboxInput placeholder="Search collections…" showTrigger={false} />
-                        <ComboboxEmpty>No collections match</ComboboxEmpty>
-                        <ComboboxList>
-                          {(collection: CollectionSummary) => (
-                            <ComboboxItem key={collection.id} value={collection}>
-                              <span className="flex min-w-0 flex-col">
-                                <span className="truncate">{collection.name}</span>
-                                <span className="text-muted-foreground truncate text-xs">
-                                  {collection.documentCount} documents
-                                  {collection.ownerName
-                                    ? ` · shared by ${collection.ownerName}`
-                                    : ""}
-                                </span>
-                              </span>
-                            </ComboboxItem>
-                          )}
-                        </ComboboxList>
-                      </ComboboxContent>
-                    </Combobox>
-                  )}
-                  {atLimit ? (
-                    <p className="text-muted-foreground text-xs">
-                      Up to {KNOWLEDGE_LIMITS.maxCollectionsPerSelection} collections.
-                    </p>
-                  ) : null}
-                  <FieldError errors={field.state.meta.errors} />
-                </div>
-              );
-            }}
+            {(field) => (
+              <CollectionsField
+                value={field.state.value}
+                onChange={field.handleChange}
+                errors={field.state.meta.errors}
+                showOwner
+              />
+            )}
           </form.Field>
         </Section>
         <Section
@@ -256,71 +98,14 @@ export const AgentSettingsFields = withForm({
           description="People using this agent need their own access to these."
         >
           <form.Field name="skillIds">
-            {(field) => {
-              const ids = field.state.value ?? [];
-              return (
-                <div className="space-y-3">
-                  {ids.length > 0 ? (
-                    <ListCard>
-                      {ids.map((id) => {
-                        const skill = skills.data?.find((candidate) => candidate.id === id);
-                        return (
-                          <ListRow key={id}>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">
-                                {skill?.name ?? "Unavailable skill"}
-                              </p>
-                              <p className="text-muted-foreground truncate text-xs">
-                                {skill?.description ??
-                                  "Remove this dependency or restore access before using the agent."}
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`Remove ${skill?.name ?? "unavailable skill"}`}
-                              onClick={() =>
-                                field.handleChange(ids.filter((value) => value !== id))
-                              }
-                            >
-                              <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-                            </Button>
-                          </ListRow>
-                        );
-                      })}
-                    </ListCard>
-                  ) : null}
-                  {skills.isError ? (
-                    <ErrorState
-                      title="Could not load skills"
-                      onRetry={() => void skills.refetch()}
-                    />
-                  ) : (
-                    <Button
-                      ref={setSkillAnchor}
-                      type="button"
-                      variant="outline"
-                      disabled={!skills.data}
-                      onClick={() => setSkillPickerOpen(true)}
-                    >
-                      <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" strokeWidth={2} />
-                      Add skills
-                    </Button>
-                  )}
-                  <SkillPicker
-                    items={skills.data ?? []}
-                    selectedIds={ids}
-                    onChange={field.handleChange}
-                    open={skillPickerOpen}
-                    onOpenChange={setSkillPickerOpen}
-                    anchor={skillAnchor}
-                    limit={20}
-                  />
-                  <FieldError errors={field.state.meta.errors} />
-                </div>
-              );
-            }}
+            {(field) => (
+              <SkillsField
+                value={field.state.value ?? []}
+                onChange={field.handleChange}
+                errors={field.state.meta.errors}
+                unavailableHint="Remove this dependency or restore access before using the agent."
+              />
+            )}
           </form.Field>
         </Section>
         <Section
@@ -459,58 +244,15 @@ export const AgentSettingsFields = withForm({
         </form.Field>
         <Section title="Model and tools">
           <ListCard>
-            {/* Wraps in the narrow rail: the label keeps its line and the
-                picker takes the rest, truncating long model names. */}
-            <ListRow className="flex-wrap">
-              <div className="flex min-w-24 shrink-0 flex-col">
-                <span className="text-sm font-medium">Preferred model</span>
-              </div>
-              <form.Field name="modelId">
-                {(field) => (
-                  <div className="flex min-w-0 flex-1 flex-col items-end gap-1">
-                    <ModelPicker
-                      models={models}
-                      value={field.state.value}
-                      onChange={(modelId) => field.handleChange(modelId)}
-                      side="bottom"
-                      align="end"
-                      // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
-                      header={({ close }) => (
-                        <div className="p-1.5 pb-0">
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={field.state.value === null}
-                            className="hover:bg-accent hover:text-accent-foreground flex w-full cursor-default items-center gap-2.5 rounded-2xl px-3 py-2 text-sm font-medium select-none"
-                            onClick={() => {
-                              close();
-                              field.handleChange(null);
-                            }}
-                          >
-                            No preference
-                          </button>
-                        </div>
-                      )}
-                      trigger={
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full min-w-0 justify-between"
-                          aria-label="Preferred model"
-                          aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                        />
-                      }
-                    >
-                      <span className="truncate">
-                        {selectedModel(field.state.value)?.displayName ??
-                          (field.state.value ? "Unavailable model" : "No preference")}
-                      </span>
-                    </ModelPicker>
-                    <FieldError errors={field.state.meta.errors} />
-                  </div>
-                )}
-              </form.Field>
-            </ListRow>
+            <form.Field name="modelId">
+              {(field) => (
+                <PreferredModelRow
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  errors={field.state.meta.errors}
+                />
+              )}
+            </form.Field>
             <form.Field name="imageModelId">
               {(field) => (
                 <ImageModelSettingRow
