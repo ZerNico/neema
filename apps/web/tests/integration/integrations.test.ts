@@ -640,6 +640,54 @@ describe("connections", () => {
     }
   });
 
+  it("keeps a rotated token when the settings are saved while it is refreshed", async () => {
+    const userId = await newUser();
+    const refreshToken = uuidv7();
+    const rotated = uuidv7();
+    refreshTokens.set(refreshToken, { access: `kept-${userId}`, refresh: rotated });
+    await run(
+      Effect.flatMap(IntegrationRepo, (repo) =>
+        saveAtCurrent(repo, {
+          userId,
+          integrationId: "outline",
+          authKind: "oauth",
+          credentials: { kind: "oauth", accessToken: "expired", refreshToken, expiresAt: 0 },
+          accountLabel: "ada",
+          fingerprint: baseUrl,
+        }),
+      ),
+    );
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    const reached = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    duringRefresh = async () => {
+      reached.resolve();
+      await answer.promise;
+    };
+    try {
+      const credential = runtime.runPromiseExit(session.credential);
+      await reached.promise;
+      // An admin saving the settings moves the revision this session was made for.
+      await configure();
+      answer.resolve();
+      expect(Exit.isFailure(await credential)).toBe(true);
+    } finally {
+      duringRefresh = null;
+      answer.resolve();
+    }
+    // The spent refresh token was replaced, not lost: no reconnect is needed.
+    const after = await run(
+      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+    );
+    expect(await run(after.credential)).toMatchObject({
+      kind: "oauth",
+      accessToken: `kept-${userId}`,
+    });
+    expect((await outlineFor(userId))?.connection?.status).toBe("active");
+  });
+
   it("validates reconnect identity after waiting for the refresh lock before contacting OAuth", async () => {
     const userId = await newUser();
     await run(

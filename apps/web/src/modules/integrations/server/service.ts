@@ -654,13 +654,23 @@ export class IntegrationService extends Context.Service<
           if (!outcome.ok && !outcome.revoked)
             return { kind: "failed", message: "Could not refresh the sign-in." } as RefreshResult;
 
-          // Stored only if nothing replaced the credential while the endpoint answered.
+          // The provider has already spent the old refresh token, so the answer
+          // is kept whenever the connection is still the one that was read. A
+          // setup changed meanwhile only means this session does not get it.
           const result = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                const held = yield* lockForRefresh(tx, connection, row, adapter, setup);
-                if ("kind" in held) return held;
-                if (held.locked.credentialRevision !== plan.credentialRevision)
+                const [locked] = yield* tx
+                  .select()
+                  .from(integrationConnections)
+                  .where(eq(integrationConnections.id, connectionId))
+                  .for("update");
+                if (
+                  !locked ||
+                  locked.status !== "active" ||
+                  locked.accountEpoch !== connection.accountEpoch ||
+                  locked.credentialRevision !== plan.credentialRevision
+                )
                   return {
                     kind: "failed",
                     message: "The sign-in changed while it was refreshed.",
@@ -686,12 +696,29 @@ export class IntegrationService extends Context.Service<
                     updatedAt: new Date(),
                   })
                   .where(eq(integrationConnections.id, connectionId));
+                const [config] = yield* tx
+                  .select()
+                  .from(integrationConfigs)
+                  .where(
+                    and(
+                      eq(integrationConfigs.id, row.id),
+                      eq(integrationConfigs.enabled, true),
+                      integrationUsableBy(connection.userId),
+                    ),
+                  );
+                if (
+                  !config ||
+                  configIdentity(config, adapter) !== configIdentity(row, adapter) ||
+                  config.revision !== setup.revision ||
+                  locked.configFingerprint !== setup.fingerprint
+                )
+                  return { kind: "failed", message: UNAVAILABLE } satisfies RefreshResult;
                 return {
                   kind: "credential",
                   credential: {
                     kind: "oauth",
                     accessToken: next.accessToken,
-                    identity: { ...credentialIdentity(held.locked), credentialRevision },
+                    identity: { ...credentialIdentity(locked), credentialRevision },
                   },
                 } satisfies RefreshResult;
               }),
