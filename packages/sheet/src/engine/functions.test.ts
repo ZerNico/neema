@@ -264,6 +264,36 @@ const cases: Record<string, Case[]> = {
       ],
     },
   ],
+  // MDETERM example.
+  MDETERM: [
+    {
+      formula: "MDETERM(A1:D4)",
+      cells: {
+        ...column("A", [1, 1, 1, 7]),
+        ...column("B", [3, 3, 1, 3]),
+        ...column("C", [8, 6, 1, 10]),
+        ...column("D", [5, 1, 0, 2]),
+      },
+      expected: 88,
+      digits: 9,
+    },
+    { formula: "MDETERM({3,6;1,1})", expected: -3, digits: 12 },
+    { formula: "MDETERM({1,2,3})", expected: new XError("#VALUE!") },
+  ],
+  // MINVERSE example.
+  MINVERSE: [
+    {
+      formula: "MINVERSE(A1:B2)",
+      cells: { A1: 4, B1: -1, A2: 2, B2: 0 },
+      expected: [
+        [0, 0.5],
+        [-1, 2],
+      ],
+      digits: 12,
+    },
+    // Its rows are equal, so it has no inverse.
+    { formula: "MINVERSE({1,2;1,2})", expected: new XError("#NUM!") },
+  ],
   SUMX2MY2: [{ formula: "SUMX2MY2(A1:A7,B1:B7)", cells: sumXY, expected: -55 }],
   SUMX2PY2: [{ formula: "SUMX2PY2(A1:A7,B1:B7)", cells: sumXY, expected: 521 }],
   SUMXMY2: [{ formula: "SUMXMY2(A1:A7,B1:B7)", cells: sumXY, expected: 79 }],

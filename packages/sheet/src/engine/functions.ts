@@ -323,6 +323,45 @@ const fitted = (name: "TREND" | "GROWTH"): Fn => ({
   },
 });
 
+/** A square range of numbers as rows, or the error Excel gives for anything else. */
+function squareOf(value: Value | undefined): number[][] | XError {
+  const grid = gridOf(value ?? null);
+  if (grid instanceof XError) return grid;
+  if (grid.height !== grid.width) return VALUE;
+  const error = firstError(grid.rows.flat());
+  if (error) return error;
+  if (grid.rows.some((row) => row.some((item) => typeof item !== "number"))) return VALUE;
+  return grid.rows.map((row) => row.map(Number));
+}
+/** Gauss-Jordan elimination with the largest pivot: the determinant, and the inverse unless singular. */
+function eliminate(matrix: number[][]) {
+  const left = matrix.map((row) => [...row]);
+  const right = matrix.map((row, r) => row.map((_, c): number => (r === c ? 1 : 0)));
+  let determinant = 1;
+  for (let at = 0; at < left.length; at++) {
+    let pivot = at;
+    for (let r = at + 1; r < left.length; r++)
+      if (Math.abs(left[r]![at]!) > Math.abs(left[pivot]![at]!)) pivot = r;
+    const lead = left[pivot]![at]!;
+    if (lead === 0) return { determinant: 0, inverse: null };
+    if (pivot !== at) {
+      [left[at], left[pivot]] = [left[pivot]!, left[at]!];
+      [right[at], right[pivot]] = [right[pivot]!, right[at]!];
+      determinant = -determinant;
+    }
+    determinant *= lead;
+    const [top, topRight] = [left[at]!.map((x) => x / lead), right[at]!.map((x) => x / lead)];
+    [left[at], right[at]] = [top, topRight];
+    for (let r = 0; r < left.length; r++) {
+      const factor = left[r]![at]!;
+      if (r === at || factor === 0) continue;
+      left[r] = left[r]!.map((x, c) => x - factor * top[c]!);
+      right[r] = right[r]!.map((x, c) => x - factor * topRight[c]!);
+    }
+  }
+  return { determinant, inverse: right };
+}
+
 function countNumbers(args: Value[], call: Call) {
   let total = 0;
   for (const [index, arg] of args.entries()) {
@@ -846,8 +885,6 @@ export const LIBRARY_KINDS: Record<string, string> = {
   XNPV: "srr",
   XIRR: "rrs",
   MMULT: "rr",
-  MDETERM: "r",
-  MINVERSE: "r",
   SUMX2MY2: "rr",
   SUMX2PY2: "rr",
   SUMXMY2: "rr",
@@ -998,6 +1035,22 @@ export const FUNCTIONS: Record<string, Fn> = {
   "MODE.MULT": { kinds: "|r", run: onNumbers(modes) },
   "F.TEST": { kinds: "rr", run: fTest },
   "CHISQ.TEST": { kinds: "rr", run: chiSquareTest },
+  MDETERM: {
+    kinds: "r",
+    run: (args) => {
+      const matrix = squareOf(args[0]);
+      return matrix instanceof XError ? matrix : eliminate(matrix).determinant;
+    },
+  },
+  MINVERSE: {
+    kinds: "r",
+    run: (args) => {
+      const matrix = squareOf(args[0]);
+      if (matrix instanceof XError) return matrix;
+      const { inverse } = eliminate(matrix);
+      return inverse ? new Grid(inverse) : NUM;
+    },
+  },
   TREND: fitted("TREND"),
   GROWTH: fitted("GROWTH"),
   "T.TEST": { kinds: "rrss", run: tTest },
