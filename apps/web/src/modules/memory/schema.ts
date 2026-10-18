@@ -6,11 +6,6 @@ export const MAX_MEMORY_CONTENT_LENGTH = 500;
 export const MemoryOrigin = Schema.Literals(["manual", "model"]);
 export type MemoryOrigin = typeof MemoryOrigin.Type;
 
-export const MemoryContent = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(MAX_MEMORY_CONTENT_LENGTH),
-);
-
 export const MemoryPreferences = Schema.Struct({
   referenceEnabled: Schema.Boolean,
   autoSaveEnabled: Schema.Boolean,
@@ -132,7 +127,5 @@ export const DeleteMemoryOutcome = Schema.Union([
   Schema.Struct({ outcome: Schema.Literals(["not_found"]) }),
 ]);
 export type DeleteMemoryOutcome = typeof DeleteMemoryOutcome.Type;
-
-export const MemoryList = Schema.Array(Memory);
 
 export const standard = Schema.toStandardSchemaV1;

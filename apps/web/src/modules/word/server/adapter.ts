@@ -1765,5 +1765,3 @@ export function editWordFile(bytes: Uint8Array, rawOperations: unknown) {
     operations: operations.map((operation) => operation.kind),
   };
 }
-export type WordEdit = ReturnType<typeof editWordFile>;
-export type WordInspection = ReturnType<typeof inspectWordFile>;

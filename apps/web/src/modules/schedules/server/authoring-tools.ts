@@ -292,6 +292,3 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     };
   },
 );
-export type PreparedScheduleDraftTools = Effect.Success<
-  ReturnType<typeof prepareScheduleDraftTools>
->;

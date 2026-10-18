@@ -836,6 +836,3 @@ const sideOf = (line: BorderLine) => ({
   style: line.style,
   ...(line.color ? { color: { rgb: `FF${line.color.slice(1)}` } } : {}),
 });
-
-export type SpreadsheetInspection = Awaited<ReturnType<typeof inspectSpreadsheet>>;
-export type SpreadsheetEdit = Awaited<ReturnType<typeof editSpreadsheet>>;

@@ -4,7 +4,6 @@ import {
   JobError,
   workerCount,
   workerEntry,
-  type JobRequest,
   type JobRuntime,
 } from "~/server/jobs.ts";
 import type { PoolWorker } from "~/server/worker-pool.ts";
@@ -12,7 +11,6 @@ import { PDF_WORKERS } from "../limits.ts";
 import type { pdfJobs } from "./runtime-worker.ts";
 
 export type PdfJobs = typeof pdfJobs;
-export type PdfWork = JobRequest<PdfJobs>;
 export type PdfRuntime = JobRuntime<PdfJobs>;
 
 /** A PDF job that failed; `code` is stable, `message` reads as the reason a page or file was not read. */

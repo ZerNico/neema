@@ -154,13 +154,6 @@ export const WorkTurnReservationInput = Schema.Struct({
   reservationId: LocalTransactionId,
 });
 
-export const WorkTurnReservationStatus = Schema.Struct({
-  reservationId: LocalTransactionId,
-  conversationId: WorkspaceId,
-  status: Schema.Literals(["reserved", "activated", "aborted", "expired"]),
-  assistantMessageId: Schema.NullOr(Schema.String),
-});
-
 /** One ```ui block's state; the JSON the block's runtime reported, at most 16 KB. */
 export const SaveUiStateInput = Schema.Struct({
   messageId: Schema.String,

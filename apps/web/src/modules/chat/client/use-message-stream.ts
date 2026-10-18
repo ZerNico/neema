@@ -245,12 +245,6 @@ export type ToolActivity =
   | KnowledgeToolActivity
   | SkillToolActivity;
 
-export const isWebToolActivity = (activity: ToolActivity): activity is WebToolActivity =>
-  activity.family === "web";
-
-export const isMemoryToolActivity = (activity: ToolActivity): activity is MemoryToolActivity =>
-  activity.family === "memory";
-
 /**
  * One durable/live compaction occurrence. Position is relative to model/tool
  * turns inside this assistant response, not to the historical checkpoint it

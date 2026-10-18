@@ -5,7 +5,6 @@ import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { Button } from "~/ui/primitives/button";
 import { DropdownMenu, DropdownMenuTrigger } from "~/ui/primitives/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 
@@ -97,63 +96,6 @@ const PALETTE = [
   "#C6E0B4",
   "#BDD7EE",
 ] as const;
-
-/**
- * A colour for text or fill: a swatch from the palette, any colour, or the
- * cell's default. The button's bar shows the current one, as Excel's does.
- */
-export function ColorMenu({
-  label,
-  icon,
-  value,
-  resetLabel,
-  onChange,
-}: {
-  label: string;
-  icon: HugeiconsIconProps["icon"];
-  value: string | undefined;
-  /** What clearing the colour is called: "Automatic" for text, "No fill" for a fill. */
-  resetLabel: string;
-  onChange: (color: string | null) => void;
-}) {
-  return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Toolbar.Button
-              render={
-                <PopoverTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={label}
-                      className="text-muted-foreground relative"
-                      onMouseDown={keepFocus}
-                    />
-                  }
-                />
-              }
-            />
-          }
-        >
-          <HugeiconsIcon icon={icon} strokeWidth={2} />
-          <span
-            aria-hidden
-            className="border-border absolute right-1.5 bottom-1 left-1.5 h-1 rounded-full border"
-            // The text's own colour, which is data rather than a theme token.
-            style={{ backgroundColor: value ?? "transparent" }}
-          />
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
-      <PopoverContent align="start" className="w-64" onMouseDown={keepFocus}>
-        <ColorSwatches value={value} resetLabel={resetLabel} onChange={onChange} />
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 /** The palette's swatches, any colour, and the default, as a colour menu's content. */
 export function ColorSwatches({

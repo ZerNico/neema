@@ -66,9 +66,6 @@ const locate = (doc: Node, id: string) => {
   };
 };
 
-/** Where the model can place content without naming a block: the document's ends. */
-export const DOCUMENT_ENDS = ["start", "end"] as const;
-
 /**
  * A placement the model can name without reading there, as a block and a
  * side: `start` and `end` for the document's ends, and position `end` on a

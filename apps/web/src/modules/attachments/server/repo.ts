@@ -28,7 +28,6 @@ export interface AttachmentAssociation {
   after(tx: DbTx, attachment: Attachment): Effect.Effect<void>;
 }
 
-export type AttachmentRow = typeof attachments.$inferSelect;
 export type AttachmentBlobRow = typeof attachmentBlobs.$inferSelect;
 
 /** The transaction handle `Db.transaction` hands its callback. */

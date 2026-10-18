@@ -394,4 +394,3 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
         : [],
   };
 });
-export type PreparedAgentDraftTools = Effect.Success<ReturnType<typeof prepareAgentDraftTools>>;

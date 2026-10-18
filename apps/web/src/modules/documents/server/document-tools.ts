@@ -1444,4 +1444,3 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
     },
   };
 });
-export type PreparedDocumentTools = Effect.Success<ReturnType<typeof prepareDocumentTools>>;

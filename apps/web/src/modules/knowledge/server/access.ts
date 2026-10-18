@@ -63,14 +63,3 @@ export const agentReadable = (userId: string): SQL =>
     )
     )
   )`;
-
-/**
- * Correlated form for queries that reach a collection through a document,
- * version or chunk rather than selecting from `knowledge_collections` itself.
- */
-export const collectionIdReadable = (userId: string, collectionId: SQL): SQL =>
-  sql`exists (
-    select 1 from ${knowledgeCollections}
-    where ${knowledgeCollections.id} = ${collectionId}
-      and ${collectionReadable(userId)}
-  )`;

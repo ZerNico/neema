@@ -268,4 +268,3 @@ export function createWorkerPool(options: WorkerPoolOptions) {
     },
   };
 }
-export type WorkerPool = ReturnType<typeof createWorkerPool>;

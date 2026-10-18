@@ -1,16 +1,6 @@
-import type {
-  DocumentLocation,
-  DocumentSource,
-  IntegrationSource,
-  Source,
-  WebSource,
-} from "./source-schema.ts";
+import type { DocumentLocation, DocumentSource, Source, WebSource } from "./source-schema.ts";
 
-export const isDocumentSource = (source: Source): source is DocumentSource =>
-  source.kind === "document";
 export const isWebSource = (source: Source): source is WebSource => source.kind === "web";
-export const isIntegrationSource = (source: Source): source is IntegrationSource =>
-  source.kind === "integration";
 
 export type SourceReference =
   | { readonly url: string; readonly kind: "web" }

@@ -21,7 +21,6 @@ export const PROJECT_FILE_LIMITS = {
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
 const Version = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 export const ProjectFileIdInput = Schema.Struct({ fileId: Id });
-export const ProjectFileVersionIdInput = Schema.Struct({ versionId: Id });
 export const RestoreProjectFileInput = Schema.Struct({ versionId: Id, basedOnVersion: Version });
 export const PinProjectFileVersionInput = Schema.Struct({
   versionId: Id,

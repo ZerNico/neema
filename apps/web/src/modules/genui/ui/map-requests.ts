@@ -40,13 +40,6 @@ function keep(messageId: string, lookups: UiLookups) {
   }
 }
 
-/** For tests: forget every result and request. */
-export function clearMapRequests() {
-  found.clear();
-  asked.clear();
-  changed();
-}
-
 /** The answer's lookups with what the page asked for merged in. */
 export function useMessageLookups(): UiLookups {
   const message = use(GenuiMessageContext);

@@ -219,7 +219,6 @@ const SPREADSHEET_OPERATIONS = {
 } as const satisfies Record<string, Definition>;
 
 type Catalog = typeof SPREADSHEET_OPERATIONS;
-export type SpreadsheetOperationKind = keyof Catalog;
 type CellInput = string | number | boolean | null;
 
 type ValueOf<F> = F extends { type: "integer" | "number" }

@@ -38,6 +38,3 @@ export const buildPdf = (pages: ReadonlyArray<string>): Uint8Array => {
   pdf += `trailer\n<< /Size ${fontId + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
   return new TextEncoder().encode(pdf);
 };
-
-/** A structurally valid PDF whose only page carries no text operators. */
-export const buildEmptyPdf = (): Uint8Array => buildPdf([""]);

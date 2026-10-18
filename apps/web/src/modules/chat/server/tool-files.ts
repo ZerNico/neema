@@ -215,5 +215,3 @@ export const makeToolFileResolver = (input: {
 
   return { resolve, authorize };
 };
-
-export type ToolFileResolver = ReturnType<typeof makeToolFileResolver>;

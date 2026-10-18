@@ -162,7 +162,6 @@ const tool = Tool.make(IMAGE_TOOL, {
   }),
   failureMode: "return",
 });
-export const imageToolDefinition = tool;
 
 const oneOf = <T extends string>(values: ReadonlyArray<T>, value: unknown): T | undefined =>
   typeof value === "string" && (values as ReadonlyArray<string>).includes(value)

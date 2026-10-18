@@ -14,8 +14,6 @@ const searchEngine = localPreference<SearchEngine>(
   "google",
 );
 
-export const readSearchEngine = searchEngine.read;
-
 export function useSearchEngine() {
   const [engine, setEngine] = searchEngine.use();
   return { engine, setEngine };
@@ -30,5 +28,4 @@ const linkTarget = localPreference<LinkTarget>(
   "panel",
 );
 
-export const readLinkTarget = linkTarget.read;
 export const useLinkTarget = linkTarget.use;

@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
 import { ImageModelSettingRow } from "~/modules/images/ui/image-model-select.tsx";
-import { browserTimeZone } from "~/modules/chat/client/time-zone.ts";
 import { PreferredModelRow } from "~/modules/chat/ui/preferred-model-row.tsx";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { CollectionsField } from "~/modules/knowledge/ui/collections-field.tsx";
@@ -225,9 +224,4 @@ export const ScheduleSettingsFields = withForm({
       </>
     );
   },
-});
-
-export const newScheduleDefaults = () => ({
-  ...EMPTY_SCHEDULE_DRAFT,
-  timezone: browserTimeZone(),
 });
