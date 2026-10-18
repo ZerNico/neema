@@ -2,7 +2,7 @@ import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
-import { ChatRepo, type MessageRow, type QueueGate } from "./repo.ts";
+import { ChatRepo, type QueueGate, type WindowMessageRow } from "./repo.ts";
 import { mergeSources } from "~/modules/tools/sources.ts";
 import type { Source } from "~/modules/tools/source-schema.ts";
 import { StreamEngine } from "./streaming.ts";
@@ -45,7 +45,10 @@ const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: 
   return queue[0]?.lastError ? ("failed" as const) : ("ready" as const);
 };
 
-const sameAttemptSnapshot = (before: ReadonlyArray<MessageRow>, after: ReadonlyArray<MessageRow>) =>
+const sameAttemptSnapshot = (
+  before: ReadonlyArray<WindowMessageRow>,
+  after: ReadonlyArray<WindowMessageRow>,
+) =>
   before.length === after.length &&
   before.every((message, index) => {
     const current = after[index]!;
@@ -71,7 +74,7 @@ export const OLDER_TURNS = 30;
  */
 const loadMessageRows = Effect.fn("chat.loadMessageRows")(function* (
   conversationId: string,
-  messages: ReadonlyArray<MessageRow>,
+  messages: ReadonlyArray<WindowMessageRow>,
 ) {
   const repo = yield* ChatRepo;
   const attachmentRepo = yield* AttachmentRepo;
@@ -108,7 +111,7 @@ const loadMessageRows = Effect.fn("chat.loadMessageRows")(function* (
     { concurrency: "unbounded" },
   );
   return {
-    messages: messages.map(({ providerReplay: _privateReplay, ...message }) => message),
+    messages,
     ...rows,
     compactionEvents: rows.compactionEvents.map((event) =>
       event.researchRunId ? { ...event, summary: null } : event,

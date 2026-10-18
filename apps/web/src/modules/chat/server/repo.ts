@@ -900,6 +900,9 @@ export type SteeredMessage = MessageRow & {
   openDocument?: OpenDocument | undefined;
 };
 
+const { providerReplay: _privateReplay, ...windowColumns } = getTableColumns(messages);
+export type WindowMessageRow = Omit<MessageRow, "providerReplay">;
+
 export class ChatRepo extends Context.Service<
   ChatRepo,
   {
@@ -1214,10 +1217,11 @@ export class ChatRepo extends Context.Service<
       beforeId?: string,
     ): Effect.Effect<string | null>;
     /** Messages from `fromId` (or the start) up to, not including, `beforeId` (or the end). */
+    /** Rows for display: without provider replay, which is private and can be a megabyte. */
     listMessageWindow(
       conversationId: string,
       range: { fromId?: string | null; beforeId?: string },
-    ): Effect.Effect<MessageRow[]>;
+    ): Effect.Effect<WindowMessageRow[]>;
     hasMessagesBefore(conversationId: string, messageId: string): Effect.Effect<boolean>;
     hasMessage(conversationId: string, messageId: string): Effect.Effect<boolean>;
     /** The newest answer sent from a desktop machine, however far back it is. */
@@ -3375,7 +3379,7 @@ export class ChatRepo extends Context.Service<
         listMessageWindow: Effect.fn("ChatRepo.listMessageWindow")(
           function* (conversationId, range) {
             return yield* db
-              .select()
+              .select(windowColumns)
               .from(messages)
               .where(
                 and(
