@@ -91,9 +91,11 @@ beforeEach(() => {
   settingsMock.mockResolvedValue({
     referenceEnabled: true,
     autoSaveEnabled: true,
+    pastChatsEnabled: true,
     globalEnabled: true,
     effectiveReferenceEnabled: true,
     effectiveAutoSaveEnabled: true,
+    effectivePastChatsEnabled: true,
     updatedAt: "2026-01-01T00:00:00.000Z",
   } as never);
   listMock.mockResolvedValue([] as never);
@@ -102,9 +104,11 @@ beforeEach(() => {
       ({
         referenceEnabled: data.referenceEnabled ?? true,
         autoSaveEnabled: data.autoSaveEnabled ?? true,
+        pastChatsEnabled: data.pastChatsEnabled ?? true,
         globalEnabled: true,
         effectiveReferenceEnabled: data.referenceEnabled ?? true,
         effectiveAutoSaveEnabled: data.autoSaveEnabled ?? true,
+        effectivePastChatsEnabled: data.pastChatsEnabled ?? true,
         updatedAt: "2026-01-02T00:00:00.000Z",
       }) as never,
   );
@@ -124,6 +128,7 @@ describe("MemoryPage", () => {
     expect(await screen.findByText("Nothing saved yet")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Use saved memories" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Save memories automatically" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Search past chats" })).toBeChecked();
     expect(screen.getByText("0 of 50")).toBeInTheDocument();
   });
 
@@ -131,9 +136,11 @@ describe("MemoryPage", () => {
     settingsMock.mockResolvedValue({
       referenceEnabled: true,
       autoSaveEnabled: true,
+      pastChatsEnabled: true,
       globalEnabled: false,
       effectiveReferenceEnabled: false,
       effectiveAutoSaveEnabled: false,
+      effectivePastChatsEnabled: false,
       updatedAt: "2026-01-01T00:00:00.000Z",
     } as never);
     renderPage();
@@ -162,6 +169,17 @@ describe("MemoryPage", () => {
       expect(updateSettingsMock).toHaveBeenCalledWith({
         data: { autoSaveEnabled: false },
       }),
+    );
+  });
+
+  it("turns past chat search off on its own", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("switch", { name: "Search past chats" }));
+
+    await waitFor(() =>
+      expect(updateSettingsMock).toHaveBeenCalledWith({ data: { pastChatsEnabled: false } }),
     );
   });
 

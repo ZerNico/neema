@@ -4,9 +4,11 @@ import { MemoryService } from "~/modules/memory/server/service.ts";
 const baseSettings = {
   referenceEnabled: true,
   autoSaveEnabled: true,
+  pastChatsEnabled: true,
   globalEnabled: false,
   effectiveReferenceEnabled: false,
   effectiveAutoSaveEnabled: false,
+  effectivePastChatsEnabled: false,
   updatedAt: "2026-01-01T00:00:00.000Z",
 } as const;
 
@@ -23,9 +25,11 @@ export const makeFakeMemoryService = (options: { autoSave?: boolean } = {}) => {
       Effect.succeed({
         referenceEnabled: input.referenceEnabled ?? settings.referenceEnabled,
         autoSaveEnabled: input.autoSaveEnabled ?? settings.autoSaveEnabled,
+        pastChatsEnabled: input.pastChatsEnabled ?? settings.pastChatsEnabled,
         globalEnabled: false,
         effectiveReferenceEnabled: false,
         effectiveAutoSaveEnabled: false,
+        effectivePastChatsEnabled: false,
         updatedAt: settings.updatedAt,
       }),
     list: () => Effect.succeed([]),

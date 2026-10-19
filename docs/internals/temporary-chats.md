@@ -1,9 +1,10 @@
 # Temporary chats
 
 A temporary chat is an ordinary conversation with `conversations.temporary` set when it was
-created. Everything else about it (agents, knowledge, tools, research, documents) is unchanged.
-Three things differ: nothing lists it, it has no memory, and it is deleted a day after its last
-activity. **Keep** clears the flag. Nothing sets the flag after creation, and that is the rule
+created. Everything else about it (agents, knowledge, research, documents) is unchanged.
+Three things differ: nothing lists it, it has no memory (nor the [history tools](history-tools.md),
+which read past chats as memory does and are never offered in it), and it is deleted a day after
+its last activity. **Keep** clears the flag. Nothing sets the flag after creation, and that is the rule
 the rest of this page depends on.
 
 ## One flag on the row, read per attempt
@@ -13,7 +14,7 @@ the rest of this page depends on.
   from the row when the generation starts, in `generation/tools.ts`. Keep therefore takes effect
   on the next attempt, and no path has to carry the flag.
 - Memory is gated where it is offered: `prepareConversationContext` skips both the
-  referenceable snapshot and `save_memory`. A write-boundary check is not needed, because a
+  referenceable snapshot and `save_memory`, and `generation/tools.ts` offers no history tools. A write-boundary check is not needed, because a
   chat can only move from temporary to kept, never back. If the row is gone when the attempt
   starts, the chat is treated as temporary.
 - Research brief preparation uses the host turn's memory tools, so it inherits the gate.
@@ -25,8 +26,9 @@ the rest of this page depends on.
   neither shows a [deleted](deleted-chats.md) chat, and both exclude temporary chats (they differ
   on [archived](archived-chats.md) ones). Every list uses `listedBy`: `listConversations` (the
   sidebar, `/chats`, the palette's recent chats, the schedule chat picker). The title query,
-  `recentMatches` and `indexedMatches` behind `searchConversations` use `searchableBy`. A new
-  list or search path without one of them leaks temporary chats.
+  `recentMatches` and `indexedMatches` behind `searchConversations` use `searchableBy`, and so
+  does `findReadableChat`, which `read_chat` opens another chat through. A new list or search
+  path without one of them leaks temporary chats.
 - A schedule refuses a temporary chat as its target (`validate.ts`). The chat would be swept
   while the schedule still pointed at it.
 - A branch copies the flag: a copy of a temporary chat must not outlive it in the sidebar.

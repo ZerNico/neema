@@ -14,6 +14,7 @@ import {
   type SaveModelMemoryInput,
   type SaveModelMemoryOutcome,
   type UpdateMemoryOutcome,
+  type UpdateMemorySettingsInput,
 } from "../schema.ts";
 import { hashMemoryContent } from "./content-hash.ts";
 import { MemoryRepo } from "./repo.ts";
@@ -165,7 +166,7 @@ export class MemoryService extends Context.Service<
     getSettings(userId: string): Effect.Effect<MemorySettings>;
     updateSettings(
       userId: string,
-      input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
+      input: UpdateMemorySettingsInput,
     ): Effect.Effect<MemorySettings, CapabilityDenied>;
     list(userId: string): Effect.Effect<ReadonlyArray<Memory>>;
     listReferenceable(userId: string): Effect.Effect<ReadonlyArray<Memory>>;
@@ -217,6 +218,7 @@ export class MemoryService extends Context.Service<
           globalEnabled,
           effectiveReferenceEnabled: globalEnabled && preferences.referenceEnabled,
           effectiveAutoSaveEnabled: globalEnabled && preferences.autoSaveEnabled,
+          effectivePastChatsEnabled: globalEnabled && preferences.pastChatsEnabled,
         } satisfies MemorySettings;
       });
       const getSettings = Effect.fn("MemoryService.getSettings")(function* (userId: string) {
@@ -225,7 +227,7 @@ export class MemoryService extends Context.Service<
 
       const updateSettings = Effect.fn("MemoryService.updateSettings")(function* (
         userId: string,
-        input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
+        input: UpdateMemorySettingsInput,
       ) {
         yield* requireMemory(userId);
         const result = yield* repo.updateSettings(userId, input);

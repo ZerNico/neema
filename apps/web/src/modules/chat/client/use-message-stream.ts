@@ -25,6 +25,7 @@ import type { AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import type { PlanStep } from "~/modules/tools/plan-schema.ts";
 import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import type { AttachmentReadActivity } from "../attachment-tool-schema.ts";
+import type { HistoryActivity } from "../history-tool-schema.ts";
 import type { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
 import { isToolFamily, projectToolCall, readLiveCall, readTextOffset } from "./tool-families.ts";
 
@@ -60,6 +61,12 @@ export interface AttachmentToolActivity extends ToolActivityBase {
   family: "attachment";
   /** Which file and part; the text itself only ever reached the model. */
   read?: AttachmentReadActivity;
+}
+
+export interface HistoryToolActivity extends ToolActivityBase {
+  family: "history";
+  /** What was looked for and how much came back; the text only ever reached the model. */
+  read?: HistoryActivity;
 }
 
 export interface ToolLoadActivity extends ToolActivityBase {
@@ -243,6 +250,7 @@ export type ToolActivity =
   | MapToolActivity
   | ToolLoadActivity
   | AttachmentToolActivity
+  | HistoryToolActivity
   | ResearchToolActivity
   | KnowledgeToolActivity
   | SkillToolActivity;

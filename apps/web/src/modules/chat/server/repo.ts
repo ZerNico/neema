@@ -16,6 +16,7 @@ import {
   eq,
   getTableColumns,
   gt,
+  gte,
   ilike,
   inArray,
   isNotNull,
@@ -174,6 +175,59 @@ const listedBy = (userId: string) =>
 const searchableBy = (userId: string) =>
   and(ownedConversation(userId), eq(conversations.temporary, false));
 
+/**
+ * Which of a person's other chats one chat may look into: never itself, and
+ * only those in its own project, or only those in none, as projects keep
+ * their work apart. Narrows `searchableBy`, never replaces it.
+ */
+export interface ChatScope {
+  readonly excludeId: string;
+  readonly projectId: string | null;
+}
+const withinScope = (scope: ChatScope | undefined) =>
+  scope
+    ? and(
+        ne(conversations.id, scope.excludeId),
+        scope.projectId === null
+          ? isNull(conversations.projectId)
+          : eq(conversations.projectId, scope.projectId),
+      )
+    : undefined;
+
+/**
+ * The messages a chat's history is read as: what the person and the model
+ * said, settled as an attempt's history counts it (the `settled` filter and
+ * steer grouping in `generation/attempt-context.ts`; change both together),
+ * and never the attempt still being written or a steer delivered into it. A
+ * steer whose answer did not settle went with that attempt.
+ */
+const historyMessage = (exceptMessageId: string | undefined) =>
+  and(
+    inArray(messages.role, ["user", "assistant"]),
+    or(
+      eq(messages.status, "complete"),
+      and(
+        ne(messages.status, "streaming"),
+        sql`jsonb_array_length(coalesce(${messages.assistantOutput}->'files', '[]'::jsonb)) > 0`,
+      ),
+    ),
+    sql`(${messages.steeredIntoMessageId} is null or exists (select 1 from ${messages} answer where answer.id = ${messages.steeredIntoMessageId} and (answer.status = 'complete' or (answer.status <> 'streaming' and jsonb_array_length(coalesce(answer.assistant_output->'files', '[]'::jsonb)) > 0))))`,
+    exceptMessageId
+      ? and(
+          ne(messages.id, exceptMessageId),
+          sql`${messages.steeredIntoMessageId} is distinct from ${exceptMessageId}`,
+        )
+      : undefined,
+  );
+
+/** One message as the history tools number it: its place among `historyMessage` rows. */
+export interface HistoryMessage {
+  number: number;
+  role: "user" | "assistant";
+  createdAt: Date;
+  content: string;
+}
+
 /** The fixed association, not an agent configuration snapshot. */
 export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
@@ -268,6 +322,7 @@ export interface ChatSearchHit {
   messageId: string | null;
   snippet: Snippet | null;
   archived: boolean;
+  lastActivityAt: Date;
 }
 
 /**
@@ -422,7 +477,36 @@ export class ChatRepo extends Context.Service<
       userId: string;
       query: string;
       limit: number;
+      /** Set when one chat searches the others: see `ChatScope`. */
+      scope?: ChatScope | undefined;
     }): Effect.Effect<ChatSearchHit[]>;
+    /** Another chat `scope` lets this person read, or null. */
+    findReadableChat(input: {
+      userId: string;
+      chatId: string;
+      scope: ChatScope;
+    }): Effect.Effect<{ id: string; title: string | null } | null>;
+    /**
+     * A page of a chat's history by message number, from 1, with how many
+     * messages it has. Callers authorize the chat first.
+     */
+    readHistoryPage(input: {
+      conversationId: string;
+      exceptMessageId?: string | undefined;
+      from: number;
+      count: number;
+    }): Effect.Effect<{ messages: HistoryMessage[]; total: number }>;
+    /** Messages of one chat matching `query`, in order from message `from`, with an excerpt each. */
+    searchHistory(input: {
+      conversationId: string;
+      exceptMessageId?: string | undefined;
+      query: string;
+      from: number;
+      limit: number;
+    }): Effect.Effect<{
+      hits: Array<Omit<HistoryMessage, "content"> & { snippet: Snippet }>;
+      matches: number;
+    }>;
     getConversation(
       userId: string,
       conversationId: string,
@@ -1066,7 +1150,7 @@ export class ChatRepo extends Context.Service<
        * common case: a frequent term fills the page from recent chats without
        * touching every match in the history. Newest chats first.
        */
-      const recentMatches = (userId: string, query: SQL, limit: number) => {
+      const recentMatches = (searchable: SQL | undefined, query: SQL, limit: number) => {
         const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
         const recent = db
           .select({
@@ -1075,7 +1159,7 @@ export class ChatRepo extends Context.Service<
             activity: sql<string>`${activity}`.as("recent_activity"),
           })
           .from(conversations)
-          .where(searchableBy(userId))
+          .where(searchable)
           .orderBy(desc(activity), desc(conversations.id))
           .limit(SEARCH_WINDOW_CHATS)
           .as("recent");
@@ -1108,7 +1192,7 @@ export class ChatRepo extends Context.Service<
        * rechecks whole pages and recomputes each message's vector, which is
        * seconds instead of milliseconds at a million messages.
        */
-      const indexedMatches = (userId: string, query: SQL, limit: number) =>
+      const indexedMatches = (searchable: SQL | undefined, query: SQL, limit: number) =>
         db
           .transaction((tx) =>
             Effect.gen(function* () {
@@ -1124,7 +1208,7 @@ export class ChatRepo extends Context.Service<
                 .innerJoin(conversations, eq(conversations.id, messages.conversationId))
                 .where(
                   and(
-                    searchableBy(userId),
+                    searchable,
                     ne(messages.role, "system"),
                     sql`${messageSearchVector(messages.content)} @@ ${query}`,
                   ),
@@ -1147,6 +1231,26 @@ export class ChatRepo extends Context.Service<
             }),
           )
           .pipe(Effect.orDie);
+
+      /** A chat's `historyMessage` rows with their numbers, in the conversation's total order. */
+      const numberedHistory = (conversationId: string, exceptMessageId: string | undefined) =>
+        db
+          .select({
+            role: sql<HistoryMessage["role"]>`${messages.role}`.as("history_role"),
+            createdAt: sql<Date>`${messages.createdAt}`
+              .mapWith(messages.createdAt)
+              .as("history_created_at"),
+            content: sql<string>`${messages.content}`.as("history_content"),
+            number: sql<number>`row_number() over (order by ${messages.createdAt}, ${messages.id})`
+              .mapWith(Number)
+              .as("history_number"),
+            total: sql<number>`count(*) over ()`.mapWith(Number).as("history_total"),
+          })
+          .from(messages)
+          .where(
+            and(eq(messages.conversationId, conversationId), historyMessage(exceptMessageId)),
+          )
+          .as("numbered");
 
       return ChatRepo.of({
         ...generationWriteMethods(ctx),
@@ -1209,15 +1313,11 @@ export class ChatRepo extends Context.Service<
           const tsQuery = prefixTsQuery(needle);
           const query = sql`to_tsquery('app_search'::regconfig, ${tsQuery ?? ""})`;
           const activity = sql`coalesce(${conversations.lastMessageAt}, ${conversations.createdAt})`;
+          const searchable = and(searchableBy(input.userId), withinScope(input.scope));
           const titled = yield* db
             .select({ conversationId: conversations.id, title: conversations.title })
             .from(conversations)
-            .where(
-              and(
-                searchableBy(input.userId),
-                ilike(conversations.title, `%${escapeLike(needle)}%`),
-              ),
-            )
+            .where(and(searchable, ilike(conversations.title, `%${escapeLike(needle)}%`)))
             .orderBy(desc(activity), desc(conversations.id))
             .limit(input.limit)
             .pipe(Effect.orDie);
@@ -1225,10 +1325,10 @@ export class ChatRepo extends Context.Service<
           // Punctuation-only input has no terms, so only titles can match it;
           // titles alone may also fill the page, and they rank first anyway.
           const searchText = tsQuery !== null && titled.length < input.limit;
-          const matched = searchText ? yield* recentMatches(input.userId, query, input.limit) : [];
+          const matched = searchText ? yield* recentMatches(searchable, query, input.limit) : [];
           const found =
             searchText && matched.length < input.limit
-              ? yield* indexedMatches(input.userId, query, input.limit)
+              ? yield* indexedMatches(searchable, query, input.limit)
               : matched;
 
           const titledIds = new Set(titled.map((row) => row.conversationId));
@@ -1258,29 +1358,109 @@ export class ChatRepo extends Context.Service<
           const snippets = new Map(
             headlines.map((row) => [row.id, snippetFromHeadline(row.headline)] as const),
           );
-          const archivedRows = hits.length
+          const stateRows = hits.length
             ? yield* db
-                .select({ id: conversations.id })
+                .select({
+                  id: conversations.id,
+                  archived: sql<boolean>`${conversations.archivedAt} is not null`,
+                  lastActivityAt: sql<Date>`${activity}`.mapWith(conversations.createdAt),
+                })
                 .from(conversations)
                 .where(
-                  and(
-                    inArray(
-                      conversations.id,
-                      hits.map((hit) => hit.conversationId),
-                    ),
-                    isNotNull(conversations.archivedAt),
+                  inArray(
+                    conversations.id,
+                    hits.map((hit) => hit.conversationId),
                   ),
                 )
                 .pipe(Effect.orDie)
             : [];
-          const archived = new Set(archivedRows.map((row) => row.id));
+          const state = new Map(stateRows.map((row) => [row.id, row] as const));
           return hits.map((hit) => ({
             conversationId: hit.conversationId,
             title: hit.title,
             messageId: hit.messageId,
             snippet: (hit.messageId && snippets.get(hit.messageId)) || null,
-            archived: archived.has(hit.conversationId),
+            archived: state.get(hit.conversationId)?.archived ?? false,
+            lastActivityAt: state.get(hit.conversationId)?.lastActivityAt ?? new Date(0),
           }));
+        }),
+
+        findReadableChat: Effect.fn("ChatRepo.findReadableChat")(function* (input) {
+          const [row] = yield* db
+            .select({ id: conversations.id, title: conversations.title })
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.id, input.chatId),
+                searchableBy(input.userId),
+                withinScope(input.scope),
+              ),
+            )
+            .pipe(Effect.orDie);
+          return row ?? null;
+        }),
+
+        readHistoryPage: Effect.fn("ChatRepo.readHistoryPage")(function* (input) {
+          const numbered = numberedHistory(input.conversationId, input.exceptMessageId);
+          // One read, so the total and the page always describe the same messages.
+          const rows = yield* db
+            .select({
+              number: numbered.number,
+              role: numbered.role,
+              createdAt: numbered.createdAt,
+              content: numbered.content,
+              total: numbered.total,
+            })
+            .from(numbered)
+            .where(
+              and(
+                gte(numbered.number, input.from),
+                lt(numbered.number, input.from + input.count),
+              ),
+            )
+            .orderBy(asc(numbered.number))
+            .pipe(Effect.orDie);
+          // Past the end there is no row to carry the total, so it is counted alone.
+          const total =
+            rows[0]?.total ??
+            (yield* db
+              .select({ total: sql<number>`count(*)`.mapWith(Number) })
+              .from(numbered)
+              .pipe(Effect.orDie))[0]?.total ??
+            0;
+          return { messages: rows.map(({ total: _total, ...message }) => message), total };
+        }),
+
+        searchHistory: Effect.fn("ChatRepo.searchHistory")(function* (input) {
+          const tsQuery = prefixTsQuery(input.query);
+          if (tsQuery === null) return { hits: [], matches: 0 };
+          const query = sql`to_tsquery('app_search'::regconfig, ${tsQuery})`;
+          const numbered = numberedHistory(input.conversationId, input.exceptMessageId);
+          const matched = and(
+            gte(numbered.number, input.from),
+            sql`${messageSearchVector(numbered.content)} @@ ${query}`,
+          );
+          const rows = yield* db
+            .select({
+              number: numbered.number,
+              role: numbered.role,
+              createdAt: numbered.createdAt,
+              // Counted before the limit, in the same read as the hits.
+              matches: sql<number>`count(*) over ()`.mapWith(Number),
+              headline: sql<string>`ts_headline('app_search'::regconfig, regexp_replace(regexp_replace(${numbered.content}, ${HEADLINE_NOISE}, '', 'g'), '[[:space:]]+', ' ', 'g'), ${query}, ${HEADLINE_OPTIONS})`,
+            })
+            .from(numbered)
+            .where(matched)
+            .orderBy(asc(numbered.number))
+            .limit(input.limit)
+            .pipe(Effect.orDie);
+          return {
+            hits: rows.map(({ headline, matches: _matches, ...hit }) => ({
+              ...hit,
+              snippet: snippetFromHeadline(headline),
+            })),
+            matches: rows[0]?.matches ?? 0,
+          };
         }),
 
         getConversation: Effect.fn("ChatRepo.getConversation")(function* (userId, conversationId) {

@@ -133,6 +133,7 @@ const WORK_FAMILIES = new Set<ToolActivity["family"]>([
   "integration",
   "project-file",
   "attachment",
+  "history",
   "map",
 ]);
 

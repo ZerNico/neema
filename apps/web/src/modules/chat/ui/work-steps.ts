@@ -65,6 +65,12 @@ export function stepLabel(step: WorkStep): string {
           return "Working with project files";
         case "attachment":
           return "Reading a file";
+        case "history":
+          return call.name === "search_chats"
+            ? "Searching your other chats"
+            : call.name === "read_chat"
+              ? "Reading another chat"
+              : "Looking back in this chat";
         case "map":
           return "Looking up a route";
         case "desktop":
@@ -99,6 +105,9 @@ const PAST: Record<string, string> = {
   "Summarizing earlier messages": "Summarized earlier messages",
   "Working with project files": "Worked with project files",
   "Reading a file": "Read a file",
+  "Looking back in this chat": "Looked back in this chat",
+  "Searching your other chats": "Searched your other chats",
+  "Reading another chat": "Read another chat",
   "Looking up a route": "Looked up a route",
   "Running a command": "Ran a command",
   "Editing files": "Edited files",

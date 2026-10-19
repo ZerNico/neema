@@ -1,0 +1,1 @@
+ALTER TABLE "memory_settings" ADD COLUMN "past_chats_enabled" boolean DEFAULT true NOT NULL;

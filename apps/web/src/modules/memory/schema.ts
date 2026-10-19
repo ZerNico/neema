@@ -9,6 +9,7 @@ export type MemoryOrigin = typeof MemoryOrigin.Type;
 export const MemoryPreferences = Schema.Struct({
   referenceEnabled: Schema.Boolean,
   autoSaveEnabled: Schema.Boolean,
+  pastChatsEnabled: Schema.Boolean,
   updatedAt: Schema.String,
 });
 export type MemoryPreferences = typeof MemoryPreferences.Type;
@@ -22,6 +23,7 @@ export const MemorySettings = Schema.Struct({
   globalEnabled: Schema.Boolean,
   effectiveReferenceEnabled: Schema.Boolean,
   effectiveAutoSaveEnabled: Schema.Boolean,
+  effectivePastChatsEnabled: Schema.Boolean,
 });
 export type MemorySettings = typeof MemorySettings.Type;
 
@@ -62,6 +64,7 @@ export type DeleteMemoryInput = typeof DeleteMemoryInput.Type;
 export const UpdateMemorySettingsInput = Schema.Struct({
   referenceEnabled: Schema.optionalKey(Schema.Boolean),
   autoSaveEnabled: Schema.optionalKey(Schema.Boolean),
+  pastChatsEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type UpdateMemorySettingsInput = typeof UpdateMemorySettingsInput.Type;
 

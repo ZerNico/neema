@@ -159,7 +159,7 @@ skipped one on purpose.
   in the other two.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, notify, map, research, agent-draft,
   schedule-draft, document, project-file, desktop, custom, image, integration, presentation,
-  spreadsheet, word, tool-file, tool-load, attachment.
+  spreadsheet, word, tool-file, tool-load, attachment, history.
   Each has its own envelope with a required `family`; there is no inference from shape.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it, over either wire format (Chat Completions, Responses). The toolkit loop never
@@ -250,6 +250,8 @@ skipped one on purpose.
   the unread mark, channels and their dedupe.
 - `docs/internals/memory.md`: snapshot semantics, one save per generation, the
   transactional guard under research.
+- `docs/internals/history-tools.md`: reading earlier messages and other chats as tools.
+  Always offered for cache stability, scope by owner and project, text only.
 - `docs/internals/documents.md`: server-ordered ProseMirror steps, rebasing and offline
   recovery, block IDs and the XML view, guarded and streamed model edits, the one-writer hub.
 - `docs/internals/files.md`: one classification for every stored file, the opaque `file`

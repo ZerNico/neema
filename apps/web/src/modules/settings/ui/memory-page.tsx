@@ -23,6 +23,7 @@ import {
   MAX_MEMORY_CONTENT_LENGTH,
   type Memory,
   type MemoryWriteOutcome,
+  type UpdateMemorySettingsInput,
 } from "~/modules/memory/schema.ts";
 import { absoluteLabel, relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -115,7 +116,7 @@ export function MemoryPage() {
     setEditing(memory);
   };
   const settingsMutation = useMutation({
-    mutationFn: (patch: { referenceEnabled?: boolean; autoSaveEnabled?: boolean }) =>
+    mutationFn: (patch: UpdateMemorySettingsInput) =>
       updateMemorySettings({ data: patch }),
     onSuccess: (next) => {
       queryClient.setQueryData(memorySettingsQuery.queryKey, next);
@@ -133,7 +134,7 @@ export function MemoryPage() {
     onError: (error) => toastError("Could not clear saved memories.", error),
   });
 
-  const updateSetting = (key: "referenceEnabled" | "autoSaveEnabled", value: boolean) => {
+  const updateSetting = (key: keyof UpdateMemorySettingsInput, value: boolean) => {
     settingsMutation.mutate({ [key]: value });
   };
 
@@ -176,6 +177,20 @@ export function MemoryPage() {
                 onCheckedChange={(checked) => updateSetting("autoSaveEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
                 aria-label="Save memories automatically"
+              />
+            </ListRow>
+            <ListRow>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-medium">Search past chats</span>
+                <span className="text-muted-foreground text-xs">
+                  Models can look up your other chats when they’re relevant
+                </span>
+              </div>
+              <Switch
+                checked={settings.data.pastChatsEnabled}
+                onCheckedChange={(checked) => updateSetting("pastChatsEnabled", checked)}
+                disabled={settingsMutation.isPending || !settings.data.globalEnabled}
+                aria-label="Search past chats"
               />
             </ListRow>
           </ListCard>

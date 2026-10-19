@@ -192,6 +192,7 @@ export const runRound = (env: RoundEnv, round: number) =>
         renderedMessageGroups: historyGroups,
         fixedPrefix: [...fixedPrefix, ...(active.content as ReadonlyArray<Prompt.MessageEncoded>)],
         trailingMessages: historyBudgetTail(round >= roundLimit),
+        historyReadable: tools.historyTools !== null,
         calibrationFactor: factor,
       });
       if (!shrunk)
@@ -376,6 +377,7 @@ export const runRound = (env: RoundEnv, round: number) =>
               renderedMessageGroups: historyGroups,
               fixedPrefix: [...fixedPrefix, ...promptMessages(activeOnly)],
               trailingMessages: historyBudgetTail(!toolRoundsLeft),
+              historyReadable: tools.historyTools !== null,
               calibrationFactor: overflowFactor,
             });
             if (!shrunk) return yield* Effect.fail(error);
