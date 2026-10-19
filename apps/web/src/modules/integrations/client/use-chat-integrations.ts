@@ -7,7 +7,8 @@ import { chatIntegrationsQuery, myIntegrationsQuery } from "./queries.ts";
 export interface ComposerIntegration {
   integrationId: string;
   name: string;
-  accountLabel: string;
+  /** Null when it uses no account of the person's, so there is nothing to name. */
+  accountLabel: string | null;
   enabled: boolean;
 }
 

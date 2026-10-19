@@ -1533,6 +1533,12 @@ describe("an MCP server a person adds for themselves", () => {
     // Needing no account, saving it turned it on for its owner.
     const chat = await newConversation(owner);
     expect(await offeredNames(owner, chat)).toEqual(["search"]);
+    // No account behind it, so the composer names none.
+    expect(
+      (await service((s) => s.chatIntegrations(owner, chat))).find(
+        (entry) => entry.integrationId === id,
+      ),
+    ).toMatchObject({ enabled: true, accountLabel: null });
     expect((await service((s) => s.listForUser(owner))).find((row) => row.id === id)).toMatchObject(
       { personal: true, connection: { authKind: "none" } },
     );

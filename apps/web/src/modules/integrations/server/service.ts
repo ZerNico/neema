@@ -49,7 +49,8 @@ export interface ChatIntegration {
   integrationId: string;
   kind: string;
   name: string;
-  accountLabel: string;
+  /** Whose account it uses; null when there is none (open, or the admin's key). */
+  accountLabel: string | null;
   enabled: boolean;
   /** What `enabled` would be without this chat's own choice. */
   defaultEnabled: boolean;
@@ -416,7 +417,10 @@ export class IntegrationService extends Context.Service<
             integrationId: config.id,
             kind: config.kind,
             name: config.name,
-            accountLabel: connection.accountLabel,
+            accountLabel:
+              connection.authKind === "none" || connection.authKind === "shared"
+                ? null
+                : connection.accountLabel,
             enabled: own?.enabled ?? defaultEnabled,
             defaultEnabled,
           });

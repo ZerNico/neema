@@ -575,7 +575,7 @@ export const ChatInput = forwardRef<
                   id: item.integrationId,
                   label: item.name,
                   ...(item.enabled ? { meta: "on" } : {}),
-                  description: item.accountLabel,
+                  description: item.accountLabel ?? undefined,
                   search: `${item.integrationId} ${item.name}`,
                 })),
                 onSelect: (id) => {
