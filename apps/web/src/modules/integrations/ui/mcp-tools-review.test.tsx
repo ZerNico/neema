@@ -21,7 +21,10 @@ vi.mock("../server/functions.ts", () => ({
     },
   })),
   checkIntegrationCatalog: vi.fn(),
+  approvePersonalCatalog: vi.fn(),
+  checkPersonalCatalog: vi.fn(),
   listAdminIntegrations: vi.fn(),
+  listPersonalServers: vi.fn(),
 }));
 
 const tool = (mcpName: string, patch: Partial<McpToolEntry> = {}): McpToolEntry => ({
@@ -68,6 +71,18 @@ const mount = (integration: AdminIntegration) =>
   );
 
 describe("reviewing an MCP server's tools", () => {
+  it("asks a person reviewing their own server only which tools to turn on", () => {
+    const integration = row([], [tool("search"), tool("delete_page")]);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <McpToolsReview row={integration} personal onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByRole("switch", { name: "Offer search" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Offer delete page" })).toBeChecked();
+  });
+
   it("marks what changed since approval and keeps earlier choices", () => {
     mount(
       row(

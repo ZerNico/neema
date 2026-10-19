@@ -3,20 +3,24 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { myIntegrationsQuery } from "../client/queries.ts";
+import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import { outlineManifest } from "../outline/manifest.ts";
-import type { UserIntegration } from "../schema.ts";
+import type { PersonalServers, UserIntegration } from "../schema.ts";
 import {
   connectIntegrationApiKey,
   connectIntegrationOpen,
   updateIntegrationConnection,
 } from "../server/functions.ts";
-import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
+import {
+  IntegrationSettingsPage,
+  IntegrationsSettingsPage,
+} from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children }: { to: string; children?: unknown }) => (
     <a href={to}>{children as never}</a>
   ),
+  useNavigate: () => vi.fn(),
 }));
 vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
@@ -37,6 +41,7 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
   kind: "outline",
   name: "Outline",
   available: true,
+  personal: false,
   methods: { oauth: true, apiKey: true, open: null, everyone: false },
   tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
     name,
@@ -61,9 +66,10 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
   dependents: { sources: 0, schedules: 0 },
 });
 
-const mount = (integration: UserIntegration) => {
+const mount = (integration: UserIntegration, servers: PersonalServers["servers"] = []) => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(myIntegrationsQuery.queryKey, [integration]);
+  client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers });
   render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -121,6 +127,33 @@ describe("integration account row", () => {
     });
     expect(screen.getByText("Connected")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Account actions" })).toBeNull();
+  });
+
+  it("lets the owner of their own server review its tools", async () => {
+    mount({ ...outline({ authKind: "none", accountLabel: "Mine" }), personal: true, tools: [] }, [
+      {
+        id: "outline",
+        name: "Mine",
+        config: { url: "https://mcp.example.com/mcp", ways: "anonymous" },
+        catalog: {
+          approved: [],
+          latest: [],
+          server: null,
+          checkedAt: null,
+          checkError: null,
+          reviewedAt: null,
+          version: "listing.0",
+        },
+      },
+    ]);
+    expect(screen.getByText("https://mcp.example.com/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Tools to review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review tools" })).toBeVisible();
+    expect(screen.getByText(/Review this server’s tools/)).toBeInTheDocument();
+    // Changing and deleting it sit in the page's menu, as on other detail pages.
+    fireEvent.click(screen.getByRole("button", { name: "Server actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Edit server" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Delete server" })).toBeVisible();
   });
 
   it("keeps a working connection's row to its account and a menu", async () => {
@@ -185,5 +218,45 @@ describe("integration account row", () => {
         data: { integrationId: "jira", scope: null },
       }),
     );
+  });
+});
+
+describe("integrations list", () => {
+  it("opens the dialog to add an MCP server of one's own", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData(myIntegrationsQuery.queryKey, []);
+    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <ConfirmProvider>
+          <IntegrationsSettingsPage />
+        </ConfirmProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add MCP server" }));
+    expect(await screen.findByText("Add an MCP server")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("keeps one's own servers apart from the admin's", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData(myIntegrationsQuery.queryKey, [
+      outline({}),
+      { ...outline({ authKind: "none" }), id: "mcp", kind: "mcp", name: "Mine", personal: true },
+    ]);
+    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <ConfirmProvider>
+          <IntegrationsSettingsPage />
+        </ConfirmProvider>
+      </QueryClientProvider>,
+    );
+    const admins = screen.getByRole("heading", { name: "From your admin" }).closest("section")!;
+    const own = screen.getByRole("heading", { name: "Your MCP servers" }).closest("section")!;
+    expect(admins).toHaveTextContent("Outline");
+    expect(admins).not.toHaveTextContent("Mine");
+    expect(own).toHaveTextContent("Mine");
+    expect(own).toHaveTextContent("Only you use it");
   });
 });

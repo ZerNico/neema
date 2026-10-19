@@ -18,6 +18,16 @@ describe("tool permissions", () => {
     );
   });
 
+  it("lists every tool together when access is not grouped", () => {
+    render(
+      <ToolPermissions kind="outline" byAccess={false} permissions={{}} onChange={() => {}} />,
+    );
+    expect(screen.getByRole("combobox", { name: "All tools permission" })).toHaveTextContent(
+      "Custom",
+    );
+    expect(screen.queryByRole("combobox", { name: "Read-only tools permission" })).toBeNull();
+  });
+
   it("reads Custom once one tool in a group differs", () => {
     render(
       <ToolPermissions

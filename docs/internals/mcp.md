@@ -105,6 +105,25 @@ open, so opening another way asks nobody to reconnect and keeps the review. A co
 whose way the admin closed reads as needing to reconnect, judged by its kind wherever a
 session or credential is handed out.
 
+## Servers a person adds
+
+With the `mcpServers` capability, a person may add a server for themselves. It is an
+ordinary `integration_configs` row with an `owner_user_id`, so everything above applies, with
+the owner where the admin would be: they review its catalog, the sweep lists as them, and only
+they may use it. `integrationUsableBy` decides this in SQL, so losing the capability, or the
+account, stops the server everywhere at once without deleting it. Others never see it: not in
+their lists, the directory or the admin's page, and an agent cannot name one that is not the
+author's own. Names are unique among what one person sees (the admin's and their own), not
+across everyone.
+
+The address is the one thing that differs. An admin's server may be private because the admin
+chose it; a person's must be public HTTPS, or anyone could point the app at the internal
+network. The server sets `reach: public` on the config, a key no form can send, and with it
+every request, to the server's own origin too, goes through `resolvePublicHttpUrl` and
+`fetchPinned`, so a name that later resolves inside is refused like any other address. A person
+cannot hold a shared key or turn a server on for everyone, since there is nobody else to act
+for, and signs in only with a client found at sign-in, never an admin’s.
+
 ## Sign-in follows the 2026-07-28 authorization spec
 
 Endpoints are not fixed per type; `DiscoveredOAuth` finds them when a sign-in starts. The

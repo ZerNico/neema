@@ -193,6 +193,7 @@ export const makeOAuthFlow = (deps: {
       if (stored.revision !== row.revision) return yield* signInOutdated();
       if (stored.server && adapter.discoveredOAuth) {
         const tokens = yield* adapter.discoveredOAuth.complete({
+          config,
           server: stored.server,
           clientSecret: yield* discoveredSecret(row, stored.server),
           code: input.code,

@@ -28,6 +28,13 @@ export const mcpWaysOf = (config: Readonly<Record<string, string>>): McpWays => 
   };
 };
 
+/**
+ * A server a person added for themselves: every request, its own address
+ * included, must reach a public address. Set by the server, never a field.
+ */
+export const reachesPublicOnly = (config: Readonly<Record<string, string>>) =>
+  config.reach === "public";
+
 const OAUTH = { key: "ways", values: ["oauth"] };
 const TOKEN = { key: "ways", values: ["token"] };
 const ANONYMOUS = { key: "ways", values: ["anonymous"] };

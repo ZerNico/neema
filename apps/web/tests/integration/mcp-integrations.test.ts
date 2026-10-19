@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { LookupAllOptions } from "node:dns";
 import type { AddressInfo } from "node:net";
 import { PgClient } from "@effect/sql-pg";
 import {
@@ -8,11 +9,11 @@ import {
   inputRequired,
   McpServer,
 } from "@modelcontextprotocol/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Cause, Effect, Exit, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { conversations, user, userApprovals } from "~/db/schema/index.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { conversations, defaultCapabilities, user, userApprovals } from "~/db/schema/index.ts";
 import type { CatalogDecision } from "~/modules/integrations/server/adapter.ts";
 import { mcpAdapter } from "~/modules/integrations/mcp/server/adapter.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
@@ -32,6 +33,34 @@ type Services = Db | KeyCipher | IntegrationRepo | IntegrationService | Integrat
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
+// Names a person's own server may use: each resolves to the address given, and a
+// public one is answered by the local test server. The address checks stay real.
+const { names } = vi.hoisted(() => ({
+  names: new Map<string, { address: string; forwardTo?: string; requests: number }>(),
+}));
+vi.mock("node:dns/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:dns/promises")>();
+  // The one form url-safety asks in: every address of a name.
+  const lookup = async (hostname: string, options: LookupAllOptions) => {
+    const named = names.get(hostname);
+    return named ? [{ address: named.address, family: 4 }] : real.lookup(hostname, options);
+  };
+  return { ...real, lookup };
+});
+vi.mock("~/modules/tools/server/url-safety.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("~/modules/tools/server/url-safety.ts")>();
+  return {
+    ...real,
+    fetchPinned: (target: { url: URL }, init?: RequestInit) => {
+      const named = names.get(target.url.hostname);
+      if (!named?.forwardTo) return real.fetchPinned(target as never, init);
+      named.requests++;
+      const local = new URL(`${target.url.pathname}${target.url.search}`, named.forwardTo);
+      return fetch(local, { ...init, redirect: "manual" });
+    },
+  };
+});
+
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 
 /** What the test server describes `search` as; a test changes it to make the tool drift. */
@@ -1418,5 +1447,129 @@ describe("an MCP server set up by an admin", () => {
     expect(JSON.stringify(failed)).toMatch(/refused the shared key/);
     const still = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(still.find((row) => row.id === id)?.connection?.status).toBe("active");
+  });
+});
+
+describe("an MCP server a person adds for themselves", () => {
+  const allowServers = (allowed: boolean) =>
+    run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(defaultCapabilities)
+          .set({
+            capabilities: sql`${defaultCapabilities.capabilities} || ${JSON.stringify({ mcpServers: allowed })}::jsonb`,
+          })
+          .pipe(Effect.orDie),
+      ),
+    );
+  const activeUser = async () => {
+    const id = await newUser();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.insert(userApprovals).values({ userId: id, status: "approved" }).pipe(Effect.orDie),
+      ),
+    );
+    return id;
+  };
+  const save = (userId: string, name: string, url: string, integrationId: string | null = null) =>
+    run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.savePersonalServer(userId, {
+          integrationId,
+          name,
+          config: { url, ways: "anonymous" },
+        }),
+      ).pipe(Effect.result),
+    );
+  afterAll(() => allowServers(false));
+
+  it("is reviewed and used by its owner alone, while they may add servers", async () => {
+    names.set("mcp.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    const owner = await activeUser();
+    const other = await activeUser();
+    const admin = await newUser();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(user).set({ role: "admin" }).where(eq(user.id, admin)).pipe(Effect.orDie),
+      ),
+    );
+
+    await allowServers(false);
+    expect(JSON.stringify(await save(owner, "Mine", "https://mcp.example.test/mcp"))).toMatch(
+      /has not let you/,
+    );
+    await allowServers(true);
+    expect(JSON.stringify(await save(owner, "Mine", "http://mcp.example.test/mcp"))).toMatch(
+      /https:/,
+    );
+    const saved = await save(owner, "Mine", "https://mcp.example.test/mcp");
+    if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
+    const id = saved.success.id;
+    // Another person may use the same name for theirs.
+    expect((await save(other, "Mine", "https://mcp.example.test/mcp"))._tag).toBe("Success");
+
+    // Nobody else sees it or may change it, admins included.
+    const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(IntegrationService, f));
+    const others = await service((s) => s.listForUser(other));
+    expect(others.filter((row) => row.id === id)).toEqual([]);
+    expect((await service((s) => s.directory(other))).map((row) => row.id)).not.toContain(id);
+    expect((await service((s) => s.adminList())).map((row) => row.id)).not.toContain(id);
+    const adminCheck = await service((s) => s.checkCatalog(id, admin).pipe(Effect.result));
+    expect(adminCheck._tag).toBe("Failure");
+    const otherCheck = await service((s) => s.checkPersonalCatalog(other, id).pipe(Effect.result));
+    expect(otherCheck._tag).toBe("Failure");
+
+    // The owner reviews it, through the public address only.
+    const catalog = await service((s) => s.checkPersonalCatalog(owner, id));
+    expect(catalog.latest?.map((entry) => entry.mcpName)).toContain("search");
+    expect(names.get("mcp.example.test")!.requests).toBeGreaterThan(0);
+    await service((s) =>
+      s.approvePersonalCatalog(owner, id, {
+        version: catalog.version!,
+        decisions: [{ mcpName: "search", enabled: true, access: "read" }],
+      }),
+    );
+    // Needing no account, saving it turned it on for its owner.
+    const chat = await newConversation(owner);
+    expect(await offeredNames(owner, chat)).toEqual(["search"]);
+    expect((await service((s) => s.listForUser(owner))).find((row) => row.id === id)).toMatchObject(
+      { personal: true, connection: { authKind: "none" } },
+    );
+
+    // Taking the capability away stops it without deleting it.
+    await allowServers(false);
+    expect(await offeredNames(owner, chat)).toEqual([]);
+    await allowServers(true);
+    expect(await offeredNames(owner, chat)).toEqual(["search"]);
+
+    await service((s) => s.deletePersonalServer(owner, id));
+    expect(
+      (await service((s) => s.personalServers(owner))).servers.map((row) => row.id),
+    ).not.toContain(id);
+  });
+
+  it("refuses a private address, also when a public name later points inside", async () => {
+    await allowServers(true);
+    const owner = await activeUser();
+    names.set("inside.example.test", { address: "10.0.0.5", requests: 0 });
+    expect(JSON.stringify(await save(owner, "Inside", "https://inside.example.test/mcp"))).toMatch(
+      /public address/,
+    );
+    expect(JSON.stringify(await save(owner, "Local", `https://127.0.0.1/mcp`))).toMatch(
+      /public address/,
+    );
+
+    names.set("moves.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    const saved = await save(owner, "Moves", "https://moves.example.test/mcp");
+    if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
+    names.set("moves.example.test", { address: "10.0.0.5", forwardTo: base, requests: 0 });
+    const checked = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.checkPersonalCatalog(owner, saved.success.id),
+      ).pipe(Effect.result),
+    );
+    expect(checked._tag).toBe("Failure");
+    expect(names.get("moves.example.test")!.requests).toBe(0);
   });
 });

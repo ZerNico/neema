@@ -74,6 +74,8 @@ export interface UserIntegration {
   name: string;
   /** Enabled by an admin, configured, and shared with this person. */
   available: boolean;
+  /** Added by this person for themselves, so they set it up and review its tools. */
+  personal: boolean;
   /** `everyone`: the open way is on for everyone without a press, so it cannot be disconnected. */
   methods: {
     oauth: boolean;
@@ -90,6 +92,33 @@ export interface UserIntegration {
 }
 
 export const IntegrationIdInput = Schema.Struct({ integrationId: IntegrationId });
+
+/** A public MCP server one person added for themselves; only they use and review it. */
+export interface PersonalServer {
+  id: string;
+  name: string;
+  /** The MCP admin fields a person may set: address, way in, header. */
+  config: Record<string, string>;
+  catalog: AdminCatalog;
+}
+
+export interface PersonalServers {
+  /** Whether this person may add servers; ones added before stop working without it. */
+  canAdd: boolean;
+  servers: ReadonlyArray<PersonalServer>;
+}
+
+/** The fields of the MCP setup a person fills in for their own server; sign-in asks the server for scopes. */
+export const PERSONAL_SERVER_FIELDS = ["url", "ways", "header"] as const;
+
+export const SavePersonalServerInput = Schema.Struct({
+  /** Null adds a server. */
+  integrationId: Schema.NullOr(IntegrationId),
+  name: Schema.String.check(Schema.isMaxLength(100)),
+  config: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))).check(
+    Schema.isMaxProperties(10),
+  ),
+});
 
 /** The service checks the id's stricter shape and that the type ships. */
 export const CreateIntegrationInput = Schema.Struct({

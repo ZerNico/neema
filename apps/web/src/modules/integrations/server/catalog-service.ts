@@ -105,7 +105,9 @@ export const makeCatalogService = (deps: {
       const token = yield* repo.startCatalogCheck(integrationId);
       const current = yield* repo.catalog(integrationId);
       // Recorded only for the setup the check started under: a move meanwhile drops it.
-      const started = (yield* repo.getConfig(integrationId))?.revision ?? 0;
+      const setup = yield* repo.getConfig(integrationId);
+      const started = setup?.revision ?? 0;
+      const owner = setup?.ownerUserId ?? null;
       const fail = (reason: string) =>
         repo
           .recordCatalogCheck(
@@ -116,10 +118,15 @@ export const makeCatalogService = (deps: {
           )
           .pipe(Effect.andThen(Effect.fail(new IntegrationRejected({ reason }))));
       // The sweep lists as the last reviewer only while that account may act and
-      // is still an admin, as an admin's own request must be.
-      const reviewer = asUserId ? null : (current?.reviewedBy ?? null);
+      // is still an admin, as an admin's own request must be. A personal server
+      // lists as its owner while they may still use it, else not at all.
+      const reviewer = asUserId ? null : (owner ?? current?.reviewedBy ?? null);
       const eligible =
-        reviewer !== null && (yield* eligibleAdmin(reviewer).pipe(Effect.provideService(Db, db)));
+        reviewer !== null &&
+        (owner
+          ? yield* repo.isUsable(owner, integrationId)
+          : yield* eligibleAdmin(reviewer).pipe(Effect.provideService(Db, db)));
+      if (owner && !asUserId && !eligible) return yield* fail("Its owner can no longer use it.");
       const context = yield* catalogSession(
         integrationId,
         asUserId ?? (eligible ? reviewer : null),

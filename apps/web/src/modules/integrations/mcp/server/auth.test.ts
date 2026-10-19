@@ -258,6 +258,7 @@ describe("signing in to an MCP server", () => {
     const finish = (found: DiscoveredServer, verifier: string, iss: string | null) =>
       Effect.runPromiseExit(
         mcpOAuth.complete({
+          config: {},
           server: found,
           clientSecret: "dyn-secret",
           code: "good",
@@ -309,7 +310,12 @@ describe("signing in to an MCP server", () => {
   it("refreshes for the same resource, and a refused grant means signing in again", async () => {
     const { server: found } = await started();
     const fresh = await Effect.runPromise(
-      mcpOAuth.refresh({ server: found, clientSecret: "dyn-secret", refreshToken: "refresh-1" }),
+      mcpOAuth.refresh({
+        config: {},
+        server: found,
+        clientSecret: "dyn-secret",
+        refreshToken: "refresh-1",
+      }),
     );
     expect(fresh).toMatchObject({ ok: true, tokens: { accessToken: "access-2" } });
     expect(log.tokens.at(-1)).toMatchObject({
@@ -317,7 +323,12 @@ describe("signing in to an MCP server", () => {
       resource: `${base}/mcp`,
     });
     const revoked = await Effect.runPromise(
-      mcpOAuth.refresh({ server: found, clientSecret: "dyn-secret", refreshToken: "spent" }),
+      mcpOAuth.refresh({
+        config: {},
+        server: found,
+        clientSecret: "dyn-secret",
+        refreshToken: "spent",
+      }),
     );
     expect(revoked).toEqual({ ok: false, revoked: true });
   });
@@ -327,7 +338,12 @@ describe("signing in to an MCP server", () => {
     const stalling = { ...found, metadata: { ...found.metadata, token_endpoint: `${base}/stall` } };
     const outcome = await Effect.runPromise(
       mcpOAuth
-        .refresh({ server: stalling, clientSecret: "dyn-secret", refreshToken: "refresh-1" })
+        .refresh({
+          config: {},
+          server: stalling,
+          clientSecret: "dyn-secret",
+          refreshToken: "refresh-1",
+        })
         .pipe(Effect.timeoutOption(Duration.millis(300))),
     );
     expect(outcome._tag).toBe("None");

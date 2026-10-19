@@ -346,6 +346,7 @@ export const makeCredentials = (deps: {
 
         const outcome = plan.discovered
           ? yield* adapter.discoveredOAuth!.refresh({
+              config: row.config,
               server: plan.discovered,
               clientSecret: plan.clientSecret,
               refreshToken: plan.refreshToken,

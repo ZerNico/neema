@@ -14,6 +14,7 @@ import {
 import { Effect } from "effect";
 import { IntegrationRejected } from "../../errors.ts";
 import type { DiscoveredOAuth } from "../../server/adapter.ts";
+import { reachesPublicOnly } from "../manifest.ts";
 import type { TokenOutcome, TokenSet } from "../../server/oauth.ts";
 import { scopedFetch } from "./http.ts";
 
@@ -26,8 +27,11 @@ const OAUTH_TIMEOUT_MS = 30_000;
  * Requests for one step of a sign-in. Refreshing holds the connection's row
  * lock, so a stalled authorization server must not hold it for long.
  */
-const bounded = (url: URL, signal: AbortSignal) =>
-  scopedFetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(OAUTH_TIMEOUT_MS)]) });
+const bounded = (url: URL, signal: AbortSignal, publicOnly: boolean) =>
+  scopedFetch(url, {
+    publicOnly,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(OAUTH_TIMEOUT_MS)]),
+  });
 
 /**
  * Metadata stored at sign-in, read back. It was the SDK's validated document
@@ -68,10 +72,14 @@ const messageOf = (error: unknown) =>
  * Asks the server unauthenticated, as the spec's flow starts: a protected
  * server answers 401 with where its metadata is and which scopes it wants.
  */
-const challenge = (url: URL) =>
+const challenge = (url: URL, publicOnly: boolean) =>
   Effect.tryPromise({
     try: async (signal) => {
-      const response = await bounded(url, signal)(url, {
+      const response = await bounded(
+        url,
+        signal,
+        publicOnly,
+      )(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -98,11 +106,12 @@ export const mcpOAuth: DiscoveredOAuth = {
   begin: (input) =>
     Effect.gen(function* () {
       const url = new URL(input.config.url!);
-      const hint = yield* challenge(url);
+      const publicOnly = reachesPublicOnly(input.config);
+      const hint = yield* challenge(url, publicOnly);
       const info = yield* Effect.tryPromise({
         try: (signal) =>
           discoverOAuthServerInfo(url, {
-            fetchFn: bounded(url, signal),
+            fetchFn: bounded(url, signal, publicOnly),
             ...(hint?.resourceMetadataUrl ? { resourceMetadataUrl: hint.resourceMetadataUrl } : {}),
           }),
         catch: (error) => reject(`Could not find the server’s sign-in: ${messageOf(error)}`),
@@ -198,7 +207,7 @@ export const mcpOAuth: DiscoveredOAuth = {
           codeVerifier: input.verifier,
           redirectUri: input.redirectUri,
           resource: new URL(input.server.resource),
-          fetchFn: bounded(new URL(input.server.resource), signal),
+          fetchFn: bounded(new URL(input.server.resource), signal, reachesPublicOnly(input.config)),
         }),
       catch: (error) =>
         error instanceof IssuerMismatchError || /\biss\b|issuer/i.test(messageOf(error))
@@ -217,7 +226,7 @@ export const mcpOAuth: DiscoveredOAuth = {
           },
           refreshToken: input.refreshToken,
           resource: new URL(input.server.resource),
-          fetchFn: bounded(new URL(input.server.resource), signal),
+          fetchFn: bounded(new URL(input.server.resource), signal, reachesPublicOnly(input.config)),
         }),
       catch: (error) => error,
     }).pipe(
@@ -259,7 +268,9 @@ const clientFor = (
       return { clientId: input.clientMetadataUrl, clientSecret: null };
     if (!metadata.registration_endpoint)
       return yield* reject(
-        "The server’s sign-in only accepts registered apps. Ask your admin to add a client ID for it.",
+        reachesPublicOnly(input.config)
+          ? "The server’s sign-in only accepts registered apps. Use a token instead."
+          : "The server’s sign-in only accepts registered apps. Ask your admin to add a client ID for it.",
       );
     // The method the token request will use (the SDK prefers basic, then post),
     // so the client is registered for how it then authenticates. Silence means basic (RFC 8414).
@@ -281,7 +292,7 @@ const clientFor = (
             token_endpoint_auth_method: method,
             application_type: "web",
           },
-          fetchFn: bounded(url, signal),
+          fetchFn: bounded(url, signal, reachesPublicOnly(input.config)),
         }),
       catch: (error) =>
         reject(`The server’s sign-in refused to register this app: ${messageOf(error)}`),

@@ -7,8 +7,18 @@ import { findIntegrationType } from "../catalog.ts";
 import { IntegrationAuthFailed, IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import type { ToolPermission, UnattendedGrant } from "../consent.ts";
 import type { IntegrationGrant } from "../grant.ts";
-import type { AdminCatalog, AdminIntegration, ScopeOption, UserIntegration } from "../schema.ts";
-import { readFields } from "../fields.ts";
+import {
+  PERSONAL_SERVER_FIELDS,
+  type AdminCatalog,
+  type AdminIntegration,
+  type PersonalServer,
+  type PersonalServers,
+  type ScopeOption,
+  type UserIntegration,
+} from "../schema.ts";
+import { resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
+import { mcpWaysOf } from "../mcp/manifest.ts";
+import { fieldValues, readFields } from "../fields.ts";
 import type { IntegrationManifest } from "../manifest.ts";
 import type { CatalogDecision, IntegrationAdapter } from "./adapter.ts";
 import { findAdapterType } from "./adapters.ts";
@@ -86,12 +96,43 @@ const byName = <A extends { name: string }>(a: A, b: A) => a.name.localeCompare(
 /** At most this many items in one connection's limit. */
 const MAX_SCOPE_ITEMS = 200;
 
+/** At most this many MCP servers of one's own. */
+const MAX_PERSONAL_SERVERS = 20;
+
+const unknownIntegration = () => new IntegrationRejected({ reason: "Unknown integration." });
+
 export class IntegrationService extends Context.Service<
   IntegrationService,
   {
     adminList(): Effect.Effect<ReadonlyArray<AdminIntegration>>;
-    /** Every integration's id, type and name, for showing stored references anywhere. */
-    directory(): Effect.Effect<ReadonlyArray<{ id: string; kind: string; name: string }>>;
+    /** Every integration this person could meet a reference to: the admin's and their own. */
+    directory(
+      userId: string,
+    ): Effect.Effect<ReadonlyArray<{ id: string; kind: string; name: string }>>;
+    personalServers(userId: string): Effect.Effect<PersonalServers>;
+    /** Adds or changes a server of one's own; its address must be public. */
+    savePersonalServer(
+      userId: string,
+      input: {
+        integrationId: string | null;
+        name: string;
+        config: Readonly<Record<string, string>>;
+      },
+    ): Effect.Effect<PersonalServer, IntegrationRejected>;
+    deletePersonalServer(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<void, IntegrationRejected>;
+    /** The owner's own review of what their server lists, as `checkCatalog` and `approveCatalog`. */
+    checkPersonalCatalog(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<AdminCatalog, IntegrationRejected>;
+    approvePersonalCatalog(
+      userId: string,
+      integrationId: string,
+      input: { version: string; decisions: ReadonlyArray<CatalogDecision> },
+    ): Effect.Effect<AdminCatalog, IntegrationRejected>;
     /** A new integration of a shipped type, off until set up. */
     /** Adds an integration of a type; the server picks its id. */
     createIntegration(input: {
@@ -241,6 +282,33 @@ export class IntegrationService extends Context.Service<
             ? toCatalog(yield* repo.catalog(row.id))
             : null;
         return toAdmin(row, catalog);
+      });
+
+      /** A person's own server is reviewed by them alone; an admin's by admins. */
+      const ownServer = Effect.fn(function* (userId: string, integrationId: string) {
+        const row = yield* repo.getConfig(integrationId);
+        if (row?.ownerUserId !== userId) return yield* unknownIntegration();
+        if (!(yield* repo.isUsable(userId, integrationId)))
+          return yield* new IntegrationRejected({
+            reason: "Your admin has not let you add MCP servers.",
+          });
+      });
+      const adminServer = Effect.fn(function* (integrationId: string) {
+        const row = yield* repo.getConfig(integrationId);
+        if (row && row.ownerUserId !== null) return yield* unknownIntegration();
+      });
+
+      const personalView = Effect.fn(function* (row: IntegrationConfigRow) {
+        return {
+          id: row.id,
+          name: row.name,
+          config: Object.fromEntries(
+            PERSONAL_SERVER_FIELDS.flatMap((key) =>
+              row.config[key] === undefined ? [] : [[key, row.config[key]!]],
+            ),
+          ),
+          catalog: toCatalog(yield* repo.catalog(row.id)),
+        } satisfies PersonalServer;
       });
 
       const credentials = yield* makeCredentials({ toolsOf, changed });
@@ -436,12 +504,118 @@ export class IntegrationService extends Context.Service<
           );
         }),
 
-        directory: Effect.fn("IntegrationService.directory")(function* () {
-          const rows = yield* repo.listConfigs();
+        directory: Effect.fn("IntegrationService.directory")(function* (userId) {
+          const rows = [...(yield* repo.listConfigs()), ...(yield* repo.listConfigs(userId))];
           return rows
             .toSorted(byName)
             .map((row) => ({ id: row.id, kind: row.kind, name: row.name }));
         }),
+
+        personalServers: Effect.fn("IntegrationService.personalServers")(function* (userId) {
+          const rows = yield* repo.listConfigs(userId);
+          return {
+            canAdd: yield* repo.mayAddServers(userId),
+            servers: yield* Effect.forEach(rows.toSorted(byName), personalView),
+          };
+        }),
+
+        savePersonalServer: Effect.fn("IntegrationService.savePersonalServer")(
+          function* (userId, input) {
+            if (!(yield* repo.mayAddServers(userId)))
+              return yield* new IntegrationRejected({
+                reason: "Your admin has not let you add MCP servers.",
+              });
+            const adapter = findAdapterType("mcp");
+            if (!adapter) return yield* unknownIntegration();
+            const stored = input.integrationId ? yield* repo.getConfig(input.integrationId) : null;
+            if (input.integrationId && stored?.ownerUserId !== userId)
+              return yield* unknownIntegration();
+            if (!stored && (yield* repo.listConfigs(userId)).length >= MAX_PERSONAL_SERVERS)
+              return yield* new IntegrationRejected({
+                reason: `You can add at most ${MAX_PERSONAL_SERVERS} servers.`,
+              });
+            const name = input.name.trim();
+            if (!name || name.length > NAME_MAX)
+              return yield* new IntegrationRejected({ reason: "Give it a name." });
+            if (yield* repo.nameTaken(name, stored?.id ?? null, userId))
+              return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            // Only what a person may choose; without an account means open, never a shared key.
+            const config: Record<string, string> = Object.fromEntries(
+              PERSONAL_SERVER_FIELDS.flatMap((key) =>
+                input.config[key] === undefined ? [] : [[key, input.config[key]]],
+              ),
+            );
+            if (fieldValues(config.ways).includes("anonymous")) config.anonymous = "open";
+            config.reach = "public";
+            const normalized = adapter.normalizeConfig(config);
+            if ("error" in normalized)
+              return yield* new IntegrationRejected({ reason: normalized.error });
+            // Each request checks this again; asking now just says so before anything is saved.
+            yield* resolvePublicHttpUrl(normalized.config.url!).pipe(
+              Effect.mapError(
+                () =>
+                  new IntegrationRejected({
+                    reason: "Use a public address. An admin can add servers on a private network.",
+                  }),
+              ),
+            );
+            const id =
+              stored?.id ?? (yield* repo.createConfig({ kind: "mcp", name, ownerUserId: userId }));
+            if (!id)
+              return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            const row = yield* repo.saveConfig({
+              id,
+              name,
+              enabled: true,
+              config: normalized.config,
+              fingerprint: normalized.fingerprint,
+              oauthClientId: null,
+              allowApiKeys: true,
+              listsTools: true,
+            });
+            if (!row) return yield* unknownIntegration();
+            // Needing no account, it is on for its owner once saved, as connecting would
+            // make it; their own token or sign-in, if any, stays.
+            if (mcpWaysOf(normalized.config).anonymous === "open")
+              yield* repo.saveConnection({
+                userId,
+                integrationId: id,
+                revision: row.revision,
+                authKind: "none",
+                credentials: { kind: "none" },
+                accountLabel: name,
+                fingerprint: normalized.fingerprint,
+                replacing: ["none"],
+              });
+            yield* changed(userId);
+            return yield* personalView(row);
+          },
+        ),
+
+        deletePersonalServer: Effect.fn("IntegrationService.deletePersonalServer")(
+          function* (userId, integrationId) {
+            const row = yield* repo.getConfig(integrationId);
+            if (row?.ownerUserId !== userId) return yield* unknownIntegration();
+            yield* repo.deleteConfig(integrationId);
+            yield* changed(userId);
+          },
+        ),
+
+        checkPersonalCatalog: Effect.fn("IntegrationService.checkPersonalCatalog")(
+          function* (userId, integrationId) {
+            yield* ownServer(userId, integrationId);
+            return yield* catalog.checkCatalog(integrationId, userId);
+          },
+        ),
+
+        approvePersonalCatalog: Effect.fn("IntegrationService.approvePersonalCatalog")(
+          function* (userId, integrationId, input) {
+            yield* ownServer(userId, integrationId);
+            const approved = yield* catalog.approveCatalog(userId, integrationId, input);
+            yield* changed(userId);
+            return approved;
+          },
+        ),
 
         createIntegration: Effect.fn("IntegrationService.createIntegration")(function* (input) {
           if (!findIntegrationType(input.kind) || !findAdapterType(input.kind))
@@ -449,7 +623,7 @@ export class IntegrationService extends Context.Service<
           const name = input.name.trim();
           if (!name || name.length > NAME_MAX)
             return yield* new IntegrationRejected({ reason: "Give it a name." });
-          if (yield* repo.nameTaken(name, null))
+          if (yield* repo.nameTaken(name, null, null))
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           const id = yield* repo.createConfig({ kind: input.kind, name });
           if (!id)
@@ -476,12 +650,13 @@ export class IntegrationService extends Context.Service<
           const stored = yield* repo.getConfig(input.id);
           const manifest = stored ? findIntegrationType(stored.kind) : null;
           const adapter = stored ? findAdapterType(stored.kind) : null;
-          if (!stored || !manifest || !adapter)
-            return yield* new IntegrationRejected({ reason: "Unknown integration." });
+          // A person's own server is theirs to set up, through savePersonalServer.
+          if (!stored || !manifest || !adapter || stored.ownerUserId !== null)
+            return yield* unknownIntegration();
           const name = input.name.trim();
           if (!name || name.length > NAME_MAX)
             return yield* new IntegrationRejected({ reason: "Give it a name." });
-          if (yield* repo.nameTaken(name, input.id))
+          if (yield* repo.nameTaken(name, input.id, null))
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           const known = new Set(manifest.adminFields.map((field) => field.key));
           const config = Object.fromEntries(
@@ -581,6 +756,7 @@ export class IntegrationService extends Context.Service<
               kind: entry.config.kind,
               name: entry.config.name,
               available: open,
+              personal: entry.config.ownerUserId !== null,
               methods,
               // A shared key only ever reads, so its other tools are not anyone's to set.
               tools: (yield* toolsOf(manifest, adapter, entry.config.id))
@@ -654,8 +830,18 @@ export class IntegrationService extends Context.Service<
           },
         ),
 
-        checkCatalog: (integrationId, asUserId) => catalog.checkCatalog(integrationId, asUserId),
-        approveCatalog: catalog.approveCatalog,
+        checkCatalog: Effect.fn("IntegrationService.checkCatalog")(
+          function* (integrationId, asUserId) {
+            yield* adminServer(integrationId);
+            return yield* catalog.checkCatalog(integrationId, asUserId);
+          },
+        ),
+        approveCatalog: Effect.fn("IntegrationService.approveCatalog")(
+          function* (adminId, integrationId, input) {
+            yield* adminServer(integrationId);
+            return yield* catalog.approveCatalog(adminId, integrationId, input);
+          },
+        ),
         checkDueCatalogs: catalog.checkDueCatalogs,
 
         connectOpen: Effect.fn("IntegrationService.connectOpen")(function* (userId, integrationId) {

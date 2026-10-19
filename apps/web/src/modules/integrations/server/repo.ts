@@ -21,6 +21,7 @@ import {
   schedules,
   user,
 } from "~/db/schema/index.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import type { ToolPermission } from "../consent.ts";
 import type { McpToolEntry } from "../mcp/catalog.ts";
@@ -77,10 +78,6 @@ const decodeShared = Schema.decodeUnknownOption(
 );
 
 /**
- * Who may connect: everyone signed in when the audience is the instance,
- * admins always, otherwise a user or group grant. SQL, so the settings list,
- * connect and every attempt apply the same rule.
- */
 /** A type's own kind for its first integration, then numbered: `jira`, `jira-2`. */
 const freeId = (kind: string, taken: ReadonlyArray<string>) => {
   const used = new Set(taken);
@@ -90,13 +87,30 @@ const freeId = (kind: string, taken: ReadonlyArray<string>) => {
   return `${kind}-${n}`;
 };
 
-export const integrationUsableBy = (userId: string): SQL => sql`(
+/**
+ * Who may connect: everyone signed in when the audience is the instance,
+ * admins always, otherwise a user or group grant. A personal server only its
+ * owner, while they may still add their own. SQL, so the settings list,
+ * connect and every attempt apply the same rule.
+ */
+export const integrationUsableBy = (
+  userId: string,
+): SQL => sql`(case when ${integrationConfigs.ownerUserId} is null then (
   ${integrationConfigs.audience} = 'instance'
   or exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')
   or exists(select 1 from ${integrationUserGrants} where ${integrationUserGrants.integrationId} = ${integrationConfigs.id} and ${integrationUserGrants.userId} = ${userId})
   or exists(select 1 from ${integrationGroupGrants} join ${groupMembers} on ${groupMembers.groupId} = ${integrationGroupGrants.groupId}
     where ${integrationGroupGrants.integrationId} = ${integrationConfigs.id} and ${groupMembers.userId} = ${userId})
-)`;
+) else (
+  ${integrationConfigs.ownerUserId} = ${userId}
+  and ${capabilityAllowedSql(integrationConfigs.ownerUserId, "mcpServers")}
+) end)`;
+
+/** The admin's integrations, or one person's own servers. */
+const ownedBy = (ownerUserId: string | null) =>
+  ownerUserId === null
+    ? isNull(integrationConfigs.ownerUserId)
+    : eq(integrationConfigs.ownerUserId, ownerUserId);
 
 export interface SaveConfig {
   readonly id: string;
@@ -130,7 +144,10 @@ export interface AllowanceUse {
 export class IntegrationRepo extends Context.Service<
   IntegrationRepo,
   {
-    listConfigs(): Effect.Effect<ReadonlyArray<IntegrationConfigRow & { connectionCount: number }>>;
+    /** The admin's integrations, or with an owner, that person's own servers. */
+    listConfigs(
+      ownerUserId?: string | null,
+    ): Effect.Effect<ReadonlyArray<IntegrationConfigRow & { connectionCount: number }>>;
     getConfig(id: string): Effect.Effect<IntegrationConfigRow | null>;
     /** The OAuth client secret, decrypted, for the token endpoint only. */
     clientSecret(row: IntegrationConfigRow): Effect.Effect<string | null>;
@@ -144,7 +161,11 @@ export class IntegrationRepo extends Context.Service<
      * Adds an integration under the first free id of its type (`jira`, then
      * `jira-2`), or returns null when the name is already in use.
      */
-    createConfig(input: { kind: string; name: string }): Effect.Effect<string | null>;
+    createConfig(input: {
+      kind: string;
+      name: string;
+      ownerUserId?: string | null;
+    }): Effect.Effect<string | null>;
     /**
      * Removes an integration with everything that only meant something with it
      * (connections, grants, chat and agent settings, through their foreign keys)
@@ -153,8 +174,12 @@ export class IntegrationRepo extends Context.Service<
     deleteConfig(
       id: string,
     ): Effect.Effect<{ deleted: true } | { deleted: false; sources: number }>;
-    /** Whether another integration already uses this name, ignoring case. */
-    nameTaken(name: string, exceptId: string | null): Effect.Effect<boolean>;
+    /** Whether another integration the owner would see uses this name, ignoring case. */
+    nameTaken(
+      name: string,
+      exceptId: string | null,
+      ownerUserId: string | null,
+    ): Effect.Effect<boolean>;
     /** Integrations this person may use, enabled or not, with their connection if any. */
     listForUser(userId: string): Effect.Effect<
       ReadonlyArray<{
@@ -164,6 +189,8 @@ export class IntegrationRepo extends Context.Service<
       }>
     >;
     isUsable(userId: string, integrationId: string): Effect.Effect<boolean>;
+    /** Whether this person may add MCP servers of their own. */
+    mayAddServers(userId: string): Effect.Effect<boolean>;
     getConnection(
       userId: string,
       integrationId: string,
@@ -334,6 +361,7 @@ export class IntegrationRepo extends Context.Service<
       const nameTaken = Effect.fn("IntegrationRepo.nameTaken")(function* (
         name: string,
         exceptId: string | null,
+        ownerUserId: string | null,
       ) {
         const rows = yield* db
           .select({ id: integrationConfigs.id })
@@ -342,6 +370,8 @@ export class IntegrationRepo extends Context.Service<
             and(
               sql`lower(${integrationConfigs.name}) = lower(${name})`,
               exceptId ? sql`${integrationConfigs.id} <> ${exceptId}` : undefined,
+              // A person sees the admin's integrations beside their own, so theirs avoid both.
+              ownerUserId === null ? ownedBy(null) : or(ownedBy(null), ownedBy(ownerUserId)),
             ),
           )
           .pipe(Effect.orDie);
@@ -349,13 +379,14 @@ export class IntegrationRepo extends Context.Service<
       });
 
       return IntegrationRepo.of({
-        listConfigs: Effect.fn("IntegrationRepo.listConfigs")(function* () {
+        listConfigs: Effect.fn("IntegrationRepo.listConfigs")(function* (ownerUserId = null) {
           const rows = yield* db
             .select({
               config: integrationConfigs,
               connectionCount: sql<number>`(select count(*)::int from ${integrationConnections} where ${integrationConnections.integrationId} = ${integrationConfigs.id})`,
             })
             .from(integrationConfigs)
+            .where(ownedBy(ownerUserId))
             .pipe(Effect.orDie);
           return rows.map((row) => ({ ...row.config, connectionCount: row.connectionCount }));
         }),
@@ -473,12 +504,17 @@ export class IntegrationRepo extends Context.Service<
             );
             const rows = yield* db
               .insert(integrationConfigs)
-              .values({ id, kind: input.kind, name: input.name })
+              .values({
+                id,
+                kind: input.kind,
+                name: input.name,
+                ownerUserId: input.ownerUserId ?? null,
+              })
               .onConflictDoNothing()
               .returning({ id: integrationConfigs.id })
               .pipe(Effect.orDie);
             if (rows.length) return id;
-            if (yield* nameTaken(input.name, null)) return null;
+            if (yield* nameTaken(input.name, null, input.ownerUserId ?? null)) return null;
           }
         }),
 
@@ -536,6 +572,15 @@ export class IntegrationRepo extends Context.Service<
             usable: Boolean(row.usable),
             connection: row.connection,
           }));
+        }),
+
+        mayAddServers: Effect.fn("IntegrationRepo.mayAddServers")(function* (userId) {
+          const [row] = yield* db
+            .select({ allowed: capabilityAllowedSql(userId, "mcpServers") })
+            .from(user)
+            .where(eq(user.id, userId))
+            .pipe(Effect.orDie);
+          return Boolean(row?.allowed);
         }),
 
         isUsable: Effect.fn("IntegrationRepo.isUsable")(function* (userId, integrationId) {

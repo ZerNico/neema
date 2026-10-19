@@ -21,7 +21,9 @@ import type { McpToolEntry } from "~/modules/integrations/mcp/catalog.ts";
  * (`kind`), so a server can have two Outlines or two Jira sites. The id is
  * chosen once and never changes, since tool names (`int_<id>__…`), the OAuth
  * callback and every stored reference carry it. Shared like custom tools: who
- * may connect is `audience` plus the grant tables below, admins always.
+ * may connect is `audience` plus the grant tables below, admins always. A
+ * personal MCP server has an owner instead: only they use and review it, and
+ * its address must be public.
  */
 export const integrationConfigs = pgTable(
   "integration_configs",
@@ -29,8 +31,10 @@ export const integrationConfigs = pgTable(
     id: text().primaryKey(),
     /** The manifest and adapter it runs on. */
     kind: text().notNull(),
-    /** What people see; unique, so an @mention names one integration. */
+    /** What people see; unique among what one person sees, so an @mention names one integration. */
     name: text().notNull(),
+    // Set for a server a person added for themselves; null for the admin's.
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     enabled: boolean().notNull().default(false),
     // Non-secret settings named by the manifest's admin fields (base URL…).
     config: jsonb().$type<Record<string, string>>().notNull().default({}),
@@ -57,7 +61,13 @@ export const integrationConfigs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("integration_configs_name_idx").on(sql`lower(${t.name})`)],
+  (t) => [
+    uniqueIndex("integration_configs_name_idx").on(
+      sql`coalesce(${t.ownerUserId}, '')`,
+      sql`lower(${t.name})`,
+    ),
+    index("integration_configs_owner_idx").on(t.ownerUserId),
+  ],
 );
 
 export const integrationUserGrants = pgTable(

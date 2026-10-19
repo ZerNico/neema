@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -136,7 +136,16 @@ export class AgentRepo extends Context.Service<
             const existing = yield* tx
               .select({ id: integrationConfigs.id })
               .from(integrationConfigs)
-              .where(inArray(integrationConfigs.id, [...integrationIds]));
+              .where(
+                and(
+                  inArray(integrationConfigs.id, [...integrationIds]),
+                  // Another person's own server is not theirs to name.
+                  or(
+                    isNull(integrationConfigs.ownerUserId),
+                    eq(integrationConfigs.ownerUserId, userId),
+                  ),
+                ),
+              );
             if (existing.length !== new Set(integrationIds).size)
               return yield* new AgentRejected({ reason: "a selected integration does not exist" });
           }

@@ -6,6 +6,7 @@ import {
   listKnowledgeSources,
   listMyIntegrations,
   listPendingIntegrationCalls,
+  listPersonalServers,
 } from "../server/functions.ts";
 
 export const adminIntegrationsQuery = queryOptions({
@@ -17,6 +18,12 @@ export const adminIntegrationsQuery = queryOptions({
 export const myIntegrationsQuery = queryOptions({
   queryKey: ["integrations", "mine"],
   queryFn: () => listMyIntegrations(),
+});
+
+/** MCP servers this person added; under `integrations` so a change refreshes it. */
+export const personalServersQuery = queryOptions({
+  queryKey: ["integrations", "personal"],
+  queryFn: () => listPersonalServers(),
 });
 
 /** Where a browser starts OAuth; the desktop shell hands it to the system browser. */

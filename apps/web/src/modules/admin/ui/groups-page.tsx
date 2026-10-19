@@ -173,6 +173,11 @@ const featureGroups: ReadonlyArray<{
         description: "Call tools an admin has added. Only admins can write them.",
         key: "customTools",
       },
+      {
+        label: "Their own MCP servers",
+        description: "Add public MCP servers for themselves and approve their tools.",
+        key: "mcpServers",
+      },
     ],
   },
   {

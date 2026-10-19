@@ -80,7 +80,9 @@ from.
 - `integration_configs` is one row per integration: its type, name, enabled, the admin
   fields (base URL), an OAuth client, and whether personal API keys are allowed.
   Who may connect uses `SharingService` (`integration` resource, admin-managed), checked in
-  SQL by `integrationUsableBy` at connect, at every attempt and at every sync.
+  SQL by `integrationUsableBy` at connect, at every attempt and at every sync. An MCP server a
+  person added for themselves has an owner instead, and only they may connect
+  ([MCP](mcp.md#servers-a-person-adds)).
 - `integration_connections` is one row per (user, integration). Credentials are one
   `KeyCipher` JSON document and never leave the server, tool rows or logs. A connection is
   never shared: an agent or schedule reaches only the sender's own. A type whose admin

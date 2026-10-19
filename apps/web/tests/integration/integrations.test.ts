@@ -2333,7 +2333,7 @@ describe("several integrations of one type", () => {
           .where(eq(conversationIntegrations.conversationId, conversationId)),
       ),
     ).toEqual([]);
-    expect((await service((s) => s.directory())).map((entry) => entry.id)).not.toContain(
+    expect((await service((s) => s.directory(userId))).map((entry) => entry.id)).not.toContain(
       "outline-2",
     );
   });

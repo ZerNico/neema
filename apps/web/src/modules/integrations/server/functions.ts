@@ -14,6 +14,7 @@ import {
   IntegrationIdInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
+  SavePersonalServerInput,
   SourceIdInput,
   UpdateConnectionInput,
 } from "../schema.ts";
@@ -61,7 +62,81 @@ export const listAdminIntegrations = createServerFn({ method: "GET" })
 /** Every integration's id, type and name, so any stored reference can be named and drawn. */
 export const listIntegrationDirectory = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .handler(() => runServerFn(IntegrationService.use((service) => service.directory())));
+  .handler(({ context }) =>
+    runServerFn(IntegrationService.use((service) => service.directory(context.session.user.id))),
+  );
+
+/** The MCP servers this person added for themselves, and whether they may add more. */
+export const listPersonalServers = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(
+      IntegrationService.use((service) => service.personalServers(context.session.user.id)),
+    ),
+  );
+
+export const savePersonalServer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SavePersonalServerInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.savePersonalServer(context.session.user.id, {
+          integrationId: data.integrationId,
+          name: data.name,
+          config: data.config,
+        }),
+      ).pipe(
+        Effect.map((server) => ({ ok: true as const, server })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const deletePersonalServer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.deletePersonalServer(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** Lists the person's own server's tools now; nothing is offered until they approve. */
+export const checkPersonalCatalog = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.checkPersonalCatalog(context.session.user.id, data.integrationId),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const approvePersonalCatalog = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ApproveCatalogInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.approvePersonalCatalog(context.session.user.id, data.integrationId, {
+          version: data.version,
+          decisions: data.decisions,
+        }),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
 
 export const createIntegration = createServerFn({ method: "POST" })
   .middleware([requireAdmin])

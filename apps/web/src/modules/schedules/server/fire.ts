@@ -85,7 +85,7 @@ export class ScheduleFire extends Context.Service<
           .pipe(
             Effect.andThen(() => start(row, runId)),
             Effect.catchTag("IntegrationNotAvailable", (error) =>
-              integrations.directory().pipe(
+              integrations.directory(row.userId).pipe(
                 Effect.flatMap((directory) =>
                   Effect.fail({
                     _tag: "GrantUnavailable" as const,

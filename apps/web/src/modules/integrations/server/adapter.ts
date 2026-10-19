@@ -241,6 +241,8 @@ export interface DiscoveredOAuth {
     IntegrationRejected
   >;
   complete(input: {
+    /** The integration's config as saved, for how its requests may go. */
+    config: Readonly<Record<string, string>>;
     server: DiscoveredServer;
     clientSecret: string | null;
     code: string;
@@ -250,6 +252,7 @@ export interface DiscoveredOAuth {
     redirectUri: string;
   }): Effect.Effect<TokenSet, IntegrationRejected>;
   refresh(input: {
+    config: Readonly<Record<string, string>>;
     server: DiscoveredServer;
     clientSecret: string | null;
     refreshToken: string;
