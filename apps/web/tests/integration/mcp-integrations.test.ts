@@ -1549,6 +1549,22 @@ describe("an MCP server a person adds for themselves", () => {
     ).not.toContain(id);
   });
 
+  it("starts no check of a server deleted after the sweep claimed it", async () => {
+    await allowServers(true);
+    names.set("gone.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    const owner = await activeUser();
+    const saved = await save(owner, "Gone", "https://gone.example.test/mcp");
+    if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
+    const id = saved.success.id;
+    await run(Effect.flatMap(IntegrationService, (s) => s.deletePersonalServer(owner, id)));
+    // As the sweep would, holding a claim taken before the delete.
+    const exit = await runtime.runPromiseExit(
+      Effect.flatMap(IntegrationService, (s) => s.checkCatalog(id, null)),
+    );
+    expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(true);
+    expect(JSON.stringify(exit)).toMatch(/removed/);
+  });
+
   it("refuses a private address, also when a public name later points inside", async () => {
     await allowServers(true);
     const owner = await activeUser();

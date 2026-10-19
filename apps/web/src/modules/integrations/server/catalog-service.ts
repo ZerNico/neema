@@ -103,6 +103,8 @@ export const makeCatalogService = (deps: {
       asUserId: string | null,
     ) {
       const token = yield* repo.startCatalogCheck(integrationId);
+      if (!token)
+        return yield* new IntegrationRejected({ reason: "This integration was removed." });
       const current = yield* repo.catalog(integrationId);
       // Recorded only for the setup the check started under: a move meanwhile drops it.
       const setup = yield* repo.getConfig(integrationId);

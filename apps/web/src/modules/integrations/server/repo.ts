@@ -280,7 +280,8 @@ export class IntegrationRepo extends Context.Service<
      * Starts a check, sweep or manual, and returns its token. Starting one
      * supersedes any still running: only the newest may record what it saw.
      */
-    startCatalogCheck(integrationId: string): Effect.Effect<string>;
+    /** Null when the integration is gone, so there is nothing to check. */
+    startCatalogCheck(integrationId: string): Effect.Effect<string | null>;
     /**
      * False when a newer check, or another revision of the integration,
      * superseded this one; nothing is written then. A listing equal to the
@@ -991,15 +992,27 @@ export class IntegrationRepo extends Context.Service<
         startCatalogCheck: Effect.fn("IntegrationRepo.startCatalogCheck")(
           function* (integrationId) {
             const token = uuidv7();
-            yield* db
+            // Selected from the integration, holding it while the row goes in: one
+            // deleted meanwhile, say mid-sweep, starts no check instead of failing one.
+            const rows = yield* db
               .insert(integrationToolCatalogs)
-              .values({ integrationId, checkToken: token })
+              .select((qb) =>
+                qb
+                  .select({
+                    integrationId: integrationConfigs.id,
+                    checkToken: sql<string>`${token}`.as("check_token"),
+                  })
+                  .from(integrationConfigs)
+                  .where(eq(integrationConfigs.id, integrationId))
+                  .for("key share"),
+              )
               .onConflictDoUpdate({
                 target: integrationToolCatalogs.integrationId,
                 set: { checkToken: token },
               })
+              .returning({ integrationId: integrationToolCatalogs.integrationId })
               .pipe(Effect.orDie);
-            return token;
+            return rows.length ? token : null;
           },
         ),
 
