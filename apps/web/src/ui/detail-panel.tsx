@@ -434,11 +434,11 @@ function DetailPanelResizer({
       aria-valuemin={DETAIL_PANEL_MIN}
       aria-valuemax={expanded ? width : max}
       tabIndex={0}
-      // A grabbable strip that draws nothing itself: the rail already has a
-      // border there, so the only mark is the line below, tinting that edge.
-      // Sits wholly inside the rail, whose overflow is clipped, or it would
-      // lose its outer half and the cursor with it.
-      className="group absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize touch-none focus-visible:outline-none"
+      // A grabbable strip that draws nothing itself: the only mark is the line
+      // below, tinting the rail's border. It starts on that border and stays
+      // inside the rail, whose overflow is clipped, or it would lose its outer
+      // half and the cursor with it.
+      className="group absolute inset-y-0 -left-px z-10 w-2 cursor-col-resize touch-none focus-visible:outline-none"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         start.current = { x: event.clientX, width, to: width };
@@ -528,8 +528,10 @@ function useTitlebarInset(root: RefObject<HTMLElement | null>, mounted: boolean)
     if (!mounted || !element) return;
     const html = document.documentElement;
     const apply = () => {
-      const width = element.getBoundingClientRect().width;
-      html.style.setProperty("--detail-panel-inset", `${width}px`);
+      const rect = element.getBoundingClientRect();
+      const width = rect.width;
+      // Measured from the window's edge, so an inset page's margin is included.
+      html.style.setProperty("--detail-panel-inset", `${html.clientWidth - rect.left}px`);
       if (width > 0) html.dataset.detailPanel = "";
       else delete html.dataset.detailPanel;
     };

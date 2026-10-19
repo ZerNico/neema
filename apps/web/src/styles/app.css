@@ -114,6 +114,11 @@
   --chart-foreground: oklch(0.985 0 0);
 }
 
+/* The open sidebar's width, also read by the desktop titlebar outside its tree. */
+:root {
+  --app-sidebar-width: 19rem;
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -134,11 +139,11 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.115 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.922 0 0);
   --sidebar-primary-foreground: oklch(0.205 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.215 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
@@ -190,6 +195,15 @@ html[data-desktop-chrome] [data-slot="sheet-content"]:is([data-side="left"], [da
   height: var(--desktop-content-height);
 }
 
+/* The titlebar is the top of the canvas, so the inset page starts right below
+   it and the titlebar's controls stay centred in the band above the page. One
+   pixel keeps the page's edge, drawn outside it, clear of the titlebar. */
+@media (width >= 48rem) {
+  html[data-desktop-chrome] [data-variant="inset"] ~ [data-slot="sidebar-inset"] {
+    margin-top: 1px;
+  }
+}
+
 html[data-desktop-chrome] [data-slot="sheet-overlay"],
 html[data-desktop-chrome] [data-slot="sheet-content"][data-side="top"] {
   top: var(--desktop-titlebar-height);
@@ -207,6 +221,13 @@ html:not([data-desktop-chrome]) .desktop-titlebar {
   -webkit-app-region: drag;
   app-region: drag;
   user-select: none;
+}
+
+/* Over the canvas, the page's muted fills (a selected tab, a hovered button)
+   would match it, so the titlebar borrows the sidebar's highlight instead. */
+html:has([data-variant="inset"]) .desktop-titlebar {
+  --muted: var(--sidebar-accent);
+  --accent: var(--sidebar-accent);
 }
 
 .desktop-titlebar-content {
@@ -232,10 +253,23 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
   width: 100%;
 }
 
-/* The open detail rail owns the titlebar above it (`--detail-panel-inset` is its
-   live width), so the header ends at the rail's edge and the rail's tab strip takes
-   the rest. The strip ends where the content area does: on Windows and Linux the
-   window controls overlay sits past it, over the rail's top right corner. */
+/* With the sidebar open, the chat's title starts where the page does; it slides
+   back beside the buttons with the sidebar as it collapses. */
+.desktop-header [data-header-slot] {
+  transition: margin-left 200ms linear;
+}
+
+html[data-desktop-chrome]:has([data-slot="sidebar"][data-variant="inset"][data-state="expanded"])
+  .desktop-header
+  [data-header-slot] {
+  margin-left: max(0.5rem, calc(var(--app-sidebar-width) + 0.75rem - var(--header-slot-start, 0px)));
+}
+
+/* The open detail rail owns the titlebar above it (`--detail-panel-inset` is how
+   far its left edge sits from the window's right), so the header ends at the
+   rail's edge and the rail's tab strip takes the rest. The strip ends where the
+   content area does: on Windows and Linux the window controls overlay sits past
+   it, over the rail's top right corner. */
 .desktop-titlebar-panel {
   display: none;
 }

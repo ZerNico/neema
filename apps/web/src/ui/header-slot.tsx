@@ -1,4 +1,4 @@
-import { createContext, use, useMemo, useState, type ReactNode } from "react";
+import { createContext, use, useCallback, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 const SlotContext = createContext<{
@@ -18,8 +18,33 @@ export function HeaderSlotProvider({ children }: { children: ReactNode }) {
 
 /** Where route content lands; it takes the header's free width. */
 export function HeaderSlot() {
-  const slot = use(SlotContext);
-  return <div ref={slot?.setTarget} className="flex min-w-0 flex-1 items-center" />;
+  const setTarget = use(SlotContext)?.setTarget;
+  const attach = useCallback(
+    (element: HTMLDivElement | null) => {
+      setTarget?.(element);
+      if (!element) return;
+      // Where the slot would start with no offset: the stylesheet pushes it to
+      // the page's edge while the desktop sidebar is open, never over the buttons.
+      const measure = () => {
+        const previous = element.previousElementSibling;
+        const gap = Number.parseFloat(getComputedStyle(element.parentElement ?? element).columnGap);
+        const start = previous
+          ? previous.getBoundingClientRect().right + (Number.isNaN(gap) ? 0 : gap)
+          : element.getBoundingClientRect().left;
+        element.style.setProperty("--header-slot-start", `${start}px`);
+      };
+      measure();
+      // A control appearing beside it, or the window resizing, changes the slot's
+      // width; its own offset does too, but leaves the measurement as it was.
+      const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+      observer?.observe(element);
+      return () => observer?.disconnect();
+    },
+    [setTarget],
+  );
+  // The extra margin matches the visual gap between the icon buttons before it,
+  // whose glyphs sit inset in their boxes while text starts at its edge.
+  return <div ref={attach} data-header-slot="" className="ml-2 flex min-w-0 flex-1 items-center" />;
 }
 
 export function HeaderContent({ children }: { children: ReactNode }) {

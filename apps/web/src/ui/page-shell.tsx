@@ -54,7 +54,7 @@ export function SectionShell({
       <nav
         aria-label={title}
         className={cn(
-          "border-border flex w-full shrink-0 flex-col gap-1 border-r p-3 md:w-56",
+          "flex w-full shrink-0 flex-col gap-1 p-3 md:w-56",
           atRoot ? "flex" : "hidden md:flex",
         )}
       >

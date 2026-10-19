@@ -99,10 +99,14 @@ function AuthenticatedLayout({
       <AppMotionProvider>
         <ConfirmProvider>
           <FeatureTourProvider enabled={!identity.impersonatedBy}>
-            <SidebarProvider style={{ "--sidebar-width": "19rem" } as CSSProperties}>
+            {/* A fixed height, so the inset page stretches to it less its margins. */}
+            <SidebarProvider
+              className="h-svh"
+              style={{ "--sidebar-width": "var(--app-sidebar-width)" } as CSSProperties}
+            >
               <CommandPaletteProvider>
                 <SessionAppSidebar initialUser={user} impersonating={!!identity.impersonatedBy} />
-                <SidebarInset className="h-svh overflow-hidden">
+                <SidebarInset className="min-h-0 overflow-hidden">
                   <DetailPanelProvider
                     userId={identity.userId}
                     {...(browser ? { newTab: browserNewTab } : {})}

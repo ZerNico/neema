@@ -46,7 +46,7 @@ export function AppSidebar({
 }) {
   const { state, isMobile } = useSidebar();
   return (
-    <Sidebar collapsible="rail">
+    <Sidebar variant="inset" collapsible="rail">
       <ClosesOnLink>
         <div className="flex min-h-0 flex-1">
           <SidebarNavRail account={<AccountMenu user={user} impersonating={impersonating} />} />
