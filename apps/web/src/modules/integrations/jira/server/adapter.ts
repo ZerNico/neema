@@ -636,6 +636,7 @@ export const jiraAdapter: IntegrationAdapter = {
     jiraCall<JiraUser>(session, "GET", "/myself").pipe(
       Effect.map((me) => ({
         accountLabel: `${me.emailAddress || me.displayName || "Jira account"} · ${new URL(siteOf(session.config)).hostname}`,
+        accountKey: me.accountId || null,
       })),
     ),
   handlers,

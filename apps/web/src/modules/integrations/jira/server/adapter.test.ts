@@ -210,7 +210,10 @@ describe("jira adapter", () => {
 
     requests = [];
     const label = await run(jiraAdapter.verify(sessionWith({ kind: "oauth", accessToken: "a1" })));
-    expect(label).toEqual({ accountLabel: "me@acme.test · acme.atlassian.net" });
+    expect(label).toEqual({
+      accountLabel: "me@acme.test · acme.atlassian.net",
+      accountKey: "u-me",
+    });
     // The cloud id is the configured site's, not the first one the account can reach.
     expect(requests.map((request) => request.url)).toContain(`${GATEWAY}/myself`);
     expect(requests.every((request) => request.authorization === "Bearer a1")).toBe(true);
@@ -428,10 +431,12 @@ describe("a connection limited to some projects", () => {
       adapter: jiraAdapter,
       tools: shippedTools(jiraManifest, jiraAdapter),
       authKind: "api_key",
+      account: "ada@example.com",
     };
     const tools = prepareIntegrationTools({
       offered: [
         {
+          connectionId: "c",
           integrationId: "jira",
           session: connected,
           scope: ["PROJ"],
@@ -507,10 +512,12 @@ describe("a connection limited to some projects", () => {
       adapter: jiraAdapter,
       tools: shippedTools(jiraManifest, jiraAdapter),
       authKind: "api_key",
+      account: "ada@example.com",
     };
     const tools = prepareIntegrationTools({
       offered: [
         {
+          connectionId: "c",
           integrationId: "jira",
           session: connected,
           scope: ["OPS"],

@@ -84,7 +84,10 @@ import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
-import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
+import type {
+  ComposerIntegration,
+  ComposerIntegrations,
+} from "~/modules/integrations/client/use-chat-integrations.ts";
 import { AddIntegrationDialog } from "~/modules/integrations/ui/add-integration-dialog.tsx";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import type { ConversationMode } from "../schema.ts";
@@ -118,6 +121,30 @@ export interface ImageModelChoice {
   readonly agentPreference?: string | null | undefined;
   readonly onChange: (modelId: string) => void;
 }
+
+const sharesIntegration = (items: ReadonlyArray<ComposerIntegration>, item: ComposerIntegration) =>
+  items.some(
+    (other) =>
+      other.integrationId === item.integrationId && other.connectionId !== item.connectionId,
+  );
+
+/** The "@" rows: one per integration, naming its accounts only when there are several. */
+const mentionableIntegrations = (items: ReadonlyArray<ComposerIntegration>) => {
+  const byIntegration = new Map<string, ComposerIntegration[]>();
+  for (const item of items)
+    byIntegration.set(item.integrationId, [...(byIntegration.get(item.integrationId) ?? []), item]);
+  return [...byIntegration.values()].map((accounts) => {
+    const first = accounts[0]!;
+    const named = accounts.flatMap((item) => (item.account ? [item.account] : []));
+    return {
+      id: first.integrationId,
+      label: first.name,
+      ...(accounts.some((item) => item.enabled) ? { meta: "on" } : {}),
+      ...(named.length > 1 ? { description: named.join(" · ") } : {}),
+      search: `${first.integrationId} ${first.name} ${named.join(" ")}`,
+    };
+  });
+};
 
 export const ChatInput = forwardRef<
   ComposerFieldHandle,
@@ -569,18 +596,14 @@ export const ChatInput = forwardRef<
         integrations={
           integrations && !controlsDisabled
             ? {
-                // Turns the service on if needed and names it in the message.
-                // Every connected service is listed, already-on ones too.
-                items: integrations.items.map((item) => ({
-                  id: item.integrationId,
-                  label: item.name,
-                  ...(item.enabled ? { meta: "on" } : {}),
-                  description: item.accountLabel,
-                  search: `${item.integrationId} ${item.name}`,
-                })),
+                // One row per integration, already-on ones too: the mention in the
+                // text names it, not an account. Picking one with nothing on turns
+                // on all its accounts; the model asks which when there are several.
+                items: mentionableIntegrations(integrations.items),
                 onSelect: (id) => {
-                  if (!integrations.items.find((item) => item.integrationId === id)?.enabled)
-                    integrations.setEnabled(id, true);
+                  const accounts = integrations.items.filter((item) => item.integrationId === id);
+                  if (accounts.some((item) => item.enabled)) return;
+                  for (const item of accounts) integrations.setEnabled(item.connectionId, true);
                 },
               }
             : undefined
@@ -703,14 +726,17 @@ export const ChatInput = forwardRef<
                   <DropdownMenuSubContent className="w-64">
                     {integrations.items.map((item) => (
                       <DropdownMenuSwitchItem
-                        key={item.integrationId}
+                        key={item.connectionId}
                         checked={item.enabled}
                         onCheckedChange={(checked) =>
-                          integrations.setEnabled(item.integrationId, checked)
+                          integrations.setEnabled(item.connectionId, checked)
                         }
                       >
                         <IntegrationLogo integrationId={item.integrationId} />
-                        {item.name}
+                        {/* Only told apart once there is more than one of it. */}
+                        {item.account && sharesIntegration(integrations.items, item)
+                          ? `${item.name} · ${item.account}`
+                          : item.name}
                       </DropdownMenuSwitchItem>
                     ))}
                     {integrations.items.length ? <DropdownMenuSeparator /> : null}

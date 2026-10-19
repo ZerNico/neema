@@ -176,7 +176,7 @@ describe.each(boundaries)("$name acceptance boundary", ({ run }) => {
   });
 });
 
-const selectedIntegrations = [{ integrationId: "integration", enabled: true }];
+const selectedIntegrations = [{ connectionId: "connection", enabled: true }];
 const integrationSelections = [
   {
     name: "send",

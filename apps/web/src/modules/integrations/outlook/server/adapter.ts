@@ -514,18 +514,22 @@ export const outlookAdapter: IntegrationAdapter = {
     return { config: { tenant }, fingerprint: tenant };
   },
   oauth: {
-    authorizeUrl: (config) => `${loginBase(config)}/authorize`,
+    // The picker every time, so adding a second account does not quietly sign
+    // in the one the browser already has.
+    authorizeUrl: (config) => `${loginBase(config)}/authorize?prompt=select_account`,
     tokenUrl: (config) => `${loginBase(config)}/token`,
     scopes: ["offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite"],
   },
   verify: (session: IntegrationSession) =>
-    graphCall<{ displayName?: string; mail?: string | null; userPrincipalName?: string }>(
-      session,
-      "GET",
-      "/me?$select=displayName,mail,userPrincipalName",
-    ).pipe(
+    graphCall<{
+      id?: string;
+      displayName?: string;
+      mail?: string | null;
+      userPrincipalName?: string;
+    }>(session, "GET", "/me?$select=id,displayName,mail,userPrincipalName").pipe(
       Effect.map((me) => ({
         accountLabel: me.mail || me.userPrincipalName || me.displayName || "Outlook account",
+        accountKey: me.id ?? null,
       })),
     ),
   handlers,

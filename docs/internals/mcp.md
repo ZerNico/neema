@@ -81,7 +81,9 @@ choose; their choice sticks across later listings.
 The admin ticks any of three ways in: signing in, pasting a token, or going without an account,
 which is either open to anyone or one key for everyone. Several may stand at once, since many
 public servers take a token for private data or higher limits. Each person picks one; Settings lets someone using it without
-an account add their own later.
+an account add their own later, which replaces using it without one. An MCP server says
+nothing stable about who signed in, so each sign-in or token adds an account unless it
+reconnects a named one.
 
 - **Signing in** is OAuth, below. **A token** goes as a bearer token or in a header the admin
   names.
@@ -91,10 +93,38 @@ an account add their own later.
   belongs to the sender, so a connection on it is offered only `read` tools and `consentFor`
   refuses anything else (`shared`). The check is in the tool layer, not only the UI.
 
+Either way without an account may be **on for everyone**. Then nobody presses anything: the
+connection is made when the person's integrations are read (Settings, a chat's list, an
+attempt's offer), without asking the server, since it holds nothing personal and the admin's
+save already checked it. It is on in new chats like any fresh connection. Such a connection
+cannot be disconnected, since the next read makes it again; it is turned off per chat or for
+new chats instead. A person's own sign-in or token replaces it and is never replaced back, and
+disconnecting that returns them to the shared way. When the admin moves the server or changes
+which way without an account it uses, those connections follow on the next read.
+
 The fingerprint names where credentials go (the address and the header), not which ways are
 open, so opening another way asks nobody to reconnect and keeps the review. A connection
 whose way the admin closed reads as needing to reconnect, judged by its kind wherever a
 session or credential is handed out.
+
+## Servers a person adds
+
+With the `mcpServers` capability, a person may add a server for themselves. It is an
+ordinary `integration_configs` row with an `owner_user_id`, so everything above applies, with
+the owner where the admin would be: they review its catalog, the sweep lists as them, and only
+they may use it. `integrationUsableBy` decides this in SQL, so losing the capability, or the
+account, stops the server everywhere at once without deleting it. Others never see it: not in
+their lists, the directory or the admin's page, and an agent cannot name one that is not the
+author's own. Names are unique among what one person sees (the admin's and their own), not
+across everyone.
+
+The address is the one thing that differs. An admin's server may be private because the admin
+chose it; a person's must be public HTTPS, or anyone could point the app at the internal
+network. The server sets `reach: public` on the config, a key no form can send, and with it
+every request, to the server's own origin too, goes through `resolvePublicHttpUrl` and
+`fetchPinned`, so a name that later resolves inside is refused like any other address. A person
+cannot hold a shared key or turn a server on for everyone, since there is nobody else to act
+for, and signs in only with a client found at sign-in, never an admin’s.
 
 ## Sign-in follows the 2026-07-28 authorization spec
 

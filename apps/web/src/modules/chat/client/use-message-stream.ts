@@ -211,6 +211,8 @@ export interface ImageToolActivity extends ToolActivityBase {
 export interface IntegrationToolActivity extends ToolActivityBase {
   family: "integration";
   integrationId: string;
+  /** The account that acted, when the chat had several of this integration on. */
+  account?: string;
   tool: string;
   label: string;
   access: "read" | "write" | "destructive";

@@ -88,13 +88,31 @@ describe("starting an OAuth connection", () => {
       Connect,
       "https://chat.example/api/integrations/wiki/connect?returnTo=https%3A%2F%2Fevil.example%2F",
     );
-    expect(mocks.begin).toHaveBeenCalledWith("person", "wiki", "https://chat.example", undefined);
+    expect(mocks.begin).toHaveBeenCalledWith(
+      "person",
+      "wiki",
+      "https://chat.example",
+      undefined,
+      undefined,
+    );
     await call(Connect, "https://chat.example/api/integrations/wiki/connect?returnTo=%2Fchat%2Fc1");
     expect(mocks.begin).toHaveBeenLastCalledWith(
       "person",
       "wiki",
       "https://chat.example",
       "/chat/c1",
+      undefined,
+    );
+  });
+
+  it("passes on which account a reconnect is for, for the service to check", async () => {
+    await call(Connect, "https://chat.example/api/integrations/wiki/connect?account=acc-1");
+    expect(mocks.begin).toHaveBeenLastCalledWith(
+      "person",
+      "wiki",
+      "https://chat.example",
+      undefined,
+      "acc-1",
     );
   });
 });

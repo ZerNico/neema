@@ -173,6 +173,7 @@ export const integrationActivityFromRow = (
 const integrationFields = (activity: StoredIntegrationActivity) => ({
   status: activity.status === "complete" ? ("complete" as const) : ("error" as const),
   integrationId: activity.integrationId,
+  ...(activity.account ? { account: activity.account } : {}),
   tool: activity.tool,
   label: activity.label,
   access: activity.access,
@@ -300,6 +301,7 @@ const CustomFields = Schema.Struct({
 /** What an integration call is named as before its row has a result. */
 const IntegrationStart = Schema.Struct({
   integrationId: StoredIntegrationActivity.fields.integrationId,
+  account: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(120))),
   tool: StoredIntegrationActivity.fields.tool,
   label: StoredIntegrationActivity.fields.label,
   access: StoredIntegrationActivity.fields.access,

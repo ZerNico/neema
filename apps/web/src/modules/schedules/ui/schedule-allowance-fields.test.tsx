@@ -15,14 +15,20 @@ function Host({ initial }: { initial: IntegrationGrant }) {
   );
 }
 const saved = () => JSON.parse(screen.getByTestId("grant").textContent!) as IntegrationGrant;
-const write: IntegrationGrant = { integrationId: "outlook", access: "write" };
+const write: IntegrationGrant = {
+  connectionId: "connection",
+  integrationId: "outlook",
+  access: "write",
+};
 
 describe("schedule allowances", () => {
   it("offers nothing to read-only access or an integration without allowances", () => {
     const { unmount } = render(<Host initial={{ ...write, access: "read" }} />);
     expect(screen.queryByRole("switch")).toBeNull();
     unmount();
-    render(<Host initial={{ integrationId: "outline", access: "write" }} />);
+    render(
+      <Host initial={{ connectionId: "connection", integrationId: "outline", access: "write" }} />,
+    );
     expect(screen.queryByRole("switch")).toBeNull();
   });
 

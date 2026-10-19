@@ -21,7 +21,7 @@ import {
   type McpToolEntry,
 } from "../catalog.ts";
 import { fieldValues } from "../../fields.ts";
-import { MCP_ANONYMOUS, MCP_WAYS, mcpWaysOf } from "../manifest.ts";
+import { MCP_ANONYMOUS, MCP_WAYS, mcpWaysOf, reachesPublicOnly } from "../manifest.ts";
 import { mcpOAuth } from "./auth.ts";
 import { connect, REQUEST_OPTIONS, toFailure, type Connection, type Elicit } from "./client.ts";
 import { promptOf, resultOf } from "./elicitation.ts";
@@ -189,6 +189,7 @@ const callTool = (
         url: new URL(session.config.url!),
         credential,
         header: session.config.header,
+        publicOnly: reachesPublicOnly(session.config),
         // Nobody to ask (a scheduled run): the server is not told it may.
         ...(call ? { elicit } : {}),
       });
@@ -281,6 +282,9 @@ export const mcpAdapter: IntegrationAdapter = {
     const raw = (config.url ?? "").trim();
     if (!URL.canParse(raw)) return { error: "Enter the MCP server’s address." };
     const url = new URL(raw);
+    const publicOnly = reachesPublicOnly(config);
+    if (publicOnly && url.protocol !== "https:")
+      return { error: "The server address must start with https://." };
     if (url.protocol !== "https:" && url.protocol !== "http:")
       return { error: "The server address must start with https:// or http://." };
     if (url.username || url.password)
@@ -302,7 +306,14 @@ export const mcpAdapter: IntegrationAdapter = {
       url: url.toString(),
       ways: MCP_WAYS.filter((way) => ticked.includes(way)).join(" "),
     };
-    if (anonymous && ticked.includes("anonymous")) normalized.anonymous = anonymous;
+    if (anonymous && ticked.includes("anonymous")) {
+      // A personal server has no admin key to share and nobody else to turn on for.
+      if (publicOnly && anonymous === "shared")
+        return { error: "Choose how you connect without an account." };
+      normalized.anonymous = anonymous;
+      if (config.everyone === "everyone" && !publicOnly) normalized.everyone = "everyone";
+    }
+    if (publicOnly) normalized.reach = "public";
     const ways = mcpWaysOf(normalized);
     if (header && (ways.token || ways.anonymous === "shared")) normalized.header = header;
     if (scopes && ways.oauth) normalized.scopes = scopes;
@@ -310,7 +321,7 @@ export const mcpAdapter: IntegrationAdapter = {
     // everyone connected, and a connection whose way closed is judged by its kind.
     return {
       config: normalized,
-      fingerprint: `${normalized.url} ${normalized.header ?? ""}`,
+      fingerprint: `${normalized.url} ${normalized.header ?? ""}${publicOnly ? " public" : ""}`,
     };
   },
   oauth: null,
@@ -321,6 +332,7 @@ export const mcpAdapter: IntegrationAdapter = {
       oauth: ways.oauth,
       apiKey: ways.token,
       open: ways.anonymous === "open" ? "none" : ways.anonymous === "shared" ? "shared" : null,
+      everyone: ways.everyone,
     };
   },
   verify: (session) =>
@@ -332,13 +344,16 @@ export const mcpAdapter: IntegrationAdapter = {
           url: new URL(session.config.url!),
           credential,
           header: session.config.header,
+          publicOnly: reachesPublicOnly(session.config),
         });
         // A server that lets anyone connect may still refuse a bad token on a real request.
         yield* Effect.tryPromise({
           try: (signal) => connection.client.listTools(undefined, { signal, timeout: 30_000 }),
           catch: (error) => failed("verify", connection, error),
         });
-        return { accountLabel: accountLabel(credential) };
+        // MCP says nothing stable about who signed in, so each sign-in or
+        // token is another account unless it reconnects a named one.
+        return { accountLabel: accountLabel(credential), accountKey: null };
       }),
     ),
   scopeOptions: null,
@@ -367,6 +382,7 @@ export const mcpAdapter: IntegrationAdapter = {
             url: new URL(session.config.url!),
             credential,
             header: session.config.header,
+            publicOnly: reachesPublicOnly(session.config),
           });
           const listed = yield* Effect.tryPromise({
             try: (signal) =>

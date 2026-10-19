@@ -23,7 +23,12 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
 import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
-import type { BrowseNode, KnowledgeSourceView, SourceRoot } from "../schema.ts";
+import {
+  accountName,
+  type BrowseNode,
+  type KnowledgeSourceView,
+  type SourceRoot,
+} from "../schema.ts";
 import { isSelected, type AdapterFailure } from "./adapter.ts";
 import { IntegrationService } from "./service.ts";
 
@@ -46,7 +51,7 @@ type SourceRow = typeof knowledgeSources.$inferSelect;
 
 const failureText = (error: AdapterFailure | IntegrationNotAvailable) =>
   error._tag === "IntegrationAuthFailed" || error._tag === "IntegrationNotAvailable"
-    ? "The owner’s connection is missing or needs reconnecting."
+    ? "The owner’s account is missing or needs reconnecting."
     : error._tag === "IntegrationRejected"
       ? error.reason
       : error.message;
@@ -60,7 +65,8 @@ export class KnowledgeSourceService extends Context.Service<
       userId: string,
       input: {
         collectionId: string;
-        integrationId: string;
+        /** The owner's account it syncs as; editing may switch to another of theirs. */
+        connectionId: string;
         /** Absent adds a source; present edits that one. */
         sourceId?: string | undefined;
         root: SourceRoot;
@@ -71,7 +77,7 @@ export class KnowledgeSourceService extends Context.Service<
     syncNow(userId: string, sourceId: string): Effect.Effect<boolean>;
     browse(
       userId: string,
-      integrationId: string,
+      connectionId: string,
       parentId: string | null,
     ): Effect.Effect<ReadonlyArray<BrowseNode>, IntegrationRejected | IntegrationNotAvailable>;
     /** One claim-and-sync pass; the tick loop and tests drive it. */
@@ -84,11 +90,18 @@ export class KnowledgeSourceService extends Context.Service<
   static readonly manualLayer = Layer.effect(KnowledgeSourceService, make(false));
 }
 
-const toView = (row: SourceRow, connected: boolean, canEdit: boolean): KnowledgeSourceView => ({
+const toView = (
+  row: SourceRow,
+  connected: boolean,
+  canEdit: boolean,
+  account: string | null,
+): KnowledgeSourceView => ({
   id: row.id,
   canEdit,
   collectionId: row.collectionId,
   integrationId: row.integrationId,
+  connectionId: row.connectionId,
+  account,
   root: row.root,
   status: row.status,
   lastError: row.lastError,
@@ -135,21 +148,31 @@ function make(background: boolean) {
         .select({
           source: knowledgeSources,
           status: integrationConnections.status,
+          name: integrationConnections.name,
+          accountLabel: integrationConnections.accountLabel,
           owner: knowledgeCollections.userId,
         })
         .from(knowledgeSources)
         .innerJoin(knowledgeCollections, eq(knowledgeCollections.id, knowledgeSources.collectionId))
-        // The owner's current connection, whichever row that is today.
+        // The account it syncs as, which is the owner's own.
         .leftJoin(
           integrationConnections,
           and(
+            eq(integrationConnections.id, knowledgeSources.connectionId),
             eq(integrationConnections.userId, knowledgeCollections.userId),
-            eq(integrationConnections.integrationId, knowledgeSources.integrationId),
           ),
         )
         .where(and(eq(knowledgeSources.collectionId, collectionId), collectionReadable(userId)))
         .pipe(Effect.orDie);
-      return rows.map((row) => toView(row.source, row.status === "active", row.owner === userId));
+      return rows.map((row) => {
+        const owner = row.owner === userId;
+        // Only the owner hears which of their accounts it is.
+        const account =
+          owner && row.accountLabel !== null
+            ? accountName({ name: row.name, accountLabel: row.accountLabel })
+            : null;
+        return toView(row.source, row.status === "active", owner, account);
+      });
     });
 
     /** Mirrors one claimed source. Every outcome ends in `finish`. */
@@ -215,9 +238,15 @@ function make(background: boolean) {
           status: "error",
           lastError: "The collection’s owner can no longer sync it.",
         });
-      // Always the owner's own connection as it is now; never anyone else's.
+      // Always the owner's own chosen account; never anyone else's, nor another of theirs.
       const outcome = yield* Effect.gen(function* () {
-        const session = yield* integrations.session(owner, source.integrationId);
+        if (!source.connectionId)
+          return yield* new IntegrationRejected({
+            reason: "Its account was disconnected. Choose which account it syncs as.",
+          });
+        const session = yield* integrations.session(owner, source.connectionId);
+        if (session.integration.id !== source.integrationId)
+          return yield* new IntegrationNotAvailable({ integrationId: source.integrationId });
         const adapter = session.adapter.knowledge;
         if (!adapter)
           return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
@@ -538,10 +567,11 @@ function make(background: boolean) {
           return yield* new IntegrationRejected({
             reason: "Only the collection’s owner can sync into it.",
           });
-        // Saving needs a working connection now; later syncs look it up again.
-        const session = yield* integrations.session(userId, input.integrationId);
+        // Saving needs a working account of theirs now; later syncs look it up again.
+        const session = yield* integrations.session(userId, input.connectionId);
         if (!findIntegrationType(session.integration.kind)?.knowledgeSource)
           return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+        const integrationId = session.integration.id;
         const root = { ...input.root, rules: [...input.root.rules] };
         const row = yield* db
           .transaction((tx) =>
@@ -562,6 +592,7 @@ function make(background: boolean) {
                     .update(knowledgeSources)
                     .set({
                       root,
+                      connectionId: input.connectionId,
                       // A new selection revokes the old worker and starts in full.
                       cursor: null,
                       leaseToken: null,
@@ -576,7 +607,8 @@ function make(background: boolean) {
                       and(
                         eq(knowledgeSources.id, input.sourceId),
                         eq(knowledgeSources.collectionId, input.collectionId),
-                        eq(knowledgeSources.integrationId, input.integrationId),
+                        // Another account of the same integration, never another integration.
+                        eq(knowledgeSources.integrationId, integrationId),
                       ),
                     )
                     .returning()
@@ -586,7 +618,8 @@ function make(background: boolean) {
                     .values({
                       id: uuidv7(),
                       collectionId: input.collectionId,
-                      integrationId: input.integrationId,
+                      integrationId,
+                      connectionId: input.connectionId,
                       root,
                       nextSyncAt: sql`now()`,
                     })
@@ -599,7 +632,7 @@ function make(background: boolean) {
         if (!row)
           return yield* new IntegrationRejected({ reason: "That source no longer exists." });
         yield* kick;
-        return toView(row, true, true);
+        return toView(row, true, true, session.account);
       }),
 
       remove: Effect.fn("KnowledgeSourceService.remove")(function* (userId, sourceId) {
@@ -621,8 +654,8 @@ function make(background: boolean) {
       }),
 
       browse: Effect.fn("KnowledgeSourceService.browse")(
-        function* (userId, integrationId, parentId) {
-          const session = yield* integrations.session(userId, integrationId);
+        function* (userId, connectionId, parentId) {
+          const session = yield* integrations.session(userId, connectionId);
           const adapter = session.adapter.knowledge;
           if (!adapter)
             return yield* new IntegrationRejected({ reason: "This integration cannot sync." });

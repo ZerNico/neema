@@ -29,7 +29,7 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { PlugSocketIcon } from "@hugeicons/core-free-icons";
-import { adminIntegrationsQuery } from "../client/queries.ts";
+import { adminIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import type { ToolAccess } from "../manifest.ts";
 import {
   diffCatalog,
@@ -38,8 +38,13 @@ import {
   type McpAnnotations,
   type McpToolEntry,
 } from "../mcp/catalog.ts";
-import type { AdminCatalog, AdminIntegration } from "../schema.ts";
-import { approveIntegrationCatalog, checkIntegrationCatalog } from "../server/functions.ts";
+import type { AdminCatalog } from "../schema.ts";
+import {
+  approveIntegrationCatalog,
+  approvePersonalCatalog,
+  checkIntegrationCatalog,
+  checkPersonalCatalog,
+} from "../server/functions.ts";
 
 const ACCESS: ReadonlyArray<{ value: ToolAccess; label: string }> = [
   { value: "read", label: "Reads only" },
@@ -59,14 +64,18 @@ const hint = (annotations: McpAnnotations) =>
 
 type Decision = { enabled: boolean; access: ToolAccess };
 
-/** Where a review starts: each tool as approved before, a new one off at what it claims. */
-const initialDecisions = (changes: ReadonlyArray<CatalogChange>) => {
+/**
+ * Where a review starts: each tool as approved before, a new one at what it
+ * claims, off for an admin and on for a person reviewing a server they added
+ * to use. Either way nothing is offered until approved.
+ */
+const initialDecisions = (changes: ReadonlyArray<CatalogChange>, personal: boolean) => {
   const decisions = new Map<string, Decision>();
   for (const change of changes) {
     if (change.kind === "removed") continue;
     const before = change.kind === "added" ? null : change.before;
     decisions.set(change.entry.mcpName, {
-      enabled: !change.entry.unsupported && (before?.enabled ?? false),
+      enabled: !change.entry.unsupported && (before?.enabled ?? personal),
       access: before?.accessChosen ? before.access : change.entry.access,
     });
   }
@@ -83,40 +92,46 @@ const changedParts = (before: McpToolEntry, after: McpToolEntry) =>
   ].filter(Boolean);
 
 /**
- * The admin's review of what an MCP server lists. Nothing a server says
- * reaches a chat until it is approved here; a tool new or changed since the
- * last approval is marked and stays off chats until approved again.
+ * The review of what an MCP server lists, by an admin or, for a server a
+ * person added, by them. Nothing a server says reaches a chat until it is
+ * approved here; a tool new or changed since the last approval is marked and
+ * stays off chats until approved again.
  */
 export function McpToolsReview({
   row,
+  personal = false,
   onOpenChange,
 }: {
-  row: AdminIntegration;
+  row: { id: string; name: string; catalog: AdminCatalog | null };
+  personal?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const checkCatalog = personal ? checkPersonalCatalog : checkIntegrationCatalog;
+  const approveCatalog = personal ? approvePersonalCatalog : approveIntegrationCatalog;
+  const listQuery = personal ? personalServersQuery : adminIntegrationsQuery;
   const queryClient = useQueryClient();
   const [catalog, setCatalog] = useState<AdminCatalog>(row.catalog!);
   const changes = useMemo(
     () => diffCatalog(catalog.approved, catalog.latest),
     [catalog.approved, catalog.latest],
   );
-  const [decisions, setDecisions] = useState(() => initialDecisions(changes));
+  const [decisions, setDecisions] = useState(() => initialDecisions(changes, personal));
   const [error, setError] = useState<string | null>(catalog.checkError);
 
   const refresh = (next: AdminCatalog) => {
     setCatalog(next);
-    setDecisions(initialDecisions(diffCatalog(next.approved, next.latest)));
+    setDecisions(initialDecisions(diffCatalog(next.approved, next.latest), personal));
     setError(next.checkError);
-    void queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
+    void queryClient.invalidateQueries({ queryKey: listQuery.queryKey });
   };
   const check = useMutation({
-    mutationFn: () => checkIntegrationCatalog({ data: { integrationId: row.id } }),
+    mutationFn: () => checkCatalog({ data: { integrationId: row.id } }),
     onSuccess: (result) => (result.ok ? refresh(result.catalog) : setError(result.error)),
     onError: () => setError(`Could not reach ${row.name}.`),
   });
   const approve = useMutation({
     mutationFn: () =>
-      approveIntegrationCatalog({
+      approveCatalog({
         data: {
           integrationId: row.id,
           version: catalog.version ?? "",
@@ -226,6 +241,8 @@ export function McpToolsReview({
                   key={change.entry.mcpName}
                   change={change}
                   decision={decisions.get(change.entry.mcpName)!}
+                  // One's own server: its hint stands, and Settings decides when each tool asks.
+                  chooseAccess={!personal}
                   disabled={busy}
                   onChange={(patch) => decide(change.entry.mcpName, patch)}
                 />
@@ -255,11 +272,13 @@ export function McpToolsReview({
 function ToolRow({
   change,
   decision,
+  chooseAccess,
   disabled,
   onChange,
 }: {
   change: Exclude<CatalogChange, { kind: "removed" }>;
   decision: Decision;
+  chooseAccess: boolean;
   disabled: boolean;
   onChange: (patch: Partial<Decision>) => void;
 }) {
@@ -286,23 +305,25 @@ function ToolRow({
             {entry.mcpName}
           </span>
         </div>
-        <Select
-          value={decision.access}
-          items={ACCESS}
-          disabled={disabled || Boolean(entry.unsupported)}
-          onValueChange={(value) => onChange({ access: value as ToolAccess })}
-        >
-          <SelectTrigger size="sm" aria-label={`What ${entry.title} can do`} className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ACCESS.map((choice) => (
-              <SelectItem key={choice.value} value={choice.value}>
-                {choice.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {chooseAccess ? (
+          <Select
+            value={decision.access}
+            items={ACCESS}
+            disabled={disabled || Boolean(entry.unsupported)}
+            onValueChange={(value) => onChange({ access: value as ToolAccess })}
+          >
+            <SelectTrigger size="sm" aria-label={`What ${entry.title} can do`} className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACCESS.map((choice) => (
+                <SelectItem key={choice.value} value={choice.value}>
+                  {choice.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
       </div>
       <Disclosure open={open} onOpenChange={setOpen}>
         <div className="pl-11">

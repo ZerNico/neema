@@ -28,6 +28,8 @@ const source: KnowledgeSourceView = {
   canEdit: true,
   collectionId: "collection-1",
   integrationId: "outline",
+  connectionId: "connection",
+  account: null,
   root: { nodeId: "root", title: "Handbook", mode: "all", rules: [] },
   status: "idle",
   lastError: null,

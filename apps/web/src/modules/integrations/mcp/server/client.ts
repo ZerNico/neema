@@ -122,6 +122,7 @@ export const connect = (input: {
   url: URL;
   credential: Credential;
   header: string | undefined;
+  publicOnly: boolean;
   elicit?: Elicit;
 }) =>
   Effect.acquireRelease(
@@ -129,6 +130,7 @@ export const connect = (input: {
       let challenge: AuthChallenge | null = null;
       const fetch = scopedFetch(input.url, {
         sameOriginOnly: true,
+        publicOnly: input.publicOnly,
         onChallenge: (next) => {
           challenge = next;
         },

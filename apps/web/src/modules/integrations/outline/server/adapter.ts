@@ -363,14 +363,16 @@ export const outlineAdapter: IntegrationAdapter = {
     scopes: ["read", "write"],
   },
   verify: (session) =>
-    outlineCall<{ user?: { name?: string; email?: string }; team?: { name?: string } }>(
-      session,
-      "auth.info",
-      {},
-    ).pipe(
+    outlineCall<{
+      user?: { id?: string; name?: string; email?: string };
+      team?: { name?: string };
+    }>(session, "auth.info", {}).pipe(
       Effect.map(({ data }) => {
         const person = data.user?.email || data.user?.name || "Outline account";
-        return { accountLabel: data.team?.name ? `${person} · ${data.team.name}` : person };
+        return {
+          accountLabel: data.team?.name ? `${person} · ${data.team.name}` : person,
+          accountKey: data.user?.id ?? null,
+        };
       }),
     ),
   handlers,

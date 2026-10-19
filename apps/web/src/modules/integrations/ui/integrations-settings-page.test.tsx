@@ -3,20 +3,24 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
-import { myIntegrationsQuery } from "../client/queries.ts";
+import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import { outlineManifest } from "../outline/manifest.ts";
-import type { UserIntegration } from "../schema.ts";
+import type { IntegrationConnectionView, PersonalServers, UserIntegration } from "../schema.ts";
 import {
   connectIntegrationApiKey,
   connectIntegrationOpen,
   updateIntegrationConnection,
 } from "../server/functions.ts";
-import { IntegrationSettingsPage } from "./integrations-settings-page.tsx";
+import {
+  IntegrationSettingsPage,
+  IntegrationsSettingsPage,
+} from "./integrations-settings-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children }: { to: string; children?: unknown }) => (
     <a href={to}>{children as never}</a>
   ),
+  useNavigate: () => vi.fn(),
 }));
 vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
@@ -32,12 +36,28 @@ vi.mock("../server/functions.ts", () => ({
   })),
 }));
 
-const outline = (connection: Partial<UserIntegration["connection"]> | null): UserIntegration => ({
+const account = (patch: Partial<IntegrationConnectionView> = {}): IntegrationConnectionView => ({
+  id: "connection-1",
+  authKind: "oauth",
+  accountLabel: "ada@example.com · Example workspace",
+  name: null,
+  status: "active",
+  offerByDefault: true,
+  toolPermissions: {},
+  scope: null,
+  requiredScopes: null,
+  dependents: { sources: 0, schedules: 0 },
+  createdAt: "2026-09-24T10:00:00Z",
+  ...patch,
+});
+
+const outline = (connection: Partial<IntegrationConnectionView> | null): UserIntegration => ({
   id: "outline",
   kind: "outline",
   name: "Outline",
   available: true,
-  methods: { oauth: true, apiKey: true, open: null },
+  personal: false,
+  methods: { oauth: true, apiKey: true, open: null, everyone: false },
   tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
     name,
     title,
@@ -46,24 +66,13 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
     access,
   })),
   apiKeyHelpUrl: null,
-  connection: connection && {
-    id: "connection-1",
-    authKind: "oauth",
-    accountLabel: "ada@example.com · Example workspace",
-    status: "active",
-    offerByDefault: true,
-    toolPermissions: {},
-    scope: null,
-    requiredScopes: null,
-    createdAt: "2026-09-24T10:00:00Z",
-    ...connection,
-  },
-  dependents: { sources: 0, schedules: 0 },
+  connections: connection ? [account(connection)] : [],
 });
 
-const mount = (integration: UserIntegration) => {
+const mount = (integration: UserIntegration, servers: PersonalServers["servers"] = []) => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(myIntegrationsQuery.queryKey, [integration]);
+  client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers });
   render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -74,17 +83,20 @@ const mount = (integration: UserIntegration) => {
 };
 
 describe("integration account row", () => {
-  it("offers one way back in for a lapsed sign-in, the rest in its menu", async () => {
+  it("reconnects a lapsed sign-in as that account, and adds another beside it", async () => {
     mount(outline({ status: "needs_reauth" }));
     expect(screen.getByText("Signed out")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Reconnect" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Use an API key" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Account actions" }));
-    expect(await screen.findByRole("menuitem", { name: "Use an API key instead" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "Disconnect" })).toBeVisible();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Use an API key instead" }));
+    // Reconnecting names the account, so the sign-in cannot land on another one.
+    expect(screen.getByRole("link", { name: "Reconnect" })).toHaveAttribute(
+      "href",
+      "/api/integrations/outline/connect?account=connection-1",
+    );
+    expect(screen.getByText("Add another account")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/api/integrations/outline/connect",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use an API key" }));
     const dialog = await screen.findByRole("dialog", { name: "Connect Outline with an API key" });
     // The manifest's fields are the form, and their values are what is sent.
     const connect = within(dialog).getByRole("button", { name: "Connect" });
@@ -101,10 +113,35 @@ describe("integration account row", () => {
     );
   });
 
+  it("names, renames and sets each account on its own", async () => {
+    mount({
+      ...outline({}),
+      connections: [
+        account({ name: "Work" }),
+        account({ id: "connection-2", accountLabel: "ada@home.test", offerByDefault: false }),
+      ],
+    });
+    expect(screen.getByRole("heading", { name: "Accounts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Work" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ada@home.test" })).toBeInTheDocument();
+    expect(screen.getByText("Name it to tell your accounts apart.")).toBeInTheDocument();
+    vi.mocked(updateIntegrationConnection).mockResolvedValue({ ok: true });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for ada@home.test" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rename account" });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: " Home " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
+        data: { connectionId: "connection-2", name: "Home" },
+      }),
+    );
+  });
+
   it("lets a person turn an open server on again after the admin changed it", async () => {
     mount({
       ...outline({ authKind: "none", accountLabel: "No sign-in needed", status: "needs_reauth" }),
-      methods: { oauth: false, apiKey: false, open: "none" },
+      methods: { oauth: false, apiKey: false, open: "none", everyone: false },
     });
     expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(screen.queryByText("Signed out")).not.toBeInTheDocument();
@@ -114,20 +151,58 @@ describe("integration account row", () => {
     );
   });
 
-  it("keeps a working connection's row to its account and a menu", async () => {
+  it("offers no Disconnect for a server an admin turned on for everyone", async () => {
+    mount({
+      ...outline({ authKind: "none", accountLabel: "Docs" }),
+      methods: { oauth: false, apiKey: false, open: "none", everyone: true },
+    });
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
+  });
+
+  it("lets the owner of their own server review its tools", async () => {
+    mount({ ...outline({ authKind: "none", accountLabel: "Mine" }), personal: true, tools: [] }, [
+      {
+        id: "outline",
+        name: "Mine",
+        config: { url: "https://mcp.example.com/mcp", ways: "anonymous" },
+        catalog: {
+          approved: [],
+          latest: [],
+          server: null,
+          checkedAt: null,
+          checkError: null,
+          reviewedAt: null,
+          version: "listing.0",
+        },
+      },
+    ]);
+    expect(screen.getByText("https://mcp.example.com/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Tools to review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review tools" })).toBeVisible();
+    expect(screen.getByText(/Review this server’s tools/)).toBeInTheDocument();
+    // Changing and deleting it sit in the page's menu, as on other detail pages.
+    fireEvent.click(screen.getByRole("button", { name: "Server actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Edit server" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Delete server" })).toBeVisible();
+  });
+
+  it("keeps a working account's row to its name and a menu", async () => {
     mount(outline({}));
     expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Reconnect|Sign in/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Account actions" }));
+    expect(screen.queryByRole("link", { name: /Reconnect/ })).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Actions for ada@example.com · Example workspace" }),
+    );
     expect(await screen.findByRole("menuitem", { name: "Disconnect" })).toBeVisible();
-    expect(screen.queryByRole("menuitem", { name: "Use an API key instead" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   });
 
   it("shows both ways to connect before there is an account", () => {
     mount(outline(null));
     expect(screen.getByRole("button", { name: "Use an API key" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign in with Outline" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Account actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Actions for/ })).not.toBeInTheDocument();
   });
 
   it("asks for every field the integration's API key needs", async () => {
@@ -159,22 +234,62 @@ describe("integration account row", () => {
     // The choice is saved at once; with nothing ticked the connection reaches nothing.
     await waitFor(() =>
       expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
-        data: { integrationId: "jira", scope: [] },
+        data: { connectionId: "connection-1", scope: [] },
       }),
     );
     expect(screen.getByText("None selected")).toBeInTheDocument();
     await user.click(await screen.findByRole("checkbox", { name: /Operations/ }));
     await waitFor(() =>
       expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
-        data: { integrationId: "jira", scope: ["OPS"] },
+        data: { connectionId: "connection-1", scope: ["OPS"] },
       }),
     );
     expect(screen.getByText("1 selected")).toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: "All projects" }));
     await waitFor(() =>
       expect(updateIntegrationConnection).toHaveBeenLastCalledWith({
-        data: { integrationId: "jira", scope: null },
+        data: { connectionId: "connection-1", scope: null },
       }),
     );
+  });
+});
+
+describe("integrations list", () => {
+  it("opens the dialog to add an MCP server of one's own", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData(myIntegrationsQuery.queryKey, []);
+    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <ConfirmProvider>
+          <IntegrationsSettingsPage />
+        </ConfirmProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add MCP server" }));
+    expect(await screen.findByText("Add an MCP server")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("keeps one's own servers apart from the admin's", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData(myIntegrationsQuery.queryKey, [
+      outline({}),
+      { ...outline({ authKind: "none" }), id: "mcp", kind: "mcp", name: "Mine", personal: true },
+    ]);
+    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
+    render(
+      <QueryClientProvider client={client}>
+        <ConfirmProvider>
+          <IntegrationsSettingsPage />
+        </ConfirmProvider>
+      </QueryClientProvider>,
+    );
+    const admins = screen.getByRole("heading", { name: "From your admin" }).closest("section")!;
+    const own = screen.getByRole("heading", { name: "Your MCP servers" }).closest("section")!;
+    expect(admins).toHaveTextContent("Outline");
+    expect(admins).not.toHaveTextContent("Mine");
+    expect(own).toHaveTextContent("Mine");
+    expect(own).toHaveTextContent("Only you use it");
   });
 });

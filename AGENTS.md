@@ -72,9 +72,12 @@ edit the wrong thing.
   admin-configured instance of a type, with its own id and name, so there may be two of one
   type. An MCP integration offers only the tools an admin approved from its server's
   catalog. Stored `integrationId`s
-  name the integration, never the type. A connection is one person's,
-  with their own credentials, except an MCP shared key: the admin's key for everyone, offered
-  read tools only. Chats, agents and schedules use the sender's connection. A
+  name the integration, never the type. A connection is one account of one person, with
+  their own credentials, except an MCP shared key: the admin's key for everyone, offered
+  read tools only. A person may connect several accounts to one integration; chats, grants,
+  allowances and knowledge sources name the connection, and the model gets one tool set
+  that takes an `account` when more than one is on. Chats, agents and schedules use the
+  sender's own. A
   knowledge source mirrors part of an integration into a collection as the collection owner.
   An allowance is a manifest-declared way calls reach people (sending mail, inviting); a
   schedule grants it for exact addresses only, capped per run.

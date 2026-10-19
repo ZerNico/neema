@@ -16,7 +16,7 @@ import { attachmentBlobs } from "./attachments.ts";
 import { user } from "./auth.ts";
 import { messages } from "./chat.ts";
 import { groups } from "./groups.ts";
-import { integrationConfigs } from "./integrations.ts";
+import { integrationConfigs, integrationConnections } from "./integrations.ts";
 
 // Reusable document collections. A collection is owned by one user and can be
 // selected in an ordinary chat or attached to an agent; the two are the same
@@ -129,10 +129,10 @@ export interface KnowledgeSourceStats {
 
 /**
  * A subtree of an integration mirrored into a collection. The sync runs as the
- * collection owner with whatever connection the owner has at that moment, so
- * disconnecting pauses it and reconnecting resumes it, so readers of a shared
- * collection see what the owner could see and chose. A lost connection keeps
- * the documents already synced and records the error.
+ * collection owner's chosen account, so readers of a shared collection see
+ * what the owner could see and chose. Disconnecting that account pauses the
+ * source until the owner picks one; signing in to it again keeps the same
+ * connection. A lost connection keeps the documents already synced.
  */
 export const knowledgeSources = pgTable(
   "knowledge_sources",
@@ -145,6 +145,10 @@ export const knowledgeSources = pgTable(
     integrationId: text("integration_id")
       .notNull()
       .references(() => integrationConfigs.id, { onDelete: "restrict" }),
+    // The owner's account the sync runs as; null once it was disconnected.
+    connectionId: text("connection_id").references(() => integrationConnections.id, {
+      onDelete: "set null",
+    }),
     root: jsonb().$type<KnowledgeSourceRoot>().notNull(),
     status: text({ enum: ["idle", "syncing", "error"] })
       .notNull()
@@ -173,6 +177,7 @@ export const knowledgeSources = pgTable(
   (t) => [
     index("knowledge_sources_collection_idx").on(t.collectionId),
     index("knowledge_sources_due_idx").on(t.nextSyncAt),
+    index("knowledge_sources_connection_idx").on(t.connectionId),
   ],
 );
 

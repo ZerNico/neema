@@ -5,7 +5,7 @@ import { uuidv7 } from "uuidv7";
 import { verification } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
-import { IntegrationRejected } from "../errors.ts";
+import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import {
   authorizeUrl,
   callbackPath,
@@ -51,6 +51,8 @@ interface OAuthStateValue {
   redirectUri: string;
   /** A path on this app to land on afterwards; validated when it was given. */
   returnTo?: string;
+  /** The account being reconnected; absent adds another. */
+  connectionId?: string;
   /** Recorded when the sign-in was discovered: where the code goes, and who must answer. */
   server?: DiscoveredServer;
   /**
@@ -67,14 +69,14 @@ interface OAuthStateValue {
 export const makeOAuthFlow = (deps: {
   credentials: Pick<
     Effect.Success<ReturnType<typeof makeCredentials>>,
-    "available" | "discoveredSecret"
+    "available" | "discoveredSecret" | "sameAccount"
   >;
   changed: (userId: string) => Effect.Effect<void>;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const repo = yield* IntegrationRepo;
-    const { available, discoveredSecret } = deps.credentials;
+    const { available, discoveredSecret, sameAccount } = deps.credentials;
     const { changed } = deps;
 
     const beginOAuth = Effect.fn("IntegrationService.beginOAuth")(function* (
@@ -82,8 +84,12 @@ export const makeOAuthFlow = (deps: {
       integrationId: string,
       origin: string,
       returnTo?: string,
+      connectionId?: string,
     ) {
       const { manifest, adapter, row, config } = yield* available(userId, integrationId);
+      const reconnecting = connectionId ? yield* repo.getConnection(userId, connectionId) : null;
+      if (connectionId && reconnecting?.integrationId !== integrationId)
+        return yield* new IntegrationNotAvailable({ integrationId });
       const state = randomToken();
       const redirectUri = `${origin}${callbackPath(integrationId)}`;
       const store = (value: OAuthStateValue) =>
@@ -103,7 +109,7 @@ export const makeOAuthFlow = (deps: {
             reason: "This integration does not use sign-in.",
           });
         // A step-up keeps what was granted and asks for what a call lacked.
-        const connection = yield* repo.getConnection(userId, integrationId);
+        const connection = reconnecting;
         const previous = connection ? yield* repo.decrypt(connection) : null;
         const granted = previous?.kind === "oauth" && previous.server ? previous.server.scopes : [];
         const started = yield* discovered.begin({
@@ -134,6 +140,7 @@ export const makeOAuthFlow = (deps: {
           server: started.server,
           revision: row.revision,
           ...(returnTo ? { returnTo } : {}),
+          ...(connectionId ? { connectionId } : {}),
         });
         return { state, url: started.url };
       }
@@ -149,6 +156,7 @@ export const makeOAuthFlow = (deps: {
         redirectUri,
         revision: row.revision,
         ...(returnTo ? { returnTo } : {}),
+        ...(connectionId ? { connectionId } : {}),
       };
       yield* store(value);
       return {
@@ -193,6 +201,7 @@ export const makeOAuthFlow = (deps: {
       if (stored.revision !== row.revision) return yield* signInOutdated();
       if (stored.server && adapter.discoveredOAuth) {
         const tokens = yield* adapter.discoveredOAuth.complete({
+          config,
           server: stored.server,
           clientSecret: yield* discoveredSecret(row, stored.server),
           code: input.code,
@@ -200,10 +209,11 @@ export const makeOAuthFlow = (deps: {
           verifier: stored.verifier,
           redirectUri: stored.redirectUri,
         });
-        const { accountLabel } = yield* verified(adapter, config, {
+        const { accountLabel, accountKey } = yield* verified(adapter, config, {
           kind: "oauth",
           accessToken: tokens.accessToken,
         });
+        yield* sameAccount(userId, integrationId, stored.connectionId ?? null, accountKey);
         // The exchange took time: a save meanwhile may have moved the
         // integration to another client or server, so the write checks again.
         const saved = yield* repo.saveConnection({
@@ -213,7 +223,9 @@ export const makeOAuthFlow = (deps: {
           authKind: "oauth",
           credentials: { kind: "oauth", ...tokens, server: stored.server },
           accountLabel,
+          accountKey,
           fingerprint,
+          connectionId: stored.connectionId ?? null,
         });
         if (!saved) return yield* signInOutdated();
         yield* repo.clearRequiredScopes(saved.id);
@@ -240,10 +252,11 @@ export const makeOAuthFlow = (deps: {
         return yield* new IntegrationRejected({
           reason: "The service refused the sign-in. Try again.",
         });
-      const { accountLabel } = yield* verified(adapter, config, {
+      const { accountLabel, accountKey } = yield* verified(adapter, config, {
         kind: "oauth",
         accessToken: outcome.tokens.accessToken,
       });
+      yield* sameAccount(userId, integrationId, stored.connectionId ?? null, accountKey);
       const saved = yield* repo.saveConnection({
         userId,
         integrationId,
@@ -251,7 +264,9 @@ export const makeOAuthFlow = (deps: {
         authKind: "oauth",
         credentials: { kind: "oauth", ...outcome.tokens },
         accountLabel,
+        accountKey,
         fingerprint,
+        connectionId: stored.connectionId ?? null,
       });
       if (!saved) return yield* signInOutdated();
       yield* changed(userId);

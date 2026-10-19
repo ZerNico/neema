@@ -1,9 +1,12 @@
 import { Schema } from "effect";
 
-/** Off, unconfigured, not shared with this person, or not connected. */
+/**
+ * Off, unconfigured, not shared with this person, or not connected. Names the integration when it
+ * is known, and the account when an account was what could not be found.
+ */
 export class IntegrationNotAvailable extends Schema.TaggedError<IntegrationNotAvailable>()(
   "IntegrationNotAvailable",
-  { integrationId: Schema.String },
+  { integrationId: Schema.NullOr(Schema.String), connectionId: Schema.optionalKey(Schema.String) },
 ) {}
 
 /** A request the person can fix: shown to them as written. */

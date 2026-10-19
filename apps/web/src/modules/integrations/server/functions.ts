@@ -8,12 +8,14 @@ import {
   ApproveCatalogInput,
   BrowseInput,
   ConnectApiKeyInput,
+  ConnectionIdInput,
   ConversationIntegrationInput,
   DecideIntegrationCallInput,
   CreateIntegrationInput,
   IntegrationIdInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
+  SavePersonalServerInput,
   SourceIdInput,
   UpdateConnectionInput,
 } from "../schema.ts";
@@ -61,7 +63,81 @@ export const listAdminIntegrations = createServerFn({ method: "GET" })
 /** Every integration's id, type and name, so any stored reference can be named and drawn. */
 export const listIntegrationDirectory = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .handler(() => runServerFn(IntegrationService.use((service) => service.directory())));
+  .handler(({ context }) =>
+    runServerFn(IntegrationService.use((service) => service.directory(context.session.user.id))),
+  );
+
+/** The MCP servers this person added for themselves, and whether they may add more. */
+export const listPersonalServers = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(
+      IntegrationService.use((service) => service.personalServers(context.session.user.id)),
+    ),
+  );
+
+export const savePersonalServer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SavePersonalServerInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.savePersonalServer(context.session.user.id, {
+          integrationId: data.integrationId,
+          name: data.name,
+          config: data.config,
+        }),
+      ).pipe(
+        Effect.map((server) => ({ ok: true as const, server })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const deletePersonalServer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.deletePersonalServer(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** Lists the person's own server's tools now; nothing is offered until they approve. */
+export const checkPersonalCatalog = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.checkPersonalCatalog(context.session.user.id, data.integrationId),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const approvePersonalCatalog = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ApproveCatalogInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.approvePersonalCatalog(context.session.user.id, data.integrationId, {
+          version: data.version,
+          decisions: data.decisions,
+        }),
+      ).pipe(
+        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
 
 export const createIntegration = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -125,7 +201,12 @@ export const connectIntegrationApiKey = createServerFn({ method: "POST" })
     runServerFn(
       outcome(
         IntegrationService.use((service) =>
-          service.connectApiKey(context.session.user.id, data.integrationId, data.values),
+          service.connectApiKey(
+            context.session.user.id,
+            data.integrationId,
+            data.values,
+            data.connectionId,
+          ),
         ),
       ),
     ),
@@ -184,8 +265,9 @@ export const updateIntegrationConnection = createServerFn({ method: "POST" })
     runServerFn(
       outcome(
         IntegrationService.use((service) =>
-          service.updatePreferences(context.session.user.id, data.integrationId, {
+          service.updatePreferences(context.session.user.id, data.connectionId, {
             ...(data.offerByDefault === undefined ? {} : { offerByDefault: data.offerByDefault }),
+            ...(data.name === undefined ? {} : { name: data.name }),
             ...(data.toolPermissions === undefined
               ? {}
               : { toolPermissions: data.toolPermissions }),
@@ -196,13 +278,14 @@ export const updateIntegrationConnection = createServerFn({ method: "POST" })
     ),
   );
 
+/** Removes one of this person's accounts. */
 export const disconnectIntegration = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(standard(IntegrationIdInput))
+  .validator(standard(ConnectionIdInput))
   .handler(({ context, data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.disconnect(context.session.user.id, data.integrationId),
+        service.disconnect(context.session.user.id, data.connectionId),
       ),
     ),
   );
@@ -229,7 +312,7 @@ export const setConversationIntegration = createServerFn({ method: "POST" })
           service.setConversationIntegration(
             context.session.user.id,
             data.conversationId,
-            data.integrationId,
+            data.connectionId,
             data.enabled === undefined ? {} : { enabled: data.enabled },
           ),
         ),
@@ -260,7 +343,7 @@ export const decideIntegrationCall = createServerFn({ method: "POST" })
         if (data.decision === "conversation" && call.access !== "destructive")
           yield* IntegrationService.use((service) =>
             // This one tool, in this chat only; Settings still decides elsewhere.
-            service.setConversationIntegration(userId, call.conversationId, call.integrationId, {
+            service.setConversationIntegration(userId, call.conversationId, call.connectionId, {
               allowTool: call.tool,
             }),
           ).pipe(Effect.ignore);
@@ -304,14 +387,14 @@ export const listKnowledgeSources = createServerFn({ method: "GET" })
     ),
   );
 
-/** What a connection can be limited to, for its Settings page. */
+/** What an account can be limited to, for its Settings page. */
 export const listIntegrationScopeOptions = createServerFn({ method: "GET" })
   .middleware([requireSession])
-  .validator(standard(IntegrationIdInput))
+  .validator(standard(ConnectionIdInput))
   .handler(({ context, data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.scopeOptions(context.session.user.id, data.integrationId),
+        service.scopeOptions(context.session.user.id, data.connectionId),
       ).pipe(
         Effect.map((options) => ({ ok: true as const, options })),
         Effect.catch((error) =>
@@ -331,7 +414,7 @@ export const browseIntegration = createServerFn({ method: "GET" })
   .handler(({ context, data }) =>
     runServerFn(
       KnowledgeSourceService.use((sources) =>
-        sources.browse(context.session.user.id, data.integrationId, data.parentId ?? null),
+        sources.browse(context.session.user.id, data.connectionId, data.parentId ?? null),
       ).pipe(
         Effect.map((nodes) => ({ ok: true as const, nodes })),
         Effect.catch((error) =>

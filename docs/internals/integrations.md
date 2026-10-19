@@ -80,13 +80,22 @@ from.
 - `integration_configs` is one row per integration: its type, name, enabled, the admin
   fields (base URL), an OAuth client, and whether personal API keys are allowed.
   Who may connect uses `SharingService` (`integration` resource, admin-managed), checked in
-  SQL by `integrationUsableBy` at connect, at every attempt and at every sync.
-- `integration_connections` is one row per (user, integration). Credentials are one
-  `KeyCipher` JSON document and never leave the server, tool rows or logs. A connection is
-  never shared: an agent or schedule reaches only the sender's own. A type whose admin
-  config decides how people connect (MCP) may also open connections that hold nothing
-  personal (`none`, or `shared` for the admin's key); the row still carries the person's
-  toggles and tool permissions.
+  SQL by `integrationUsableBy` at connect, at every attempt and at every sync. An MCP server a
+  person added for themselves has an owner instead, and only they may connect
+  ([MCP](mcp.md#servers-a-person-adds)).
+- `integration_connections` is one row per account: a person may connect several to one
+  integration (work and personal mail), and everything that acts as one (a chat's toggle,
+  a grant, an allowance count, a knowledge source, an approval) names the connection, never
+  the integration alone. Credentials are one `KeyCipher` JSON document and never leave the
+  server, tool rows or logs. A connection is never shared: an agent or schedule reaches only
+  the sender's own. `verify` reports the service's stable id for the account (`account_key`),
+  so signing in to the same account again reconnects that row instead of adding another; a
+  reconnect that signs in as a different account is refused, since it would move that
+  account's chats and grants to someone else. A type whose admin config decides how people
+  connect (MCP) may also open connections that hold nothing personal (`none`, or `shared` for
+  the admin's key); a person has at most one of those per integration, and an account of
+  their own replaces it. The row still carries the person's toggles, tool permissions and
+  an optional name for the account.
 - An API key is whatever the manifest's `apiKey.fields` declare, not one string: some
   services want the account's email beside the token. `readFields` checks the values by
   kind and drops undeclared keys before `verify` sees them, and the connection stores those
@@ -149,14 +158,27 @@ it needs no deep link back.
 ## What a chat is offered
 
 The offer is read as the generation starts (`resolveOffer`, beside custom tools) and held
-for it. A chat's own choice (`conversation_integrations.enabled`) wins; otherwise an
-installed agent's attachments decide, otherwise the connection's "Turn on in new chats". A
-connection that stopped working drops out rather than failing the turn. The choice is sticky
-per chat, not per message, because a changed tool list recaches the whole prefix. An
-existing chat saves each toggle immediately; a chat not created yet sends its toggles with
-the first message. An `@` mention is only a keyboard route to the same toggle. Branch copies
-the chat’s choices and per-tool allowances like it copies the work permission level. Deep research workers are
-offered none.
+for it, per account. A chat's own choice (`conversation_integrations.enabled`) wins;
+otherwise an installed agent's attachments decide, and an agent names an integration, never
+someone's account, so all the sender's accounts of it come on; otherwise each account's "Turn
+on in new chats". An account that stopped working drops out rather than failing the turn.
+The choice is sticky per chat, not per message, because a changed tool list recaches the
+whole prefix. An existing chat saves each toggle immediately; a chat not created yet sends
+its toggles with the first message. An `@` mention names an integration, as the message text
+does, and turns its accounts on when none is. Branch copies the chat’s choices and per-tool
+allowances like it copies the work permission level. Deep research workers are offered none.
+
+The model sees one set of tools per integration, however many accounts are on. With one,
+nothing changes. With two or more, every tool takes an `account` argument, offered as an enum
+of the accounts' names, which are made unique ("Token", "Token 2"). The argument decodes
+anything, so a missing or unknown name is refused with the valid ones rather than failing the
+answer, and nothing ever falls back to another account; the description tells the model to
+ask when the request does not say which. One tool set rather than one per account keeps the
+tool list from doubling with near-identical entries. Everything after the name is the named
+account's own: its permissions, scope, consent, session and allowance counts, and a tool
+is left out only when no enabled account may use it. The argument is removed before the call
+is prepared, since an MCP server checks arguments against its own schema. The tool row
+records which account acted.
 
 ## Consent
 
@@ -210,12 +232,15 @@ on the tool row ("Approved in Claude"), as the person made it there and not here
 
 ## Schedules decide in advance
 
-A schedule stores `integration_grants` (read, or read and write, per integration). Only the
+A schedule stores `integration_grants` (read, or read and write, per account of the owner's;
+a grant to one account never reaches their others). Only the
 editor sets them; a chat draft leaves them out, which keeps what is saved, because a model
 must not grant itself authority. A fire copies them into the generation config, where they
 replace the chat's choices entirely and nothing ever waits: anything beyond the grant is
-refused to the model. The fire first checks every granted connection and ends the run as an
-error when one is gone, the way a lost collection does. A person retrying that answer later
+refused to the model. The fire first checks every granted account and ends the run as an
+error when one is gone, the way a lost collection does. A grant whose account was
+disconnected takes the owner's next account on that integration only while it is their only
+one there, as a knowledge source does; with several it waits for the owner to choose. A person retrying that answer later
 is present again, so a retry carries no grants.
 
 An integration may declare **allowances** in its manifest: a way some calls reach people,
@@ -239,7 +264,8 @@ Remediation requires a proven atomic provider contract or an immutable snapshot-
 that preserves body, inline and ordinary attachments, threading, concurrent edits, the original
 draft and uncertain-send behavior. A later GET or an unproven `If-Match` is not that contract.
 
-The cap is counted in `integration_allowance_uses`, keyed by the answer's message, by one
+The cap is counted in `integration_allowance_uses`, keyed by the answer's message and the
+account, by one
 insert-or-increment that only succeeds below the cap, taken right before the call goes out.
 Parallel calls in one round cannot overshoot it, and a resumed answer cannot start over. A
 use goes back only when the call certainly sent nothing (the adapter refused it, or the
@@ -287,9 +313,12 @@ an Outline collection or any page in it. A collection may hold any number of sou
 same Outline collection more than once. A root is `all` (everything under it) or `selected`
 (only what is picked), plus page rules that include or exclude; the nearest rule on a page or
 its ancestors wins, else the root's mode. Rules name pages, never lists of pages, so a page
-added later follows the choice made above it. The sync runs as the collection owner with whatever connection the
-owner has when it runs; a source never names a connection row. Disconnecting pauses it and
-keeps what it synced, and reconnecting makes the owner's sources due at once. Everyone the collection is shared with can then read what the owner
+added later follows the choice made above it. The sync runs as the collection owner's account
+the source names, never another of theirs. Disconnecting that account pauses the source and
+keeps what it synced. Signing in to the same account again keeps the row; a source left
+without one takes the owner's next account there only while it is their only one, and
+otherwise waits for them to pick. Either way it is due at once. Everyone the collection is shared with can
+then read what the owner
 selected, even without access at the source; this is accepted.
 
 Overlapping sources never index one page twice. A source skips a page another source of the

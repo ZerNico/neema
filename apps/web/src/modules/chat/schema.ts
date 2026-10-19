@@ -86,11 +86,11 @@ const generationFields = {
     Schema.Array(EntityId).check(Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection)),
   ),
   /**
-   * Integration toggles made before the chat existed. An existing chat saves
+   * Account toggles made before the chat existed. An existing chat saves
    * each toggle as it happens, so this only matters for a first message.
    */
   integrationChoices: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ integrationId: EntityId, enabled: Schema.Boolean })).check(
+    Schema.Array(Schema.Struct({ connectionId: EntityId, enabled: Schema.Boolean })).check(
       Schema.isMaxLength(20),
     ),
   ),

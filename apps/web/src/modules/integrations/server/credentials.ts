@@ -4,6 +4,7 @@ import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections } from "~/db/schema/index.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
+import { accountName } from "../schema.ts";
 import {
   IntegrationAuthFailed,
   IntegrationNotAvailable,
@@ -45,6 +46,8 @@ export interface ConnectedSession extends IntegrationSession {
   readonly tools: ReadonlyArray<OfferedTool>;
   /** `shared` acts as the admin's account for everyone, so only reads are offered. */
   readonly authKind: IntegrationConnectionRow["authKind"];
+  /** What the person calls this account, as the session starts. */
+  readonly account: string;
 }
 
 /**
@@ -99,16 +102,19 @@ export const methodsFor = (
 ): ConnectMethods => {
   if (adapter.connectMethods) {
     const declared = adapter.connectMethods(config);
+    const open = declared.open === "shared" && !sharedStored ? null : declared.open;
     return {
       oauth: declared.oauth && Boolean(adapter.discoveredOAuth),
       apiKey: declared.apiKey && Boolean(manifest.apiKey),
-      open: declared.open === "shared" && !sharedStored ? null : declared.open,
+      open,
+      everyone: open !== null && declared.everyone,
     };
   }
   return {
     oauth: Boolean(manifest.oauth && adapter.oauth && oauthReady(row)),
     apiKey: Boolean(manifest.apiKey && row.allowApiKeys),
     open: null,
+    everyone: false,
   };
 };
 
@@ -343,6 +349,7 @@ export const makeCredentials = (deps: {
 
         const outcome = plan.discovered
           ? yield* adapter.discoveredOAuth!.refresh({
+              config: row.config,
               server: plan.discovered,
               clientSecret: plan.clientSecret,
               refreshToken: plan.refreshToken,
@@ -501,17 +508,21 @@ export const makeCredentials = (deps: {
         return yield* new IntegrationRequestFailed({ status: null, message: result.message });
       });
 
+    /** A working session as one of this person's accounts. */
     const sessionFor = Effect.fn("IntegrationService.session")(function* (
       userId: string,
-      integrationId: string,
+      connectionId: string,
     ) {
+      const connection = yield* repo.getConnection(userId, connectionId);
+      // A connection that is not theirs reads like one that is gone.
+      if (!connection)
+        return yield* new IntegrationNotAvailable({ integrationId: null, connectionId });
+      const integrationId = connection.integrationId;
       const { manifest, adapter, row, config, fingerprint } = yield* available(
         userId,
         integrationId,
       );
-      const connection = yield* repo.getConnection(userId, integrationId);
       if (
-        !connection ||
         connection.status !== "active" ||
         connection.configFingerprint !== fingerprint ||
         !wayOpen(manifest, adapter, row, config, connection.authKind)
@@ -525,6 +536,7 @@ export const makeCredentials = (deps: {
         adapter,
         tools: yield* toolsOf(manifest, adapter, row.id),
         authKind: connection.authKind,
+        account: accountName(connection),
         config,
         credential: credentialFor(connection, row, adapter, {
           fingerprint,
@@ -541,5 +553,45 @@ export const makeCredentials = (deps: {
       return session;
     });
 
-    return { available, discoveredSecret, sessionFor };
+    /**
+     * Reconnecting an account must sign in as that same account: another one
+     * under its row would quietly move its chats and grants to someone else.
+     */
+    const sameAccount = Effect.fn(function* (
+      userId: string,
+      integrationId: string,
+      connectionId: string | null,
+      accountKey: string | null,
+    ) {
+      if (!connectionId) return;
+      const current = yield* repo.getConnection(userId, connectionId);
+      if (current?.integrationId !== integrationId)
+        return yield* new IntegrationNotAvailable({ integrationId, connectionId });
+      if (current.accountKey && accountKey && current.accountKey !== accountKey)
+        return yield* new IntegrationRejected({
+          reason: `That is another account than “${accountName(current)}”. Add it as another account instead.`,
+        });
+      // A row from before it knew its account cannot take on one connected beside it.
+      const listed = yield* repo.listForUser(userId);
+      const other = listed
+        .find((entry) => entry.config.id === integrationId)
+        ?.connections.find((entry) => entry.id !== connectionId && entry.accountKey === accountKey);
+      if (accountKey && other)
+        return yield* new IntegrationRejected({
+          reason: `That account is already connected as “${accountName(other)}”.`,
+        });
+    });
+
+    /** A session as any working account of theirs, oldest first, for work that is not a person's own call. */
+    const anySessionFor = Effect.fn(function* (userId: string, integrationId: string) {
+      const listed = yield* repo.listForUser(userId);
+      const accounts = listed.find((entry) => entry.config.id === integrationId)?.connections ?? [];
+      for (const account of accounts) {
+        const session = yield* sessionFor(userId, account.id).pipe(Effect.option);
+        if (session._tag === "Some") return session.value;
+      }
+      return yield* new IntegrationNotAvailable({ integrationId });
+    });
+
+    return { available, discoveredSecret, sessionFor, anySessionFor, sameAccount };
   });

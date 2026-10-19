@@ -9,7 +9,7 @@ import { cn } from "~/ui/utils";
 import { findIntegrationType } from "../catalog.ts";
 import { integrationScopeOptionsQuery } from "../client/queries.ts";
 import type { IntegrationScope } from "../manifest.ts";
-import type { ScopeOption, UserIntegration } from "../schema.ts";
+import type { IntegrationConnectionView, ScopeOption, UserIntegration } from "../schema.ts";
 
 /** Past this many, the list gets a filter field. */
 const FILTER_FROM = 8;
@@ -30,14 +30,17 @@ const SKELETON_WIDTHS = ["w-40", "w-56", "w-32", "w-48", "w-36", "w-52", "w-44",
  */
 export function IntegrationScopeSection({
   integration,
+  connection,
   onChange,
 }: {
   integration: UserIntegration;
+  /** The account being limited; each has its own. */
+  connection: IntegrationConnectionView;
   onChange: (scope: string[] | null) => void;
 }) {
   const manifest = findIntegrationType(integration.kind)!;
   const scope = manifest.scope!;
-  const saved = integration.connection!.scope;
+  const saved = connection.scope;
   const noun = scope.label.toLowerCase();
   const id = useId();
   const queryClient = useQueryClient();
@@ -47,7 +50,7 @@ export function IntegrationScopeSection({
   const [pinned] = useState(() => new Set(saved ?? []));
   // Fetched on the way to choosing a limit, so the list is usually there by the click.
   const prefetch = () =>
-    void queryClient.prefetchQuery(integrationScopeOptionsQuery(integration.id));
+    void queryClient.prefetchQuery(integrationScopeOptionsQuery(connection.id));
 
   const choice = (value: "all" | "some", title: string, description: string) => (
     <label
@@ -96,7 +99,7 @@ export function IntegrationScopeSection({
         </RadioGroup>
         {limited ? (
           <ScopePicker
-            integrationId={integration.id}
+            connectionId={connection.id}
             scope={scope}
             picked={picked}
             pinned={pinned}
@@ -117,13 +120,13 @@ export function IntegrationScopeSection({
  * so it can be unticked.
  */
 function ScopePicker({
-  integrationId,
+  connectionId,
   scope,
   picked,
   pinned,
   onToggle,
 }: {
-  integrationId: string;
+  connectionId: string;
   scope: IntegrationScope;
   picked: ReadonlyArray<string>;
   pinned: ReadonlySet<string>;
@@ -132,7 +135,7 @@ function ScopePicker({
   const id = useId();
   const noun = scope.label.toLowerCase();
   const [filter, setFilter] = useState("");
-  const options = useQuery(integrationScopeOptionsQuery(integrationId));
+  const options = useQuery(integrationScopeOptionsQuery(connectionId));
   const known = options.data?.ok ? options.data.options : [];
   const items: ReadonlyArray<ScopeOption> = [
     ...known,

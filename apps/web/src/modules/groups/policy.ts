@@ -17,6 +17,7 @@ export const CAPABILITY_KEYS = [
   "attachments",
   "mcp",
   "apiKeys",
+  "mcpServers",
 ] as const;
 
 export type Capability = (typeof CAPABILITY_KEYS)[number];

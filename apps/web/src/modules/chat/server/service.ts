@@ -63,7 +63,7 @@ import {
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveIntegrationChoices"> &
   TurnContent & {
     /** Integration toggles made in the composer before this chat existed. */
-    integrationChoices?: ReadonlyArray<{ integrationId: string; enabled: boolean }> | undefined;
+    integrationChoices?: ReadonlyArray<{ connectionId: string; enabled: boolean }> | undefined;
     searchEnabled: boolean;
     researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null | undefined;

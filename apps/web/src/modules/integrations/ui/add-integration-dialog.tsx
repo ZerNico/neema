@@ -63,9 +63,11 @@ export function AddIntegrationDialog({
             {list.map((integration) => {
               const manifest = findIntegrationType(integration.kind);
               if (!manifest) return null;
-              const connection = integration.connection;
-              const ready = integration.available && connection?.status === "active";
-              const here = chat.items.find((item) => item.integrationId === integration.id);
+              // Each working account it has in this chat, switched on its own.
+              const here = chat.items.filter((item) => item.integrationId === integration.id);
+              const lapsed = integration.connections.some(
+                (account) => account.status === "needs_reauth",
+              );
               return (
                 <li
                   key={integration.id}
@@ -75,20 +77,40 @@ export function AddIntegrationDialog({
                   <div className="flex min-w-0 flex-1 basis-40 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       {integration.name}
-                      {connection?.status === "needs_reauth" ? (
-                        <Badge variant="destructive">Reconnect</Badge>
-                      ) : null}
+                      {lapsed ? <Badge variant="destructive">Reconnect</Badge> : null}
                     </span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      {connection ? connection.accountLabel : manifest.description}
-                    </span>
+                    {here.length <= 1 ? (
+                      <span className="text-muted-foreground truncate text-xs">
+                        {here[0]?.account ?? (here.length ? "" : manifest.description)}
+                      </span>
+                    ) : null}
                   </div>
-                  {ready && here ? (
+                  {integration.available && here.length === 1 ? (
                     <Switch
-                      checked={here.enabled}
+                      checked={here[0]!.enabled}
                       aria-label={`Use ${integration.name} in this chat`}
-                      onCheckedChange={(enabled) => chat.setEnabled(integration.id, enabled)}
+                      onCheckedChange={(enabled) => chat.setEnabled(here[0]!.connectionId, enabled)}
                     />
+                  ) : integration.available && here.length > 1 ? (
+                    <ul className="flex w-full flex-col gap-2 pl-12">
+                      {here.map((item) => (
+                        <li
+                          key={item.connectionId}
+                          className="flex items-center justify-between gap-3"
+                        >
+                          <span className="truncate text-sm">
+                            {item.account ?? integration.name}
+                          </span>
+                          <Switch
+                            checked={item.enabled}
+                            aria-label={`Use ${item.account ?? integration.name} in this chat`}
+                            onCheckedChange={(enabled) =>
+                              chat.setEnabled(item.connectionId, enabled)
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
                   ) : integration.available ? (
                     <ConnectActions integration={integration} returnTo={returnTo} />
                   ) : (

@@ -1,7 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
+import {
+  myIntegrationsQuery,
+  personalServersQuery,
+} from "~/modules/integrations/client/queries.ts";
 import { IntegrationSettingsPage } from "~/modules/integrations/ui/integrations-settings-page.tsx";
 
 interface ConnectResult {
@@ -15,7 +18,11 @@ export const Route = createFileRoute("/_app/settings/integrations/$integrationId
     ...(typeof search.connected === "string" ? { connected: search.connected } : {}),
     ...(typeof search.error === "string" ? { error: search.error.slice(0, 300) } : {}),
   }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(myIntegrationsQuery),
+  loader: ({ context }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(myIntegrationsQuery),
+      context.queryClient.ensureQueryData(personalServersQuery),
+    ]),
   component: IntegrationRoute,
 });
 

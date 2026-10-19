@@ -499,7 +499,21 @@ describe("admin config", () => {
       oauth: true,
       apiKey: true,
       open: "none",
+      everyone: false,
     });
+    // On for everyone only means something without an account.
+    const everyone = (ways: string) =>
+      mcpAdapter.normalizeConfig({
+        url: "https://mcp.example.com/mcp",
+        ways,
+        anonymous: "open",
+        everyone: "everyone",
+      });
+    const on = everyone("token anonymous");
+    expect("config" in on && on.config.everyone).toBe("everyone");
+    expect("fingerprint" in on && on.fingerprint).toBe("fingerprint" in open && open.fingerprint);
+    const closed = everyone("token");
+    expect("config" in closed && closed.config).not.toHaveProperty("everyone");
     for (const bad of [
       { url: "https://user:pw@mcp.example.com", ways: "anonymous", anonymous: "open" },
       { url: "ftp://mcp.example.com", ways: "anonymous", anonymous: "open" },

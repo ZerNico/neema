@@ -73,13 +73,15 @@ const plainBody = (init: RequestInit | undefined): RequestInit => {
  * following a redirect, so a bearer token cannot be carried elsewhere. Any
  * other origin (the sign-in server, a registration endpoint) is named by the
  * server itself, so it must be public and is connected to at the addresses
- * that were checked.
+ * that were checked. `publicOnly` holds the server's own origin to that too,
+ * for an address a person chose rather than the admin.
  */
 export const scopedFetch = (
   serverUrl: URL,
   options: {
     onChallenge?: (challenge: AuthChallenge) => void;
     sameOriginOnly?: boolean;
+    publicOnly?: boolean;
     /** Ends every request made through this fetch, whatever the caller passes. */
     signal?: AbortSignal;
   } = {},
@@ -88,15 +90,16 @@ export const scopedFetch = (
   const read = { bytes: 0 };
   return async (input, init) => {
     const url = new URL(input);
-    const own = options.signal;
+    const bound = options.signal;
     const given = init?.signal ?? undefined;
-    const signal = own && given ? AbortSignal.any([own, given]) : (own ?? given);
+    const signal = bound && given ? AbortSignal.any([bound, given]) : (bound ?? given);
     const request = { ...plainBody(init), ...(signal ? { signal } : {}) };
     let response: Response;
-    if (url.origin === serverUrl.origin) {
+    const own = url.origin === serverUrl.origin;
+    if (own && !options.publicOnly) {
       response = await fetch(url, { ...request, redirect: "manual" });
     } else {
-      if (options.sameOriginOnly) throw new Error(`Refused a request to ${url.origin}.`);
+      if (!own && options.sameOriginOnly) throw new Error(`Refused a request to ${url.origin}.`);
       // Looking the address up is part of the request: stopping or timing out ends it too.
       const target = await Effect.runPromise(
         resolvePublicHttpUrl(url.toString()),
