@@ -44,13 +44,13 @@ export const toCatalog = (row: ToolCatalogRow | null): AdminCatalog => ({
  * lists, an admin approving it, and the sweep that checks again when due.
  */
 export const makeCatalogService = (deps: {
-  credentials: Pick<Effect.Success<ReturnType<typeof makeCredentials>>, "sessionFor">;
+  credentials: Pick<Effect.Success<ReturnType<typeof makeCredentials>>, "anySessionFor">;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const repo = yield* IntegrationRepo;
     const bus = yield* SyncBus;
-    const { sessionFor } = deps.credentials;
+    const { anySessionFor } = deps.credentials;
 
     /**
      * A session to list a catalog with. An open or shared server needs nobody;
@@ -88,7 +88,7 @@ export const makeCatalogService = (deps: {
       }
       // The reviewer's own account first: it may see tools nobody sees without one.
       const own = userId
-        ? yield* sessionFor(userId, integrationId).pipe(Effect.option)
+        ? yield* anySessionFor(userId, integrationId).pipe(Effect.option)
         : Option.none();
       if (Option.isSome(own)) return { row, adapter, catalog, session: own.value };
       if (methods.open === "none")

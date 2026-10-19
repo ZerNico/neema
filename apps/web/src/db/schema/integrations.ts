@@ -99,9 +99,11 @@ export const integrationGroupGrants = pgTable(
 );
 
 /**
- * One user's credentials for one integration. Everything the assistant does
- * through an integration runs as this account, so it is never shared: an
- * agent or a schedule only ever reaches the sender's own connection.
+ * One account of one person on one integration. Everything the assistant does
+ * through it runs as this account, so it is never shared: an agent or a
+ * schedule only ever reaches the sender's own. A person may connect several
+ * accounts (work and personal mail); chats, grants, allowances and knowledge
+ * sources name the connection, never the integration alone.
  */
 export const integrationConnections = pgTable(
   "integration_connections",
@@ -126,6 +128,11 @@ export const integrationConnections = pgTable(
       .notNull()
       .default(sql`gen_random_uuid()::text`),
     accountLabel: text("account_label").notNull(),
+    // The service's own id for the account, when it has one, so signing in to
+    // the same account again reconnects this row instead of adding another.
+    accountKey: text("account_key"),
+    // The person's name for it ("Work"); null shows the account label.
+    name: text(),
     // The instance config the credentials were issued against. A base URL
     // change makes them meaningless, so a mismatch reads as needing reauth.
     configFingerprint: text("config_fingerprint").notNull(),
@@ -148,14 +155,22 @@ export const integrationConnections = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("integration_connections_user_idx").on(t.userId, t.integrationId)],
+  (t) => [
+    index("integration_connections_user_idx").on(t.userId, t.integrationId),
+    uniqueIndex("integration_connections_account_idx")
+      .on(t.userId, t.integrationId, t.accountKey)
+      .where(sql`${t.accountKey} is not null`),
+    // Using it without an account is the same for every such row, so one is enough.
+    uniqueIndex("integration_connections_open_idx")
+      .on(t.userId, t.integrationId)
+      .where(sql`${t.authKind} in ('none', 'shared')`),
+  ],
 );
 
 /**
- * A chat's own choices over the connection's defaults: whether the
- * integration is offered, and which tools need no approval here. Branch
- * copies these; a one-off Allow is never stored, only "always allow in this
- * chat".
+ * A chat's own choices over an account's defaults: whether it is offered, and
+ * which tools need no approval here. Branch copies these; a one-off Allow is
+ * never stored, only "always allow in this chat".
  */
 export const conversationIntegrations = pgTable(
   "conversation_integrations",
@@ -163,15 +178,18 @@ export const conversationIntegrations = pgTable(
     conversationId: text("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id")
+    connectionId: text("connection_id")
       .notNull()
-      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+      .references(() => integrationConnections.id, { onDelete: "cascade" }),
     enabled: boolean(),
     // Tools the person said to always allow in this chat, from an approval.
     allowedTools: jsonb("allowed_tools").$type<string[]>().notNull().default([]),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.conversationId, t.integrationId] })],
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.connectionId] }),
+    index("conversation_integrations_connection_idx").on(t.connectionId),
+  ],
 );
 
 /** An agent narrows the offer to what it attached; the sender's connection runs it. */
@@ -203,13 +221,17 @@ export const integrationAllowanceUses = pgTable(
     messageId: text("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id")
+    // Per account: a cap on what one run sends from work mail is not shared with personal.
+    connectionId: text("connection_id")
       .notNull()
-      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+      .references(() => integrationConnections.id, { onDelete: "cascade" }),
     allowanceId: text("allowance_id").notNull(),
     uses: integer().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.messageId, t.integrationId, t.allowanceId] })],
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.connectionId, t.allowanceId] }),
+    index("integration_allowance_uses_connection_idx").on(t.connectionId),
+  ],
 );
 
 /**

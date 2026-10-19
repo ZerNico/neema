@@ -81,7 +81,9 @@ choose; their choice sticks across later listings.
 The admin ticks any of three ways in: signing in, pasting a token, or going without an account,
 which is either open to anyone or one key for everyone. Several may stand at once, since many
 public servers take a token for private data or higher limits. Each person picks one; Settings lets someone using it without
-an account add their own later.
+an account add their own later, which replaces using it without one. An MCP server says
+nothing stable about who signed in, so each sign-in or token adds an account unless it
+reconnects a named one.
 
 - **Signing in** is OAuth, below. **A token** goes as a bearer token or in a header the admin
   names.

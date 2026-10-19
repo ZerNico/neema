@@ -52,6 +52,18 @@ type Services =
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
+
+/** Runs `f` with the person's account on an integration: their first, the one most tests connect. */
+const on = <A, E, R>(
+  userId: string,
+  integrationId: string,
+  f: (connectionId: string) => Effect.Effect<A, E, R>,
+) =>
+  Effect.flatMap(IntegrationRepo, (repo) => repo.listForUser(userId)).pipe(
+    Effect.flatMap((rows) =>
+      f(rows.find((row) => row.config.id === integrationId)?.connections[0]?.id ?? "no-account"),
+    ),
+  );
 /** The typed failure a refused call ended with, or the exit itself when it did not fail. */
 const failureOf = (result: Exit.Exit<unknown, unknown>) =>
   Exit.isFailure(result) ? Cause.squash(result.cause) : result;
@@ -144,7 +156,11 @@ const startOutline = () =>
       switch (request.url) {
         case "/api/auth.info":
           return json(200, {
-            data: { user: { email: "ada@example.com" }, team: { name: "Acme" } },
+            // Outline's own id for the account, so signing in again reconnects it.
+            // A `bo-` token is another person's account on the same workspace.
+            data: token.startsWith("bo-")
+              ? { user: { id: "user-bo", email: "bo@example.com" }, team: { name: "Acme" } }
+              : { user: { id: "user-ada", email: "ada@example.com" }, team: { name: "Acme" } },
           });
         case "/api/collections.list":
           return json(200, {
@@ -289,7 +305,11 @@ describe("connections", () => {
     // Outline declares nothing to limit.
     const refused = await run(
       Effect.flatMap(IntegrationService, (s) =>
-        Effect.flip(s.updatePreferences(userId, "outline", { scope: ["x"] })),
+        Effect.flip(
+          on(userId, "outline", (account) =>
+            s.updatePreferences(userId, account, { scope: ["x"] }),
+          ),
+        ),
       ),
     );
     expect(refused).toMatchObject({ reason: "This integration has no limits." });
@@ -313,6 +333,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: null,
           userId,
           integrationId: "jira",
           authKind: "api_key",
@@ -322,11 +343,17 @@ describe("connections", () => {
         }),
       ),
     );
-    const session = await run(Effect.flatMap(IntegrationService, (s) => s.session(userId, "jira")));
+    const session = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "jira", (account) => s.session(userId, account)),
+      ),
+    );
     expect(await run(session.scope)).toBeNull();
     const limit = (scope: string[] | null) =>
       run(
-        Effect.flatMap(IntegrationService, (s) => s.updatePreferences(userId, "jira", { scope })),
+        Effect.flatMap(IntegrationService, (s) =>
+          on(userId, "jira", (account) => s.updatePreferences(userId, account, { scope })),
+        ),
       );
     await limit([" PROJ ", "OPS", "PROJ"]);
     // The same session sees the new limit: it is read per call.
@@ -334,7 +361,7 @@ describe("connections", () => {
     const jira = (await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId)))).find(
       (entry) => entry.id === "jira",
     );
-    expect(jira?.connection?.scope).toEqual(["PROJ", "OPS"]);
+    expect(jira?.connections[0]?.scope).toEqual(["PROJ", "OPS"]);
     // Choosing a limit and ticking nothing reaches nothing; it is not "all".
     await limit([]);
     expect(await run(session.scope)).toEqual([]);
@@ -365,7 +392,7 @@ describe("connections", () => {
 
     await connectKey(userId);
     const mine = await outlineFor(userId);
-    expect(mine?.connection).toMatchObject({
+    expect(mine?.connections[0]).toMatchObject({
       accountLabel: "ada@example.com · Acme",
       status: "active",
     });
@@ -391,9 +418,11 @@ describe("connections", () => {
       ),
     );
     const mine = await outlineFor(userId);
-    expect(mine?.connection?.status).toBe("needs_reauth");
+    expect(mine?.connections[0]?.status).toBe("needs_reauth");
     const session = await runtime.runPromiseExit(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     expect(failureOf(session)).toMatchObject({
       _tag: "IntegrationNotAvailable",
@@ -434,7 +463,7 @@ describe("connections", () => {
     });
     expect(Exit.isSuccess(await complete(started.state))).toBe(true);
     const mine = await outlineFor(userId);
-    expect(mine?.connection).toMatchObject({ authKind: "oauth", status: "active" });
+    expect(mine?.connections[0]).toMatchObject({ authKind: "oauth", status: "active" });
     // The state is spent once used.
     expect(failureOf(await complete(started.state))).toMatchObject({
       _tag: "IntegrationRejected",
@@ -478,7 +507,7 @@ describe("connections", () => {
       );
       expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
       expect(tokenCalls.length).toBe(before);
-      expect((await outlineFor(userId))?.connection).toBeNull();
+      expect((await outlineFor(userId))?.connections[0]).toBeUndefined();
     } finally {
       await configure();
     }
@@ -523,7 +552,7 @@ describe("connections", () => {
       );
       expect(duringCodeExchange).toBeNull();
       expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
-      expect((await outlineFor(userId))?.connection).toBeNull();
+      expect((await outlineFor(userId))?.connections[0]).toBeUndefined();
     } finally {
       duringCodeExchange = null;
       await configure();
@@ -534,7 +563,9 @@ describe("connections", () => {
     const userId = await newUser();
     await connectKey(userId);
     const before = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const moveTo = (baseUrlNow: string) =>
       run(
@@ -559,7 +590,9 @@ describe("connections", () => {
         message: "This integration is no longer connected.",
       });
       const after = await run(
-        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+        Effect.flatMap(IntegrationService, (s) =>
+          on(userId, "outline", (account) => s.session(userId, account)),
+        ),
       );
       expect(await run(after.credential)).toMatchObject({ kind: "api_key" });
     } finally {
@@ -572,6 +605,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: "user-ada",
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -591,7 +625,9 @@ describe("connections", () => {
     );
     const before = tokenCalls.length;
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const tokens = await run(
       Effect.all(
@@ -625,6 +661,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: "user-ada",
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -635,7 +672,9 @@ describe("connections", () => {
       ),
     );
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const reached = Promise.withResolvers<void>();
     const answer = Promise.withResolvers<void>();
@@ -654,7 +693,9 @@ describe("connections", () => {
         message: "The sign-in changed while it was refreshed.",
       });
       const after = await run(
-        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+        Effect.flatMap(IntegrationService, (s) =>
+          on(userId, "outline", (account) => s.session(userId, account)),
+        ),
       );
       expect(await run(after.credential)).toMatchObject({ kind: "api_key" });
     } finally {
@@ -671,6 +712,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: "user-ada",
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -681,7 +723,9 @@ describe("connections", () => {
       ),
     );
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const reached = Promise.withResolvers<void>();
     const answer = Promise.withResolvers<void>();
@@ -705,13 +749,15 @@ describe("connections", () => {
     }
     // The spent refresh token was replaced, not lost: no reconnect is needed.
     const after = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     expect(await run(after.credential)).toMatchObject({
       kind: "oauth",
       accessToken: `kept-${userId}`,
     });
-    expect((await outlineFor(userId))?.connection?.status).toBe("active");
+    expect((await outlineFor(userId))?.connections[0]?.status).toBe("active");
   });
 
   it("validates reconnect identity after waiting for the refresh lock before contacting OAuth", async () => {
@@ -719,6 +765,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: "user-ada",
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -734,7 +781,9 @@ describe("connections", () => {
       ),
     );
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const blocker = new Client({ connectionString: database.url });
     await blocker.connect();
@@ -760,6 +809,7 @@ describe("connections", () => {
       await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
           saveAtCurrent(repo, {
+            accountKey: "user-ada",
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -780,7 +830,7 @@ describe("connections", () => {
         message: "This integration is no longer connected.",
       });
       expect(tokenCalls.length).toBe(before);
-      expect((await outlineFor(userId))?.connection?.status).toBe("active");
+      expect((await outlineFor(userId))?.connections[0]?.status).toBe("active");
     } finally {
       await blocker.query("rollback");
       await blocker.end();
@@ -794,12 +844,15 @@ describe("connections", () => {
       const userId = await newUser();
       await connectKey(userId);
       const session = await run(
-        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+        Effect.flatMap(IntegrationService, (s) =>
+          on(userId, "outline", (account) => s.session(userId, account)),
+        ),
       );
       const before = tokenCalls.length;
       const replacement = await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
           saveAtCurrent(repo, {
+            accountKey: "user-ada",
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -821,7 +874,7 @@ describe("connections", () => {
         message: "This integration is no longer connected.",
       });
       expect(tokenCalls.length).toBe(before);
-      expect((await outlineFor(userId))?.connection?.status).toBe("active");
+      expect((await outlineFor(userId))?.connections[0]?.status).toBe("active");
     },
   );
 
@@ -834,6 +887,7 @@ describe("connections", () => {
       await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
           saveAtCurrent(repo, {
+            accountKey: "user-ada",
             userId,
             integrationId: "outline",
             authKind: "oauth",
@@ -844,7 +898,9 @@ describe("connections", () => {
         ),
       );
       const session = await run(
-        Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+        Effect.flatMap(IntegrationService, (s) =>
+          on(userId, "outline", (account) => s.session(userId, account)),
+        ),
       );
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -863,7 +919,7 @@ describe("connections", () => {
           await run(
             Effect.gen(function* () {
               const repo = yield* IntegrationRepo;
-              const connection = (yield* repo.getConnection(userId, "outline"))!;
+              const connection = (yield* repo.getConnection(userId, session.connectionId))!;
               const credentials = yield* repo.decrypt(connection);
               if (credentials?.kind !== "oauth") throw new Error("OAuth fixture missing");
               yield* (yield* Db)
@@ -887,9 +943,11 @@ describe("connections", () => {
         await run(
           Effect.flatMap(IntegrationService, (s) => s.reportAuthFailure({ userId, failure })),
         );
-        expect((await outlineFor(userId))?.connection?.status).toBe("active");
+        expect((await outlineFor(userId))?.connections[0]?.status).toBe("active");
         const current = await run(
-          Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+          Effect.flatMap(IntegrationService, (s) =>
+            on(userId, "outline", (account) => s.session(userId, account)),
+          ),
         );
         expect(await run(outlineCall(current, "auth.info", {}))).toBeDefined();
       } finally {
@@ -904,12 +962,16 @@ describe("connections", () => {
     const userId = await newUser();
     await connectKey(userId);
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     const credential = await run(session.credential);
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.updatePreferences(userId, "outline", { offerByDefault: false }),
+        on(userId, "outline", (account) =>
+          s.updatePreferences(userId, account, { offerByDefault: false }),
+        ),
       ),
     );
     await run(
@@ -920,7 +982,7 @@ describe("connections", () => {
         }),
       ),
     );
-    expect((await outlineFor(userId))?.connection?.status).toBe("active");
+    expect((await outlineFor(userId))?.connections[0]?.status).toBe("active");
     await run(
       Effect.flatMap(IntegrationService, (s) =>
         s.reportAuthFailure({
@@ -932,7 +994,7 @@ describe("connections", () => {
         }),
       ),
     );
-    expect((await outlineFor(userId))?.connection?.status).toBe("needs_reauth");
+    expect((await outlineFor(userId))?.connections[0]?.status).toBe("needs_reauth");
   });
 
   it("marks a connection whose refresh the service refuses for reconnecting", async () => {
@@ -940,6 +1002,7 @@ describe("connections", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: "user-ada",
           userId,
           integrationId: "outline",
           authKind: "oauth",
@@ -955,14 +1018,16 @@ describe("connections", () => {
       ),
     );
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     expect(failureOf(await runtime.runPromiseExit(session.credential))).toMatchObject({
       _tag: "IntegrationAuthFailed",
       integrationId: "outline",
     });
     const mine = await outlineFor(userId);
-    expect(mine?.connection?.status).toBe("needs_reauth");
+    expect(mine?.connections[0]?.status).toBe("needs_reauth");
   });
 
   it("asks for reconnecting when the stored credential is not one it reads", async () => {
@@ -981,20 +1046,24 @@ describe("connections", () => {
       }),
     );
     const session = await run(
-      Effect.flatMap(IntegrationService, (s) => s.session(userId, "outline")),
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.session(userId, account)),
+      ),
     );
     expect(failureOf(await runtime.runPromiseExit(session.credential))).toMatchObject({
       _tag: "IntegrationAuthFailed",
       integrationId: "outline",
     });
     const mine = await outlineFor(userId);
-    expect(mine?.connection?.status).toBe("needs_reauth");
+    expect(mine?.connections[0]?.status).toBe("needs_reauth");
   });
 });
 
 describe("what a chat is offered", () => {
   it("writes first-turn choices on the supplied transaction, all or nothing", async () => {
     const userId = await newUser();
+    await connectKey(userId);
+    const account = await run(on(userId, "outline", Effect.succeed));
     const conversationId = uuidv7();
     const missing = await run(
       Effect.gen(function* () {
@@ -1005,8 +1074,8 @@ describe("what a chat is offered", () => {
             Effect.gen(function* () {
               yield* tx.insert(conversations).values({ id: conversationId, userId });
               yield* repo.setConversationChoices(tx, userId, conversationId, [
-                { integrationId: "outline", enabled: true },
-                { integrationId: "missing", enabled: false },
+                { connectionId: account, enabled: true },
+                { connectionId: "missing", enabled: false },
               ]);
             }),
           ),
@@ -1015,7 +1084,7 @@ describe("what a chat is offered", () => {
     );
     expect(missing).toMatchObject({
       _tag: "Failure",
-      failure: { _tag: "IntegrationNotAvailable", integrationId: "missing" },
+      failure: { _tag: "IntegrationNotAvailable", integrationId: null, connectionId: "missing" },
     });
     expect(
       await insert((db) =>
@@ -1038,7 +1107,7 @@ describe("what a chat is offered", () => {
           Effect.gen(function* () {
             yield* tx.insert(conversations).values({ id: conversationId, userId });
             yield* repo.setConversationChoices(tx, userId, conversationId, [
-              { integrationId: "outline", enabled: false },
+              { connectionId: account, enabled: false },
             ]);
           }),
         );
@@ -1050,7 +1119,7 @@ describe("what a chat is offered", () => {
         .from(conversationIntegrations)
         .where(eq(conversationIntegrations.conversationId, conversationId)),
     );
-    expect(choices).toMatchObject([{ integrationId: "outline", enabled: false }]);
+    expect(choices).toMatchObject([{ connectionId: account, enabled: false }]);
   });
 
   it("follows the connection default, then the chat's own choice, then a fire's grants", async () => {
@@ -1068,14 +1137,17 @@ describe("what a chat is offered", () => {
     expect(await offered(null)).toEqual([["outline", null]]);
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.setConversationIntegration(userId, conversationId, "outline", { enabled: false }),
+        on(userId, "outline", (account) =>
+          s.setConversationIntegration(userId, conversationId, account, { enabled: false }),
+        ),
       ),
     );
     expect(await offered(null)).toEqual([]);
     // A fire ignores the chat's toggles: its grants are the whole offer.
-    expect(await offered([{ integrationId: "outline", access: "read" }])).toEqual([
-      ["outline", { access: "read", allowances: {} }],
-    ]);
+    const account = await run(on(userId, "outline", Effect.succeed));
+    expect(
+      await offered([{ connectionId: account, integrationId: "outline", access: "read" }]),
+    ).toEqual([["outline", { access: "read", allowances: {} }]]);
     expect(await offered([])).toEqual([]);
   });
 
@@ -1104,7 +1176,9 @@ describe("what a chat is offered", () => {
     // switch: they get their own defaults.
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.setConversationIntegration(userId, conversationId, "outline", { enabled: false }),
+        on(userId, "outline", (account) =>
+          s.setConversationIntegration(userId, conversationId, account, { enabled: false }),
+        ),
       ),
     );
     expect((await chat())[0]).toMatchObject({ enabled: false });
@@ -1128,7 +1202,7 @@ describe("what a chat is offered", () => {
     const permissions = (conversationId: string) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
-          s.permissionsFor(userId, conversationId, "outline"),
+          on(userId, "outline", (account) => s.permissionsFor(userId, conversationId, account)),
         ),
       );
     expect(await permissions(first)).toEqual({ permissions: {}, allowedInChat: [] });
@@ -1137,7 +1211,9 @@ describe("what a chat is offered", () => {
     const set = (toolPermissions: Record<string, "allow" | "ask" | "block">) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
-          s.updatePreferences(userId, "outline", { toolPermissions }),
+          on(userId, "outline", (account) =>
+            s.updatePreferences(userId, account, { toolPermissions }),
+          ),
         ),
       );
     await set({ search: "block" });
@@ -1150,7 +1226,9 @@ describe("what a chat is offered", () => {
     const allow = (tool: string) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
-          s.setConversationIntegration(userId, first, "outline", { allowTool: tool }),
+          on(userId, "outline", (account) =>
+            s.setConversationIntegration(userId, first, account, { allowTool: tool }),
+          ),
         ),
       );
     await allow("update_document");
@@ -1194,6 +1272,8 @@ describe("approvals", () => {
     conversationId: "c",
     messageId: "m",
     integrationId: "outline",
+    connectionId: "account",
+    account: null,
     tool: "create_document",
     label: "Create a document",
     access: "write" as const,
@@ -1276,10 +1356,10 @@ describe("approvals", () => {
             indexer: createSourceIndexer([]),
             approvals,
             owner: { userId, conversationId, messageId: "answer" },
-            permissionsFor: (integrationId) =>
-              service.permissionsFor(userId, conversationId, integrationId),
-            sessionFor: (integrationId) =>
-              service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+            permissionsFor: (connectionId) =>
+              service.permissionsFor(userId, conversationId, connectionId),
+            sessionFor: (connectionId) =>
+              service.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
             rowIdFor: () => Effect.succeed("pending-call"),
             reportAuthFailure: (_session, failure) =>
               service.reportAuthFailure({ userId, failure }),
@@ -1294,17 +1374,21 @@ describe("approvals", () => {
             | undefined;
           if (!handler) throw new Error("create document was not offered");
           if (change === "unprompted")
-            yield* service.updatePreferences(userId, "outline", {
-              toolPermissions: { create_document: "allow" },
-            });
+            yield* on(userId, "outline", (account) =>
+              service.updatePreferences(userId, account, {
+                toolPermissions: { create_document: "allow" },
+              }),
+            );
           const waiting = yield* Effect.forkChild(
             handler({ title: "Plan", collectionId: "c1", text: "Content" }, { toolCallId: "call" }),
           );
           if (change !== "unprompted") yield* waitForPending(userId);
           if (change === "block")
-            yield* service.updatePreferences(userId, "outline", {
-              toolPermissions: { create_document: "block" },
-            });
+            yield* on(userId, "outline", (account) =>
+              service.updatePreferences(userId, account, {
+                toolPermissions: { create_document: "block" },
+              }),
+            );
           if (change === "reconnect")
             yield* service.connectApiKey(userId, "outline", { key: "ol_api_good" });
           if (change === "client")
@@ -1354,10 +1438,10 @@ describe("prepared calls", () => {
         indexer: createSourceIndexer([]),
         approvals,
         owner: { userId, conversationId, messageId: "answer" },
-        permissionsFor: (integrationId) =>
-          service.permissionsFor(userId, conversationId, integrationId),
-        sessionFor: (integrationId) =>
-          service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+        permissionsFor: (connectionId) =>
+          service.permissionsFor(userId, conversationId, connectionId),
+        sessionFor: (connectionId) =>
+          service.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
         rowIdFor: () => Effect.succeed("pending-call"),
         reportAuthFailure: (_session, failure) => service.reportAuthFailure({ userId, failure }),
         reportMissingScopes: () => Effect.void,
@@ -1384,9 +1468,11 @@ describe("prepared calls", () => {
       const { userId, conversationId } = await setup();
       await run(
         Effect.flatMap(IntegrationService, (s) =>
-          s.updatePreferences(userId, "outline", {
-            toolPermissions: { create_document: "allow" },
-          }),
+          on(userId, "outline", (account) =>
+            s.updatePreferences(userId, account, {
+              toolPermissions: { create_document: "allow" },
+            }),
+          ),
         ),
       );
       const entered = Promise.withResolvers<void>();
@@ -1410,16 +1496,16 @@ describe("prepared calls", () => {
               indexer: createSourceIndexer([]),
               approvals: yield* IntegrationApprovals,
               owner: { userId, conversationId, messageId: "answer" },
-              permissionsFor: (id) =>
-                service.permissionsFor(userId, conversationId, id).pipe(
+              permissionsFor: (connectionId) =>
+                service.permissionsFor(userId, conversationId, connectionId).pipe(
                   Effect.tap(() =>
                     Effect.sync(() => {
                       if (++checks === 5) queued.resolve();
                     }),
                   ),
                 ),
-              sessionFor: (id) =>
-                service.session(userId, id).pipe(Effect.orElseSucceed(() => null)),
+              sessionFor: (connectionId) =>
+                service.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
               rowIdFor: () => Effect.succeed("pending-call"),
               reportAuthFailure: (_session, failure) =>
                 service.reportAuthFailure({ userId, failure }),
@@ -1443,9 +1529,11 @@ describe("prepared calls", () => {
             const read = prepared.group.handlers.int_outline__read_document as Handler;
             expect((yield* read({ id: "d1" }, { toolCallId: "read" })).ok).toBe(true);
             if (change === "block")
-              yield* service.updatePreferences(userId, "outline", {
-                toolPermissions: { create_document: "block" },
-              });
+              yield* on(userId, "outline", (account) =>
+                service.updatePreferences(userId, account, {
+                  toolPermissions: { create_document: "block" },
+                }),
+              );
             if (change === "reconnect")
               yield* service.connectApiKey(userId, "outline", { key: "ol_api_good" });
             release.resolve();
@@ -1479,11 +1567,13 @@ describe("prepared calls", () => {
     const fire = (access: "read" | "write", tool: string, args: Record<string, unknown>) =>
       run(
         Effect.gen(function* () {
-          const handler = yield* offeredHandler(
-            userId,
-            conversationId,
-            [{ integrationId: "outline", access }],
-            tool,
+          const handler = yield* on(userId, "outline", (connectionId) =>
+            offeredHandler(
+              userId,
+              conversationId,
+              [{ connectionId, integrationId: "outline", access }],
+              tool,
+            ),
           );
           return yield* handler(args, { toolCallId: "call" });
         }),
@@ -1500,8 +1590,10 @@ describe("prepared calls", () => {
 });
 
 describe("allowance uses", () => {
+  /** An answer, and the account of its owner its uses are counted against. */
   const answer = async () => {
     const userId = await newUser();
+    await connectKey(userId);
     const conversationId = uuidv7();
     const messageId = uuidv7();
     await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
@@ -1514,12 +1606,11 @@ describe("allowance uses", () => {
         status: "streaming",
       }),
     );
-    return messageId;
+    return { messageId, connectionId: await run(on(userId, "outline", Effect.succeed)) };
   };
 
   it("hands out at most the cap, however many calls race for it", async () => {
-    const messageId = await answer();
-    const use = { messageId, integrationId: "outline", allowanceId: "send" };
+    const use = { ...(await answer()), allowanceId: "send" };
     const taken = await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         Effect.all(
@@ -1541,15 +1632,14 @@ describe("allowance uses", () => {
     expect(
       await run(
         Effect.flatMap(IntegrationRepo, (repo) =>
-          repo.reserveAllowance({ ...use, messageId: other, cap: 3 }),
+          repo.reserveAllowance({ ...use, ...other, cap: 3 }),
         ),
       ),
     ).toBe(true);
   });
 
   it("lets a use given back be taken again", async () => {
-    const messageId = await answer();
-    const use = { messageId, integrationId: "outline", allowanceId: "send" };
+    const use = { ...(await answer()), allowanceId: "send" };
     const again = await run(
       Effect.gen(function* () {
         const repo = yield* IntegrationRepo;
@@ -1582,8 +1672,20 @@ describe("knowledge sync", () => {
         )
         .where(eq(knowledgeDocuments.collectionId, collectionId)),
     ).then(([row]) => Number(row?.total ?? 0));
-  const sources = <A, E>(f: (s: KnowledgeSourceService["Service"]) => Effect.Effect<A, E>) =>
-    run(Effect.flatMap(KnowledgeSourceService, f));
+  const sources = <A, E>(
+    f: (s: KnowledgeSourceService["Service"]) => Effect.Effect<A, E, IntegrationRepo>,
+  ) => run(Effect.flatMap(KnowledgeSourceService, f));
+  /** Saves a source as the person's account on the integration it names. */
+  const saveAs = (
+    s: KnowledgeSourceService["Service"],
+    userId: string,
+    input: Omit<Parameters<KnowledgeSourceService["Service"]["save"]>[1], "connectionId"> & {
+      integrationId: string;
+    },
+  ) => {
+    const { integrationId, ...rest } = input;
+    return on(userId, integrationId, (connectionId) => s.save(userId, { ...rest, connectionId }));
+  };
   const collectionFor = async (userId: string) => {
     const collectionId = uuidv7();
     await insert((db) =>
@@ -1605,7 +1707,7 @@ describe("knowledge sync", () => {
       await connectKey(userId);
       const collectionId = await collectionFor(userId);
       const source = await sources((s) =>
-        s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+        saveAs(s, userId, { collectionId, integrationId: "outline", root: handbook("all") }),
       );
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -1620,7 +1722,7 @@ describe("knowledge sync", () => {
         await entered.promise;
         if (change === "edit")
           await sources((s) =>
-            s.save(userId, {
+            saveAs(s, userId, {
               sourceId: source.id,
               collectionId,
               integrationId: "outline",
@@ -1659,7 +1761,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const source = await sources((s) =>
-      s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+      saveAs(s, userId, { collectionId, integrationId: "outline", root: handbook("all") }),
     );
     await insert((db) => db.update(user).set({ banned: true }).where(eq(user.id, userId)));
     const before = apiCalls.length;
@@ -1678,7 +1780,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const source = await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: handbook("all"),
@@ -1851,7 +1953,7 @@ describe("knowledge sync", () => {
     const collectionId = await collectionFor(userId);
 
     const source = await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: handbook("all", [{ nodeId: "document:d1", title: "Onboarding", mode: "exclude" }]),
@@ -1883,7 +1985,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: handbook("selected", [
@@ -1901,7 +2003,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const source = await sources((s) =>
-      s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+      saveAs(s, userId, { collectionId, integrationId: "outline", root: handbook("all") }),
     );
     await sources((s) => s.tick);
     expect(await mirrored(collectionId)).toEqual(["document:d1", "document:d2", "document:d3"]);
@@ -1925,7 +2027,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const source = await sources((s) =>
-      s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+      saveAs(s, userId, { collectionId, integrationId: "outline", root: handbook("all") }),
     );
     await sources((s) => s.tick);
     expect(await mirrored(collectionId)).toEqual(["document:d1", "document:d2", "document:d3"]);
@@ -1965,7 +2067,7 @@ describe("knowledge sync", () => {
     bodies.set("d3", { text: "x".repeat(200_001), updatedAt: original.updatedAt });
     try {
       const source = await sources((s) =>
-        s.save(userId, {
+        saveAs(s, userId, {
           collectionId,
           integrationId: "outline",
           root: handbook("selected", [
@@ -2000,7 +2102,7 @@ describe("knowledge sync", () => {
         .where(eq(knowledgeCollections.id, collectionId)),
     );
     await sources((s) =>
-      s.save(owner, { collectionId, integrationId: "outline", root: handbook("all") }),
+      saveAs(s, owner, { collectionId, integrationId: "outline", root: handbook("all") }),
     );
     expect(await sources((s) => s.list(owner, collectionId))).toMatchObject([{ canEdit: true }]);
     expect(await sources((s) => s.list(reader, collectionId))).toMatchObject([{ canEdit: false }]);
@@ -2011,7 +2113,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: { nodeId: "collection:gone", title: "Archive", mode: "all", rules: [] },
@@ -2028,7 +2130,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: { nodeId: "document:d1", title: "Onboarding", mode: "all", rules: [] },
@@ -2044,7 +2146,7 @@ describe("knowledge sync", () => {
     const collectionId = await collectionFor(userId);
     const pick = (nodeId: string, title: string) =>
       sources((s) =>
-        s.save(userId, {
+        saveAs(s, userId, {
           collectionId,
           integrationId: "outline",
           root: handbook("selected", [{ nodeId, title, mode: "include" }]),
@@ -2064,11 +2166,11 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const whole = await sources((s) =>
-      s.save(userId, { collectionId, integrationId: "outline", root: handbook("all") }),
+      saveAs(s, userId, { collectionId, integrationId: "outline", root: handbook("all") }),
     );
     await sources((s) => s.tick);
     const page = await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: { nodeId: "document:d1", title: "Onboarding", mode: "all", rules: [] },
@@ -2081,7 +2183,7 @@ describe("knowledge sync", () => {
 
     // The first source lets go of the page; the other one takes it next.
     await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         sourceId: whole.id,
@@ -2114,7 +2216,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: handbook("selected", [{ nodeId: "document:d3", title: "Holidays", mode: "include" }]),
@@ -2122,13 +2224,17 @@ describe("knowledge sync", () => {
     );
     await sources((s) => s.tick);
 
-    await run(Effect.flatMap(IntegrationService, (s) => s.disconnect(userId, "outline")));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(userId, "outline", (account) => s.disconnect(userId, account)),
+      ),
+    );
     const [paused] = await sources((s) => s.list(userId, collectionId));
     expect(paused).toMatchObject({ connected: false });
     // Nothing synced is dropped while paused.
     expect(await mirrored(collectionId)).toEqual(["document:d3"]);
 
-    // A new connection row: the source follows it without being edited.
+    // A new connection row, their only one there: the source follows it without being edited.
     await connectKey(userId);
     await sources((s) => s.tick);
     const [resumed] = await sources((s) => s.list(userId, collectionId));
@@ -2141,7 +2247,7 @@ describe("knowledge sync", () => {
     await connectKey(userId);
     const collectionId = await collectionFor(userId);
     const source = await sources((s) =>
-      s.save(userId, {
+      saveAs(s, userId, {
         collectionId,
         integrationId: "outline",
         root: handbook("selected", [{ nodeId: "document:d2", title: "Laptop", mode: "include" }]),
@@ -2161,6 +2267,202 @@ describe("knowledge sync", () => {
     const [after] = await sources((s) => s.list(userId, collectionId));
     expect(after).toMatchObject({ status: "error", connected: false });
     expect(await mirrored(collectionId)).toEqual(["document:d2"]);
+  });
+});
+
+describe("several accounts of one integration", () => {
+  const service = <A, E>(
+    f: (s: IntegrationService["Service"]) => Effect.Effect<A, E, IntegrationRepo>,
+  ) => run(Effect.flatMap(IntegrationService, f));
+  const newConversation = async (userId: string) => {
+    const id = uuidv7();
+    await insert((db) => db.insert(conversations).values({ id, userId }));
+    return id;
+  };
+  const accountsOf = async (userId: string) =>
+    ((await outlineFor(userId))?.connections ?? []).map((account) => ({
+      id: account.id,
+      name: account.name ?? account.accountLabel,
+      status: account.status,
+    }));
+  /** Two accounts of one person: Ada's own and the `bo-` one, named "Home". */
+  const twoAccounts = async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    validTokens.add("bo-key");
+    await service((s) => s.connectApiKey(userId, "outline", { key: "bo-key" }));
+    const [ada, bo] = await accountsOf(userId);
+    await service((s) => s.updatePreferences(userId, bo!.id, { name: "Home" }));
+    return { userId, ada: ada!.id, bo: bo!.id };
+  };
+  const toolsIn = (userId: string, conversationId: string, grants: IntegrationGrant[] | null) =>
+    run(
+      Effect.gen(function* () {
+        const integrations = yield* IntegrationService;
+        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants });
+        const prepared = prepareIntegrationTools({
+          offered,
+          indexer: createSourceIndexer([]),
+          approvals: yield* IntegrationApprovals,
+          owner: { userId, conversationId, messageId: "answer" },
+          permissionsFor: (connectionId) =>
+            integrations.permissionsFor(userId, conversationId, connectionId),
+          sessionFor: (connectionId) =>
+            integrations.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
+          rowIdFor: () => Effect.succeed("call-row"),
+          reportAuthFailure: () => Effect.void,
+          reportMissingScopes: () => Effect.void,
+          allowanceUses: unlimited,
+        })!;
+        const list = prepared.group.handlers.int_outline__list as (
+          args: Record<string, unknown>,
+          context: { toolCallId: string },
+        ) => Effect.Effect<IntegrationModelResult>;
+        return { offered, prepared, list };
+      }),
+    );
+  /** The keys requests reached Outline with while `f` ran. */
+  const keysDuring = async <A>(f: () => Promise<A>) => {
+    const keys: string[] = [];
+    beforeApiResponse = async (request) => {
+      keys.push(request.headers.authorization ?? "");
+    };
+    try {
+      return { result: await f(), keys };
+    } finally {
+      beforeApiResponse = null;
+    }
+  };
+
+  it("connects another account beside one, and the same account again reconnects it", async () => {
+    const { userId, ada, bo } = await twoAccounts();
+    expect(await accountsOf(userId)).toEqual([
+      { id: ada, name: "ada@example.com · Acme", status: "active" },
+      { id: bo, name: "Home", status: "active" },
+    ]);
+    await connectKey(userId);
+    expect((await accountsOf(userId)).map((account) => account.id)).toEqual([ada, bo]);
+
+    // Reconnecting one account must not sign in as the other.
+    const swapped = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        Effect.flip(s.connectApiKey(userId, "outline", { key: "ol_api_good" }, bo)),
+      ),
+    );
+    expect(swapped).toMatchObject({ reason: expect.stringMatching(/another account than “Home”/) });
+
+    await service((s) => s.disconnect(userId, ada));
+    expect(await accountsOf(userId)).toEqual([{ id: bo, name: "Home", status: "active" }]);
+  });
+
+  it("offers one tool set, and each call runs as the account it names", async () => {
+    const { userId, ada, bo } = await twoAccounts();
+    const conversationId = await newConversation(userId);
+    const { offered, prepared, list } = await toolsIn(userId, conversationId, null);
+    expect(offered.map((offer) => offer.connectionId)).toEqual([ada, bo]);
+    expect([...prepared.names.keys()].filter((name) => name.endsWith("__list"))).toEqual([
+      "int_outline__list",
+    ]);
+
+    const unnamed = await keysDuring(() => run(list({}, { toolCallId: "unnamed" })));
+    expect(unnamed.result).toMatchObject({ ok: false });
+    expect(unnamed.keys).toEqual([]);
+    const home = await keysDuring(() => run(list({ account: "Home" }, { toolCallId: "home" })));
+    expect(home.result).toMatchObject({ ok: true });
+    expect(new Set(home.keys)).toEqual(new Set(["Bearer bo-key"]));
+
+    // Blocked for Home only: still offered for Ada, and refused when named for Home.
+    await service((s) => s.updatePreferences(userId, bo, { toolPermissions: { list: "block" } }));
+    const blocked = await toolsIn(userId, conversationId, null);
+    const refused = await keysDuring(() =>
+      run(blocked.list({ account: "Home" }, { toolCallId: "blocked" })),
+    );
+    expect(refused.result).toMatchObject({ ok: false, refused: true });
+    expect(refused.keys).toEqual([]);
+
+    // With one account left on in the chat, the tool takes no account at all.
+    await service((s) =>
+      s.setConversationIntegration(userId, conversationId, bo, { enabled: false }),
+    );
+    const alone = await toolsIn(userId, conversationId, null);
+    expect(alone.offered.map((offer) => offer.connectionId)).toEqual([ada]);
+    expect(alone.prepared.names.get("int_outline__list")?.chooses).toBe(false);
+    const plain = await keysDuring(() => run(alone.list({}, { toolCallId: "plain" })));
+    expect(plain.result).toMatchObject({ ok: true });
+    expect(new Set(plain.keys)).toEqual(new Set(["Bearer ol_api_good"]));
+  });
+
+  it("hands what lost its account to the next one only while it is the only one", async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    const [ada] = await accountsOf(userId);
+    const scheduleId = uuidv7();
+    await insert((db) =>
+      db.insert(schedules).values({
+        id: scheduleId,
+        userId,
+        name: "Weekly",
+        prompt: "Summarize",
+        scheduleText: "Every Monday",
+        cron: "0 9 * * 1",
+        timezone: "UTC",
+        integrationGrants: [{ connectionId: ada!.id, integrationId: "outline", access: "read" }],
+      }),
+    );
+    const grantOf = async () =>
+      (
+        await insert((db) =>
+          db
+            .select({ grants: schedules.integrationGrants })
+            .from(schedules)
+            .where(eq(schedules.id, scheduleId)),
+        )
+      )[0]?.grants?.[0]?.connectionId;
+
+    // Disconnected, then connected again as their only account: the grant follows.
+    await service((s) => s.disconnect(userId, ada!.id));
+    await connectKey(userId);
+    const [again] = await accountsOf(userId);
+    expect(again!.id).not.toBe(ada!.id);
+    expect(await grantOf()).toBe(again!.id);
+
+    // With two accounts there is no guessing: the grant waits to be edited.
+    validTokens.add("bo-key");
+    await service((s) => s.connectApiKey(userId, "outline", { key: "bo-key" }));
+    await service((s) => s.disconnect(userId, again!.id));
+    await connectKey(userId);
+    expect(await grantOf()).toBe(again!.id);
+  });
+
+  it("refuses to reconnect an account as one already connected beside it", async () => {
+    const { userId, ada, bo } = await twoAccounts();
+    // As if Ada's row came from before accounts were known.
+    await insert((db) =>
+      db
+        .update(integrationConnections)
+        .set({ accountKey: null })
+        .where(eq(integrationConnections.id, ada)),
+    );
+    const taken = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        Effect.flip(s.connectApiKey(userId, "outline", { key: "bo-key" }, ada)),
+      ),
+    );
+    expect(taken).toMatchObject({ reason: "That account is already connected as “Home”." });
+    expect((await accountsOf(userId)).map((account) => account.id)).toEqual([ada, bo]);
+  });
+
+  it("lets a schedule's grant reach only the account it names", async () => {
+    const { userId, bo } = await twoAccounts();
+    const conversationId = await newConversation(userId);
+    const { offered } = await toolsIn(userId, conversationId, [
+      { connectionId: bo, integrationId: "outline", access: "read" },
+    ]);
+    expect(offered.map((offer) => [offer.connectionId, offer.unattended?.access])).toEqual([
+      [bo, "read"],
+    ]);
   });
 });
 
@@ -2195,8 +2497,9 @@ describe("several integrations of one type", () => {
     second?.close();
   });
 
-  const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
-    run(Effect.flatMap(IntegrationService, f));
+  const service = <A, E>(
+    f: (s: IntegrationService["Service"]) => Effect.Effect<A, E, IntegrationRepo>,
+  ) => run(Effect.flatMap(IntegrationService, f));
   const refusal = <A>(
     f: (s: IntegrationService["Service"]) => Effect.Effect<A, IntegrationRejected>,
   ) => service((s) => Effect.flip(f(s))).then((error) => error.reason);
@@ -2231,7 +2534,7 @@ describe("several integrations of one type", () => {
     expect(
       mine
         .filter((entry) => entry.kind === "outline")
-        .map((entry) => [entry.id, entry.name, entry.connection?.accountLabel]),
+        .map((entry) => [entry.id, entry.name, entry.connections[0]?.accountLabel]),
     ).toEqual([
       ["outline-2", "Docs B", "ada@example.com · Second"],
       ["outline", "Outline", "ada@example.com · Acme"],
@@ -2250,10 +2553,10 @@ describe("several integrations of one type", () => {
           indexer: createSourceIndexer([]),
           approvals,
           owner: { userId, conversationId, messageId: "answer" },
-          permissionsFor: (integrationId) =>
-            integrations.permissionsFor(userId, conversationId, integrationId),
-          sessionFor: (integrationId) =>
-            integrations.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+          permissionsFor: (connectionId) =>
+            integrations.permissionsFor(userId, conversationId, connectionId),
+          sessionFor: (connectionId) =>
+            integrations.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
           rowIdFor: () => Effect.succeed("call"),
           reportAuthFailure: () => Effect.void,
           reportMissingScopes: () => Effect.void,
@@ -2279,7 +2582,9 @@ describe("several integrations of one type", () => {
 
     // Deleting one waits for its knowledge sources, then takes its settings with it.
     await service((s) =>
-      s.setConversationIntegration(userId, conversationId, "outline-2", { enabled: false }),
+      on(userId, "outline-2", (account) =>
+        s.setConversationIntegration(userId, conversationId, account, { enabled: false }),
+      ),
     );
     const collectionId = uuidv7();
     await insert((db) =>
@@ -2299,6 +2604,8 @@ describe("several integrations of one type", () => {
     );
     await insert((db) => db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId)));
     const scheduleId = uuidv7();
+    const accountA = await run(on(userId, "outline", Effect.succeed));
+    const accountB = await run(on(userId, "outline-2", Effect.succeed));
     await insert((db) =>
       db.insert(schedules).values({
         id: scheduleId,
@@ -2309,8 +2616,8 @@ describe("several integrations of one type", () => {
         cron: "0 9 * * 1",
         timezone: "UTC",
         integrationGrants: [
-          { integrationId: "outline", access: "read" },
-          { integrationId: "outline-2", access: "write" },
+          { connectionId: accountA, integrationId: "outline", access: "read" },
+          { connectionId: accountB, integrationId: "outline-2", access: "write" },
         ],
       }),
     );
@@ -2322,7 +2629,9 @@ describe("several integrations of one type", () => {
         .from(schedules)
         .where(eq(schedules.id, scheduleId)),
     );
-    expect(schedule?.grants).toEqual([{ integrationId: "outline", access: "read" }]);
+    expect(schedule?.grants).toEqual([
+      { connectionId: accountA, integrationId: "outline", access: "read" },
+    ]);
     const left = await service((s) => s.listForUser(userId));
     expect(left.map((entry) => entry.id)).not.toContain("outline-2");
     expect(

@@ -63,6 +63,18 @@ vi.mock("~/modules/tools/server/url-safety.ts", async (importOriginal) => {
 
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 
+/** Runs `f` with the person's account on an integration: their first, the one most tests connect. */
+const on = <A, E, R>(
+  userId: string,
+  integrationId: string,
+  f: (connectionId: string) => Effect.Effect<A, E, R>,
+) =>
+  Effect.flatMap(IntegrationRepo, (repo) => repo.listForUser(userId)).pipe(
+    Effect.flatMap((rows) =>
+      f(rows.find((row) => row.config.id === integrationId)?.connections[0]?.id ?? "no-account"),
+    ),
+  );
+
 /** What the test server describes `search` as; a test changes it to make the tool drift. */
 let searchDescription = "Search the docs.";
 const deleted: string[] = [];
@@ -328,12 +340,12 @@ const toolsFor = (
         indexer: createSourceIndexer([]),
         approvals,
         owner: { userId, conversationId, messageId: "answer" },
-        permissionsFor: (integrationId) =>
+        permissionsFor: (connectionId) =>
           Effect.sync(() => void reads.permissions++).pipe(
-            Effect.andThen(service.permissionsFor(userId, conversationId, integrationId)),
+            Effect.andThen(service.permissionsFor(userId, conversationId, connectionId)),
           ),
-        sessionFor: (integrationId) =>
-          service.session(userId, integrationId).pipe(Effect.orElseSucceed(() => null)),
+        sessionFor: (connectionId) =>
+          service.session(userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
         // One durable row per provider call, as the stream observer mints it.
         rowIdFor: (providerCallId) => Effect.succeed(`row-${providerCallId}-${conversationId}`),
         reportAuthFailure: (_session, failure) => service.reportAuthFailure({ userId, failure }),
@@ -617,7 +629,7 @@ describe("an MCP server set up by an admin", () => {
     await save("anonymous");
     expect(await offeredNames(person, personChat)).toEqual([]);
     const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
-    expect(after.find((row) => row.id === id)?.connection).toMatchObject({
+    expect(after.find((row) => row.id === id)?.connections[0]).toMatchObject({
       authKind: "api_key",
       status: "needs_reauth",
     });
@@ -640,7 +652,7 @@ describe("an MCP server set up by an admin", () => {
     ]);
     const connectionOf = () =>
       run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person))).then(
-        (rows) => rows.find((row) => row.id === id)?.connection,
+        (rows) => rows.find((row) => row.id === id)?.connections[0],
       );
 
     // Nobody pressed anything, and a new chat already has it.
@@ -657,7 +669,11 @@ describe("an MCP server set up by an admin", () => {
       Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token: "t" })),
     );
     expect(await connectionOf()).toMatchObject({ authKind: "api_key" });
-    await run(Effect.flatMap(IntegrationService, (s) => s.disconnect(person, id)));
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(person, id, (account) => s.disconnect(person, account)),
+      ),
+    );
     expect(await connectionOf()).toMatchObject({ authKind: "none", status: "active" });
 
     // Moved to another server, the open connection follows; a token would need reconnecting.
@@ -684,7 +700,7 @@ describe("an MCP server set up by an admin", () => {
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(listed.find((row) => row.id === shared)).toMatchObject({
       methods: { open: "shared", everyone: true },
-      connection: { authKind: "shared", accountLabel: "Shared key" },
+      connections: [{ authKind: "shared", accountLabel: "Shared key" }],
     });
   });
 
@@ -694,10 +710,18 @@ describe("an MCP server set up by an admin", () => {
       url: `${base}/mcp`,
       ways: "token",
     });
-    const connect = (token: string) =>
-      run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token })));
+    const connect = (token: string, connectionId?: string) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.connectApiKey(person, id, { token }, connectionId),
+        ),
+      );
     await connect("first");
-    const before = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    const before = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(person, id, (account) => s.session(person, account)),
+      ),
+    );
     await run(
       Effect.flatMap(IntegrationService, (s) =>
         s.saveConfig({
@@ -710,14 +734,19 @@ describe("an MCP server set up by an admin", () => {
         }),
       ),
     );
-    await connect("second");
+    // Reconnecting the same account, as Settings does once the address moved.
+    await connect("second", before.connectionId);
     // A call prepared before the move still names the old address: it gets nothing.
     const stale = await runtime.runPromiseExit(before.credential);
     expect(Exit.isFailure(stale) && Cause.squash(stale.cause)).toMatchObject({
       _tag: "IntegrationRequestFailed",
       message: "This integration is no longer connected.",
     });
-    const after = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    const after = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(person, id, (account) => s.session(person, account)),
+      ),
+    );
     expect(await run(after.credential)).toMatchObject({
       kind: "api_key",
       values: { token: "second" },
@@ -1084,9 +1113,11 @@ describe("an MCP server set up by an admin", () => {
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.updatePreferences(admin, id, {
-          toolPermissions: { release: "allow", delete_page: "allow" },
-        }),
+        on(admin, id, (account) =>
+          s.updatePreferences(admin, account, {
+            toolPermissions: { release: "allow", delete_page: "allow" },
+          }),
+        ),
       ),
     );
     const conversationId = await newConversation(admin);
@@ -1140,7 +1171,9 @@ describe("an MCP server set up by an admin", () => {
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.updatePreferences(admin, id, { toolPermissions: { release: "allow" } }),
+        on(admin, id, (account) =>
+          s.updatePreferences(admin, account, { toolPermissions: { release: "allow" } }),
+        ),
       ),
     );
     const conversationId = await newConversation(admin);
@@ -1189,7 +1222,9 @@ describe("an MCP server set up by an admin", () => {
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(admin, id)));
     await run(
       Effect.flatMap(IntegrationService, (s) =>
-        s.updatePreferences(admin, id, { toolPermissions: { provision: "allow" } }),
+        on(admin, id, (account) =>
+          s.updatePreferences(admin, account, { toolPermissions: { provision: "allow" } }),
+        ),
       ),
     );
     const conversationId = await newConversation(admin);
@@ -1244,6 +1279,7 @@ describe("an MCP server set up by an admin", () => {
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
+          accountKey: null,
           userId: admin,
           integrationId: id,
           authKind: "oauth",
@@ -1264,13 +1300,13 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(JSON.stringify(refused)).toMatch(/Grant more access/);
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(admin)));
-    expect(listed.find((row) => row.id === id)?.connection).toMatchObject({
+    expect(listed.find((row) => row.id === id)?.connections[0]).toMatchObject({
       status: "active",
       requiredScopes: ["docs:read", "docs:write"],
     });
 
     // A server naming new scopes on every refusal stops adding past the limit.
-    const connectionId = listed.find((row) => row.id === id)!.connection!.id;
+    const connectionId = listed.find((row) => row.id === id)!.connections[0]!.id;
     const held = await run(
       Effect.flatMap(IntegrationRepo, (repo) => repo.getConnectionById(connectionId)),
     );
@@ -1311,23 +1347,30 @@ describe("an MCP server set up by an admin", () => {
     const id = await setUp("Docs rescoped", config);
     const normalized = mcpAdapter.normalizeConfig(config);
     if ("error" in normalized) throw new Error(normalized.error);
-    const connect = (accessToken: string) =>
+    // MCP names no account, so signing in again is a reconnect of the one it names.
+    const connect = (accessToken: string, connectionId?: string) =>
       run(
         Effect.flatMap(IntegrationRepo, (repo) =>
           saveAtCurrent(repo, {
+            accountKey: null,
             userId: person,
             integrationId: id,
             authKind: "oauth",
             credentials: { kind: "oauth", accessToken, refreshToken: null, expiresAt: null },
             accountLabel: "ada",
             fingerprint: normalized.fingerprint,
+            connectionId: connectionId ?? null,
           }),
         ),
       );
     await connect("narrow");
-    const stale = await run(Effect.flatMap(IntegrationService, (s) => s.session(person, id)));
+    const stale = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        on(person, id, (account) => s.session(person, account)),
+      ),
+    );
     // The person signs in again with more access before the old call's refusal lands.
-    await connect("wide");
+    await connect("wide", stale.connectionId);
     await run(
       Effect.flatMap(IntegrationService, (s) =>
         s.reportMissingScopes(
@@ -1345,11 +1388,17 @@ describe("an MCP server set up by an admin", () => {
   it("marks the connection whose token the server refused, and not one that replaced it", async () => {
     const admin = await newUser();
     const id = await setUp("Docs refusing", { url: `${base}/refusing`, ways: "token" });
-    const connect = (userId: string, token: string) =>
-      run(Effect.flatMap(IntegrationService, (s) => s.connectApiKey(userId, id, { token })));
+    const connect = (userId: string, token: string, reconnect = false) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          reconnect
+            ? on(userId, id, (account) => s.connectApiKey(userId, id, { token }, account))
+            : s.connectApiKey(userId, id, { token }),
+        ),
+      );
     const statusOf = (userId: string) =>
       run(Effect.flatMap(IntegrationService, (s) => s.listForUser(userId))).then(
-        (rows) => rows.find((row) => row.id === id)?.connection?.status,
+        (rows) => rows.find((row) => row.id === id)?.connections[0]?.status,
       );
     await connect(admin, "revoked");
     const catalog = await check(id, admin);
@@ -1373,7 +1422,7 @@ describe("an MCP server set up by an admin", () => {
     const person = await newUser();
     await connect(person, "old");
     const prepared = await toolsFor(person, await newConversation(person));
-    beforeRefusal = () => connect(person, "new");
+    beforeRefusal = () => connect(person, "new", true);
     const late = await run(
       handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "late" }),
     );
@@ -1401,7 +1450,7 @@ describe("an MCP server set up by an admin", () => {
     await run(Effect.flatMap(IntegrationService, (s) => s.connectOpen(person, id)));
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(listed.find((row) => row.id === id)).toMatchObject({
-      connection: { authKind: "shared", accountLabel: "Shared key" },
+      connections: [{ authKind: "shared", accountLabel: "Shared key" }],
       tools: [{ name: "search", access: "read" }],
     });
     const conversationId = await newConversation(person);
@@ -1420,7 +1469,7 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(refused).toMatchObject({ reason: "API keys are turned off for this integration." });
     const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
-    expect(after.find((row) => row.id === id)?.connection?.authKind).toBe("shared");
+    expect(after.find((row) => row.id === id)?.connections[0]?.authKind).toBe("shared");
 
     // A key the server stops taking is the admin's to fix: nobody is signed out for it.
     await run(
@@ -1446,7 +1495,7 @@ describe("an MCP server set up by an admin", () => {
     );
     expect(JSON.stringify(failed)).toMatch(/refused the shared key/);
     const still = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
-    expect(still.find((row) => row.id === id)?.connection?.status).toBe("active");
+    expect(still.find((row) => row.id === id)?.connections[0]?.status).toBe("active");
   });
 });
 
@@ -1538,9 +1587,9 @@ describe("an MCP server a person adds for themselves", () => {
       (await service((s) => s.chatIntegrations(owner, chat))).find(
         (entry) => entry.integrationId === id,
       ),
-    ).toMatchObject({ enabled: true, accountLabel: null });
+    ).toMatchObject({ enabled: true, account: null });
     expect((await service((s) => s.listForUser(owner))).find((row) => row.id === id)).toMatchObject(
-      { personal: true, connection: { authKind: "none" } },
+      { personal: true, connections: [{ authKind: "none" }] },
     );
 
     // Taking the capability away stops it without deleting it.

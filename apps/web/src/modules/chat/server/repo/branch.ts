@@ -169,7 +169,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
               .returning()
               .pipe(Effect.orDie);
             const branch = branchRows[0]!;
-            // A chat's integration choices go with it, like its approval
+            // A chat's account choices go with it, like its approval
             // level. Answers already given to waiting calls do not.
             const integrationChoices = yield* tx
               .select()

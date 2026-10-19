@@ -16,6 +16,8 @@ const call = (prompt: NonNullable<PendingIntegrationCall["prompt"]>): PendingInt
   kind: "elicitation",
   callId: "row-1",
   conversationId: "c",
+  connectionId: "connection",
+  account: null,
   messageId: "m",
   integrationId: "mcp",
   tool: "release",

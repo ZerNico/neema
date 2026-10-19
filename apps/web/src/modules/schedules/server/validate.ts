@@ -45,7 +45,12 @@ export type ValidatedSchedule = Omit<
  */
 export const normalizeGrant = (grant: IntegrationGrant): IntegrationGrant | string => {
   const entries = Object.entries(grant.allowances ?? {});
-  if (entries.length === 0) return { integrationId: grant.integrationId, access: grant.access };
+  const named = {
+    connectionId: grant.connectionId,
+    integrationId: grant.integrationId,
+    access: grant.access,
+  };
+  if (entries.length === 0) return named;
   if (grant.access !== "write") return "only read-and-write access can let runs contact people";
   const allowances: Record<string, { targets: string[] }> = {};
   for (const [id, entry] of entries) {
@@ -56,7 +61,7 @@ export const normalizeGrant = (grant: IntegrationGrant): IntegrationGrant | stri
     if (unique.length === 0) return "add at least one address to each allowance";
     allowances[id] = { targets: unique };
   }
-  return { integrationId: grant.integrationId, access: grant.access, allowances };
+  return { ...named, allowances };
 };
 
 /** An allowance the grant names that its integration's type does not declare, if any. */
@@ -146,7 +151,7 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
             ...new Map(
               grants
                 .filter((grant) => typeof grant !== "string")
-                .map((grant) => [grant.integrationId, grant]),
+                .map((grant) => [grant.connectionId, grant]),
             ).values(),
           ],
         }
@@ -162,8 +167,9 @@ export const checkScheduleResources = (
   settings: Pick<ValidatedSchedule, "skillIds" | "collectionIds" | "chatId" | "integrationGrants">,
 ) =>
   Effect.gen(function* () {
-    // A grant needs the person's own working connection now, the way a
-    // collection needs to be readable; a fire rechecks it.
+    // A grant needs a working account of the person's own now, on the
+    // integration it names, the way a collection needs to be readable; a fire
+    // rechecks it.
     for (const grant of settings.integrationGrants ?? []) {
       const [connection] = yield* tx
         .select({ status: integrationConnections.status, kind: integrationConfigs.kind })
@@ -174,6 +180,7 @@ export const checkScheduleResources = (
         )
         .where(
           and(
+            eq(integrationConnections.id, grant.connectionId),
             eq(integrationConnections.userId, userId),
             eq(integrationConnections.integrationId, grant.integrationId),
             eq(integrationConfigs.enabled, true),

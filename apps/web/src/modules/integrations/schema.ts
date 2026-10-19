@@ -45,10 +45,25 @@ export interface AdminCatalog {
   version: string | null;
 }
 
+/**
+ * Ways in that hold nothing of the person's: open, or the admin's shared key.
+ * A person has at most one such connection per integration.
+ */
+export const NO_ACCOUNT_KINDS = ["none", "shared"] as const;
+export const usesNoAccount = (kind: IntegrationConnectionView["authKind"]) =>
+  NO_ACCOUNT_KINDS.some((entry) => entry === kind);
+
+/** What a person calls an account: their own name for it, else what the service reports. */
+export const accountName = (connection: { name: string | null; accountLabel: string }) =>
+  connection.name ?? connection.accountLabel;
+
+/** One account of a person on an integration. */
 export interface IntegrationConnectionView {
   id: string;
   authKind: "oauth" | "api_key" | "none" | "shared";
   accountLabel: string;
+  /** The person's own name for it; null shows the account label. */
+  name: string | null;
   status: "active" | "needs_reauth";
   offerByDefault: boolean;
   /** Only tools set away from their default. */
@@ -57,6 +72,8 @@ export interface IntegrationConnectionView {
   scope: string[] | null;
   /** OAuth scopes a call was refused for; signing in again grants them. */
   requiredScopes: string[] | null;
+  /** What disconnecting it would leave without credentials. */
+  dependents: { sources: number; schedules: number };
   createdAt: string;
 }
 
@@ -86,12 +103,13 @@ export interface UserIntegration {
   /** What chats can be offered, in order, before any per-person permission. */
   tools: ReadonlyArray<IntegrationToolInfo>;
   apiKeyHelpUrl: string | null;
-  connection: IntegrationConnectionView | null;
-  /** What disconnecting would leave without credentials. */
-  dependents: { sources: number; schedules: number };
+  /** This person's accounts on it, oldest first; empty when not connected. */
+  connections: ReadonlyArray<IntegrationConnectionView>;
 }
 
 export const IntegrationIdInput = Schema.Struct({ integrationId: IntegrationId });
+
+export const ConnectionIdInput = Schema.Struct({ connectionId: EntityId });
 
 /** A public MCP server one person added for themselves; only they use and review it. */
 export interface PersonalServer {
@@ -169,6 +187,8 @@ export const ApproveCatalogInput = Schema.Struct({
 
 export const ConnectApiKeyInput = Schema.Struct({
   integrationId: IntegrationId,
+  /** Replaces this account's key; absent adds an account. */
+  connectionId: Schema.optionalKey(EntityId),
   /** The manifest's API key fields by key; the service checks them against it. */
   values: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))).check(
     Schema.isMaxProperties(10),
@@ -179,8 +199,10 @@ export const ToolPermission = Schema.Literals(["allow", "ask", "block"]);
 export type ToolPermission = typeof ToolPermission.Type;
 
 export const UpdateConnectionInput = Schema.Struct({
-  integrationId: IntegrationId,
+  connectionId: EntityId,
   offerByDefault: Schema.optionalKey(Schema.Boolean),
+  /** Null goes back to what the service reports. */
+  name: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(60)))),
   /** Merged into what is stored; one tool or a whole group at a time. */
   toolPermissions: Schema.optionalKey(
     Schema.Record(Schema.String.check(Schema.isMaxLength(64)), ToolPermission),
@@ -195,8 +217,8 @@ export const UpdateConnectionInput = Schema.Struct({
 
 export const ConversationIntegrationInput = Schema.Struct({
   conversationId: EntityId,
-  integrationId: IntegrationId,
-  /** Null returns the chat to the connection's default. */
+  connectionId: EntityId,
+  /** Null returns the chat to the account's default. */
   enabled: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 
@@ -278,13 +300,14 @@ export const SourceRoot = Schema.Struct({
 export type SourceRoot = typeof SourceRoot.Type;
 
 export const BrowseInput = Schema.Struct({
-  integrationId: IntegrationId,
+  connectionId: EntityId,
   parentId: Schema.optionalKey(EntityId),
 });
 
 export const SaveKnowledgeSourceInput = Schema.Struct({
   collectionId: EntityId,
-  integrationId: IntegrationId,
+  /** The owner's account the sync runs as. */
+  connectionId: EntityId,
   /** Absent adds a new source; present edits that one. */
   sourceId: Schema.optionalKey(EntityId),
   root: SourceRoot,
@@ -306,6 +329,10 @@ export interface KnowledgeSourceView {
   canEdit: boolean;
   collectionId: string;
   integrationId: string;
+  /** The account it syncs as; null once that account was disconnected. */
+  connectionId: string | null;
+  /** That account's name, for the owner choosing between several. */
+  account: string | null;
   root: SourceRoot;
   status: "idle" | "syncing" | "error";
   lastError: string | null;
@@ -323,6 +350,9 @@ export interface PendingIntegrationCall {
   conversationId: string;
   messageId: string;
   integrationId: string;
+  /** Which of the person's accounts acts, and what they call it; null without an account. */
+  connectionId: string;
+  account: string | null;
   tool: string;
   /** The tool as the person knows it, as the activity row names it. */
   label: string;
@@ -342,7 +372,9 @@ export interface PendingIntegrationCall {
 }
 
 /** What deciding a call would do, in the words the card and a connected app both show. */
-export const approvalConsequence = (call: PendingIntegrationCall, service: string) =>
-  call.targets.length > 0
-    ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from your ${service} account.`
-    : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with your ${service} account.`;
+export const approvalConsequence = (call: PendingIntegrationCall, service: string) => {
+  const account = `your ${service} account${call.account ? ` “${call.account}”` : ""}`;
+  return call.targets.length > 0
+    ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from ${account}.`
+    : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with ${account}.`;
+};

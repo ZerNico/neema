@@ -31,6 +31,8 @@ export const IntegrationToolActivity = Schema.Struct({
   /** Model-facing name (`int_…`); the prefix is the durable discriminator. */
   name: bounded(INTEGRATION_ACTIVITY_LIMITS.name),
   integrationId: bounded(32),
+  /** The account that acted, as the person named it then; absent with one account or none. */
+  account: Schema.optional(bounded(INTEGRATION_ACTIVITY_LIMITS.name)),
   tool: bounded(64),
   label: bounded(INTEGRATION_ACTIVITY_LIMITS.name),
   access: Access,
@@ -64,6 +66,8 @@ export const IntegrationToolEnvelope = Schema.Union([
     callIndex: Schema.Int,
     textOffset: Schema.optionalKey(Schema.Int),
     integrationId: bounded(32),
+    /** The account the call names, when it names one. */
+    account: Schema.optionalKey(bounded(INTEGRATION_ACTIVITY_LIMITS.name)),
     tool: bounded(64),
     label: bounded(INTEGRATION_ACTIVITY_LIMITS.name),
     access: Access,
@@ -95,6 +99,8 @@ const clamp = (value: string, max: number) =>
 export function projectIntegrationToolResult(input: {
   name: string;
   integrationId: string;
+  /** The account that acted, when the chat had several to choose from. */
+  account?: string | null;
   tool: string;
   label: string;
   access: "read" | "write" | "destructive";
@@ -123,6 +129,7 @@ export function projectIntegrationToolResult(input: {
     version: 1,
     name: clamp(input.name, INTEGRATION_ACTIVITY_LIMITS.name),
     integrationId: input.integrationId,
+    ...(input.account ? { account: clamp(input.account, INTEGRATION_ACTIVITY_LIMITS.name) } : {}),
     tool: input.tool,
     label: clamp(input.label, INTEGRATION_ACTIVITY_LIMITS.name),
     access: input.access,

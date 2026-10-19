@@ -701,12 +701,10 @@ export const prepareGenerationTools = (
             conversationId: input.conversationId,
             messageId: input.messageId,
           },
-          permissionsFor: (integrationId) =>
-            integrations.permissionsFor(input.userId, input.conversationId, integrationId),
-          sessionFor: (integrationId) =>
-            integrations
-              .session(input.userId, integrationId)
-              .pipe(Effect.orElseSucceed(() => null)),
+          permissionsFor: (connectionId) =>
+            integrations.permissionsFor(input.userId, input.conversationId, connectionId),
+          sessionFor: (connectionId) =>
+            integrations.session(input.userId, connectionId).pipe(Effect.orElseSucceed(() => null)),
           rowIdFor: (providerCallId) =>
             Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
               Effect.map((row) => row?.rowId),
@@ -726,17 +724,17 @@ export const prepareGenerationTools = (
               scopes,
             ),
           allowanceUses: {
-            reserve: (integrationId, allowance) =>
+            reserve: (connectionId, allowance) =>
               integrations.reserveAllowance({
                 messageId: input.messageId,
-                integrationId,
+                connectionId,
                 allowanceId: allowance.id,
                 cap: allowance.cap,
               }),
-            release: (integrationId, allowance) =>
+            release: (connectionId, allowance) =>
               integrations.releaseAllowance({
                 messageId: input.messageId,
-                integrationId,
+                connectionId,
                 allowanceId: allowance.id,
               }),
           },

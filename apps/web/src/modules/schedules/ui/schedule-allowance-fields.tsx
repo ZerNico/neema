@@ -36,6 +36,7 @@ export function ScheduleAllowanceFields({
     const { [id]: _removed, ...rest } = current;
     const next = targets ? { ...rest, [id]: { targets } } : rest;
     onChange({
+      connectionId: grant.connectionId,
       integrationId: grant.integrationId,
       access: grant.access,
       ...(Object.keys(next).length ? { allowances: next } : {}),

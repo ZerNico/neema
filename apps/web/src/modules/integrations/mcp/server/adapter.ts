@@ -351,7 +351,9 @@ export const mcpAdapter: IntegrationAdapter = {
           try: (signal) => connection.client.listTools(undefined, { signal, timeout: 30_000 }),
           catch: (error) => failed("verify", connection, error),
         });
-        return { accountLabel: accountLabel(credential) };
+        // MCP says nothing stable about who signed in, so each sign-in or
+        // token is another account unless it reconnects a named one.
+        return { accountLabel: accountLabel(credential), accountKey: null };
       }),
     ),
   scopeOptions: null,

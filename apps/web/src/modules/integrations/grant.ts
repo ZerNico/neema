@@ -14,6 +14,9 @@ const AllowanceId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$
  * the exact people each of its allowances may reach.
  */
 export const IntegrationGrant = Schema.Struct({
+  /** The owner's account the run acts as; a grant never reaches their others. */
+  connectionId: EntityId,
+  /** Which integration that account is on, for its allowances and its name. */
   integrationId: EntityId,
   access: Schema.Literals(["read", "write"]),
   allowances: Schema.optionalKey(

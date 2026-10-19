@@ -4,11 +4,13 @@ import { toastError } from "~/ui/error-toast.ts";
 import { setConversationIntegration } from "../server/functions.ts";
 import { chatIntegrationsQuery, myIntegrationsQuery } from "./queries.ts";
 
+/** One of the person's accounts, as the composer lists and toggles it. */
 export interface ComposerIntegration {
+  connectionId: string;
   integrationId: string;
   name: string;
-  /** Null when it uses no account of the person's, so there is nothing to name. */
-  accountLabel: string | null;
+  /** What the person calls the account; null when it uses none of theirs. */
+  account: string | null;
   enabled: boolean;
 }
 
@@ -16,15 +18,15 @@ export interface ComposerIntegrations {
   items: ReadonlyArray<ComposerIntegration>;
   /** Something is set up that this person could connect: worth offering "Add". */
   canAdd: boolean;
-  setEnabled: (integrationId: string, enabled: boolean) => void;
+  setEnabled: (connectionId: string, enabled: boolean) => void;
   /** What a first message carries: toggles made before the chat existed. */
   sendFields: {
-    integrationChoices?: ReadonlyArray<{ integrationId: string; enabled: boolean }>;
+    integrationChoices?: ReadonlyArray<{ connectionId: string; enabled: boolean }>;
   };
 }
 
 /**
- * A chat's integration toggles. An existing chat saves each change at once,
+ * A chat's account toggles. An existing chat saves each change at once,
  * since the choice belongs to the chat rather than to one message; a chat not
  * created yet holds them here until its first message carries them.
  */
@@ -34,7 +36,7 @@ export function useChatIntegrations(conversationId: string | null): ComposerInte
   const mine = useQuery(myIntegrationsQuery);
   const [local, setLocal] = useState<ReadonlyMap<string, boolean>>(new Map());
   const save = useMutation({
-    mutationFn: (input: { integrationId: string; enabled: boolean }) =>
+    mutationFn: (input: { connectionId: string; enabled: boolean }) =>
       setConversationIntegration({ data: { conversationId: conversationId!, ...input } }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: chatIntegrationsQuery(conversationId).queryKey }),
@@ -43,26 +45,27 @@ export function useChatIntegrations(conversationId: string | null): ComposerInte
 
   const items = (query.data ?? []).map((entry) => {
     const pendingSave =
-      save.isPending && save.variables?.integrationId === entry.integrationId
+      save.isPending && save.variables?.connectionId === entry.connectionId
         ? save.variables.enabled
         : undefined;
     return {
+      connectionId: entry.connectionId,
       integrationId: entry.integrationId,
       name: entry.name,
-      accountLabel: entry.accountLabel,
-      enabled: pendingSave ?? local.get(entry.integrationId) ?? entry.enabled,
+      account: entry.account,
+      enabled: pendingSave ?? local.get(entry.connectionId) ?? entry.enabled,
     };
   });
   const choices = conversationId
     ? []
-    : [...local].map(([integrationId, enabled]) => ({ integrationId, enabled }));
+    : [...local].map(([connectionId, enabled]) => ({ connectionId, enabled }));
 
   return {
     items,
     canAdd: (mine.data ?? []).some((integration) => integration.available),
-    setEnabled: (integrationId, enabled) => {
-      if (conversationId) save.mutate({ integrationId, enabled });
-      else setLocal((current) => new Map(current).set(integrationId, enabled));
+    setEnabled: (connectionId, enabled) => {
+      if (conversationId) save.mutate({ connectionId, enabled });
+      else setLocal((current) => new Map(current).set(connectionId, enabled));
     },
     sendFields: choices.length ? { integrationChoices: choices } : {},
   };

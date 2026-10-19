@@ -109,6 +109,7 @@ const session: ConnectedSession = {
   credential: Effect.succeed({ kind: "oauth", accessToken: "token" }),
   scope: Effect.succeed(null),
   connectionId: "connection",
+  account: "ana@example.com",
   accountEpoch: "epoch",
   configIdentity: "config",
   integration: { id: "outlook", kind: "outlook", name: "Outlook" },
@@ -217,7 +218,16 @@ describe("sending under a schedule's allowance", () => {
   const tools = (unattended: UnattendedGrant, permissions = {}) => {
     counted.clear();
     const prepared = prepareIntegrationTools({
-      offered: [{ integrationId: "outlook", session, scope: null, unattended, permissions }],
+      offered: [
+        {
+          connectionId: "connection",
+          integrationId: "outlook",
+          session,
+          scope: null,
+          unattended,
+          permissions,
+        },
+      ],
       indexer: createSourceIndexer([]),
       approvals,
       owner: { userId: "u1", conversationId: "c1", messageId: "m1" },
@@ -311,6 +321,7 @@ describe("sending under a schedule's allowance", () => {
     const prepared = prepareIntegrationTools({
       offered: [
         {
+          connectionId: "connection",
           integrationId: "outlook",
           session,
           scope: null,
@@ -408,5 +419,122 @@ describe("sending under a schedule's allowance", () => {
       "u1",
       expect.objectContaining({ access: "destructive", targets: ["ana@example.com"] }),
     );
+  });
+});
+
+describe("several accounts of one integration", () => {
+  const approvals: IntegrationApprovals["Service"] = {
+    request: vi.fn(() => Effect.succeed({ answer: "allow" as const, via: null })),
+    elicit: () => Effect.succeed({ action: "cancel" as const }),
+    answer: () => Effect.succeed(false),
+    decide: () => Effect.succeed(false),
+    get: () => Effect.succeed(null),
+    pending: () => Effect.succeed([]),
+  };
+  const as = (connectionId: string, account: string, accessToken: string): ConnectedSession => ({
+    ...session,
+    connectionId,
+    account,
+    credential: Effect.succeed({ kind: "oauth", accessToken }),
+  });
+  const work = as("work", "Work", "work-token");
+  const home = as("home", "Home", "home-token");
+  const permissionsByAccount: Record<string, Record<string, "allow" | "ask" | "block">> = {
+    work: { send_mail: "allow" },
+    home: { send_mail: "block" },
+  };
+
+  /** The tools as a chat with both accounts on gets them, and the token each request carried. */
+  const prepare = (accounts: ReadonlyArray<ConnectedSession>) => {
+    const tokens: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        tokens.push(new Headers(init?.headers).get("authorization") ?? "");
+        return graph(input, init);
+      }),
+    );
+    const reserved: string[] = [];
+    const prepared = prepareIntegrationTools({
+      offered: accounts.map((account) => ({
+        connectionId: account.connectionId,
+        integrationId: "outlook",
+        session: account,
+        scope: null,
+        unattended: null,
+        permissions: permissionsByAccount[account.connectionId] ?? {},
+      })),
+      indexer: createSourceIndexer([]),
+      approvals,
+      owner: { userId: "u1", conversationId: "c1", messageId: "m1" },
+      permissionsFor: (connectionId) =>
+        Effect.succeed({
+          permissions: permissionsByAccount[connectionId] ?? {},
+          allowedInChat: [],
+        }),
+      sessionFor: (connectionId) =>
+        Effect.succeed(accounts.find((account) => account.connectionId === connectionId) ?? null),
+      rowIdFor: (id) => Effect.succeed(`row-${id}`),
+      reportAuthFailure: () => Effect.void,
+      reportMissingScopes: () => Effect.void,
+      allowanceUses: {
+        reserve: (connectionId) => Effect.sync(() => (reserved.push(connectionId), true)),
+        release: () => Effect.void,
+      },
+    })!;
+    const call = (tool: string, args: Record<string, unknown>, callId = "call") =>
+      Effect.runPromise(
+        (
+          prepared.group.handlers[`int_outlook__${tool}`] as (
+            args: unknown,
+            context: { toolCallId: string },
+          ) => Effect.Effect<IntegrationModelResult>
+        )(args, { toolCallId: callId }),
+      );
+    return { prepared, call, tokens, reserved };
+  };
+  const message = { to: ["ana@example.com"], subject: "Report", body: "Hi" };
+
+  it("offers one tool, and runs it as the account the call names, never another", async () => {
+    const { prepared, call, tokens } = prepare([work, home]);
+    // One send tool for both accounts, not two near-identical ones.
+    expect([...prepared.names.keys()].filter((name) => name.endsWith("__send_mail"))).toEqual([
+      "int_outlook__send_mail",
+    ]);
+    expect(prepared.names.get("int_outlook__send_mail")?.chooses).toBe(true);
+
+    const unnamed = await call("send_mail", message);
+    expect(unnamed).toMatchObject({ ok: false });
+    expect(JSON.stringify(unnamed)).toMatch(/“Work”/);
+    const unknown = await call("send_mail", { ...message, account: "Billing" });
+    expect(JSON.stringify(unknown)).toMatch(/no Outlook account “Billing”/);
+    expect(sent).toEqual([]);
+
+    // Sending is blocked for Home: named, it is refused rather than sent from Work.
+    const blocked = await call("send_mail", { ...message, account: "home" });
+    expect(blocked).toMatchObject({ ok: false, refused: true });
+    expect(sent).toEqual([]);
+
+    expect(await call("send_mail", { ...message, account: "Work" }, "sent")).toMatchObject({
+      ok: true,
+    });
+    expect(sent).toHaveLength(1);
+    expect(tokens.every((token) => token === "Bearer work-token")).toBe(true);
+    // The account argument is ours; the service never sees it.
+    expect(JSON.stringify(requests.map((request) => request.body))).not.toMatch(/"account"/);
+    expect(prepared.take("sent").account).toEqual({ connectionId: "work", name: "Work" });
+  });
+
+  it("tells two accounts left under one label apart", async () => {
+    const { call } = prepare([as("a", "Token", "a-token"), as("b", "Token", "b-token")]);
+    const listed = await call("list_events", {});
+    expect(JSON.stringify(listed)).toMatch(/“Token”, “Token 2”/);
+  });
+
+  it("needs no account argument with one account on", async () => {
+    const { prepared, call, tokens } = prepare([work]);
+    expect(prepared.names.get("int_outlook__send_mail")?.chooses).toBe(false);
+    expect(await call("send_mail", message)).toMatchObject({ ok: true });
+    expect(tokens.every((token) => token === "Bearer work-token")).toBe(true);
   });
 });

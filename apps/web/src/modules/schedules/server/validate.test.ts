@@ -7,11 +7,13 @@ describe("schedule integration grants", () => {
   it("stores allowance addresses as the mailbox parser writes them", () => {
     expect(
       normalizeGrant({
+        connectionId: "connection",
         integrationId: "outlook",
         access: "write",
         allowances: { send: { targets: ["Ana@Example.com", "ana@example.com", "bo@bücher.de"] } },
       }),
     ).toEqual({
+      connectionId: "connection",
       integrationId: "outlook",
       access: "write",
       allowances: { send: { targets: ["ana@example.com", "bo@xn--bcher-kva.de"] } },
@@ -36,11 +38,14 @@ describe("schedule integration grants", () => {
       /add at least one address/,
     ],
   ])("refuses %j", (grant, reason) => {
-    expect(normalizeGrant({ integrationId: "outlook", ...grant })).toMatch(reason);
+    expect(
+      normalizeGrant({ connectionId: "connection", integrationId: "outlook", ...grant }),
+    ).toMatch(reason);
   });
 
   it("finds an allowance the integration's type does not declare", () => {
     const grant = {
+      connectionId: "connection",
       integrationId: "docs",
       access: "write" as const,
       allowances: { send: { targets: ["ana@example.com"] } },

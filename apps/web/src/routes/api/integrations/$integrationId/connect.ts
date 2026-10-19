@@ -34,9 +34,17 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
         const origin = appOrigin(request) ?? new URL(request.url).origin;
         // Only a path on this app; anything else would turn the flow into a redirector.
         const returnTo = safeRedirect(new URL(request.url).searchParams.get("returnTo"));
+        // An account to reconnect; the service checks it is this person's own.
+        const connectionId = new URL(request.url).searchParams.get("account") ?? undefined;
         const started = await runtime.runPromise(
           Effect.flatMap(IntegrationService, (service) =>
-            service.beginOAuth(current.session.user.id, params.integrationId, origin, returnTo),
+            service.beginOAuth(
+              current.session.user.id,
+              params.integrationId,
+              origin,
+              returnTo,
+              connectionId,
+            ),
           ).pipe(
             Effect.map((value) => ({ ok: true as const, ...value })),
             Effect.catch((error) =>

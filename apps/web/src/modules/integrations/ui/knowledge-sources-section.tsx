@@ -29,12 +29,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { FieldError } from "~/ui/primitives/field";
+import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/ui/primitives/select";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { cn } from "~/ui/utils";
 import { knowledgeSourcesQuery } from "../client/queries.ts";
-import type { BrowseNode, KnowledgeSourceView, SourceRoot, SourceRule } from "../schema.ts";
+import {
+  accountName,
+  type BrowseNode,
+  type IntegrationConnectionView,
+  type KnowledgeSourceView,
+  type SourceRoot,
+  type SourceRule,
+} from "../schema.ts";
+import { useSyncableIntegrations } from "../client/use-syncable-integrations.ts";
 import {
   browseIntegration,
   removeKnowledgeSource,
@@ -47,8 +62,15 @@ import { openSyncedPages } from "./open-synced-pages.tsx";
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-/** What the picker works on: a new source for an integration, or an existing one. */
-export type SourceTarget = { integrationId: string; sourceId?: string };
+/**
+ * What the picker works on: a new source for an integration, or an existing
+ * one, and the account it syncs as; null when that account was disconnected.
+ */
+export type SourceTarget = {
+  integrationId: string;
+  connectionId: string | null;
+  sourceId?: string;
+};
 
 const pages = (count: number) => `${count} ${count === 1 ? "page" : "pages"}`;
 
@@ -85,7 +107,13 @@ export function KnowledgeSourcesSection({
             key={source.id}
             source={source}
             documents={documents.filter((document) => document.source?.sourceId === source.id)}
-            onEdit={() => onEdit({ integrationId: source.integrationId, sourceId: source.id })}
+            onEdit={() =>
+              onEdit({
+                integrationId: source.integrationId,
+                connectionId: source.connectionId,
+                sourceId: source.id,
+              })
+            }
           />
         ))}
       </ListCard>
@@ -147,7 +175,7 @@ function SourceRow({
   const status = !source.connected
     ? source.canEdit
       ? `Paused: ${name} isn’t connected. Pages already synced stay searchable.`
-      : `Paused: the owner’s ${name} connection is off. Pages already synced stay searchable.`
+      : `Paused: the owner’s ${name} account is disconnected. Pages already synced stay searchable.`
     : (source.lastError ??
       [
         selectionSummary(source.root),
@@ -299,6 +327,9 @@ export function SourcePickerDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const sources = useQuery(knowledgeSourcesQuery(collectionId));
+  const accounts =
+    useSyncableIntegrations().find((integration) => integration.id === target.integrationId)
+      ?.connections ?? [];
   if (sources.isPending) return null;
   const existing = target.sourceId
     ? sources.data?.find((source) => source.id === target.sourceId)
@@ -307,6 +338,9 @@ export function SourcePickerDialog({
     <SourcePicker
       collectionId={collectionId}
       integrationId={target.integrationId}
+      accounts={accounts}
+      // Its own account, else the first working one, which the picker lets them change.
+      initialAccount={target.connectionId ?? accounts[0]?.id ?? null}
       sourceId={existing?.id}
       initial={existing?.root ?? null}
       open={open}
@@ -318,6 +352,8 @@ export function SourcePickerDialog({
 function SourcePicker({
   collectionId,
   integrationId,
+  accounts,
+  initialAccount,
   sourceId,
   initial,
   open,
@@ -325,6 +361,9 @@ function SourcePicker({
 }: {
   collectionId: string;
   integrationId: string;
+  /** The owner's working accounts on it. */
+  accounts: ReadonlyArray<IntegrationConnectionView>;
+  initialAccount: string | null;
   sourceId: string | undefined;
   initial: SourceRoot | null;
   open: boolean;
@@ -346,12 +385,13 @@ function SourcePicker({
   const [step, setStep] = useState<"where" | "what">(initial ? "what" : "where");
   const [error, setError] = useState<string | null>(null);
   const name = useIntegrationDirectory().name(integrationId);
+  const [connectionId, setConnectionId] = useState(initialAccount);
   const save = useMutation({
-    mutationFn: (chosen: DraftRoot) =>
+    mutationFn: (chosen: DraftRoot & { connectionId: string }) =>
       saveKnowledgeSource({
         data: {
           collectionId,
-          integrationId,
+          connectionId: chosen.connectionId,
           ...(sourceId ? { sourceId } : {}),
           root: {
             nodeId: chosen.nodeId,
@@ -409,10 +449,38 @@ function SourcePicker({
               : "New pages arrive and deleted ones leave by themselves."}
           </DialogDescription>
         </DialogHeader>
+        {accounts.length > 1 ? (
+          <Field>
+            <FieldLabel>Sync as</FieldLabel>
+            <Select
+              value={connectionId ?? ""}
+              items={accounts.map((account) => ({
+                value: account.id,
+                label: accountName(account),
+              }))}
+              onValueChange={(value) => setConnectionId(String(value))}
+            >
+              <SelectTrigger aria-label="Account it syncs as">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {accountName(account)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
         <div className="max-h-[28rem] min-w-0 overflow-y-auto rounded-2xl border p-2">
-          {step === "where" || !root ? (
+          {!connectionId ? (
+            <p className="text-muted-foreground p-2 text-sm">
+              Connect your {name} account in Settings to choose what to sync.
+            </p>
+          ) : step === "where" || !root ? (
             <ChooseLevel
-              integrationId={integrationId}
+              connectionId={connectionId}
               parentId={null}
               chosen={root?.nodeId ?? null}
               onChoose={(node) =>
@@ -453,7 +521,7 @@ function SourcePicker({
               </p>
               {root.hasChildren ? (
                 <PickLevel
-                  integrationId={integrationId}
+                  connectionId={connectionId}
                   parentId={root.nodeId}
                   ancestors={[]}
                   root={root}
@@ -491,7 +559,7 @@ function SourcePicker({
             <PendingButton
               pending={save.isPending}
               disabled={!root}
-              onClick={() => root && save.mutate(root)}
+              onClick={() => root && connectionId && save.mutate({ ...root, connectionId })}
             >
               {sourceId ? "Save and sync" : "Start syncing"}
             </PendingButton>
@@ -503,11 +571,10 @@ function SourcePicker({
 }
 
 /** Loads one level of the service's tree; shared by both steps. */
-function useBrowseLevel(integrationId: string, parentId: string | null) {
+function useBrowseLevel(connectionId: string, parentId: string | null) {
   return useQuery({
-    queryKey: ["integration-browse", integrationId, parentId],
-    queryFn: () =>
-      browseIntegration({ data: { integrationId, ...(parentId ? { parentId } : {}) } }),
+    queryKey: ["integration-browse", connectionId, parentId],
+    queryFn: () => browseIntegration({ data: { connectionId, ...(parentId ? { parentId } : {}) } }),
     staleTime: 60_000,
   });
 }
@@ -558,24 +625,24 @@ function ExpandButton({
 
 /** Step one: pick the one node to sync from, browsing down as far as needed. */
 function ChooseLevel({
-  integrationId,
+  connectionId,
   parentId,
   chosen,
   onChoose,
 }: {
-  integrationId: string;
+  connectionId: string;
   parentId: string | null;
   chosen: string | null;
   onChoose: (node: BrowseNode) => void;
 }) {
-  const level = useBrowseLevel(integrationId, parentId);
+  const level = useBrowseLevel(connectionId, parentId);
   if (!level.data?.ok || level.data.nodes.length === 0) return <LevelState level={level} />;
   return (
     <ul className="flex flex-col" role="radiogroup" aria-label="Where to sync from">
       {level.data.nodes.map((node) => (
         <ChooseRow
           key={node.id}
-          integrationId={integrationId}
+          connectionId={connectionId}
           node={node}
           chosen={chosen}
           onChoose={onChoose}
@@ -586,12 +653,12 @@ function ChooseLevel({
 }
 
 function ChooseRow({
-  integrationId,
+  connectionId,
   node,
   chosen,
   onChoose,
 }: {
-  integrationId: string;
+  connectionId: string;
   node: BrowseNode;
   chosen: string | null;
   onChoose: (node: BrowseNode) => void;
@@ -623,7 +690,7 @@ function ChooseRow({
       {expanded ? (
         <div className="pl-6">
           <ChooseLevel
-            integrationId={integrationId}
+            connectionId={connectionId}
             parentId={node.id}
             chosen={chosen}
             onChoose={onChoose}
@@ -636,26 +703,26 @@ function ChooseRow({
 
 /** Step two: check or uncheck pages under the chosen node. */
 function PickLevel({
-  integrationId,
+  connectionId,
   parentId,
   ancestors,
   root,
   onToggle,
 }: {
-  integrationId: string;
+  connectionId: string;
   parentId: string;
   ancestors: ReadonlyArray<string>;
   root: DraftRoot;
   onToggle: (node: BrowseNode, ancestors: ReadonlyArray<string>) => void;
 }) {
-  const level = useBrowseLevel(integrationId, parentId);
+  const level = useBrowseLevel(connectionId, parentId);
   if (!level.data?.ok || level.data.nodes.length === 0) return <LevelState level={level} />;
   return (
     <ul className="flex flex-col">
       {level.data.nodes.map((node) => (
         <PickRow
           key={node.id}
-          integrationId={integrationId}
+          connectionId={connectionId}
           node={node}
           ancestors={ancestors}
           root={root}
@@ -667,13 +734,13 @@ function PickLevel({
 }
 
 function PickRow({
-  integrationId,
+  connectionId,
   node,
   ancestors,
   root,
   onToggle,
 }: {
-  integrationId: string;
+  connectionId: string;
   node: BrowseNode;
   ancestors: ReadonlyArray<string>;
   root: DraftRoot;
@@ -696,7 +763,7 @@ function PickRow({
       {expanded ? (
         <div className="pl-6">
           <PickLevel
-            integrationId={integrationId}
+            connectionId={connectionId}
             parentId={node.id}
             ancestors={path}
             root={root}

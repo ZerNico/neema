@@ -22,28 +22,31 @@ import { IntegrationFieldControl } from "./integration-field.tsx";
 /**
  * The ways to connect one integration: an API key, OAuth, or both, as the
  * admin allowed. OAuth leaves the page; `returnTo` is where it comes back to.
+ * `another` offers only the ways that add an account of one's own.
  */
 export function ConnectActions({
   integration,
   returnTo,
+  another = false,
 }: {
   integration: UserIntegration;
   returnTo?: string;
+  another?: boolean;
 }) {
   const manifest = findIntegrationType(integration.kind);
   const [keyOpen, setKeyOpen] = useState(false);
   if (!manifest) return null;
-  const reconnect = integration.connection?.status === "needs_reauth";
   // A server from a catalog is known by its own name, not its type's.
   const service = manifest.toolSource === "catalog" ? integration.name : manifest.name;
+  const open = !another && integration.methods.open;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
       {/* One primary: no account first, then a sign-in, a token last. */}
-      {integration.methods.open ? <TurnOnButton integration={integration} /> : null}
+      {open ? <TurnOnButton integration={integration} /> : null}
       {integration.methods.apiKey ? (
         <Button
           size="sm"
-          variant={integration.methods.oauth || integration.methods.open ? "outline" : "default"}
+          variant={integration.methods.oauth || open || another ? "outline" : "default"}
           onClick={() => setKeyOpen(true)}
         >
           Use {manifest.apiKey?.noun ?? "an API key"}
@@ -53,9 +56,9 @@ export function ConnectActions({
         <SignInButton
           integration={integration}
           returnTo={returnTo}
-          variant={integration.methods.open ? "outline" : "default"}
+          variant={open || another ? "outline" : "default"}
         >
-          {reconnect ? "Reconnect" : `Sign in with ${service}`}
+          {another ? "Sign in" : `Sign in with ${service}`}
         </SignInButton>
       ) : null}
       {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
@@ -95,15 +98,20 @@ export function TurnOnButton({
   );
 }
 
-/** Leaves the page for the service's sign-in; `returnTo` is where it comes back to. */
+/**
+ * Leaves the page for the service's sign-in; `returnTo` is where it comes
+ * back to. With `connectionId` it reconnects that account, else adds one.
+ */
 export function SignInButton({
   integration,
   returnTo,
+  connectionId,
   variant = "default",
   children,
 }: {
   integration: UserIntegration;
   returnTo?: string | undefined;
+  connectionId?: string | undefined;
   variant?: "default" | "outline";
   children: ReactNode;
 }) {
@@ -115,7 +123,13 @@ export function SignInButton({
       // In the desktop app a new-window link goes to the system browser,
       // which is where the sign-in has to happen; a browser tab just goes.
       render={
-        <a href={connectUrl(integration.id, returnTo)} target={desktop ? "_blank" : undefined} />
+        <a
+          href={connectUrl(integration.id, {
+            ...(returnTo ? { returnTo } : {}),
+            ...(connectionId ? { connectionId } : {}),
+          })}
+          target={desktop ? "_blank" : undefined}
+        />
       }
     >
       {children}
@@ -123,12 +137,15 @@ export function SignInButton({
   );
 }
 
+/** A key for another account, or with `connectionId` a new key for that one. */
 export function ApiKeyDialog({
   integration,
+  connectionId,
   open,
   onOpenChange,
 }: {
   integration: UserIntegration;
+  connectionId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -140,7 +157,10 @@ export function ApiKeyDialog({
   const [error, setError] = useState<string | null>(null);
   const complete = fields.every((field) => !field.required || values[field.key]?.trim());
   const save = useMutation({
-    mutationFn: () => connectIntegrationApiKey({ data: { integrationId: integration.id, values } }),
+    mutationFn: () =>
+      connectIntegrationApiKey({
+        data: { integrationId: integration.id, values, ...(connectionId ? { connectionId } : {}) },
+      }),
     onSuccess: async (result) => {
       if (!result.ok) {
         setError(result.error);

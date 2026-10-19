@@ -1,3 +1,4 @@
+import { accountName } from "~/modules/integrations/schema.ts";
 import { PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
@@ -133,12 +134,41 @@ export const ScheduleSettingsFields = withForm({
           <form.Field name="integrationGrants">
             {(field) => {
               const grants = field.state.value ?? [];
-              const connected = (integrations.data ?? []).filter(
-                (integration) =>
-                  integration.connection?.status === "active" ||
-                  grants.some((grant) => grant.integrationId === integration.id),
-              );
-              if (connected.length === 0)
+              // One row per account a run could act as, plus any granted one since lost.
+              const rows = (integrations.data ?? []).flatMap((integration) => {
+                const several = integration.connections.length > 1;
+                const accounts = integration.connections
+                  .filter(
+                    (account) =>
+                      account.status === "active" ||
+                      grants.some((grant) => grant.connectionId === account.id),
+                  )
+                  .map((account) => ({
+                    integration,
+                    connectionId: account.id,
+                    title: several
+                      ? `${integration.name} · ${accountName(account)}`
+                      : integration.name,
+                    detail:
+                      account.status === "active"
+                        ? account.accountLabel
+                        : "Not connected: runs will fail until you reconnect.",
+                  }));
+                const lost = grants
+                  .filter(
+                    (grant) =>
+                      grant.integrationId === integration.id &&
+                      !integration.connections.some((account) => account.id === grant.connectionId),
+                  )
+                  .map((grant) => ({
+                    integration,
+                    connectionId: grant.connectionId,
+                    title: integration.name,
+                    detail: "Its account was disconnected: turn this off or runs will fail.",
+                  }));
+                return [...accounts, ...lost];
+              });
+              if (rows.length === 0)
                 return (
                   <p className="text-muted-foreground text-sm">
                     Connect a service in Settings → Integrations to let runs use it.
@@ -146,21 +176,17 @@ export const ScheduleSettingsFields = withForm({
                 );
               return (
                 <ListCard>
-                  {connected.map((integration) => {
-                    const grant = grants.find((entry) => entry.integrationId === integration.id);
+                  {rows.map(({ integration, connectionId, title, detail }) => {
+                    const grant = grants.find((entry) => entry.connectionId === connectionId);
                     const value = grant?.access ?? "none";
-                    const rest = grants.filter((entry) => entry.integrationId !== integration.id);
+                    const rest = grants.filter((entry) => entry.connectionId !== connectionId);
                     return (
-                      <Fragment key={integration.id}>
+                      <Fragment key={connectionId}>
                         <ListRow>
                           <IntegrationLogo integrationId={integration.id} variant="tile" />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{integration.name}</p>
-                            <p className="text-muted-foreground truncate text-xs">
-                              {integration.connection?.status === "active"
-                                ? integration.connection.accountLabel
-                                : "Not connected: runs will fail until you reconnect."}
-                            </p>
+                            <p className="truncate text-sm font-medium">{title}</p>
+                            <p className="text-muted-foreground truncate text-xs">{detail}</p>
                           </div>
                           <ToggleGroup
                             value={[value]}
@@ -169,14 +195,14 @@ export const ScheduleSettingsFields = withForm({
                               if (next === "read" || next === "write")
                                 field.handleChange([
                                   ...rest,
-                                  { integrationId: integration.id, access: next },
+                                  { connectionId, integrationId: integration.id, access: next },
                                 ]);
                               else if (next === "none") field.handleChange(rest);
                             }}
                             variant="outline"
                             size="sm"
                             spacing={0}
-                            aria-label={`${integration.name} during runs`}
+                            aria-label={`${title} during runs`}
                           >
                             <ToggleGroupItem value="none">Off</ToggleGroupItem>
                             <ToggleGroupItem value="read">Read</ToggleGroupItem>

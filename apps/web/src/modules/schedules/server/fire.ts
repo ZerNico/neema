@@ -1,3 +1,4 @@
+import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -78,7 +79,13 @@ export class ScheduleFire extends Context.Service<
       // like a lost collection, rather than answering without it unannounced.
       const grantsUsable = (row: ScheduleRow) =>
         Effect.forEach(row.integrationGrants, (grant) =>
-          integrations.session(row.userId, grant.integrationId).pipe(Effect.asVoid),
+          integrations.session(row.userId, grant.connectionId).pipe(
+            Effect.asVoid,
+            // Named by its integration, which the reason below looks up.
+            Effect.mapError(
+              () => new IntegrationNotAvailable({ integrationId: grant.integrationId }),
+            ),
+          ),
         );
       const fire: ScheduleFire["Service"] = (row, runId) =>
         grantsUsable(row)

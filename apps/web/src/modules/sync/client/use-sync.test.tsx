@@ -101,6 +101,8 @@ describe("useSync", () => {
         conversationId: "chat",
         messageId: "message",
         integrationId: "service",
+        connectionId: "connection",
+        account: null,
         tool: "read",
         label: "Search",
         promptId: "prompt",

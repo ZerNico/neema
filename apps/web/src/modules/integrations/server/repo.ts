@@ -24,6 +24,7 @@ import {
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import type { ToolPermission } from "../consent.ts";
+import { NO_ACCOUNT_KINDS, usesNoAccount } from "../schema.ts";
 import type { McpToolEntry } from "../mcp/catalog.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -137,7 +138,7 @@ export interface StoredOAuthClient {
 
 export interface AllowanceUse {
   messageId: string;
-  integrationId: string;
+  connectionId: string;
   allowanceId: string;
 }
 
@@ -180,25 +181,27 @@ export class IntegrationRepo extends Context.Service<
       exceptId: string | null,
       ownerUserId: string | null,
     ): Effect.Effect<boolean>;
-    /** Integrations this person may use, enabled or not, with their connection if any. */
+    /** Integrations this person may use, enabled or not, with their accounts, oldest first. */
     listForUser(userId: string): Effect.Effect<
       ReadonlyArray<{
         config: IntegrationConfigRow;
         usable: boolean;
-        connection: IntegrationConnectionRow | null;
+        connections: ReadonlyArray<IntegrationConnectionRow>;
       }>
     >;
     isUsable(userId: string, integrationId: string): Effect.Effect<boolean>;
     /** Whether this person may add MCP servers of their own. */
     mayAddServers(userId: string): Effect.Effect<boolean>;
+    /** One of this person's accounts; null when it is not theirs or is gone. */
     getConnection(
       userId: string,
-      integrationId: string,
+      connectionId: string,
     ): Effect.Effect<IntegrationConnectionRow | null>;
     getConnectionById(id: string): Effect.Effect<IntegrationConnectionRow | null>;
     /**
-     * Null when the integration is no longer at `revision`: the credentials
-     * were issued or verified under another setup, and nothing is written.
+     * Null when the integration is no longer at `revision` (the credentials
+     * were issued or verified under another setup), or the account named to
+     * reconnect is not this person's; nothing is written then.
      */
     saveConnection(input: {
       userId: string;
@@ -207,37 +210,39 @@ export class IntegrationRepo extends Context.Service<
       authKind: AuthKind;
       credentials: StoredCredentials;
       accountLabel: string;
+      /** The service's id for the account; signing in to it again reconnects. */
+      accountKey: string | null;
       fingerprint: string;
-      /**
-       * Replaces an existing connection only when it was made one of these
-       * ways; empty only inserts. Absent replaces any, as connecting does.
-       */
-      replacing?: ReadonlyArray<AuthKind>;
+      /** The account being reconnected; otherwise the key or the way in decides. */
+      connectionId?: string | null;
     }): Effect.Effect<IntegrationConnectionRow | null>;
     updatePreferences(
       userId: string,
-      integrationId: string,
+      connectionId: string,
       input: {
         offerByDefault?: boolean;
         toolPermissions?: Record<string, ToolPermission>;
         /** Null lifts the limit. */
         scope?: string[] | null;
+        /** Null goes back to the account label. */
+        name?: string | null;
       },
     ): Effect.Effect<IntegrationConnectionRow | null>;
-    removeConnection(userId: string, integrationId: string): Effect.Effect<void>;
+    removeConnection(userId: string, connectionId: string): Effect.Effect<void>;
     markNeedsReauth(credential: CredentialIdentity): Effect.Effect<void>;
     setConversationChoices(
       tx: DbTx,
       userId: string,
       conversationId: string,
-      choices: ReadonlyArray<{ integrationId: string; enabled: boolean }>,
+      choices: ReadonlyArray<{ connectionId: string; enabled: boolean }>,
     ): Effect.Effect<void, IntegrationNotAvailable>;
     /** Null when the stored document is not one this version reads; the person reconnects. */
     decrypt(row: IntegrationConnectionRow): Effect.Effect<StoredCredentials | null>;
     encrypt(credentials: StoredCredentials): Effect.Effect<string>;
+    /** What runs as this account: knowledge sources and schedules. */
     dependents(
       userId: string,
-      integrationId: string,
+      connectionId: string,
     ): Effect.Effect<{ sources: number; schedules: number }>;
     /** A chat's own choices; empty for a chat that never overrode anything. */
     conversationSettings(
@@ -250,7 +255,7 @@ export class IntegrationRepo extends Context.Service<
     setConversationSetting(
       userId: string,
       conversationId: string,
-      integrationId: string,
+      connectionId: string,
       input: { enabled?: boolean | null; allowTool?: string },
     ): Effect.Effect<boolean>;
     /** The integrations a chat's installed agent attached, or null for plain chat. */
@@ -568,11 +573,28 @@ export class IntegrationRepo extends Context.Service<
               ),
             )
             .pipe(Effect.orDie);
-          return rows.map((row) => ({
-            config: row.config,
-            usable: Boolean(row.usable),
-            connection: row.connection,
-          }));
+          const byConfig = new Map<
+            string,
+            {
+              config: IntegrationConfigRow;
+              usable: boolean;
+              connections: IntegrationConnectionRow[];
+            }
+          >();
+          for (const row of rows) {
+            let entry = byConfig.get(row.config.id);
+            if (!entry)
+              byConfig.set(
+                row.config.id,
+                (entry = { config: row.config, usable: Boolean(row.usable), connections: [] }),
+              );
+            if (row.connection) entry.connections.push(row.connection);
+          }
+          for (const entry of byConfig.values())
+            entry.connections.sort(
+              (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
+            );
+          return [...byConfig.values()];
         }),
 
         mayAddServers: Effect.fn("IntegrationRepo.mayAddServers")(function* (userId) {
@@ -599,21 +621,19 @@ export class IntegrationRepo extends Context.Service<
           return rows.length > 0;
         }),
 
-        getConnection: Effect.fn("IntegrationRepo.getConnection")(
-          function* (userId, integrationId) {
-            const rows = yield* db
-              .select()
-              .from(integrationConnections)
-              .where(
-                and(
-                  eq(integrationConnections.userId, userId),
-                  eq(integrationConnections.integrationId, integrationId),
-                ),
-              )
-              .pipe(Effect.orDie);
-            return rows[0] ?? null;
-          },
-        ),
+        getConnection: Effect.fn("IntegrationRepo.getConnection")(function* (userId, connectionId) {
+          const rows = yield* db
+            .select()
+            .from(integrationConnections)
+            .where(
+              and(
+                eq(integrationConnections.id, connectionId),
+                eq(integrationConnections.userId, userId),
+              ),
+            )
+            .pipe(Effect.orDie);
+          return rows[0] ?? null;
+        }),
 
         getConnectionById: Effect.fn("IntegrationRepo.getConnectionById")(function* (id) {
           const rows = yield* db
@@ -627,79 +647,159 @@ export class IntegrationRepo extends Context.Service<
         saveConnection: Effect.fn("IntegrationRepo.saveConnection")(function* (input) {
           const credentialsCiphertext = yield* cipher.encrypt(JSON.stringify(input.credentials));
           const now = new Date();
-          // Selected from the integration's row at the revision the credentials
-          // were issued under, so a setup changed meanwhile writes nothing. Key share
-          // waits out a save in flight (it locks for update) but not a refresh.
-          const rows = yield* db
-            .insert(integrationConnections)
-            .select((qb) =>
-              qb
-                .select({
-                  id: sql<string>`${uuidv7()}`.as("id"),
-                  userId: sql<string>`${input.userId}`.as("user_id"),
-                  integrationId: integrationConfigs.id,
-                  authKind: sql<AuthKind>`${input.authKind}`.as("auth_kind"),
-                  credentialsCiphertext: sql<string>`${credentialsCiphertext}`.as(
-                    "credentials_ciphertext",
-                  ),
-                  accountLabel: sql<string>`${input.accountLabel}`.as("account_label"),
-                  configFingerprint: sql<string>`${input.fingerprint}`.as("config_fingerprint"),
-                })
-                .from(integrationConfigs)
-                .where(
-                  and(
-                    eq(integrationConfigs.id, input.integrationId),
-                    eq(integrationConfigs.revision, input.revision),
-                  ),
-                )
-                .for("key share"),
+          // Reconnecting keeps the person's preferences and name; only the
+          // credentials and what they point at are replaced.
+          const replaced = {
+            authKind: input.authKind,
+            credentialsCiphertext,
+            accountLabel: input.accountLabel,
+            ...(input.accountKey === null ? {} : { accountKey: input.accountKey }),
+            configFingerprint: input.fingerprint,
+            status: "active" as const,
+            accountEpoch: uuidv7(),
+            credentialRevision: uuidv7(),
+            updatedAt: now,
+          };
+          const saved = yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                // The integration's row at the revision the credentials were issued
+                // under, so a setup changed meanwhile writes nothing. Key share waits
+                // out a save in flight (it locks for update) but not a refresh.
+                const [setup] = yield* tx
+                  .select({ id: integrationConfigs.id })
+                  .from(integrationConfigs)
+                  .where(
+                    and(
+                      eq(integrationConfigs.id, input.integrationId),
+                      eq(integrationConfigs.revision, input.revision),
+                    ),
+                  )
+                  .for("key share");
+                if (!setup) return null;
+                const mine = and(
+                  eq(integrationConnections.userId, input.userId),
+                  eq(integrationConnections.integrationId, input.integrationId),
+                );
+                let row: IntegrationConnectionRow | undefined;
+                if (input.connectionId) {
+                  [row] = yield* tx
+                    .update(integrationConnections)
+                    .set(replaced)
+                    .where(and(mine, eq(integrationConnections.id, input.connectionId)))
+                    .returning();
+                  if (!row) return null;
+                } else {
+                  const values = {
+                    id: uuidv7(),
+                    userId: input.userId,
+                    integrationId: input.integrationId,
+                    authKind: input.authKind,
+                    credentialsCiphertext,
+                    accountLabel: input.accountLabel,
+                    accountKey: input.accountKey,
+                    configFingerprint: input.fingerprint,
+                  };
+                  // The same account again, or the one way without an account,
+                  // reconnects what is there; anything else is another account.
+                  [row] =
+                    input.accountKey !== null
+                      ? yield* tx
+                          .insert(integrationConnections)
+                          .values(values)
+                          .onConflictDoUpdate({
+                            target: [
+                              integrationConnections.userId,
+                              integrationConnections.integrationId,
+                              integrationConnections.accountKey,
+                            ],
+                            targetWhere: sql`${integrationConnections.accountKey} is not null`,
+                            set: replaced,
+                          })
+                          .returning()
+                      : usesNoAccount(input.authKind)
+                        ? yield* tx
+                            .insert(integrationConnections)
+                            .values(values)
+                            .onConflictDoUpdate({
+                              target: [
+                                integrationConnections.userId,
+                                integrationConnections.integrationId,
+                              ],
+                              // Literal, as the partial index says it: a bound list
+                              // cannot be matched to the index's predicate.
+                              targetWhere: sql`${integrationConnections.authKind} in ('none', 'shared')`,
+                              set: replaced,
+                            })
+                            .returning()
+                        : yield* tx.insert(integrationConnections).values(values).returning();
+                }
+                if (!row) return null;
+                // An account of their own takes over from using it without one.
+                if (!usesNoAccount(input.authKind))
+                  yield* tx
+                    .delete(integrationConnections)
+                    .where(
+                      and(mine, inArray(integrationConnections.authKind, [...NO_ACCOUNT_KINDS])),
+                    );
+                return row;
+              }),
             )
-            .onConflictDoUpdate({
-              target: [integrationConnections.userId, integrationConnections.integrationId],
-              // Reconnecting keeps the person's preferences; only the
-              // credentials and what they point at are replaced.
-              set: {
-                authKind: input.authKind,
-                credentialsCiphertext,
-                accountLabel: input.accountLabel,
-                configFingerprint: input.fingerprint,
-                status: "active",
-                accountEpoch: uuidv7(),
-                credentialRevision: uuidv7(),
-                updatedAt: now,
-              },
-              ...(input.replacing
-                ? {
-                    setWhere: input.replacing.length
-                      ? inArray(integrationConnections.authKind, [...input.replacing])
-                      : sql`false`,
-                  }
-                : {}),
-            })
-            .returning()
             .pipe(Effect.orDie);
-          const saved = rows[0];
           if (!saved) return null;
-          // Sources that paused while the owner was disconnected resume within a
-          // tick instead of waiting out their hourly slot.
+          // What lost its account when that was disconnected (a knowledge source, a
+          // schedule's grant) takes this one only while it is the person's only account
+          // there: connecting again fixes it, and two accounts are never guessed between.
+          const [{ accounts } = { accounts: 0 }] = yield* db
+            .select({ accounts: count() })
+            .from(integrationConnections)
+            .where(
+              and(
+                eq(integrationConnections.userId, input.userId),
+                eq(integrationConnections.integrationId, input.integrationId),
+              ),
+            )
+            .pipe(Effect.orDie);
+          if (accounts === 1) {
+            yield* db
+              .update(knowledgeSources)
+              .set({ connectionId: saved.id })
+              .where(
+                and(
+                  isNull(knowledgeSources.connectionId),
+                  eq(knowledgeSources.integrationId, input.integrationId),
+                  sql`${knowledgeSources.collectionId} in (select ${knowledgeCollections.id} from ${knowledgeCollections} where ${knowledgeCollections.userId} = ${input.userId})`,
+                ),
+              )
+              .pipe(Effect.orDie);
+            yield* db
+              .update(schedules)
+              .set({
+                integrationGrants: sql`(select jsonb_agg(case when grant_entry->>'integrationId' = ${input.integrationId} and not exists (select 1 from ${integrationConnections} where ${integrationConnections.id} = grant_entry->>'connectionId') then jsonb_set(grant_entry, '{connectionId}', to_jsonb(${saved.id}::text)) else grant_entry end) from jsonb_array_elements(${schedules.integrationGrants}) as grant_entry)`,
+              })
+              .where(
+                and(
+                  eq(schedules.userId, input.userId),
+                  sql`${schedules.integrationGrants} @> ${JSON.stringify([{ integrationId: input.integrationId }])}::jsonb`,
+                ),
+              )
+              .pipe(Effect.orDie);
+          }
+          // Its sources resume within a tick instead of waiting out their hourly slot.
           yield* db
             .update(knowledgeSources)
             .set({ nextSyncAt: sql`now()` })
-            .where(
-              and(
-                eq(knowledgeSources.integrationId, input.integrationId),
-                sql`${knowledgeSources.collectionId} in (select ${knowledgeCollections.id} from ${knowledgeCollections} where ${knowledgeCollections.userId} = ${input.userId})`,
-              ),
-            )
+            .where(eq(knowledgeSources.connectionId, saved.id))
             .pipe(Effect.orDie);
           return saved;
         }),
 
         updatePreferences: Effect.fn("IntegrationRepo.updatePreferences")(
-          function* (userId, integrationId, input) {
+          function* (userId, connectionId, input) {
             const rows = yield* db
               .update(integrationConnections)
               .set({
+                ...(input.name === undefined ? {} : { name: input.name }),
                 ...(input.offerByDefault === undefined
                   ? {}
                   : { offerByDefault: input.offerByDefault }),
@@ -715,7 +815,7 @@ export class IntegrationRepo extends Context.Service<
               .where(
                 and(
                   eq(integrationConnections.userId, userId),
-                  eq(integrationConnections.integrationId, integrationId),
+                  eq(integrationConnections.id, connectionId),
                 ),
               )
               .returning()
@@ -725,13 +825,13 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         removeConnection: Effect.fn("IntegrationRepo.removeConnection")(
-          function* (userId, integrationId) {
+          function* (userId, connectionId) {
             yield* db
               .delete(integrationConnections)
               .where(
                 and(
                   eq(integrationConnections.userId, userId),
-                  eq(integrationConnections.integrationId, integrationId),
+                  eq(integrationConnections.id, connectionId),
                 ),
               )
               .pipe(Effect.orDie);
@@ -755,34 +855,50 @@ export class IntegrationRepo extends Context.Service<
         setConversationChoices: Effect.fn("IntegrationRepo.setConversationChoices")(
           function* (tx, userId, conversationId, choices) {
             if (choices.length === 0) return;
-            const ids = [...new Set(choices.map((choice) => choice.integrationId))].toSorted();
-            const configs = yield* tx
-              .select({ id: integrationConfigs.id })
-              .from(integrationConfigs)
-              .where(inArray(integrationConfigs.id, ids))
-              .orderBy(asc(integrationConfigs.id))
+            const ids = [...new Set(choices.map((choice) => choice.connectionId))].toSorted();
+            // Only this person's own accounts, held while the choices go in.
+            const accounts = yield* tx
+              .select({
+                id: integrationConnections.id,
+                integrationId: integrationConnections.integrationId,
+              })
+              .from(integrationConnections)
+              .where(
+                and(
+                  inArray(integrationConnections.id, ids),
+                  eq(integrationConnections.userId, userId),
+                ),
+              )
+              .orderBy(asc(integrationConnections.id))
               .for("share")
               .pipe(Effect.orDie);
-            const missing = ids.find((id) => !configs.some((config) => config.id === id));
-            if (missing) return yield* new IntegrationNotAvailable({ integrationId: missing });
+            const missing = ids.find((id) => !accounts.some((account) => account.id === id));
+            if (missing)
+              return yield* new IntegrationNotAvailable({
+                integrationId: null,
+                connectionId: missing,
+              });
             const [owned] = yield* tx
               .select({ id: conversations.id })
               .from(conversations)
               .where(ownedConversationById(conversationId, userId))
               .pipe(Effect.orDie);
-            if (!owned) return yield* new IntegrationNotAvailable({ integrationId: ids[0]! });
+            if (!owned)
+              return yield* new IntegrationNotAvailable({
+                integrationId: accounts[0]!.integrationId,
+              });
             for (const choice of choices)
               yield* tx
                 .insert(conversationIntegrations)
                 .values({
                   conversationId,
-                  integrationId: choice.integrationId,
+                  connectionId: choice.connectionId,
                   enabled: choice.enabled,
                 })
                 .onConflictDoUpdate({
                   target: [
                     conversationIntegrations.conversationId,
-                    conversationIntegrations.integrationId,
+                    conversationIntegrations.connectionId,
                   ],
                   set: { enabled: choice.enabled, updatedAt: new Date() },
                 })
@@ -793,7 +909,7 @@ export class IntegrationRepo extends Context.Service<
         decrypt,
         encrypt: (credentials) => cipher.encrypt(JSON.stringify(credentials)),
 
-        dependents: Effect.fn("IntegrationRepo.dependents")(function* (userId, integrationId) {
+        dependents: Effect.fn("IntegrationRepo.dependents")(function* (userId, connectionId) {
           const [sources] = yield* db
             .select({ total: count() })
             .from(knowledgeSources)
@@ -804,7 +920,7 @@ export class IntegrationRepo extends Context.Service<
             .where(
               and(
                 eq(knowledgeCollections.userId, userId),
-                eq(knowledgeSources.integrationId, integrationId),
+                eq(knowledgeSources.connectionId, connectionId),
               ),
             )
             .pipe(Effect.orDie);
@@ -814,7 +930,7 @@ export class IntegrationRepo extends Context.Service<
             .where(
               and(
                 eq(schedules.userId, userId),
-                sql`${schedules.integrationGrants} @> ${JSON.stringify([{ integrationId }])}::jsonb`,
+                sql`${schedules.integrationGrants} @> ${JSON.stringify([{ connectionId }])}::jsonb`,
               ),
             )
             .pipe(Effect.orDie);
@@ -832,13 +948,25 @@ export class IntegrationRepo extends Context.Service<
         ),
 
         setConversationSetting: Effect.fn("IntegrationRepo.setConversationSetting")(
-          function* (userId, conversationId, integrationId, input) {
+          function* (userId, conversationId, connectionId, input) {
             const owned = yield* db
               .select({ id: conversations.id })
               .from(conversations)
               .where(ownedConversationById(conversationId, userId))
               .pipe(Effect.orDie);
             if (owned.length === 0) return false;
+            // A chat's choice can only name its owner's own account.
+            const account = yield* db
+              .select({ id: integrationConnections.id })
+              .from(integrationConnections)
+              .where(
+                and(
+                  eq(integrationConnections.id, connectionId),
+                  eq(integrationConnections.userId, userId),
+                ),
+              )
+              .pipe(Effect.orDie);
+            if (account.length === 0) return false;
             const set = {
               ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
               updatedAt: new Date(),
@@ -846,11 +974,11 @@ export class IntegrationRepo extends Context.Service<
             const allowed = input.allowTool ? [input.allowTool] : [];
             yield* db
               .insert(conversationIntegrations)
-              .values({ conversationId, integrationId, ...set, allowedTools: allowed })
+              .values({ conversationId, connectionId, ...set, allowedTools: allowed })
               .onConflictDoUpdate({
                 target: [
                   conversationIntegrations.conversationId,
-                  conversationIntegrations.integrationId,
+                  conversationIntegrations.connectionId,
                 ],
                 set: input.allowTool
                   ? {
@@ -1150,14 +1278,14 @@ export class IntegrationRepo extends Context.Service<
             .insert(integrationAllowanceUses)
             .values({
               messageId: input.messageId,
-              integrationId: input.integrationId,
+              connectionId: input.connectionId,
               allowanceId: input.allowanceId,
               uses: 1,
             })
             .onConflictDoUpdate({
               target: [
                 integrationAllowanceUses.messageId,
-                integrationAllowanceUses.integrationId,
+                integrationAllowanceUses.connectionId,
                 integrationAllowanceUses.allowanceId,
               ],
               set: { uses: sql`${integrationAllowanceUses.uses} + 1` },
@@ -1175,7 +1303,7 @@ export class IntegrationRepo extends Context.Service<
             .where(
               and(
                 eq(integrationAllowanceUses.messageId, input.messageId),
-                eq(integrationAllowanceUses.integrationId, input.integrationId),
+                eq(integrationAllowanceUses.connectionId, input.connectionId),
                 eq(integrationAllowanceUses.allowanceId, input.allowanceId),
               ),
             )

@@ -51,6 +51,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
           ? `${activity.label}: didn’t work`
           : activity.label;
   const detail = [
+    activity.account,
     activity.summary,
     activity.sources?.length ? `${activity.sources.length} results` : null,
     activity.decidedIn

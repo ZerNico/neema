@@ -22,13 +22,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { FieldLabel } from "~/ui/primitives/field";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/ui/primitives/dialog";
+import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { findIntegrationType } from "../catalog.ts";
-import { connectUrl, myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
+import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import { hasPendingChanges } from "../mcp/catalog.ts";
-import { useDesktop } from "~/modules/desktop/client/bridge.ts";
-import type { PersonalServer, UserIntegration } from "../schema.ts";
+import {
+  accountName,
+  usesNoAccount,
+  type IntegrationConnectionView,
+  type PersonalServer,
+  type UserIntegration,
+} from "../schema.ts";
 import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
 import { ApiKeyDialog, ConnectActions, SignInButton, TurnOnButton } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
@@ -38,20 +53,30 @@ import { useDeletePersonalServer } from "../client/use-delete-personal-server.ts
 import { PersonalServerDialog } from "./personal-server-dialog.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
-const withoutAccountKind = (connection: UserIntegration["connection"]) =>
-  connection?.authKind === "none" || connection?.authKind === "shared";
+type Account = IntegrationConnectionView;
 
+/** How the list sums up an integration: its one account's state, or how many are connected. */
 function StatusBadge({ integration }: { integration: UserIntegration }) {
-  const { connection } = integration;
-  if (!connection) return null;
+  const { connections } = integration;
+  if (connections.length === 0) return null;
   if (!integration.available) return <Badge variant="outline">Turned off</Badge>;
+  if (connections.length > 1) {
+    const lapsed = connections.filter((account) => account.status === "needs_reauth").length;
+    return lapsed ? (
+      <Badge variant="destructive">{lapsed === 1 ? "1 signed out" : `${lapsed} signed out`}</Badge>
+    ) : (
+      <Badge variant="secondary">{connections.length} accounts</Badge>
+    );
+  }
+  return <AccountBadge account={connections[0]!} />;
+}
+
+function AccountBadge({ account }: { account: Account }) {
   // Says what happened; the button beside it says what to do.
-  if (connection.status === "needs_reauth")
+  if (account.status === "needs_reauth")
     return (
       <Badge variant="destructive">
-        {connection.authKind === "shared" || connection.authKind === "none"
-          ? "Paused"
-          : "Signed out"}
+        {usesNoAccount(account.authKind) ? "Paused" : "Signed out"}
       </Badge>
     );
   return <Badge variant="secondary">Connected</Badge>;
@@ -168,8 +193,10 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
         />
       </Page>
     );
-  const { connection } = integration;
-  const usable = connection && integration.available && connection.status === "active";
+  const accounts = integration.connections;
+  const working = integration.available
+    ? accounts.filter((account) => account.status === "active")
+    : [];
   return (
     <Page
       title={integration.name}
@@ -182,13 +209,25 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
       {server && editing ? (
         <PersonalServerDialog server={server} open onOpenChange={setEditing} />
       ) : null}
-      <Section title="Account">
+      <Section title={accounts.length > 1 ? "Accounts" : "Account"}>
         <ListCard>
-          <AccountRow integration={integration} />
-          {usable ? <DefaultRow integration={integration} /> : null}
+          {accounts.length === 0 ? (
+            <NotConnectedRow integration={integration} />
+          ) : (
+            accounts.map((account) => (
+              <AccountRow
+                key={account.id}
+                integration={integration}
+                account={account}
+                several={accounts.length > 1}
+              />
+            ))
+          )}
+          {accounts.length > 0 && integration.available && addsAccounts(integration) ? (
+            <AddAccountRow integration={integration} />
+          ) : null}
         </ListCard>
       </Section>
-      {usable && manifest.scope ? <ScopeSection integration={integration} /> : null}
       {integration.tools.length === 0 ? (
         <Section title="What chats can do">
           <EmptyState
@@ -201,17 +240,16 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
             }
           />
         </Section>
-      ) : usable ? (
-        <Section
-          title="Tool permissions"
-          description={
-            connection.authKind === "shared"
-              ? "Chats only read with a key everyone shares. Choose when they may."
-              : "Choose when chats may use each tool. Blocked tools are never offered."
-          }
-        >
-          <PermissionsEditor integration={integration} />
-        </Section>
+      ) : working.length ? (
+        // Each account decides for itself: when it is on, what it reaches, what may run unasked.
+        working.map((account) => (
+          <AccountSettings
+            key={account.id}
+            integration={integration}
+            account={account}
+            titled={accounts.length > 1}
+          />
+        ))
       ) : (
         <Section title="What chats can do">
           <ListCard>
@@ -224,6 +262,69 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
         </Section>
       )}
     </Page>
+  );
+}
+
+/** Ways in that add an account of one's own, beside any there already are. */
+const addsAccounts = (integration: UserIntegration) =>
+  integration.methods.oauth || integration.methods.apiKey;
+
+function AccountSettings({
+  integration,
+  account,
+  titled,
+}: {
+  integration: UserIntegration;
+  account: Account;
+  titled: boolean;
+}) {
+  const manifest = findIntegrationType(integration.kind)!;
+  const update = useConnectionUpdate(account.id);
+  const fieldId = useId();
+  const name = accountName(account);
+  return (
+    <>
+      <Section title={titled ? name : "In chats"}>
+        <ListCard>
+          <ListRow className="justify-between">
+            <FieldLabel htmlFor={fieldId}>Turn on in new chats</FieldLabel>
+            <Switch
+              id={fieldId}
+              checked={account.offerByDefault}
+              onCheckedChange={(offerByDefault) => update.mutate({ offerByDefault })}
+            />
+          </ListRow>
+        </ListCard>
+      </Section>
+      {manifest.scope ? (
+        <IntegrationScopeSection
+          integration={integration}
+          connection={account}
+          onChange={(scope) => update.mutate({ scope })}
+        />
+      ) : null}
+      <Section
+        title={titled ? `Tool permissions · ${name}` : "Tool permissions"}
+        description={
+          account.authKind === "shared"
+            ? "Chats only read with a key everyone shares. Choose when they may."
+            : "Choose when chats may use each tool. Blocked tools are never offered."
+        }
+      >
+        <ToolPermissions
+          kind={integration.kind}
+          byAccess={!integration.personal}
+          // Shared keys only ever read, so their other tools have nothing to set.
+          tools={
+            account.authKind === "shared"
+              ? integration.tools.filter((tool) => tool.access === "read")
+              : integration.tools
+          }
+          permissions={account.toolPermissions}
+          onChange={(toolPermissions) => update.mutate({ toolPermissions })}
+        />
+      </Section>
+    </>
   );
 }
 
@@ -292,37 +393,39 @@ type ConnectionChanges = {
   offerByDefault?: boolean;
   toolPermissions?: Record<string, ToolPermission>;
   scope?: string[] | null;
+  name?: string | null;
 };
 
 // Optimistic, so a click changes one control instead of disabling them all
 // while the save runs; the last save to settle refetches the truth.
-const useConnectionUpdate = (integrationId: string) => {
+const useConnectionUpdate = (connectionId: string) => {
   const queryClient = useQueryClient();
-  const mutationKey = ["integrations", "connection", integrationId];
+  const mutationKey = ["integrations", "connection", connectionId];
   const { queryKey } = myIntegrationsQuery;
   return useMutation({
     mutationKey,
     mutationFn: (input: ConnectionChanges) =>
-      updateIntegrationConnection({ data: { integrationId, ...input } }),
+      updateIntegrationConnection({ data: { connectionId, ...input } }),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData(queryKey);
       queryClient.setQueryData(queryKey, (current) =>
-        current?.map((item) =>
-          item.id === integrationId && item.connection
-            ? {
-                ...item,
-                connection: {
-                  ...item.connection,
+        current?.map((item) => ({
+          ...item,
+          connections: item.connections.map((account) =>
+            account.id === connectionId
+              ? {
+                  ...account,
                   ...(input.offerByDefault === undefined
                     ? {}
                     : { offerByDefault: input.offerByDefault }),
-                  toolPermissions: { ...item.connection.toolPermissions, ...input.toolPermissions },
+                  toolPermissions: { ...account.toolPermissions, ...input.toolPermissions },
                   ...(input.scope === undefined ? {} : { scope: input.scope }),
-                },
-              }
-            : item,
-        ),
+                  ...(input.name === undefined ? {} : { name: input.name }),
+                }
+              : account,
+          ),
+        })),
       );
       return { previous };
     },
@@ -340,16 +443,66 @@ const useConnectionUpdate = (integrationId: string) => {
 const plural = (count: number, noun: string) =>
   count === 0 ? null : `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-function AccountRow({ integration }: { integration: UserIntegration }) {
+/** No account yet: the ways in, as the admin allowed them. */
+function NotConnectedRow({ integration }: { integration: UserIntegration }) {
+  return (
+    <ListRow>
+      <IntegrationLogo integrationId={integration.id} variant="tile" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-medium">Not connected</span>
+        <span className="text-muted-foreground truncate text-xs">
+          {!integration.available
+            ? "An admin turned this integration off."
+            : integration.methods.open
+              ? `Turn ${integration.name} on to use it in chats.`
+              : `Connect your ${integration.name} account to use it in chats.`}
+        </span>
+      </div>
+      {integration.available ? <ConnectActions integration={integration} /> : null}
+    </ListRow>
+  );
+}
+
+/** Another account beside the ones there are, say work and personal mail. */
+function AddAccountRow({ integration }: { integration: UserIntegration }) {
+  const replaces = integration.connections.every((account) => usesNoAccount(account.authKind));
+  return (
+    <ListRow>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm font-medium">
+          {replaces ? "Use your own account" : "Add another account"}
+        </span>
+        <span className="text-muted-foreground truncate text-xs">
+          {replaces
+            ? "It replaces using it without one."
+            : "Chats with more than one on ask which to use."}
+        </span>
+      </div>
+      <ConnectActions integration={integration} another />
+    </ListRow>
+  );
+}
+
+function AccountRow({
+  integration,
+  account,
+  several,
+}: {
+  integration: UserIntegration;
+  account: Account;
+  several: boolean;
+}) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const disconnect = useMutation({
-    mutationFn: () => disconnectIntegration({ data: { integrationId: integration.id } }),
+    mutationFn: () => disconnectIntegration({ data: { connectionId: account.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
     onError: (error) => toastError("Could not disconnect.", error),
   });
-  const { connection, dependents } = integration;
-  const needsReauth = connection?.status === "needs_reauth";
+  const { dependents } = account;
+  const name = accountName(account);
+  const needsReauth = account.status === "needs_reauth";
+  const noAccount = usesNoAccount(account.authKind);
   const affected = [
     plural(dependents.sources, "knowledge source"),
     plural(dependents.schedules, "schedule"),
@@ -358,86 +511,94 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
   const confirmDisconnect = async () => {
     if (
       await confirm({
-        title: `Disconnect ${integration.name}?`,
-        description: integration.methods.everyone
-          ? "Chats go back to using it without an account."
-          : affected.length
-            ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
-            : "Chats lose its tools until you connect again.",
+        title: `Disconnect “${name}”?`,
+        description:
+          integration.methods.everyone && integration.connections.length === 1
+            ? "Chats go back to using it without an account."
+            : affected.length
+              ? `Chats lose it, and ${affected.join(" and ")} stop working until you connect it again. Documents already synced stay.`
+              : "Chats lose it until you connect it again.",
         confirmLabel: "Disconnect",
       })
     )
       disconnect.mutate();
   };
   const [keyOpen, setKeyOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const canConnect = integration.available;
-  // A lapsed sign-in gets one way back in; the other method and Disconnect wait in the menu.
-  const reconnectWithOAuth = needsReauth && canConnect && integration.methods.oauth;
-  // Used without an account, it can take one of the person's own for more.
-  const withoutAccount = canConnect && !needsReauth && withoutAccountKind(connection);
-  const desktop = useDesktop();
+  const reconnectWithOAuth =
+    needsReauth && canConnect && account.authKind === "oauth" && integration.methods.oauth;
+  const reconnectWithKey =
+    needsReauth && canConnect && account.authKind === "api_key" && integration.methods.apiKey;
   // On for everyone: without an account it is back on the next time it is read.
-  const canDisconnect = !(integration.methods.everyone && withoutAccountKind(connection));
-  const menu =
-    ((reconnectWithOAuth || withoutAccount) && integration.methods.apiKey) ||
-    (withoutAccount && integration.methods.oauth) ||
-    canDisconnect;
+  const canDisconnect = !(integration.methods.everyone && noAccount);
+  const canReplaceKey =
+    account.authKind === "api_key" && integration.methods.apiKey && !reconnectWithKey;
+  const menu = !noAccount || canReplaceKey || canDisconnect;
 
   return (
     <ListRow>
       <IntegrationLogo integrationId={integration.id} variant="tile" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-          <span className="truncate" title={connection?.accountLabel}>
-            {connection ? connection.accountLabel : "Not connected"}
+          <span className="truncate" title={account.accountLabel}>
+            {name}
           </span>
-          <StatusBadge integration={integration} />
+          {integration.available ? (
+            <AccountBadge account={account} />
+          ) : (
+            <Badge variant="outline">Turned off</Badge>
+          )}
         </span>
         <span className="text-muted-foreground truncate text-xs">
           {!integration.available
             ? "An admin turned this integration off."
-            : needsReauth && integration.methods.open
+            : needsReauth && noAccount
               ? `${integration.name} changed. Turn it on again to keep using it.`
               : needsReauth
                 ? `Sign in to ${integration.name} again to keep using it.`
-                : connection?.authKind === "shared"
+                : account.authKind === "shared"
                   ? "Everyone here uses one key, so chats only read."
-                  : connection?.authKind === "none"
-                    ? integration.methods.apiKey || integration.methods.oauth
+                  : account.authKind === "none"
+                    ? addsAccounts(integration)
                       ? "Used without an account."
                       : `${integration.name} needs no account.`
-                    : connection
-                      ? `Chats use ${integration.name} as this account.`
-                      : integration.methods.open
-                        ? `Turn ${integration.name} on to use it in chats.`
-                        : `Connect your ${integration.name} account to use it in chats.`}
+                    : account.name
+                      ? account.accountLabel
+                      : several
+                        ? "Name it to tell your accounts apart."
+                        : `Chats use ${integration.name} as this account.`}
         </span>
       </div>
-      {canConnect && !connection ? <ConnectActions integration={integration} /> : null}
       {canConnect &&
       !needsReauth &&
-      connection?.requiredScopes?.length &&
+      account.requiredScopes?.length &&
+      account.authKind === "oauth" &&
       integration.methods.oauth ? (
         // A call needed more than this sign-in granted; signing in again asks for both.
-        <SignInButton integration={integration}>Grant more access</SignInButton>
+        <SignInButton integration={integration} connectionId={account.id}>
+          Grant more access
+        </SignInButton>
       ) : null}
       {reconnectWithOAuth ? (
-        <SignInButton integration={integration}>Reconnect</SignInButton>
-      ) : needsReauth && canConnect && integration.methods.open ? (
+        <SignInButton integration={integration} connectionId={account.id}>
+          Reconnect
+        </SignInButton>
+      ) : needsReauth && canConnect && noAccount && integration.methods.open ? (
         <TurnOnButton integration={integration}>Turn on again</TurnOnButton>
-      ) : needsReauth && canConnect && integration.methods.apiKey ? (
+      ) : reconnectWithKey ? (
         <Button size="sm" onClick={() => setKeyOpen(true)}>
           Reconnect
         </Button>
       ) : null}
-      {connection && menu ? (
+      {menu ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Account actions"
+                aria-label={`Actions for ${name}`}
                 className="text-muted-foreground"
               />
             }
@@ -445,19 +606,11 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            {(reconnectWithOAuth || withoutAccount) && integration.methods.apiKey ? (
-              <DropdownMenuItem onClick={() => setKeyOpen(true)}>
-                Use {findIntegrationType(integration.kind)?.apiKey?.noun ?? "an API key"} instead
-              </DropdownMenuItem>
-            ) : null}
-            {withoutAccount && integration.methods.oauth ? (
-              <DropdownMenuItem
-                render={
-                  <a href={connectUrl(integration.id)} target={desktop ? "_blank" : undefined} />
-                }
-              >
-                Sign in with {integration.name}
-              </DropdownMenuItem>
+            {noAccount ? null : (
+              <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
+            )}
+            {canReplaceKey ? (
+              <DropdownMenuItem onClick={() => setKeyOpen(true)}>Replace key</DropdownMenuItem>
             ) : null}
             {canDisconnect ? (
               <DropdownMenuItem
@@ -472,51 +625,62 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
+      {keyOpen ? (
+        <ApiKeyDialog
+          integration={integration}
+          connectionId={account.id}
+          open
+          onOpenChange={setKeyOpen}
+        />
+      ) : null}
+      {renaming ? <RenameDialog account={account} onOpenChange={setRenaming} /> : null}
     </ListRow>
   );
 }
 
-function DefaultRow({ integration }: { integration: UserIntegration }) {
+function RenameDialog({
+  account,
+  onOpenChange,
+}: {
+  account: Account;
+  onOpenChange: (open: boolean) => void;
+}) {
   const fieldId = useId();
-  const update = useConnectionUpdate(integration.id);
-  const connection = integration.connection!;
+  const [name, setName] = useState(account.name ?? "");
+  const update = useConnectionUpdate(account.id);
   return (
-    <ListRow className="justify-between">
-      <FieldLabel htmlFor={fieldId}>Turn on in new chats</FieldLabel>
-      <Switch
-        id={fieldId}
-        checked={connection.offerByDefault}
-        onCheckedChange={(offerByDefault) => update.mutate({ offerByDefault })}
-      />
-    </ListRow>
-  );
-}
-
-function ScopeSection({ integration }: { integration: UserIntegration }) {
-  const update = useConnectionUpdate(integration.id);
-  return (
-    <IntegrationScopeSection
-      integration={integration}
-      onChange={(scope) => update.mutate({ scope })}
-    />
-  );
-}
-
-function PermissionsEditor({ integration }: { integration: UserIntegration }) {
-  const update = useConnectionUpdate(integration.id);
-  return (
-    <ToolPermissions
-      kind={integration.kind}
-      byAccess={!integration.personal}
-      // Shared keys only ever read, so their other tools have nothing to set.
-      tools={
-        integration.connection?.authKind === "shared"
-          ? integration.tools.filter((tool) => tool.access === "read")
-          : integration.tools
-      }
-      permissions={integration.connection!.toolPermissions}
-      onChange={(toolPermissions) => update.mutate({ toolPermissions })}
-    />
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename account</DialogTitle>
+          <DialogDescription>
+            Shown in chats and approvals. Leave it empty for {account.accountLabel}.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            update.mutate({ name: name.trim() || null });
+            onOpenChange(false);
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor={fieldId}>Name</FieldLabel>
+            <Input
+              id={fieldId}
+              value={name}
+              maxLength={60}
+              placeholder={account.accountLabel}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button type="submit">Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

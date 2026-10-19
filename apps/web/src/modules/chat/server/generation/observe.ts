@@ -579,10 +579,15 @@ export const observePart = (
             turnIndex: turn,
             callIndex: turnState.callIndex - 1,
           });
+          // Named by the call when the chat has several; the result says which acted.
+          const named = (args as { account?: unknown } | null)?.account;
           yield* start({
             family,
             name: part.name,
             integrationId: entry.integrationId,
+            ...(typeof named === "string" && named.trim()
+              ? { account: named.trim().slice(0, 120) }
+              : {}),
             tool: entry.tool.name,
             label: entry.tool.label,
             access: entry.tool.access,
@@ -1178,7 +1183,7 @@ export const observePart = (
         const integrationEntry = integrationTools?.names.get(part.name);
         if (integrationEntry) {
           if (isPreliminary) return;
-          const { sources, access, files, decided } = integrationTools!.take(part.id);
+          const { sources, access, files, decided, account } = integrationTools!.take(part.id);
           // Files a service returned become attachments of the answer,
           // stored under the fence like a custom tool's; a failed one is noted.
           // By position: the result lists the files in the order returned,
@@ -1223,6 +1228,8 @@ export const observePart = (
           const activity = projectIntegrationToolResult({
             name: part.name,
             integrationId: integrationEntry.integrationId,
+            // Only when the call had a choice; one account needs no naming.
+            account: integrationEntry.chooses ? (account?.name ?? null) : null,
             tool: integrationEntry.tool.name,
             label: integrationEntry.tool.label,
             // A call that reached people is recorded as destructive.

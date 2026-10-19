@@ -321,7 +321,14 @@ export interface IntegrationAdapter {
     readonly scopes: ReadonlyArray<string>;
   } | null;
   /** Checks a credential and names the account it belongs to. */
-  verify(session: IntegrationSession): Effect.Effect<{ accountLabel: string }, AdapterFailure>;
+  /**
+   * Who the credential signs in as. `accountKey` is the service's stable id for
+   * the account, so signing in to it again reconnects rather than adding a
+   * second account; null when the service has none to give.
+   */
+  verify(
+    session: IntegrationSession,
+  ): Effect.Effect<{ accountLabel: string; accountKey: string | null }, AdapterFailure>;
   /** The choices for the manifest's scope, for the person limiting their connection. */
   readonly scopeOptions:
     | ((session: IntegrationSession) => Effect.Effect<ReadonlyArray<ScopeOption>, AdapterFailure>)

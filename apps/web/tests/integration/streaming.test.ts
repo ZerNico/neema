@@ -42,6 +42,7 @@ import {
   documents,
   projects,
   integrationConfigs,
+  integrationConnections,
   conversationIntegrations,
   user,
   userApprovals,
@@ -3693,6 +3694,17 @@ describe("turn acceptance", () => {
         yield* db
           .insert(integrationConfigs)
           .values({ id: integrationId, kind: "outline", name: integrationId });
+        // Choices name the person's accounts; one of theirs, and one that does not exist.
+        const connectionId = uuidv7();
+        yield* db.insert(integrationConnections).values({
+          id: connectionId,
+          userId: seed.userId,
+          integrationId,
+          authKind: "none",
+          credentialsCiphertext: "unused",
+          accountLabel: "Docs",
+          configFingerprint: "unused",
+        });
         const conversationId = uuidv7();
         const missingId = uuidv7();
         const file = yield* uploadText(seed.userId, "first.txt", "First turn file");
@@ -3707,8 +3719,8 @@ describe("turn acceptance", () => {
             searchEnabled: false,
             researchEnabled: false,
             integrationChoices: [
-              { integrationId, enabled: true },
-              { integrationId: missingId, enabled: false },
+              { connectionId, enabled: true },
+              { connectionId: missingId, enabled: false },
             ],
           })
           .pipe(Effect.flip);
@@ -3736,7 +3748,7 @@ describe("turn acceptance", () => {
     );
     expect(result.failure).toMatchObject({
       _tag: "IntegrationNotAvailable",
-      integrationId: result.missingId,
+      connectionId: result.missingId,
     });
     expect(result.conversation).toEqual([]);
     expect(result.choices).toEqual([]);

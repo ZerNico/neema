@@ -473,9 +473,15 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                     </DropdownMenuItem>
                     {syncable.length > 0 ? <DropdownMenuSeparator /> : null}
                     {syncable.map((integration) => (
+                      // The picker asks which account when there are several.
                       <DropdownMenuItem
                         key={integration.id}
-                        onClick={() => setSyncing({ integrationId: integration.id })}
+                        onClick={() =>
+                          setSyncing({
+                            integrationId: integration.id,
+                            connectionId: integration.connections[0]?.id ?? null,
+                          })
+                        }
                       >
                         <IntegrationLogo integrationId={integration.id} />
                         Sync from {integration.name}
