@@ -128,7 +128,7 @@ const sharesIntegration = (items: ReadonlyArray<ComposerIntegration>, item: Comp
       other.integrationId === item.integrationId && other.connectionId !== item.connectionId,
   );
 
-/** The "@" rows: one per integration, naming its accounts. */
+/** The "@" rows: one per integration, naming its accounts only when there are several. */
 const mentionableIntegrations = (items: ReadonlyArray<ComposerIntegration>) => {
   const byIntegration = new Map<string, ComposerIntegration[]>();
   for (const item of items)
@@ -140,7 +140,7 @@ const mentionableIntegrations = (items: ReadonlyArray<ComposerIntegration>) => {
       id: first.integrationId,
       label: first.name,
       ...(accounts.some((item) => item.enabled) ? { meta: "on" } : {}),
-      ...(named.length ? { description: named.join(" · ") } : {}),
+      ...(named.length > 1 ? { description: named.join(" · ") } : {}),
       search: `${first.integrationId} ${first.name} ${named.join(" ")}`,
     };
   });
