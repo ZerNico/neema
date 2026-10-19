@@ -1169,6 +1169,23 @@ describe("embedding attempt accounting", () => {
     }),
   );
 
+  it.effect("prefers the provider's billed cost over the model's rate", () =>
+    Effect.gen(function* () {
+      stubProvider(JSON.stringify({ data, usage: { prompt_tokens: 5, cost: 0.00042 } }));
+      yield* embed;
+      expect(ledger[0]).toMatchObject({ inputTokens: 5, cost: 0.00042, costSource: "provider" });
+      stubProvider(JSON.stringify({ data, usage: { prompt_tokens: "5", cost: 0 } }));
+      yield* embed;
+      expect(ledger[0]).toMatchObject({ usageComplete: false, cost: 0, costSource: "provider" });
+      stubProvider(JSON.stringify({ data, usage: { prompt_tokens: 5, cost: -1 } }));
+      yield* embed;
+      expect(ledger[0]).toMatchObject({
+        cost: expect.closeTo(0.0000001, 15),
+        costSource: "pricing",
+      });
+    }),
+  );
+
   it.effect("counts each failed HTTP retry without storing provider payloads", () =>
     Effect.gen(function* () {
       stubProvider("private query fake-key", 503);

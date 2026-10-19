@@ -244,6 +244,10 @@ const EmbeddingUsage = Schema.Struct({
     total_tokens: Schema.optionalKey(EmbeddingTokenCount),
   }),
 });
+// Decoded apart from the counts so a malformed count never hides a billed cost.
+const EmbeddingCost = Schema.Struct({
+  usage: Schema.Struct({ cost: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)) }),
+});
 
 export interface EmbeddingAttribution {
   readonly userId: string;
@@ -879,6 +883,7 @@ export class AiGateway extends Context.Service<
         if (input.beforeDispatch) yield* input.beforeDispatch();
         let started = false;
         let inputTokens: number | null = null;
+        let reportedCost: number | null = null;
         // The finalizer surrounds dispatch and validation, not preflight or
         // permit waiting. Cancellation after dispatch may still be billable.
         return yield* Effect.gen(function* () {
@@ -937,6 +942,8 @@ export class AiGateway extends Context.Service<
               if (Option.isSome(usage))
                 inputTokens =
                   usage.value.usage.prompt_tokens ?? usage.value.usage.total_tokens ?? null;
+              const billed = Schema.decodeUnknownOption(EmbeddingCost)(json);
+              if (Option.isSome(billed)) reportedCost = billed.value.usage.cost;
               return decodeEmbeddings(json);
             }),
             Effect.timeout(Duration.seconds(45)),
@@ -1017,8 +1024,10 @@ export class AiGateway extends Context.Service<
               model.pricing.input >= 0
                 ? (inputTokens * model.pricing.input) / 1_000_000
                 : null;
-            const cost =
+            // The billed cost wins, as for chat; the model's rate is the fallback.
+            const pricedCost =
               calculatedCost !== null && Number.isFinite(calculatedCost) ? calculatedCost : null;
+            const cost = reportedCost ?? pricedCost;
             return analytics
               .record({
                 ...input.attribution,
@@ -1036,7 +1045,7 @@ export class AiGateway extends Context.Service<
                 reasoningTokens: 0,
                 usageComplete: inputTokens !== null,
                 cost,
-                costSource: cost === null ? null : "pricing",
+                costSource: reportedCost !== null ? "provider" : cost === null ? null : "pricing",
               })
               .pipe(
                 Effect.catchCause(() => Effect.logError("embedding usage could not be recorded")),
