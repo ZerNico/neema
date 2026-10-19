@@ -99,16 +99,19 @@ export const methodsFor = (
 ): ConnectMethods => {
   if (adapter.connectMethods) {
     const declared = adapter.connectMethods(config);
+    const open = declared.open === "shared" && !sharedStored ? null : declared.open;
     return {
       oauth: declared.oauth && Boolean(adapter.discoveredOAuth),
       apiKey: declared.apiKey && Boolean(manifest.apiKey),
-      open: declared.open === "shared" && !sharedStored ? null : declared.open,
+      open,
+      everyone: open !== null && declared.everyone,
     };
   }
   return {
     oauth: Boolean(manifest.oauth && adapter.oauth && oauthReady(row)),
     apiKey: Boolean(manifest.apiKey && row.allowApiKeys),
     open: null,
+    everyone: false,
   };
 };
 

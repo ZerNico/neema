@@ -27,6 +27,9 @@ import { IntegrationLogo } from "./integration-logo.tsx";
 import { IntegrationScopeSection } from "./integration-scope.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
+const withoutAccountKind = (connection: UserIntegration["connection"]) =>
+  connection?.authKind === "none" || connection?.authKind === "shared";
+
 function StatusBadge({ integration }: { integration: UserIntegration }) {
   const { connection } = integration;
   if (!connection) return null;
@@ -229,9 +232,11 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
     if (
       await confirm({
         title: `Disconnect ${integration.name}?`,
-        description: affected.length
-          ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
-          : "Chats lose its tools until you connect again.",
+        description: integration.methods.everyone
+          ? "Chats go back to using it without an account."
+          : affected.length
+            ? `Chats lose its tools, and ${affected.join(" and ")} stop working until you connect again. Documents already synced stay.`
+            : "Chats lose its tools until you connect again.",
         confirmLabel: "Disconnect",
       })
     )
@@ -242,11 +247,14 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
   // A lapsed sign-in gets one way back in; the other method and Disconnect wait in the menu.
   const reconnectWithOAuth = needsReauth && canConnect && integration.methods.oauth;
   // Used without an account, it can take one of the person's own for more.
-  const withoutAccount =
-    canConnect &&
-    !needsReauth &&
-    (connection?.authKind === "none" || connection?.authKind === "shared");
+  const withoutAccount = canConnect && !needsReauth && withoutAccountKind(connection);
   const desktop = useDesktop();
+  // On for everyone: without an account it is back on the next time it is read.
+  const canDisconnect = !(integration.methods.everyone && withoutAccountKind(connection));
+  const menu =
+    ((reconnectWithOAuth || withoutAccount) && integration.methods.apiKey) ||
+    (withoutAccount && integration.methods.oauth) ||
+    canDisconnect;
 
   return (
     <ListRow>
@@ -295,7 +303,7 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
           Reconnect
         </Button>
       ) : null}
-      {connection ? (
+      {connection && menu ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -324,14 +332,16 @@ function AccountRow({ integration }: { integration: UserIntegration }) {
                 Sign in with {integration.name}
               </DropdownMenuItem>
             ) : null}
-            <DropdownMenuItem
-              variant="destructive"
-              // A menu item cannot hold a spinner; disabled is its pending state.
-              disabled={disconnect.isPending}
-              onClick={() => void confirmDisconnect()}
-            >
-              Disconnect
-            </DropdownMenuItem>
+            {canDisconnect ? (
+              <DropdownMenuItem
+                variant="destructive"
+                // A menu item cannot hold a spinner; disabled is its pending state.
+                disabled={disconnect.isPending}
+                onClick={() => void confirmDisconnect()}
+              >
+                Disconnect
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}

@@ -576,6 +576,7 @@ describe("an MCP server set up by an admin", () => {
       oauth: false,
       apiKey: true,
       open: "none",
+      everyone: false,
     });
     expect(await offeredNames(admin, adminChat)).toEqual(["search"]);
     await run(
@@ -592,6 +593,70 @@ describe("an MCP server set up by an admin", () => {
       status: "needs_reauth",
     });
     expect(await offeredNames(admin, adminChat)).toEqual(["search"]);
+  });
+
+  it("turns on for everyone at once, and leaves a person's own account theirs", async () => {
+    const admin = await newUser();
+    const person = await newUser();
+    const config = (url: string, ways = "token anonymous") => ({
+      url,
+      ways,
+      anonymous: "open",
+      everyone: "everyone",
+    });
+    const id = await setUp("Docs for all", config(`${base}/mcp`));
+    const catalog = await check(id, admin);
+    await approve(admin, id, catalog.version!, [
+      { mcpName: "search", enabled: true, access: "read" },
+    ]);
+    const connectionOf = () =>
+      run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person))).then(
+        (rows) => rows.find((row) => row.id === id)?.connection,
+      );
+
+    // Nobody pressed anything, and a new chat already has it.
+    const chat = await newConversation(person);
+    expect(await offeredNames(person, chat)).toEqual(["search"]);
+    expect(await connectionOf()).toMatchObject({
+      authKind: "none",
+      status: "active",
+      offerByDefault: true,
+    });
+
+    // Their own token replaces it, and disconnecting goes back to the open way.
+    await run(
+      Effect.flatMap(IntegrationService, (s) => s.connectApiKey(person, id, { token: "t" })),
+    );
+    expect(await connectionOf()).toMatchObject({ authKind: "api_key" });
+    await run(Effect.flatMap(IntegrationService, (s) => s.disconnect(person, id)));
+    expect(await connectionOf()).toMatchObject({ authKind: "none", status: "active" });
+
+    // Moved to another server, the open connection follows; a token would need reconnecting.
+    await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.saveConfig({
+          id,
+          name: "Docs for all",
+          enabled: true,
+          config: config(`${base}/elsewhere`),
+          oauthClientId: "",
+          allowApiKeys: true,
+        }),
+      ),
+    );
+    expect(await connectionOf()).toMatchObject({ authKind: "none", status: "active" });
+
+    // With one shared key, everyone is on it.
+    const shared = await setUp(
+      "Docs shared for all",
+      { url: `${base}/mcp`, ways: "anonymous", anonymous: "shared", everyone: "everyone" },
+      "admin-key",
+    );
+    const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
+    expect(listed.find((row) => row.id === shared)).toMatchObject({
+      methods: { open: "shared", everyone: true },
+      connection: { authKind: "shared", accountLabel: "Shared key" },
+    });
   });
 
   it("never hands a session made for one address the credential saved for the next", async () => {

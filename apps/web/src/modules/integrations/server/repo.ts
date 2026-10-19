@@ -181,6 +181,11 @@ export class IntegrationRepo extends Context.Service<
       credentials: StoredCredentials;
       accountLabel: string;
       fingerprint: string;
+      /**
+       * Replaces an existing connection only when it was made one of these
+       * ways; empty only inserts. Absent replaces any, as connecting does.
+       */
+      replacing?: ReadonlyArray<AuthKind>;
     }): Effect.Effect<IntegrationConnectionRow | null>;
     updatePreferences(
       userId: string,
@@ -617,6 +622,13 @@ export class IntegrationRepo extends Context.Service<
                 credentialRevision: uuidv7(),
                 updatedAt: now,
               },
+              ...(input.replacing
+                ? {
+                    setWhere: input.replacing.length
+                      ? inArray(integrationConnections.authKind, [...input.replacing])
+                      : sql`false`,
+                  }
+                : {}),
             })
             .returning()
             .pipe(Effect.orDie);

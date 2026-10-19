@@ -11,16 +11,20 @@ export interface McpWays {
   readonly oauth: boolean;
   readonly token: boolean;
   readonly anonymous: (typeof MCP_ANONYMOUS)[number] | "off";
+  /** Used without an account, it is on for everyone who may use it, without a press. */
+  readonly everyone: boolean;
 }
 
 export const mcpWaysOf = (config: Readonly<Record<string, string>>): McpWays => {
   const ticked = fieldValues(config.ways ?? "oauth");
+  const anonymous = ticked.includes("anonymous");
   return {
     oauth: ticked.includes("oauth"),
     token: ticked.includes("token"),
-    anonymous: ticked.includes("anonymous")
+    anonymous: anonymous
       ? (MCP_ANONYMOUS.find((value) => value === config.anonymous) ?? "open")
       : "off",
+    everyone: anonymous && config.everyone === "everyone",
   };
 };
 
@@ -74,6 +78,22 @@ export const mcpManifest = {
           value: "shared",
           label: "One shared key",
           description: "Everyone uses your key, so chats only read.",
+        },
+      ],
+    },
+    {
+      key: "everyone",
+      label: "Turned on by",
+      kind: "choice",
+      // Unset reads as each person, the first option.
+      required: true,
+      when: ANONYMOUS,
+      options: [
+        { value: "person", label: "Each person", description: "In their Settings." },
+        {
+          value: "everyone",
+          label: "Everyone at once",
+          description: "On for everyone who can use it, and in their new chats.",
         },
       ],
     },

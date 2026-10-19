@@ -302,7 +302,10 @@ export const mcpAdapter: IntegrationAdapter = {
       url: url.toString(),
       ways: MCP_WAYS.filter((way) => ticked.includes(way)).join(" "),
     };
-    if (anonymous && ticked.includes("anonymous")) normalized.anonymous = anonymous;
+    if (anonymous && ticked.includes("anonymous")) {
+      normalized.anonymous = anonymous;
+      if (config.everyone === "everyone") normalized.everyone = "everyone";
+    }
     const ways = mcpWaysOf(normalized);
     if (header && (ways.token || ways.anonymous === "shared")) normalized.header = header;
     if (scopes && ways.oauth) normalized.scopes = scopes;
@@ -321,6 +324,7 @@ export const mcpAdapter: IntegrationAdapter = {
       oauth: ways.oauth,
       apiKey: ways.token,
       open: ways.anonymous === "open" ? "none" : ways.anonymous === "shared" ? "shared" : null,
+      everyone: ways.everyone,
     };
   },
   verify: (session) =>

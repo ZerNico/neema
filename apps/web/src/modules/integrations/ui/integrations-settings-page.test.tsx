@@ -37,7 +37,7 @@ const outline = (connection: Partial<UserIntegration["connection"]> | null): Use
   kind: "outline",
   name: "Outline",
   available: true,
-  methods: { oauth: true, apiKey: true, open: null },
+  methods: { oauth: true, apiKey: true, open: null, everyone: false },
   tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
     name,
     title,
@@ -104,7 +104,7 @@ describe("integration account row", () => {
   it("lets a person turn an open server on again after the admin changed it", async () => {
     mount({
       ...outline({ authKind: "none", accountLabel: "No sign-in needed", status: "needs_reauth" }),
-      methods: { oauth: false, apiKey: false, open: "none" },
+      methods: { oauth: false, apiKey: false, open: "none", everyone: false },
     });
     expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(screen.queryByText("Signed out")).not.toBeInTheDocument();
@@ -112,6 +112,15 @@ describe("integration account row", () => {
     await waitFor(() =>
       expect(connectIntegrationOpen).toHaveBeenCalledWith({ data: { integrationId: "outline" } }),
     );
+  });
+
+  it("offers no Disconnect for a server an admin turned on for everyone", async () => {
+    mount({
+      ...outline({ authKind: "none", accountLabel: "Docs" }),
+      methods: { oauth: false, apiKey: false, open: "none", everyone: true },
+    });
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Account actions" })).toBeNull();
   });
 
   it("keeps a working connection's row to its account and a menu", async () => {

@@ -248,9 +248,56 @@ export class IntegrationService extends Context.Service<
       const oauth = yield* makeOAuthFlow({ credentials, changed });
       const catalog = yield* makeCatalogService({ credentials });
 
+      /**
+       * This person's integrations, after giving them a connection to each one
+       * an admin turned on for everyone. Such a connection holds nothing
+       * personal, so it is made on read, without asking the server, and an
+       * earlier one is pointed at the current setup unless it is their own account.
+       */
+      const listWithEveryone = Effect.fn(function* (userId: string) {
+        const rows = yield* repo.listForUser(userId);
+        let added = false;
+        for (const row of rows) {
+          const manifest = findIntegrationType(row.config.kind);
+          const adapter = findAdapterType(row.config.kind);
+          if (!manifest || !adapter || !row.config.enabled || !row.usable) continue;
+          const normalized = adapter.normalizeConfig(row.config.config);
+          if ("error" in normalized) continue;
+          const { open, everyone } = methodsFor(
+            manifest,
+            adapter,
+            row.config,
+            normalized.config,
+            Boolean(row.config.sharedCredentialCiphertext),
+          );
+          if (!everyone || !open) continue;
+          const existing = row.connection;
+          if (
+            existing &&
+            (existing.authKind === "oauth" ||
+              existing.authKind === "api_key" ||
+              (existing.authKind === open && existing.configFingerprint === normalized.fingerprint))
+          )
+            continue;
+          const saved = yield* repo.saveConnection({
+            userId,
+            integrationId: row.config.id,
+            revision: row.config.revision,
+            authKind: open,
+            credentials: { kind: "none" },
+            accountLabel: open === "shared" ? "Shared key" : row.config.name,
+            fingerprint: normalized.fingerprint,
+            // A sign-in landing meanwhile is theirs, and stays.
+            replacing: ["none", "shared"],
+          });
+          if (saved) added = true;
+        }
+        return added ? yield* repo.listForUser(userId) : rows;
+      });
+
       /** Connections that work right now, keyed by integration. */
       const usableConnections = Effect.fn(function* (userId: string) {
-        const rows = yield* repo.listForUser(userId);
+        const rows = yield* listWithEveryone(userId);
         const usable = new Map<
           string,
           { connection: IntegrationConnectionRow; config: IntegrationConfigRow }
@@ -497,7 +544,7 @@ export class IntegrationService extends Context.Service<
         }),
 
         listForUser: Effect.fn("IntegrationService.listForUser")(function* (userId) {
-          const rows = yield* repo.listForUser(userId);
+          const rows = yield* listWithEveryone(userId);
           const result: UserIntegration[] = [];
           for (const entry of rows.toSorted((a, b) => byName(a.config, b.config))) {
             const manifest = findIntegrationType(entry.config.kind);

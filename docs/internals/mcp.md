@@ -91,6 +91,15 @@ an account add their own later.
   belongs to the sender, so a connection on it is offered only `read` tools and `consentFor`
   refuses anything else (`shared`). The check is in the tool layer, not only the UI.
 
+Either way without an account may be **on for everyone**. Then nobody presses anything: the
+connection is made when the person's integrations are read (Settings, a chat's list, an
+attempt's offer), without asking the server, since it holds nothing personal and the admin's
+save already checked it. It is on in new chats like any fresh connection. Such a connection
+cannot be disconnected, since the next read makes it again; it is turned off per chat or for
+new chats instead. A person's own sign-in or token replaces it and is never replaced back, and
+disconnecting that returns them to the shared way. When the admin moves the server or changes
+which way without an account it uses, those connections follow on the next read.
+
 The fingerprint names where credentials go (the address and the header), not which ways are
 open, so opening another way asks nobody to reconnect and keeps the review. A connection
 whose way the admin closed reads as needing to reconnect, judged by its kind wherever a

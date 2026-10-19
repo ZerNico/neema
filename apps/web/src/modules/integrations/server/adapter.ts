@@ -206,6 +206,8 @@ export interface ConnectMethods {
   readonly apiKey: boolean;
   /** Turned on without credentials of one's own; `shared` uses the admin's key. */
   readonly open: "none" | "shared" | null;
+  /** The open way is on for everyone who may use it, without anyone turning it on. */
+  readonly everyone: boolean;
 }
 
 /**

@@ -74,7 +74,13 @@ export interface UserIntegration {
   name: string;
   /** Enabled by an admin, configured, and shared with this person. */
   available: boolean;
-  methods: { oauth: boolean; apiKey: boolean; open: "none" | "shared" | null };
+  /** `everyone`: the open way is on for everyone without a press, so it cannot be disconnected. */
+  methods: {
+    oauth: boolean;
+    apiKey: boolean;
+    open: "none" | "shared" | null;
+    everyone: boolean;
+  };
   /** What chats can be offered, in order, before any per-person permission. */
   tools: ReadonlyArray<IntegrationToolInfo>;
   apiKeyHelpUrl: string | null;
