@@ -8,6 +8,7 @@ import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts
 import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";
 import { preparePublishFileTool } from "~/modules/chat/server/publish-file.ts";
 import { createWorkingFiles } from "~/modules/chat/server/working-files.ts";
+import { prepareHistoryTools } from "~/modules/chat/server/history-tools.ts";
 import {
   editPresentationTool,
   inspectPresentationTool,
@@ -74,6 +75,13 @@ describe("tool parameters the model is offered", () => {
       updatePlanTool,
       notifyUserTool,
       ...toolsOf(prepareBrowserTools({ rowIdFor: () => Effect.succeed(undefined) }).toolkit),
+      ...toolsOf(
+        prepareHistoryTools({
+          ...base,
+          repo: {} as never,
+          otherChats: { excludeId: "c", projectId: null },
+        }).toolkit,
+      ),
     ];
     // Schema.Number advertises "NaN" and "Infinity" as strings; models then send them.
     expect(JSON.stringify(tools.map((tool) => Tool.getJsonSchema(tool)))).not.toContain('"NaN"');
@@ -85,6 +93,21 @@ describe("tool parameters the model is offered", () => {
         .map(([key]) => `${tool.name}.${key}`);
     });
     expect(empty).toEqual([]);
+  });
+
+  it("requires no parameter of the history tools", () => {
+    const history = prepareHistoryTools({
+      ...base,
+      repo: {} as never,
+      otherChats: { excludeId: "c", projectId: null },
+    });
+    expect(toolsOf(history.toolkit).map((tool) => tool.name)).toEqual([
+      "read_history",
+      "search_chats",
+      "read_chat",
+    ]);
+    for (const tool of toolsOf(history.toolkit))
+      expect((Tool.getJsonSchema(tool) as { required?: string[] }).required ?? []).toEqual([]);
   });
 
   it("keeps presentation top-level parameters optional and canonical selectors in runtime parity", () => {

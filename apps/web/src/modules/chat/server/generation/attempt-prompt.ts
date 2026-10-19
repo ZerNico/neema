@@ -137,6 +137,7 @@ export const prepareAttemptPrompt = (env: {
       integrationTools,
       knowledgeTools,
       conversationContext,
+      historyTools,
       researchTool,
       offerState,
       offeredLazy,
@@ -466,6 +467,7 @@ export const prepareAttemptPrompt = (env: {
     const fixedPrefix = buildFixedPrefix({
       lazyFamilies: offeredLazy,
       images: imageTool !== undefined,
+      history: historyTools ? { otherChats: conversationContext.pastChats } : null,
       agentAuthoring: permissions.agentsCreate,
       documents: permissions.documents,
       knowledge: !!knowledgeSession,
@@ -520,6 +522,7 @@ export const prepareAttemptPrompt = (env: {
           fixedPrefix,
           trailingMessages: historyBudgetTail(false),
           webToolsEnabled: webTools !== undefined,
+          historyReadable: historyTools !== null,
           priorUsage,
           onCompaction: (event) => sink.pushCompaction({ v: 1, ...event }),
           // The tools and settings the first request will most likely send,

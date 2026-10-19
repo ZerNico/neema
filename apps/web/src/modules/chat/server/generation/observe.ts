@@ -70,6 +70,8 @@ import {
   forTranscript,
 } from "~/modules/desktop/tool-schema.ts";
 import { attachmentReadActivity } from "../attachment-reader.ts";
+import { historyActivity } from "../history-tools.ts";
+import { HistoryToolName } from "../../history-tool-schema.ts";
 import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { json } from "./json.ts";
@@ -106,6 +108,7 @@ const STORED_ARGUMENTS = {
   notify: "shown",
   map: "shown",
   attachment: "shown",
+  history: "shown",
   "tool-load": "shown",
   custom: "shown",
 } as const satisfies Record<ToolFamily, "none" | "trimmed" | "ask" | "shown">;
@@ -492,6 +495,10 @@ export const observePart = (
         }
         if (family === "attachment") {
           yield* start({ family, name: "read_attachment" });
+          return;
+        }
+        if (family === "history" && Schema.is(HistoryToolName)(part.name)) {
+          yield* start({ family, name: part.name });
           return;
         }
         if (family === "tool-load") {
@@ -966,6 +973,35 @@ export const observePart = (
             phase: "result",
             callId: rowId,
             name: "read_attachment",
+            ...activity,
+          });
+          return;
+        }
+        if (Schema.is(HistoryToolName)(part.name)) {
+          if (isPreliminary) return;
+          // The text went to the model; the row keeps what was looked for.
+          const activity = part.isFailure
+            ? { ok: false, error: "The history could not be read." }
+            : historyActivity(part.result);
+          yield* repo.completeToolCall({
+            id: rowId,
+            result: json(activity),
+            status: activity.ok ? "complete" : "error",
+            ...(activity.ok
+              ? {}
+              : {
+                  error: {
+                    code: "HistoryReadFailed",
+                    message: activity.error ?? "The history could not be read.",
+                  },
+                }),
+          });
+          yield* sink.pushTool({
+            v: 1,
+            family: "history",
+            phase: "result",
+            callId: rowId,
+            name: part.name,
             ...activity,
           });
           return;

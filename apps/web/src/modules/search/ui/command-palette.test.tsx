@@ -177,6 +177,7 @@ describe("command palette", () => {
         messageId: "m1",
         snippet: { text: "Das Handgepäck darf 10 kg wiegen", highlights: [[4, 14]] },
         archived: false,
+        lastActivityAt: new Date("2026-01-01T00:00:00.000Z"),
       },
     ]);
     const router = await renderPalette();
@@ -199,6 +200,7 @@ describe("command palette", () => {
         messageId: "m2",
         snippet: { text: "Handgepäck bleibt klein", highlights: [[0, 10]] },
         archived: true,
+        lastActivityAt: new Date("2026-01-01T00:00:00.000Z"),
       },
     ]);
     await renderPalette();

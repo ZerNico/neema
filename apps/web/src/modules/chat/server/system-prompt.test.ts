@@ -47,6 +47,7 @@ const configurations: Record<string, FixedPrefixInput> = {
     documents: true,
     web: { search: true, reader: true },
     interactiveUi: { photos: true },
+    history: { otherChats: true },
     memory: memoryMessages({ memory, projectMemory: null, project: null, saveOffered: true }),
   },
   "project-agent": {
@@ -57,6 +58,7 @@ const configurations: Record<string, FixedPrefixInput> = {
     knowledge: true,
     web: { search: false, reader: true },
     integrations: ["Outline"],
+    history: { otherChats: false },
     memory: memoryMessages({
       memory,
       projectMemory: renderProjectMemoryContext([{ content: "Launch is planned for May." }]),

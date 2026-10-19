@@ -80,6 +80,7 @@ import { AgentDraftActivityBlock } from "./agent-draft-activity-block.tsx";
 import { ScheduleDraftActivityBlock } from "./schedule-draft-activity-block.tsx";
 import { DocumentActivityBlock, DocumentRunRow } from "./document-activity-block.tsx";
 import { AttachmentActivityRow } from "./attachment-activity-row.tsx";
+import { HistoryActivityRow } from "./history-activity-row.tsx";
 import { NotifyActivityRow } from "./notify-activity-row.tsx";
 import { MapActivityRow } from "./map-activity-row.tsx";
 import { ProjectFileActivityRow } from "./project-file-activity-row.tsx";
@@ -900,6 +901,8 @@ const AssistantBody = memo(function AssistantBody({
       return <ProjectFileActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "attachment")
       return <AttachmentActivityRow key={part.key} activity={part.activity} />;
+    if (part.activity.family === "history")
+      return <HistoryActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "notify")
       return <NotifyActivityRow key={part.key} activity={part.activity} />;
     if (part.activity.family === "map")

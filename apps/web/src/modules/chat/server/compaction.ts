@@ -301,13 +301,21 @@ const SUMMARY_PREAMBLE =
 const escapeTag = (text: string, tag: string) =>
   text.replaceAll(new RegExp(`<(/?)${tag}`, "gi"), `&lt;$1${tag}`);
 
+/** Said beside a summary or a truncation when the attempt offers `read_history`. */
+const HISTORY_READABLE =
+  "The earlier messages themselves can still be read or searched with read_history.";
+
 /**
  * User role, as a handoff the application wrote, like Claude Code and Codex
  * inject theirs. In the assistant role the model read it as its own words.
+ * Rendered per attempt, so whether history is readable is never stored.
  */
-export const compactionSummaryMessage = (summary: string): Prompt.MessageEncoded => ({
+export const compactionSummaryMessage = (
+  summary: string,
+  historyReadable = false,
+): Prompt.MessageEncoded => ({
   role: "user",
-  content: `<generated-conversation-summary>\n${SUMMARY_PREAMBLE}\n\n${escapeTag(summary, "generated-conversation-summary")}\n</generated-conversation-summary>`,
+  content: `<generated-conversation-summary>\n${SUMMARY_PREAMBLE}${historyReadable ? ` ${HISTORY_READABLE}` : ""}\n\n${escapeTag(summary, "generated-conversation-summary")}\n</generated-conversation-summary>`,
 });
 
 const ACTIVE_SUMMARY_PREAMBLE =
@@ -324,6 +332,9 @@ export const activeCompactionSummaryMessage = (summary: string): Prompt.MessageE
 const TRUNCATION_NOTICE =
   "Earlier turns were dropped to fit the model's context window and could not be summarized. " +
   "Do not guess missing details; say when needed context is absent.";
+const READABLE_TRUNCATION_NOTICE =
+  "Earlier turns were dropped to fit the model's context window and could not be summarized. " +
+  `Do not guess missing details. ${HISTORY_READABLE}`;
 
 const TRUNCATION_NOTICE_TAG = "<context-truncation-notice>";
 
@@ -331,9 +342,9 @@ const TRUNCATION_NOTICE_TAG = "<context-truncation-notice>";
  * User role, never system: a system message mid-conversation is hoisted into
  * the system block by relays that translate to Claude, uncaching everything.
  */
-export const truncationNoticeMessage = (): Prompt.MessageEncoded => ({
+export const truncationNoticeMessage = (historyReadable = false): Prompt.MessageEncoded => ({
   role: "user",
-  content: `${TRUNCATION_NOTICE_TAG}\n${TRUNCATION_NOTICE}\n</context-truncation-notice>`,
+  content: `${TRUNCATION_NOTICE_TAG}\n${historyReadable ? READABLE_TRUNCATION_NOTICE : TRUNCATION_NOTICE}\n</context-truncation-notice>`,
 });
 
 // ------------------------------------------------------------ pure selection
@@ -712,6 +723,8 @@ export interface CompactionInput {
   readonly onCompaction?: (event: CompactionEvent) => Effect.Effect<void>;
   /** The chat's request settings, so the summary reads the chat's cached prompt. */
   readonly summaryRequest?: SideGenerationRequest;
+  /** The attempt offers `read_history`, so injected notes may point to it. */
+  readonly historyReadable?: boolean | undefined;
 }
 
 /**
@@ -788,7 +801,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
   const baseStart = input.projection?.startIndex ?? 0;
   const baseInjected =
     input.projection?.injectedMessages ??
-    (existing ? [compactionSummaryMessage(existing.summary)] : []);
+    (existing ? [compactionSummaryMessage(existing.summary, input.historyReadable)] : []);
   const previousSummary = input.projection
     ? baseInjected.map(transcriptLine).join("\n\n") || null
     : (existing?.summary ?? null);
@@ -885,7 +898,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
       generated === null ? null : appendix ? `${generated}\n\n${appendix}` : generated;
 
     if (summary !== null) {
-      const injected = [compactionSummaryMessage(summary)];
+      const injected = [compactionSummaryMessage(summary, input.historyReadable)];
       const total = prefixTokens + scale(estimatePromptTokens(injected)) + suffixFrom(boundary + 1);
       if (total <= budget.input) {
         const boundaryMessage = input.messages[boundary];
@@ -940,7 +953,7 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
     );
   }
 
-  const injected = [...baseInjected, truncationNoticeMessage()];
+  const injected = [...baseInjected, truncationNoticeMessage(input.historyReadable)];
   const truncationInput = {
     maxStartIndex: input.maxStartIndex,
     messages: input.messages,
@@ -1449,13 +1462,14 @@ export const shrinkForOverflow = (input: {
   fixedPrefix: ReadonlyArray<Prompt.MessageEncoded>;
   trailingMessages?: ReadonlyArray<Prompt.MessageEncoded>;
   calibrationFactor: number;
+  historyReadable?: boolean | undefined;
 }): Pick<CompactionDecision, "startIndex" | "injectedMessages" | "estimatedInputTokens"> | null => {
   // Overflow recovery is intentionally stricter than proactive compaction. A
   // checkpoint summary can itself be the only removable historical payload once
   // the newest user-led turn is all that remains, so replace every historical
   // injection with the application-authored truncation notice rather than
   // retaining an already-refused summary beside it.
-  const injected = [truncationNoticeMessage()];
+  const injected = [truncationNoticeMessage(input.historyReadable)];
 
   const scale = (value: number) => Math.ceil(value * input.calibrationFactor);
   const truncationInput = {

@@ -60,6 +60,7 @@ import { PlanStep, PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import { LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
 import { AttachmentReadActivity } from "../attachment-tool-schema.ts";
+import { HistoryActivity, HistoryToolName } from "../history-tool-schema.ts";
 import { ResearchProgress } from "../research-schema.ts";
 import { ToolFileActivity, ToolFileEnvelope } from "../tool-file-schema.ts";
 import type {
@@ -777,6 +778,26 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
     },
     live: (value) => {
       if (value.name !== "read_attachment") return null;
+      if (value.phase === "start") return started(value);
+      if (value.phase !== "result") return null;
+      return {
+        call: { name: value.name, status: value.ok === true ? "complete" : "error", result: value },
+        start: false,
+      };
+    },
+  },
+
+  history: {
+    owns: (toolName) => Schema.is(HistoryToolName)(toolName),
+    project: (call) => {
+      const read = call.status === "running" ? null : decode(HistoryActivity, call.result);
+      return {
+        status: call.status === "running" ? "running" : read?.ok ? "complete" : "error",
+        ...(read ? { read } : {}),
+      };
+    },
+    live: (value) => {
+      if (!Schema.is(HistoryToolName)(value.name)) return null;
       if (value.phase === "start") return started(value);
       if (value.phase !== "result") return null;
       return {

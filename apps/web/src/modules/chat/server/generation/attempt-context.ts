@@ -131,7 +131,8 @@ export const loadAttemptContext = (
     );
     // A steer is part of the answer it was delivered into, so it leaves
     // the history list and is rendered inside that answer. One whose
-    // answer is not in history went with that attempt.
+    // answer is not in history went with that attempt. `historyMessage` in
+    // `repo.ts` repeats this rule for the history tools; change both together.
     const answers = new Set(settled.filter((m) => m.role === "assistant").map((m) => m.id));
     const steersByAnswer = new Map<string, HistorySteer[]>();
     for (const m of settled) {

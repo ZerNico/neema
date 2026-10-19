@@ -27,7 +27,8 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
   /** A temporary chat neither reads nor saves memory. */
   memoryDisabled?: boolean;
 }) {
-  if (input.memoryDisabled) return { memoryTools: undefined, messages: () => [] };
+  if (input.memoryDisabled)
+    return { memoryTools: undefined, messages: () => [], pastChats: false };
   const settings = yield* input.memory.getSettings(input.userId);
   const referenceable = settings.effectiveReferenceEnabled
     ? yield* input.memory.listReferenceable(input.userId)
@@ -82,7 +83,8 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
       project: project && (renderedProject || projectSave) ? project.name : null,
       saveOffered: memoryTools !== undefined,
     });
-  return { memoryTools, messages };
+  // Read with the rest of memory: other chats are what the person said before.
+  return { memoryTools, messages, pastChats: settings.effectivePastChatsEnabled };
 });
 
 /**

@@ -10,6 +10,7 @@ export const memorySettings = pgTable("memory_settings", {
     .references(() => user.id, { onDelete: "cascade" }),
   referenceEnabled: boolean("reference_enabled").notNull().default(true),
   autoSaveEnabled: boolean("auto_save_enabled").notNull().default(true),
+  pastChatsEnabled: boolean("past_chats_enabled").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -79,6 +79,8 @@ import { DesktopToolName } from "~/modules/desktop/tool-schema.ts";
 import { computeBudget, skillRootChars, estimateToolSchemaTokens } from "../compaction.ts";
 import { type PromptDeps } from "../prompt.ts";
 import { prepareAttachmentReader } from "../attachment-reader.ts";
+import { prepareHistoryTools } from "../history-tools.ts";
+import { HistoryToolName } from "../../history-tool-schema.ts";
 import { currentAttachmentId } from "../file-aliases.ts";
 import { hasFileText } from "~/modules/attachments/server/file-text.ts";
 import {
@@ -750,10 +752,13 @@ export const prepareGenerationTools = (
 
     // Read per attempt, so Keep takes effect on the next one. A chat
     // deleted underneath this attempt counts as temporary: fail closed.
-    const temporary = yield* repo.getConversation(input.userId, input.conversationId).pipe(
-      Effect.map((row) => row.temporary),
-      Effect.catchTag("ConversationNotFound", () => Effect.succeed(true)),
+    const chat = yield* repo.getConversation(input.userId, input.conversationId).pipe(
+      Effect.map((row) => ({ temporary: row.temporary, projectId: row.projectId })),
+      Effect.catchTag("ConversationNotFound", () =>
+        Effect.succeed({ temporary: true, projectId: null }),
+      ),
     );
+    const { temporary } = chat;
     const conversationContext = yield* prepareConversationContext({
       memory,
       projectMemory,
@@ -764,6 +769,19 @@ export const prepareGenerationTools = (
       memoryDisabled: temporary,
     });
     const { memoryTools } = conversationContext;
+    // Offered in every kept chat, so the tool list stays the same turn to
+    // turn; the person's other chats only while past chats are on.
+    const historyTools = temporary
+      ? null
+      : prepareHistoryTools({
+          repo,
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          otherChats: conversationContext.pastChats
+            ? { excludeId: input.conversationId, projectId: chat.projectId }
+            : null,
+        });
     const memorySpent = ownCalls.some((call) => call.toolName === "save_memory");
     // Research is a tool on an ordinary turn: the model writes the brief
     // and answers from the evidence. The run it starts is owned by its
@@ -870,6 +888,7 @@ export const prepareGenerationTools = (
     const commonGroups = [
       ...(toolLoad ? [toolLoad] : []),
       attachmentReader,
+      ...(historyTools ? [historyTools] : []),
       ...(permissions.agentsCreate ? [authoring.group] : []),
       ...(permissions.schedules ? [scheduleAuthoring.group] : []),
       ...(permissions.documents ? [documents.group] : []),
@@ -937,7 +956,9 @@ export const prepareGenerationTools = (
         ? "tool-load"
         : name === "read_attachment"
           ? "attachment"
-          : Schema.is(AgentDraftToolName)(name)
+          : historyTools && Schema.is(HistoryToolName)(name) && name in historyTools.handlers
+            ? "history"
+            : Schema.is(AgentDraftToolName)(name)
             ? "agent-draft"
             : Schema.is(ScheduleDraftToolName)(name)
               ? "schedule-draft"
@@ -1053,6 +1074,7 @@ export const prepareGenerationTools = (
       integrationTools,
       knowledgeTools,
       temporary,
+      historyTools,
       conversationContext,
       memoryTools,
       memorySpent,

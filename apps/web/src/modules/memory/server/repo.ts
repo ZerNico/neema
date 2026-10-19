@@ -15,6 +15,7 @@ import {
   type MemoryPreferences,
   type SaveModelMemoryOutcome,
   type UpdateMemoryOutcome,
+  type UpdateMemorySettingsInput,
 } from "../schema.ts";
 import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "./content-hash.ts";
@@ -38,6 +39,7 @@ const toMemory = (row: MemoryRow): Memory => ({
 const toSettings = (row: typeof memorySettings.$inferSelect): MemoryPreferences => ({
   referenceEnabled: row.referenceEnabled,
   autoSaveEnabled: row.autoSaveEnabled,
+  pastChatsEnabled: row.pastChatsEnabled,
   updatedAt: row.updatedAt.toISOString(),
 });
 
@@ -90,7 +92,7 @@ export class MemoryRepo extends Context.Service<
     getSettings(userId: string): Effect.Effect<MemoryPreferences>;
     updateSettings(
       userId: string,
-      input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
+      input: UpdateMemorySettingsInput,
     ): Effect.Effect<{ preferences: MemoryPreferences; changed: boolean }>;
     list(userId: string): Effect.Effect<ReadonlyArray<Memory>>;
     /** List saved memories for prompt context; source links are provenance only. */
@@ -147,7 +149,7 @@ export class MemoryRepo extends Context.Service<
 
       const updateSettings = Effect.fn("MemoryRepo.updateSettings")(function* (
         userId: string,
-        input: { referenceEnabled?: boolean; autoSaveEnabled?: boolean },
+        input: UpdateMemorySettingsInput,
       ) {
         return yield* db
           .transaction((tx) =>
@@ -162,10 +164,12 @@ export class MemoryRepo extends Context.Service<
               const next = {
                 referenceEnabled: input.referenceEnabled ?? current.referenceEnabled,
                 autoSaveEnabled: input.autoSaveEnabled ?? current.autoSaveEnabled,
+                pastChatsEnabled: input.pastChatsEnabled ?? current.pastChatsEnabled,
               };
               if (
                 next.referenceEnabled === current.referenceEnabled &&
-                next.autoSaveEnabled === current.autoSaveEnabled
+                next.autoSaveEnabled === current.autoSaveEnabled &&
+                next.pastChatsEnabled === current.pastChatsEnabled
               ) {
                 return { preferences: toSettings(current), changed: false } as const;
               }
