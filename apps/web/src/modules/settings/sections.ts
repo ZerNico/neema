@@ -7,6 +7,7 @@ import {
   LaptopPhoneSyncIcon,
   McpServerIcon,
   Notification03Icon,
+  PaintBoardIcon,
   PlugSocketIcon,
   UserCircleIcon,
 } from "@hugeicons/core-free-icons";
@@ -19,6 +20,12 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     label: "Profile",
     icon: UserCircleIcon,
     matchPrefix: "/settings/profile",
+  },
+  {
+    to: "/settings/appearance",
+    label: "Appearance",
+    icon: PaintBoardIcon,
+    matchPrefix: "/settings/appearance",
   },
   {
     to: "/settings/memory",

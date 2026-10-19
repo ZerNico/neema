@@ -18,6 +18,10 @@ that bug.
   imports nothing from `~/ui`. `app.css` lists the package with `@source`: without it Tailwind
   never sees its classes and they are silently missing. A workbook draws inside `.paper`, which
   restores the light tokens, so a file's own dark text stays readable in the dark theme.
+- A colour scheme is a `[data-scheme]` block in `app.css` over the neutral tokens, light and `.dark`
+  apart, chosen per device and set on the root by the theme boot script. The selectors are not tied
+  to the root, so a preview element carries its own scheme. A workbook's `.paper` stays neutral: it
+  sets the light tokens on itself, below any scheme.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button

@@ -48,7 +48,7 @@ export function SidebarNavRail({ account }: { account: ReactNode }) {
   return (
     <nav
       aria-label="Main"
-      className="border-sidebar-border flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 border-r p-2"
+      className="flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 p-2"
     >
       <SidebarMenu>
         <RailToggle />

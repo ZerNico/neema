@@ -247,8 +247,10 @@ function Sidebar({
           "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
-            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
+            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          // An inset rail sits flush on the canvas; the page brings its own margin.
+          (variant === "floating" || (variant === "inset" && collapsible !== "rail")) && "p-2",
           "group-data-[collapsible=rail]:w-(--sidebar-width-icon)",
           // Clipped while opening and closing too, so the panel slides out from
           // under the rail instead of appearing whole over the page.
@@ -321,7 +323,11 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-2xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-xs md:peer-data-[variant=inset]:ring-1 md:peer-data-[variant=inset]:ring-foreground/6",
+        // Above the fixed sidebar, which would otherwise hide the edge on the left only.
+        "md:peer-data-[variant=inset]:z-20",
+        // A rail stays when collapsed, so only the other kinds give the page its left margin back.
+        "md:peer-data-[variant=inset]:peer-data-[collapsible=offcanvas]:ml-2 md:peer-data-[variant=inset]:peer-data-[collapsible=icon]:ml-2",
         className,
       )}
       {...props}

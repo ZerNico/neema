@@ -514,7 +514,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
               </span>
             </div>
           ) : text ? (
-            <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+            <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
               <MessageTagText text={text} />
             </div>
           ) : null}
@@ -708,7 +708,7 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
         </AttachmentChipRow>
       ) : null}
       {steer.content ? (
-        <div className="bg-primary text-primary-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+        <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
           {steer.content}
         </div>
       ) : null}

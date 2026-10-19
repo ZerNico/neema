@@ -20,7 +20,9 @@ const CORNER_TARGET = "desktop-titlebar-corner";
 /** The shell owns the frame so hydration and route transitions cannot replace it. */
 export function DesktopChromeFrame() {
   return (
-    <div className="desktop-titlebar border-border bg-background border-b">
+    // The canvas colour only while an inset page sits below it; before the app
+    // shell mounts, the titlebar matches the page it is loading over.
+    <div className="desktop-titlebar bg-background [html:has([data-variant=inset])_&]:bg-sidebar">
       <div id={TITLEBAR_TARGET} className="desktop-titlebar-content" />
       <div id={PANEL_TARGET} className="desktop-titlebar-panel border-l" />
       <div id={CORNER_TARGET} className="desktop-titlebar-corner" />
@@ -97,7 +99,7 @@ export function AppHeader({ children }: { children: ReactNode }) {
       : null;
   }
   return (
-    <header className="border-border flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <header className="flex h-12 shrink-0 items-center gap-2 px-3">
       {children}
     </header>
   );
