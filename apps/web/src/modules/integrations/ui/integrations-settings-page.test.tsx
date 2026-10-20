@@ -294,15 +294,13 @@ describe("integrations list", () => {
     expect(within(directory).queryByRole("button", { name: /^Outline/ })).toBeNull();
     // Known servers come from the admin like anything else, never from the catalog itself.
     expect(within(directory).queryByRole("button", { name: /^Trello/ })).toBeNull();
-    // What an admin set up connects on its own page.
+    // What an admin set up connects right in the dialog.
     await user.click(within(directory).getByRole("button", { name: /^Wiki/ }));
-    expect(navigate).toHaveBeenCalledWith({
-      to: "/settings/integrations/$integrationId",
-      params: { integrationId: "wiki" },
-    });
+    const connect = await screen.findByRole("dialog", { name: "Connect Wiki" });
+    expect(within(connect).getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    await user.click(within(connect).getByRole("button", { name: "Back" }));
 
     // An address of one's own asks for it, and saves with what was typed.
-    await user.click(screen.getByRole("button", { name: "Add integration" }));
     await user.click(screen.getByRole("button", { name: /^MCP server by address/ }));
     expect(await screen.findByLabelText(/Server address/)).toHaveValue("");
     await user.type(screen.getByLabelText("Name"), "Docs");

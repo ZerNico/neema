@@ -2,13 +2,23 @@ import { createHash, randomBytes } from "node:crypto";
 import { Effect } from "effect";
 import { IntegrationRequestFailed } from "../errors.ts";
 
-export const OAUTH_STATE_COOKIE = "integration_oauth_state";
 /** Long enough to sign in to the service in a fresh browser, short enough to be useless later. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const base64url = (bytes: Buffer) => bytes.toString("base64url");
 export const randomToken = () => base64url(randomBytes(32));
 export const sha256 = (value: string) => createHash("sha256").update(value).digest("base64url");
+
+/**
+ * The cookies of one sign-in, named by its state, so two under way in one
+ * browser (two windows, or a retry) never overwrite each other's: the state
+ * that binds it to this browser, and where its outcome is shown.
+ */
+export const oauthCookies = (state: string) => {
+  // base64url is already a valid cookie name.
+  const tag = sha256(state).slice(0, 16);
+  return { state: `integration_oauth_${tag}`, back: `integration_oauth_back_${tag}` };
+};
 
 /** The path the admin registers with the service; one per integration. */
 export const callbackPath = (integrationId: string) =>

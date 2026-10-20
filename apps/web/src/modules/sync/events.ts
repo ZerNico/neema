@@ -86,6 +86,14 @@ export const SyncEvent = Schema.Union([
   }),
   // A connection, its preferences, or (globally) an integration's setup changed.
   Schema.Struct({ type: Schema.Literal("integrations.changed") }),
+  // A sign-in in a window of its own ended without an account, told to the app too,
+  // since the system browser the desktop app used cannot reach it. `attempt` is the
+  // dialog's random handle for it.
+  Schema.Struct({
+    type: Schema.Literal("integration.signIn.failed"),
+    attempt: Schema.String,
+    error: Schema.String,
+  }),
   // An integration call started or stopped waiting for the user's decision.
   Schema.Struct({
     type: Schema.Literal("integration.approval.changed"),

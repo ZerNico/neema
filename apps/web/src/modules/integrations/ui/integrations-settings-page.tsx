@@ -55,7 +55,6 @@ import { ApiKeyDialog, ConnectActions, SignInButton, TurnOnButton } from "./conn
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { IntegrationScopeSection } from "./integration-scope.tsx";
 import { useDeletePersonalServer } from "../client/use-delete-personal-server.ts";
-import { integrationEntry } from "./directory-entries.ts";
 import { PersonalServerDialog } from "./personal-server-dialog.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
@@ -97,10 +96,9 @@ export function IntegrationsSettingsPage() {
   const yours = listed.filter(
     (integration) => integration.personal || integration.connections.length > 0,
   );
-  const toConnect = listed.flatMap((integration) =>
-    integration.available && !integration.personal && integration.connections.length === 0
-      ? (integrationEntry(integration) ?? [])
-      : [],
+  const toConnect = listed.filter(
+    (integration) =>
+      integration.available && !integration.personal && integration.connections.length === 0,
   );
   const mayAdd = toConnect.length > 0 || personal.canAdd;
   const addButton = (

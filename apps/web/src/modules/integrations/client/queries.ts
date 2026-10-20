@@ -29,11 +29,17 @@ export const personalServersQuery = queryOptions({
 /** Where a browser starts a sign-in (the desktop shell hands it to the system browser): another account, or `connectionId` to reconnect that one. */
 export const connectUrl = (
   integrationId: string,
-  options: { returnTo?: string; connectionId?: string } = {},
+  options: {
+    returnTo?: string;
+    connectionId?: string;
+    /** Who asked, so a browser signed in here as someone else starts nothing. */
+    as?: string;
+  } = {},
 ) => {
   const query = new URLSearchParams();
   if (options.returnTo) query.set("returnTo", options.returnTo);
   if (options.connectionId) query.set("account", options.connectionId);
+  if (options.as) query.set("as", options.as);
   const search = query.toString();
   return `/api/integrations/${integrationId}/connect${search ? `?${search}` : ""}`;
 };

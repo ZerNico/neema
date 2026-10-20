@@ -19,10 +19,16 @@ import { fieldDefaults, fieldShown, fieldValues } from "../fields.ts";
 import type { IntegrationField } from "../manifest.ts";
 import { knownMcpServerWithUrl } from "../mcp/known-servers.ts";
 import { mcpManifest } from "../mcp/manifest.ts";
-import { PERSONAL_SERVER_FIELDS, type PersonalServer, type PersonalServers } from "../schema.ts";
+import {
+  PERSONAL_SERVER_FIELDS,
+  type PersonalServer,
+  type PersonalServers,
+  type UserIntegration,
+} from "../schema.ts";
 import { savePersonalServer } from "../server/functions.ts";
 import { DirectoryDialogContent, IntegrationDirectory } from "./integration-directory.tsx";
-import { byName, type DirectoryEntry } from "./directory-entries.ts";
+import { byName, integrationEntry } from "./directory-entries.ts";
+import { ConnectFlow } from "./connect-flow.tsx";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 
 const MCP_FIELDS: ReadonlyArray<IntegrationField> = mcpManifest.adminFields;
@@ -87,7 +93,7 @@ export function PersonalServerDialog({
   server: PersonalServer | null;
   choices: Pick<PersonalServers, "canAdd">;
   /** Integrations an admin set up that this person has not connected. */
-  shared?: ReadonlyArray<DirectoryEntry>;
+  shared?: ReadonlyArray<UserIntegration>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -131,7 +137,15 @@ export function PersonalServerDialog({
     onError: () => setError("Could not save the server."),
   });
   const busy = save.isPending;
-  const entries = shared.toSorted(byName);
+  const entries = shared
+    .flatMap((integration) => integrationEntry(integration) ?? [])
+    .toSorted(byName);
+  // Picked from the directory: connected right here, in the same dialog.
+  const [connecting, setConnecting] = useState<UserIntegration | null>(null);
+  const openPage = (integrationId: string) => {
+    onOpenChange(false);
+    void navigate({ to: "/settings/integrations/$integrationId", params: { integrationId } });
+  };
   // A new server keeps the directory’s width, so its step reads as the same dialog.
   const FormContent = server ? DialogContent : DirectoryDialogContent;
 
@@ -143,7 +157,19 @@ export function PersonalServerDialog({
         onOpenChange(next);
       }}
     >
-      {!byAddress ? (
+      {connecting ? (
+        <DirectoryDialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect {connecting.name}</DialogTitle>
+          </DialogHeader>
+          <ConnectFlow
+            integration={connecting}
+            onBack={() => setConnecting(null)}
+            onDone={() => onOpenChange(false)}
+            onOpenPage={() => openPage(connecting.id)}
+          />
+        </DirectoryDialogContent>
+      ) : !byAddress ? (
         <DirectoryDialogContent browsing={entries}>
           <DialogHeader>
             <DialogTitle>Add integration</DialogTitle>
@@ -162,14 +188,11 @@ export function PersonalServerDialog({
                   }
                 : null
             }
-            onPick={(entry) => {
-              // Set up by an admin: connecting happens on its page.
-              onOpenChange(false);
-              void navigate({
-                to: "/settings/integrations/$integrationId",
-                params: { integrationId: entry.integrationId ?? entry.key },
-              });
-            }}
+            onPick={(entry) =>
+              setConnecting(
+                shared.find((integration) => integration.id === entry.integrationId) ?? null,
+              )
+            }
           />
         </DirectoryDialogContent>
       ) : (

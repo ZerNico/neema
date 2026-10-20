@@ -148,12 +148,24 @@ from.
 verifier in Better Auth's `verification` table, and sets an httpOnly cookie holding the
 state. The callback needs the same session, the matching cookie and an unexpired, unused
 state. Without the cookie check, someone could start a flow as themselves and have another
-person approve it, putting that person's account into the attacker's connection.
+person approve it, putting that person's account into the attacker's connection. The cookie
+is named after its state, so two sign-ins under way in one browser keep their own.
 
-The desktop shell never loads another origin, so its Connect link opens in the system
+Connecting from the add dialog signs in in a window of its own and stays in the dialog. The
+sign-in ends on `/integrations/connected`, failures included (a second cookie remembers that
+page, and only a path on this app counts), which tells the dialog through a
+`BroadcastChannel`: the service's pages often cut `window.opener`. A failure is also sent to
+the person as a sync event, since a system browser's page reaches no channel of the app's;
+the landing page itself never shows the error, as anyone can link to it with any text. The
+dialog is done once a new account of this person's shows up, however it came.
+
+The desktop shell never loads another origin, so its sign-in window opens in the system
 browser, through the ordinary `window.open` handling. That browser must be signed in here
-as the same person. The shell learns the result from the `integrations.changed` sync event;
-it needs no deep link back.
+as the same person, which the shell's own sign-in through it makes the usual case. Every
+link names who asked (`as`), kept through a detour to sign in, so a browser signed in as
+someone else, or a link that names nobody, starts nothing rather than giving them the
+account. The shell learns the result from the `integrations.changed` sync
+event, which brings the new account; it needs no deep link back.
 
 ## What a chat is offered
 
