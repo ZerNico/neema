@@ -84,11 +84,16 @@ import { HistoryToolName } from "../../history-tool-schema.ts";
 import { currentAttachmentId } from "../file-aliases.ts";
 import { hasFileText } from "~/modules/attachments/server/file-text.ts";
 import {
+  fixedFamilySummary,
   isAdvertised,
   lazyFamilyOfTool,
   prepareToolLoad,
 } from "~/modules/tools/server/tool-load.ts";
-import { LazyToolFamily, LoadToolsResult } from "~/modules/tools/tool-load-schema.ts";
+import {
+  LazyToolFamily,
+  LoadToolsResult,
+  type LoadableToolFamily,
+} from "~/modules/tools/tool-load-schema.ts";
 import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
 import type { GenerationDeps } from "./deps.ts";
 import type { GenerationSink } from "./sink.ts";
@@ -849,14 +854,22 @@ export const prepareGenerationTools = (
           return conversationFiles.find((file) => file.id === attachmentId) ?? null;
         }),
     });
-    const offeredLazy = LazyToolFamily.literals.filter((family) =>
-      family === "agent-draft"
-        ? permissions.agentsCreate
-        : family === "schedule-draft"
-          ? permissions.schedules
-          : offeredOffice.has(family),
-    );
-    const unlockedFamilies = new Set<LazyToolFamily>();
+    // The system prompt's catalogue, in this order: the fixed families, then each
+    // integration whose tools are too long to offer before they are needed.
+    const lazyCatalog: ReadonlyArray<{ family: LoadableToolFamily; summary: string }> = [
+      ...LazyToolFamily.literals
+        .filter((family) =>
+          family === "agent-draft"
+            ? permissions.agentsCreate
+            : family === "schedule-draft"
+              ? permissions.schedules
+              : offeredOffice.has(family),
+        )
+        .map((family) => ({ family, summary: fixedFamilySummary(family) })),
+      ...(integrationTools?.lazy ?? []),
+    ];
+    const offeredLazy = lazyCatalog.map((entry) => entry.family);
+    const unlockedFamilies = new Set<LoadableToolFamily>();
     const unlockTool = (name: string) => {
       const family = lazyFamilyOfTool(name);
       if (family && offeredLazy.includes(family)) unlockedFamilies.add(family);
@@ -867,7 +880,7 @@ export const prepareGenerationTools = (
     // A stored call that shows a family was in use: an explicit load, a
     // call to one of its tools, or the authoring skill that drives it.
     const unlockByCall = (
-      into: Set<LazyToolFamily>,
+      into: Set<LoadableToolFamily>,
       call: { toolName: string; result: unknown },
     ) => {
       const add = (name: string) => {
@@ -918,7 +931,7 @@ export const prepareGenerationTools = (
     ]);
     // Only advertised schemas cost input. Before the retained history is
     // known, reserve for every family anything in this chat has used.
-    const schemaTokensWith = (unlocked: ReadonlySet<LazyToolFamily>) =>
+    const schemaTokensWith = (unlocked: ReadonlySet<LoadableToolFamily>) =>
       budgetToolkit &&
       estimateToolSchemaTokens({
         tools: Object.fromEntries(
@@ -929,14 +942,14 @@ export const prepareGenerationTools = (
           ),
         ),
       });
-    const everUnlocked = new Set<LazyToolFamily>();
+    const everUnlocked = new Set<LoadableToolFamily>();
     for (const call of priorToolCalls)
       if (call.researchRunId === null) unlockByCall(everUnlocked, call);
     for (const file of kept) if (isOfficeFamily(file.owner)) everUnlocked.add(file.owner);
     const toolSchemaTokens = schemaTokensWith(everUnlocked) ?? 0;
     const summaryToolChoice = (
       toolkit: { tools: Record<string, unknown> },
-      unlocked: ReadonlySet<LazyToolFamily>,
+      unlocked: ReadonlySet<LoadableToolFamily>,
     ) => {
       const names = Object.keys(toolkit.tools).filter(
         (name) =>
@@ -959,45 +972,45 @@ export const prepareGenerationTools = (
           : historyTools && Schema.is(HistoryToolName)(name) && name in historyTools.handlers
             ? "history"
             : Schema.is(AgentDraftToolName)(name)
-            ? "agent-draft"
-            : Schema.is(ScheduleDraftToolName)(name)
-              ? "schedule-draft"
-              : Schema.is(DocumentToolName)(name)
-                ? "document"
-                : Schema.is(ProjectFileToolName)(name)
-                  ? "project-file"
-                  : Schema.is(DesktopToolName)(name)
-                    ? "desktop"
-                    : name === "save_memory"
-                      ? "memory"
-                      : name === "ask_user"
-                        ? "ask"
-                        : name === "update_plan"
-                          ? "plan"
-                          : name === "notify_user" && notifyTools
-                            ? "notify"
-                            : name === MAP_ROUTE_TOOL && mapRouteTools
-                              ? "map"
-                              : (name === "publish_file" && publishFileTool) ||
-                                  (name === "create_file" && createFileTool)
-                                ? "tool-file"
-                                : officeFamilyOf(name)
-                                  ? officeFamilyOf(name)!.family
-                                  : Schema.is(SkillToolName)(name)
-                                    ? "skill"
-                                    : Schema.is(KnowledgeToolName)(name)
-                                      ? "knowledge"
-                                      : name === "deep_research"
-                                        ? "research"
-                                        : name === "web_search" || name === "read_url"
-                                          ? "web"
-                                          : name === IMAGE_TOOL && imageTool
-                                            ? "image"
-                                            : customToolNames.has(name)
-                                              ? "custom"
-                                              : integrationTools?.names.has(name)
-                                                ? "integration"
-                                                : null;
+              ? "agent-draft"
+              : Schema.is(ScheduleDraftToolName)(name)
+                ? "schedule-draft"
+                : Schema.is(DocumentToolName)(name)
+                  ? "document"
+                  : Schema.is(ProjectFileToolName)(name)
+                    ? "project-file"
+                    : Schema.is(DesktopToolName)(name)
+                      ? "desktop"
+                      : name === "save_memory"
+                        ? "memory"
+                        : name === "ask_user"
+                          ? "ask"
+                          : name === "update_plan"
+                            ? "plan"
+                            : name === "notify_user" && notifyTools
+                              ? "notify"
+                              : name === MAP_ROUTE_TOOL && mapRouteTools
+                                ? "map"
+                                : (name === "publish_file" && publishFileTool) ||
+                                    (name === "create_file" && createFileTool)
+                                  ? "tool-file"
+                                  : officeFamilyOf(name)
+                                    ? officeFamilyOf(name)!.family
+                                    : Schema.is(SkillToolName)(name)
+                                      ? "skill"
+                                      : Schema.is(KnowledgeToolName)(name)
+                                        ? "knowledge"
+                                        : name === "deep_research"
+                                          ? "research"
+                                          : name === "web_search" || name === "read_url"
+                                            ? "web"
+                                            : name === IMAGE_TOOL && imageTool
+                                              ? "image"
+                                              : customToolNames.has(name)
+                                                ? "custom"
+                                                : integrationTools?.names.has(name)
+                                                  ? "integration"
+                                                  : null;
     // What retained history already worked with stays loaded: an explicit
     // load, a lazy tool it called, an authoring skill it loaded, a kept
     // draft or an attached Office file. Decided once, so a later hard
@@ -1083,6 +1096,7 @@ export const prepareGenerationTools = (
       readable,
       offerState,
       offeredLazy,
+      lazyCatalog,
       unlockedFamilies,
       unlockTool,
       unlockByCall,

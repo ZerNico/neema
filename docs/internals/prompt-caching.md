@@ -60,6 +60,13 @@ the whole input again on every turn.
   are large or rarely needed (the Office editors, agent and schedule drafting) are offered by
   name only: a stable system section lists every offered family, and `load_tools` loads one.
   `tool-load.ts` is the registry.
+- A remote MCP server is a family of its own (`integration:<id>`) once what it lists passes
+  about 2,000 tokens. `integrations/server/tools.ts` measures the listing alone, never the
+  per-chat text around it (accounts, scopes, blocked tools), so connecting a second account
+  never moves a server in or out of the catalogue. Its line quotes its tools' titles, the
+  server's own text, on one line each. A small server and the shipped integrations, sized by
+  us, stay advertised. A blocked tool or a changed listing changes the line, as either
+  already changes the advertised schemas.
 - The toolkit always holds every offered tool; a request advertises a subset through
   `toolChoice: { oneOf }`. A call to an unadvertised tool still runs and loads its family,
   rather than failing the generation. For the Hermes polyfill, the gateway passes the

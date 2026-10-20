@@ -14,9 +14,20 @@ export const LazyToolFamily = Schema.Literals([
 ]);
 export type LazyToolFamily = typeof LazyToolFamily.Type;
 
+/** One integration whose tools are too many or too long to offer before they are needed. */
+export const IntegrationToolFamily = Schema.TemplateLiteral(["integration:", Schema.String]);
+export type IntegrationToolFamily = typeof IntegrationToolFamily.Type;
+
+/** Anything `load_tools` loads: a fixed family, or one integration's tools. */
+export const LoadableToolFamily = Schema.Union([LazyToolFamily, IntegrationToolFamily]);
+export type LoadableToolFamily = typeof LoadableToolFamily.Type;
+
+export const integrationToolFamily = (integrationId: string): IntegrationToolFamily =>
+  `integration:${integrationId}`;
+
 /** What a `load_tools` call made available, durable on its row. */
 export const LoadToolsResult = Schema.Struct({
-  loaded: Schema.Array(LazyToolFamily),
+  loaded: Schema.Array(LoadableToolFamily),
   /** Requested names this attempt does not offer. */
   unavailable: Schema.Array(Schema.String),
 });
@@ -41,6 +52,6 @@ export const ToolLoadEnvelope = Schema.Union([
     ...envelopeFields,
     phase: Schema.Literals(["result"]),
     ok: Schema.Boolean,
-    loaded: Schema.optionalKey(Schema.Array(LazyToolFamily)),
+    loaded: Schema.optionalKey(Schema.Array(LoadableToolFamily)),
   }),
 ]);

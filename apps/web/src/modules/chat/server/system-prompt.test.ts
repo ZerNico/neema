@@ -4,6 +4,8 @@ import {
   renderMemoryContext,
   renderProjectMemoryContext,
 } from "~/modules/memory/server/memory-prompt.ts";
+import { fixedFamilySummary } from "~/modules/tools/server/tool-load.ts";
+import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import { memoryMessages } from "./conversation-context.ts";
 import { buildFixedPrefix, type FixedPrefixInput } from "./system-prompt.ts";
 
@@ -21,8 +23,10 @@ const memory = renderMemoryContext([
   { id: "m2", content: "Works as a data engineer.", origin: "model", editedAt: null },
 ])!.content;
 
-const office = ["presentation", "spreadsheet", "word"] as const;
-const allLazy = [...office, "agent-draft", "schedule-draft"] as const;
+const catalog = (families: ReadonlyArray<LazyToolFamily>) =>
+  families.map((family) => ({ family, summary: fixedFamilySummary(family) }));
+const office = catalog(["presentation", "spreadsheet", "word"]);
+const allLazy = [...office, ...catalog(["agent-draft", "schedule-draft"])];
 
 const nothing: FixedPrefixInput = {
   lazyFamilies: [],
@@ -121,13 +125,17 @@ describe("configured instructions", () => {
 describe("uploaded deck fonts", () => {
   it("are named once deck tools are offered, so a first edit can choose them", () => {
     const named = render(
-      buildFixedPrefix({ ...nothing, lazyFamilies: ["presentation"], deckFonts: ["Brand Sans"] }),
+      buildFixedPrefix({
+        ...nothing,
+        lazyFamilies: catalog(["presentation"]),
+        deckFonts: ["Brand Sans"],
+      }),
     );
     expect(named).toContain(
       "usable in presentations beside those the deck tools list: Brand Sans.",
     );
-    expect(render(buildFixedPrefix({ ...nothing, lazyFamilies: ["presentation"] }))).not.toContain(
-      "Fonts uploaded",
-    );
+    expect(
+      render(buildFixedPrefix({ ...nothing, lazyFamilies: catalog(["presentation"]) })),
+    ).not.toContain("Fonts uploaded");
   });
 });

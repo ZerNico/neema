@@ -29,7 +29,8 @@ fingerprint and access the answer was offered: a tool turned off, reclassified o
 meanwhile does not run, however long the answer has been going. A tool keeps its model-facing
 key from the first listing that named it, across every account's listing, which keeps the tool
 block byte-stable for [prompt caching](prompt-caching.md) and never renames a tool the model
-already knows.
+already knows. A server whose tools run long is offered by name until the model loads it with
+`load_tools`, like the Office editors; see [lazy tool families](prompt-caching.md#lazy-tool-families).
 
 A new account lists at once, in the request that connected it, so it has tools straight away.
 Afterwards `IntegrationCatalogSweep` lists what is due (a claim with a lease, every ten minutes,

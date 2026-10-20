@@ -35,7 +35,7 @@ import {
   type PromptDeps,
 } from "../prompt.ts";
 import { buildFixedPrefix } from "../system-prompt.ts";
-import { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import type { LoadableToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import { buildSearchReminder, MAX_PRIOR_SOURCES, systemReminderMessage } from "../search-prompt.ts";
 import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
 import type { GenerationDeps } from "./deps.ts";
@@ -141,6 +141,7 @@ export const prepareAttemptPrompt = (env: {
       researchTool,
       offerState,
       offeredLazy,
+      lazyCatalog,
       unlockByCall,
       budgetToolkit,
       toolSchemaTokens,
@@ -217,7 +218,7 @@ export const prepareAttemptPrompt = (env: {
     // (everything after the last checkpoint) had loaded. The summary
     // repeats that list so it reads the cached prefix; the schema budget in
     // tools.ts keeps the wider set as an upper bound.
-    const priorUnlocked = new Set<LazyToolFamily>();
+    const priorUnlocked = new Set<LoadableToolFamily>();
     if (offeredLazy.length) {
       const suffixIds = new Set(historySuffix.map((message) => message.id));
       for (const call of priorToolCalls)
@@ -465,7 +466,7 @@ export const prepareAttemptPrompt = (env: {
     // prefix. Memory records are system role but tagged and quoted as
     // user-provided data, never instructions (docs/internals/memory.md).
     const fixedPrefix = buildFixedPrefix({
-      lazyFamilies: offeredLazy,
+      lazyFamilies: lazyCatalog,
       images: imageTool !== undefined,
       history: historyTools ? { otherChats: conversationContext.pastChats } : null,
       agentAuthoring: permissions.agentsCreate,

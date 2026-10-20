@@ -26,6 +26,7 @@ import { mcpAdapter } from "~/modules/integrations/mcp/server/adapter.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
+import { isAdvertised, lazyFamilyOfTool } from "~/modules/tools/server/tool-load.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
 import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
@@ -489,6 +490,38 @@ describe("an MCP server set up by an admin", () => {
     } finally {
       searchDescription = "Search the docs.";
       addedTool = null;
+    }
+  });
+
+  it("offers a server whose tools run long by name until the model loads it", async () => {
+    const admin = await newUser();
+    const id = await setUp("Docs lazy", {
+      url: `${base}/mcp`,
+      ways: "anonymous",
+      anonymous: "open",
+    });
+    await connectOpen(admin, id);
+    const conversationId = await newConversation(admin);
+    // Small, it is offered as it is.
+    expect((await toolsFor(admin, conversationId))?.lazy).toEqual([]);
+
+    searchDescription = `Search the docs. ${"Mind the filters. ".repeat(500)}`;
+    try {
+      await makeDue(id);
+      await run(Effect.flatMap(IntegrationService, (s) => s.checkDueListings()));
+      const prepared = await toolsFor(admin, conversationId);
+      expect(prepared?.lazy).toEqual([
+        {
+          family: `integration:${id}`,
+          summary: "Docs lazy's tools: “Search”, “Delete page”, “Release”, “Provision”.",
+        },
+      ]);
+      // Every tool stays callable: only what is shown waits on the load.
+      expect(handlerOf(prepared, `int_${id}__search`)).toBeDefined();
+      expect(lazyFamilyOfTool(`int_${id}__search`)).toBe(`integration:${id}`);
+      expect(isAdvertised(`int_${id}__search`, [`integration:${id}`], new Set())).toBe(false);
+    } finally {
+      searchDescription = "Search the docs.";
     }
   });
 
