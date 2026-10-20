@@ -296,6 +296,8 @@ skipped one on purpose.
   reorder and never remove, failure reasons, and each provider's quirks.
 - `docs/internals/citations.md`: footnote-based citations, streamdown pins,
   markdown plugins.
+- `docs/internals/sign-up.md`: a signup mode per way in, verified addresses and who vouches for
+  them, why sign-in never merges into an unproven address, listed domains, password sign-in off.
 - `docs/internals/temporary-chats.md`: the flag, where it is read, the sweep and
   what a branch or schedule does with one.
 - `docs/internals/archived-chats.md`: the list and search predicates, what unarchives a chat
@@ -491,14 +493,16 @@ Differs from most Effect 3 material online.
   Missing approval rows deny access except for that claimed owner, whose row
   is repaired on read; other missing rows enter the pending queue. The migration
   claims existing installations, including those with users but no admin.
-- `auth_settings.signup_policy` governs every route in, `/register` and OAuth
-  alike, and is read on the creation it governs rather than captured at
-  startup. `closed` refuses creation; `approval` still creates the account and
-  leaves it unusable until an admin decides, which is what lets an OAuth
-  redirect finish. Approval lives in `user_approvals`, not on `user`, because
-  Better Auth owns that table's columns. A provider marked `trusted` admits its
-  accounts straight away. A rejected account is kept, never deleted: deleting
-  it would let the same person sign up again and reappear in the queue.
+- Each way in has its own signup mode: `auth_settings.password_signup` for
+  email and password, `oauth_providers.signup` for each provider. It is read on
+  the creation it governs rather than captured at startup. `closed` refuses
+  creation; `approval` still creates the account and leaves it unusable until
+  an admin decides, which is what lets an OAuth redirect finish. A verified
+  address in a listed domain joins whatever the mode. Approval lives in
+  `user_approvals`, not on `user`, because Better Auth owns that table's columns.
+  A rejected account is kept, never deleted: deleting it would let the same
+  person sign up again and reappear in the queue. Sign-in never merges into an
+  account whose address nobody proved. See [sign-up](docs/internals/sign-up.md).
 - Sign-in providers are rows in `oauth_providers`, secrets encrypted like
   provider API keys. Better Auth resolves its context once per instance, so
   that configuration is read once: every reader goes through `currentAuth()`,

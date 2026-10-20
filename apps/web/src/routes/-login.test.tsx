@@ -13,9 +13,10 @@ import { getSessionIdentity, getSessionUser } from "~/modules/auth/server/functi
 import {
   getApprovalStatus,
   getNeedsSetup,
-  setSignupPolicy,
+  saveAuthSettings,
 } from "~/modules/auth/server/signup-functions.ts";
-import { signInProvidersQuery } from "~/modules/auth/queries.ts";
+import { signInOptionsQuery } from "~/modules/auth/queries.ts";
+import type { SignInOptions } from "~/modules/auth/signup.ts";
 import { Route as AppRoute } from "./_app.tsx";
 import { Route as LoginRoute } from "./login.tsx";
 import { Route as RegisterRoute } from "./register.tsx";
@@ -28,9 +29,9 @@ vi.mock("~/modules/auth/server/functions.ts", () => ({
 vi.mock("~/modules/auth/server/signup-functions.ts", () => ({
   getApprovalStatus: vi.fn(),
   getNeedsSetup: vi.fn(),
-  setSignupPolicy: vi.fn(),
+  saveAuthSettings: vi.fn(),
+  getSignInOptions: vi.fn(),
 }));
-vi.mock("~/modules/auth/server/oauth-functions.ts", () => ({ getSignInProviders: vi.fn() }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
 // Better Auth's client is a proxy spyOn cannot patch; only the calls this page makes.
 vi.mock("~/modules/auth/client.ts", async (importOriginal) => ({
@@ -44,9 +45,23 @@ const user = { id: "u1", name: "Ada", email: "ada@example.com" };
  * The real sign-in pages and the real app guard, with a stand-in shell: the
  * bug lives between one's cached "signed out" and the other's read of it.
  */
-async function renderAt(path: "/login" | "/register" | "/setup") {
+const everything: SignInOptions = {
+  passwordLogin: true,
+  passwordSignup: true,
+  passwordReset: false,
+  mail: false,
+  providers: [],
+};
+
+async function renderAt(
+  path: "/login" | "/register" | "/setup" | `/login?${string}`,
+  offered = everything,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(signInProvidersQuery.queryKey, []);
+  queryClient.setQueryData(signInOptionsQuery.queryKey, {
+    ...offered,
+    providers: [...offered.providers],
+  });
   const root = createRootRouteWithContext<{ queryClient: QueryClient }>()();
   const page = (route: typeof LoginRoute | typeof RegisterRoute | typeof SetupRoute, at: string) =>
     createRoute({
@@ -119,7 +134,10 @@ describe("after a successful sign-in", () => {
   });
 
   it("enters the app after registering too", async () => {
-    vi.mocked(authClient.signUp.email).mockResolvedValue({ data: {}, error: null } as never);
+    vi.mocked(authClient.signUp.email).mockResolvedValue({
+      data: { token: "session" },
+      error: null,
+    } as never);
     const router = await renderAt("/register");
     fill("Name", "Ada");
     fill("Email", "ada@example.com");
@@ -128,6 +146,58 @@ describe("after a successful sign-in", () => {
 
     expect(await screen.findByText("Signed-in home")).toBeVisible();
     expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+describe("what the pages offer", () => {
+  it("asks a new account to open its link when there is no session yet", async () => {
+    vi.mocked(authClient.signUp.email).mockResolvedValue({
+      data: { token: null },
+      error: null,
+    } as never);
+    const router = await renderAt("/register");
+    fill("Name", "Ada");
+    fill("Email", "ada@example.com");
+    fill("Password", "correct horse");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByText("Check your email")).toBeVisible();
+    expect(router.state.location.pathname).toBe("/register");
+  });
+
+  it("leaves only providers on the sign-in page when passwords are off", async () => {
+    await renderAt("/login", {
+      ...everything,
+      passwordLogin: false,
+      passwordSignup: false,
+      providers: [{ id: "sso", label: "Work", signup: false }],
+    });
+
+    expect(await screen.findByRole("button", { name: "Continue with Work" })).toBeVisible();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Register" })).toBeNull();
+  });
+
+  it("registers only through providers that create accounts", async () => {
+    await renderAt("/register", {
+      ...everything,
+      passwordSignup: false,
+      providers: [
+        { id: "sso", label: "Work", signup: true },
+        { id: "github", label: "GitHub", signup: false },
+      ],
+    });
+
+    expect(await screen.findByRole("button", { name: "Continue with Work" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Continue with GitHub" })).toBeNull();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("explains a refused OAuth sign-in on return", async () => {
+    await renderAt("/login?error=signup_closed");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This sign-in can’t create new accounts here.",
+    );
   });
 });
 
@@ -154,7 +224,9 @@ describe("an instance nobody has set up", () => {
 
     expect(await screen.findByText("Signed-in home")).toBeVisible();
     expect(router.state.location.pathname).toBe("/");
-    expect(setSignupPolicy).toHaveBeenCalledWith({ data: { policy: "approval" } });
+    expect(saveAuthSettings).toHaveBeenCalledWith({
+      data: expect.objectContaining({ passwordSignup: "approval" }),
+    });
   });
 
   it("leaves the policy alone for someone who lost the race to set it up", async () => {
@@ -170,7 +242,7 @@ describe("an instance nobody has set up", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create admin account" }));
 
     expect(await screen.findByText("Signed-in home")).toBeVisible();
-    expect(setSignupPolicy).not.toHaveBeenCalled();
+    expect(saveAuthSettings).not.toHaveBeenCalled();
   });
 
   it("is gone once the instance has an owner", async () => {

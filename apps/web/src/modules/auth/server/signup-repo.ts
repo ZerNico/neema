@@ -9,13 +9,14 @@ import {
   userApprovals,
 } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
-import type { ApprovalStatus, SignupPolicy } from "../signup.ts";
+import { emailDomain, type ApprovalStatus, type AuthSettings } from "../signup.ts";
 import { lockAccount, reconcileApproval } from "./account-eligibility.ts";
 
 export interface PendingAccount {
   readonly userId: string;
   readonly name: string;
   readonly email: string;
+  readonly emailVerified: boolean;
   readonly requestedAt: Date;
 }
 
@@ -23,12 +24,19 @@ export class SignupRepo extends Context.Service<
   SignupRepo,
   {
     /**
-     * Read fresh on every account creation and every session check, like the
-     * provider credentials the gateway re-reads: an admin changing the policy
-     * is meant to take effect on the next request, not the next restart.
+     * Read fresh on every account creation and password sign-in, like the
+     * provider credentials the gateway re-reads: an admin changing them is
+     * meant to take effect on the next request, not the next restart.
      */
-    policy(): Effect.Effect<SignupPolicy>;
-    setPolicy(policy: SignupPolicy): Effect.Effect<void>;
+    settings(): Effect.Effect<AuthSettings>;
+    saveSettings(settings: AuthSettings): Effect.Effect<void>;
+    /**
+     * After an address is proven: a listed domain lets a waiting account in.
+     * Only an undecided row moves, so a rejection stands.
+     */
+    admitVerified(account: { id: string; email: string }): Effect.Effect<void>;
+    /** An admin vouching for an address, which then counts as proven. */
+    markVerified(userId: string): Effect.Effect<void>;
     /**
      * True until the first account claims the instance. Read from the claim, not
      * a user count: a claim whose user insert failed must not reopen setup.
@@ -54,27 +62,55 @@ export class SignupRepo extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
 
-      return SignupRepo.of({
-        policy: Effect.fn("SignupRepo.policy")(function* () {
-          const rows = yield* db
+      const self: SignupRepo["Service"] = SignupRepo.of({
+        settings: Effect.fn("SignupRepo.settings")(function* () {
+          const [row] = yield* db
             .select()
             .from(authSettings)
             .where(eq(authSettings.id, AUTH_SETTINGS_ID))
             .pipe(Effect.orDie);
           // A missing row is a database older than the seeding migration, and
-          // refusing everyone would be a worse answer than today's behaviour.
-          return rows[0]?.signupPolicy ?? "open";
+          // refusing everyone would be a worse answer than its old behaviour.
+          return {
+            passwordSignup: row?.passwordSignup ?? "open",
+            passwordLogin: row?.passwordLogin ?? true,
+            requireEmailVerification: row?.requireEmailVerification ?? false,
+            admitDomains: row?.admitDomains ?? [],
+          };
         }),
 
-        setPolicy: Effect.fn("SignupRepo.setPolicy")(function* (policy) {
+        saveSettings: Effect.fn("SignupRepo.saveSettings")(function* (settings) {
+          const values = {
+            passwordSignup: settings.passwordSignup,
+            passwordLogin: settings.passwordLogin,
+            requireEmailVerification: settings.requireEmailVerification,
+            admitDomains: [...new Set(settings.admitDomains)],
+          };
           yield* db
             .insert(authSettings)
-            .values({ id: AUTH_SETTINGS_ID, signupPolicy: policy })
+            .values({ id: AUTH_SETTINGS_ID, ...values })
             .onConflictDoUpdate({
               target: authSettings.id,
-              set: { signupPolicy: policy, updatedAt: new Date() },
+              set: { ...values, updatedAt: new Date() },
             })
             .pipe(Effect.orDie);
+        }),
+
+        admitVerified: Effect.fn("SignupRepo.admitVerified")(function* ({ id, email }) {
+          const domain = emailDomain(email);
+          const { admitDomains } = yield* self.settings();
+          if (domain && admitDomains.includes(domain))
+            yield* self.record({ userId: id, status: "approved" });
+        }),
+
+        markVerified: Effect.fn("SignupRepo.markVerified")(function* (userId) {
+          const [updated] = yield* db
+            .update(user)
+            .set({ emailVerified: true, updatedAt: new Date() })
+            .where(eq(user.id, userId))
+            .returning({ id: user.id, email: user.email })
+            .pipe(Effect.orDie);
+          if (updated) yield* self.admitVerified(updated);
         }),
 
         needsSetup: Effect.fn("SignupRepo.needsSetup")(function* () {
@@ -154,6 +190,7 @@ export class SignupRepo extends Context.Service<
               userId: userApprovals.userId,
               name: user.name,
               email: user.email,
+              emailVerified: user.emailVerified,
               requestedAt: userApprovals.requestedAt,
             })
             .from(userApprovals)
@@ -194,6 +231,7 @@ export class SignupRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
       });
+      return self;
     }),
   );
 }

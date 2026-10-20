@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { PgClient } from "@effect/sql-pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Deferred, Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import {
   accountEligible,
@@ -13,16 +13,19 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { relations } from "~/db/relations.ts";
 import {
+  account,
   oauthProviders,
   session,
   signupBootstrap,
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
-import { createAppAuth } from "~/modules/auth/server/config.ts";
+import { addressableByEmailSql } from "~/modules/auth/server/account-eligibility.ts";
+import { createAppAuth, type AuthMail } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { makeSignupGate } from "~/modules/auth/server/signup-gate.ts";
 import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
+import type { AuthSettings, SignupMode } from "~/modules/auth/signup.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -40,16 +43,64 @@ const signups = <A>(f: (r: SignupRepo["Service"]) => Effect.Effect<A>) =>
   runtime.runPromise(Effect.flatMap(SignupRepo, f));
 
 let seededPolicy: string | undefined;
+
+const configure = (patch: Partial<AuthSettings>) =>
+  signups((repo) =>
+    repo.saveSettings({
+      passwordSignup: "approval",
+      passwordLogin: true,
+      requireEmailVerification: false,
+      admitDomains: [],
+      ...patch,
+    }),
+  );
 let gate: ReturnType<typeof makeSignupGate>;
 
-const makeAuth = () =>
+const makeAuth = (mail?: AuthMail) =>
   createAppAuth({
     db,
     baseURL: origin,
     secret: "isolated-auth-test-secret-at-least-32-characters",
     purgeUserFiles: async () => {},
     signup: gate,
+    mail,
   });
+
+const addProvider = (id: string, signup: SignupMode, trustEmails = false) =>
+  runtime.runPromise(
+    Effect.flatMap(OAuthRepo, (repo) =>
+      repo.upsert({
+        id,
+        kind: "oidc",
+        label: id,
+        enabled: true,
+        signup,
+        trustEmails,
+        clientId: `${id}-client`,
+        secret: `${id}-secret`,
+        config: { discoveryUrl: "https://id.test/.well-known/openid-configuration", scopes: [] },
+      }),
+    ),
+  );
+
+const signIn = async (email: string) => {
+  const response = await auth.handler(
+    new Request(`${origin}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "isolated-test-password-123" }),
+    }),
+  );
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: text ? JSON.parse(text) : null,
+    cookie: response.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; "),
+  };
+};
 
 const insertUser = async (name: string) => {
   const id = uuidv7();
@@ -132,10 +183,10 @@ beforeAll(async () => {
   // Read before any test touches it: beforeEach sets a policy, so the seed the
   // migration wrote has to be captured while it is still the only one.
   seededPolicy = (
-    await pool.query<{ signup_policy: string }>(
-      "select signup_policy from auth_settings where id = 'instance'",
+    await pool.query<{ password_signup: string }>(
+      "select password_signup from auth_settings where id = 'instance'",
     )
-  ).rows[0]?.signup_policy;
+  ).rows[0]?.password_signup;
 
   gate = makeSignupGate((effect) => runtime.runPromise(effect));
   auth = makeAuth();
@@ -151,7 +202,7 @@ beforeEach(async () => {
   await db.delete(user);
   await db.delete(signupBootstrap);
   await db.delete(oauthProviders);
-  await signups((repo) => repo.setPolicy("approval"));
+  await configure({ passwordSignup: "approval" });
   auth = makeAuth();
 });
 
@@ -181,7 +232,7 @@ describe("who gets an account", () => {
     for (const statement of statements.slice(1, 3)) await pool.query(statement);
     expect((await db.select().from(signupBootstrap))[0]?.ownerId).toBe("legacy-no-admin");
     expect(await signups((repo) => repo.statusOf(unclaimed))).toBe("approved");
-    await signups((repo) => repo.setPolicy("closed"));
+    await configure({ passwordSignup: "closed" });
     expect((await signUp("not-an-admin")).status).toBe(403);
   });
 
@@ -208,27 +259,27 @@ describe("who gets an account", () => {
     expect(await statusOf("newcomer")).toBe("pending");
   });
 
-  it("admits everyone straight away while the policy is open", async () => {
+  it("admits everyone straight away while password signup is open", async () => {
     await signUp("founder");
-    await signups((repo) => repo.setPolicy("open"));
+    await configure({ passwordSignup: "open" });
 
     await signUp("newcomer");
 
     expect(await statusOf("newcomer")).toBe("approved");
   });
 
-  it("refuses creation entirely while the policy is closed", async () => {
+  it("refuses creation entirely while password signup is closed", async () => {
     await signUp("founder");
-    await signups((repo) => repo.setPolicy("closed"));
+    await configure({ passwordSignup: "closed" });
 
     expect((await signUp("newcomer")).status).not.toBe(200);
     expect(await db.select().from(user)).toHaveLength(1);
   });
 
   it.each(["open", "closed"] as const)(
-    "gives exactly one concurrent first signup the admin claim under %s policy",
+    "gives exactly one concurrent first signup the admin claim under %s signup",
     async (policy) => {
-      await signups((repo) => repo.setPolicy(policy));
+      await configure({ passwordSignup: policy });
       const results = await Promise.all([signUp("first"), signUp("second")]);
       const rows = await db.select().from(user);
       const owners = rows.filter((row) => row.role === "admin");
@@ -256,7 +307,7 @@ describe("who gets an account", () => {
     const [claim] = await db.select().from(signupBootstrap);
     expect(claim?.ownerId).toBeTruthy();
     expect(await db.select().from(user)).toHaveLength(0);
-    await signups((repo) => repo.setPolicy("closed"));
+    await configure({ passwordSignup: "closed" });
     expect((await signUp("next")).status).toBe(403);
     expect(await db.select().from(user)).toHaveLength(0);
   });
@@ -333,7 +384,7 @@ describe("who gets an account", () => {
     expect(await gate.approved(missingId)).toBe(true);
   });
 
-  it("lets a trusted provider skip the queue while an untrusted one waits", async () => {
+  it("lets an open provider skip the queue while one needing approval waits", async () => {
     await runtime.runPromise(
       Effect.flatMap(OAuthRepo, (repo) =>
         Effect.gen(function* () {
@@ -342,7 +393,8 @@ describe("who gets an account", () => {
             kind: "oidc",
             label: "Work",
             enabled: true,
-            trusted: true,
+            signup: "open",
+            trustEmails: false,
             clientId: "work-client",
             secret: "work-secret",
             config: {
@@ -355,7 +407,8 @@ describe("who gets an account", () => {
             kind: "builtin",
             label: "GitHub",
             enabled: true,
-            trusted: false,
+            signup: "approval",
+            trustEmails: false,
             clientId: "gh-client",
             secret: "gh-secret",
             config: {},
@@ -373,9 +426,27 @@ describe("who gets an account", () => {
     expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).toContain(
       secondColleague,
     );
-    await gate.record({ userId: colleague, providerId: "work", isFirstUser: false });
-    await gate.record({ userId: secondColleague, providerId: "work", isFirstUser: false });
-    await gate.record({ userId: stranger, providerId: "github", isFirstUser: false });
+    await gate.record({
+      userId: colleague,
+      providerId: "work",
+      email: "x@example.test",
+      emailVerified: false,
+      isFirstUser: false,
+    });
+    await gate.record({
+      userId: secondColleague,
+      providerId: "work",
+      email: "x@example.test",
+      emailVerified: false,
+      isFirstUser: false,
+    });
+    await gate.record({
+      userId: stranger,
+      providerId: "github",
+      email: "x@example.test",
+      emailVerified: false,
+      isFirstUser: false,
+    });
 
     expect(await signups((repo) => repo.statusOf(colleague))).toBe("approved");
     expect(await signups((repo) => repo.statusOf(secondColleague))).toBe("approved");
@@ -405,18 +476,24 @@ describe("who gets an account", () => {
 
   it("promotes a reconciled account when open signup records approval", async () => {
     await signUp("founder");
-    await signups((repo) => repo.setPolicy("open"));
+    await configure({ passwordSignup: "open" });
     const newcomer = await insertUser("open-reconciled");
     expect((await signups((repo) => repo.listPending())).map((row) => row.userId)).toContain(
       newcomer,
     );
-    await gate.record({ userId: newcomer, providerId: null, isFirstUser: false });
+    await gate.record({
+      userId: newcomer,
+      providerId: null,
+      email: "x@example.test",
+      emailVerified: false,
+      isFirstUser: false,
+    });
     expect(await gate.approved(newcomer)).toBe(true);
   });
 
   it("promotes a row reconciled while Better Auth’s after-hook is paused", async () => {
     await signUp("founder");
-    await signups((repo) => repo.setPolicy("open"));
+    await configure({ passwordSignup: "open" });
     const entered = Effect.runSync(Deferred.make<string>());
     const release = Effect.runSync(Deferred.make<void>());
     auth = createAppAuth({
@@ -451,13 +528,292 @@ describe("who gets an account", () => {
 
   it("takes effect on the next signup, not the next restart", async () => {
     await signUp("founder");
-    await signups((repo) => repo.setPolicy("open"));
+    await configure({ passwordSignup: "open" });
     await signUp("first");
-    await signups((repo) => repo.setPolicy("approval"));
+    await configure({ passwordSignup: "approval" });
     await signUp("second");
 
     expect(await statusOf("first")).toBe("approved");
     expect(await statusOf("second")).toBe("pending");
+  });
+});
+
+describe("each way in", () => {
+  const admit = (providerId: string | null, email: string, emailVerified: boolean) =>
+    gate.admit({ providerId, email, emailVerified });
+
+  it("closes password registration while a provider still creates accounts", async () => {
+    await signUp("founder");
+    await configure({ passwordSignup: "closed" });
+    await addProvider("work", "open");
+
+    expect((await signUp("newcomer")).status).toBe(403);
+    expect(await admit("work", "a@corp.test", true)).toEqual({
+      allowed: true,
+      emailVerified: true,
+    });
+  });
+
+  it("closes one provider while password registration stays open", async () => {
+    await signUp("founder");
+    await configure({ passwordSignup: "open" });
+    await addProvider("public", "closed");
+
+    expect((await admit("public", "a@example.test", true)).allowed).toBe(false);
+    expect((await admit(null, "a@example.test", false)).allowed).toBe(true);
+  });
+
+  it("queues a provider's accounts while refusing password registration", async () => {
+    await signUp("founder");
+    await configure({ passwordSignup: "closed" });
+    await addProvider("sso", "approval");
+    const id = await insertUser("queued");
+
+    expect((await admit("sso", "queued@example.test", true)).allowed).toBe(true);
+    await gate.record({
+      userId: id,
+      providerId: "sso",
+      email: "queued@example.test",
+      emailVerified: true,
+      isFirstUser: false,
+    });
+    expect(await signups((repo) => repo.statusOf(id))).toBe("pending");
+    expect((await signUp("password-person")).status).toBe(403);
+  });
+
+  it("admits nobody through a provider that is switched off mid-redirect", async () => {
+    await signUp("founder");
+    await addProvider("gone", "open");
+    await runtime.runPromise(Effect.flatMap(OAuthRepo, (repo) => repo.setEnabled("gone", false)));
+    expect((await admit("gone", "a@example.test", true)).allowed).toBe(false);
+  });
+
+  it("admits anyone while nobody has set the instance up", async () => {
+    await addProvider("closed", "closed");
+    expect((await admit("closed", "a@example.test", false)).allowed).toBe(true);
+  });
+
+  it("raises a trusted provider's emails to verified, and no other's", async () => {
+    await signUp("founder");
+    await addProvider("corp", "approval", true);
+    await addProvider("public", "approval");
+    expect((await admit("corp", "a@corp.test", false)).emailVerified).toBe(true);
+    expect((await admit("public", "a@example.test", false)).emailVerified).toBe(false);
+  });
+
+  it("lets a verified address in a listed domain through a closed provider", async () => {
+    await signUp("founder");
+    await configure({ admitDomains: ["corp.test"] });
+    await addProvider("sso", "closed");
+    const id = await insertUser("member");
+
+    expect((await admit("sso", "member@corp.test", true)).allowed).toBe(true);
+    expect((await admit("sso", "member@corp.test", false)).allowed).toBe(false);
+    expect((await admit("sso", "member@other.test", true)).allowed).toBe(false);
+    await gate.record({
+      userId: id,
+      providerId: "sso",
+      email: "member@corp.test",
+      emailVerified: true,
+      isFirstUser: false,
+    });
+    expect(await signups((repo) => repo.statusOf(id))).toBe("approved");
+  });
+
+  it("ignores listed domains for a password signup nobody can prove", async () => {
+    await signUp("founder");
+    await configure({ passwordSignup: "closed", admitDomains: ["example.test"] });
+    expect((await signUp("typed")).status).toBe(403);
+  });
+
+  it("refuses password sign-in when it is off, except to set the instance up", async () => {
+    await configure({ passwordLogin: false });
+    expect((await signUp("founder")).status).toBe(200);
+    expect((await signIn("founder@example.test")).status).toBe(403);
+    expect((await signUp("second")).status).toBe(403);
+
+    process.env.AUTH_PASSWORD_LOGIN = "force";
+    try {
+      expect((await signIn("founder@example.test")).status).toBe(200);
+    } finally {
+      delete process.env.AUTH_PASSWORD_LOGIN;
+    }
+  });
+
+  it("refuses unlinking the last provider account while passwords are off", async () => {
+    await signUp("founder");
+    await addProvider("work", "approval");
+    // An account on a provider that is off is no way in, so it does not count.
+    await addProvider("old", "approval");
+    await runtime.runPromise(Effect.flatMap(OAuthRepo, (repo) => repo.setEnabled("old", false)));
+    const [founder] = await db.select().from(user);
+    await db.insert(account).values({
+      id: uuidv7(),
+      accountId: "old-subject",
+      providerId: "old",
+      userId: founder!.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const linkedId = uuidv7();
+    await db.insert(account).values({
+      id: linkedId,
+      accountId: "work-subject",
+      providerId: "work",
+      userId: founder!.id,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const { cookie } = await signIn("founder@example.test");
+    await configure({ passwordLogin: false });
+
+    const unlink = await auth.handler(
+      new Request(`${origin}/api/auth/unlink-account`, {
+        method: "POST",
+        headers: { origin, cookie, "content-type": "application/json" },
+        body: JSON.stringify({ accountId: linkedId }),
+      }),
+    );
+    expect(unlink.status).toBe(403);
+    expect(await db.select().from(account).where(eq(account.providerId, "work"))).toHaveLength(1);
+
+    // With passwords back, the same request goes through: the refusal was ours.
+    await configure({ passwordLogin: true });
+    const allowed = await auth.handler(
+      new Request(`${origin}/api/auth/unlink-account`, {
+        method: "POST",
+        headers: { origin, cookie, "content-type": "application/json" },
+        body: JSON.stringify({ accountId: linkedId }),
+      }),
+    );
+    expect(allowed.status).toBe(200);
+    expect(await db.select().from(account).where(eq(account.providerId, "work"))).toHaveLength(0);
+  });
+});
+
+describe("email verification", () => {
+  const sent: { to: string; text: string }[] = [];
+  const mail: AuthMail = {
+    requireVerification: true,
+    send: async (to, _subject, text) => {
+      sent.push({ to, text });
+    },
+  };
+  const linkIn = (text: string) => text.match(/https?:\/\/\S+/)?.[0] ?? "";
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+
+  it("holds a password account until the link is opened, then admits a listed domain", async () => {
+    await signUp("founder");
+    await configure({
+      passwordSignup: "closed",
+      requireEmailVerification: true,
+      admitDomains: ["example.test"],
+    });
+    auth = makeAuth(mail);
+
+    const created = await signUp("member");
+    expect(created.status).toBe(200);
+    expect(created.body.token).toBeNull();
+    expect(await statusOf("member")).toBe("pending");
+    expect((await signIn("member@example.test")).body.code).toBe("EMAIL_NOT_VERIFIED");
+
+    const link = linkIn(sent.find((m) => m.to === "member@example.test")!.text);
+    await auth.handler(new Request(link, { headers: { origin } }));
+
+    const [row] = await db.select().from(user).where(eq(user.email, "member@example.test"));
+    expect(row?.emailVerified).toBe(true);
+    expect(await statusOf("member")).toBe("approved");
+    expect((await signIn("member@example.test")).status).toBe(200);
+  });
+
+  it("refuses a closed password signup outright instead of promising a link", async () => {
+    await signUp("founder");
+    await configure({ passwordSignup: "closed", requireEmailVerification: true });
+    auth = makeAuth(mail);
+
+    const refused = await signUp("stranger");
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe("signup_closed");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("keeps a rejection when the address is proven later", async () => {
+    const adminId = (await signUp("founder")).body.user.id as string;
+    await configure({ admitDomains: ["example.test"] });
+    const id = await insertUser("turned-down");
+    await signups((repo) => repo.decide({ userId: id, status: "rejected", decidedBy: adminId }));
+    await signups((repo) => repo.markVerified(id));
+    expect(await signups((repo) => repo.statusOf(id))).toBe("rejected");
+  });
+
+  it("finds unproven addresses by email only while verification is off", async () => {
+    await signUp("founder");
+    const id = await insertUser("unproven");
+    await signups((repo) => repo.record({ userId: id, status: "approved" }));
+    const found = async () =>
+      (
+        await db
+          .select({ id: user.id })
+          .from(user)
+          .where(sql`${user.email} = 'unproven@example.test' and ${addressableByEmailSql}`)
+      ).length;
+
+    expect(await found()).toBe(1);
+    await configure({ requireEmailVerification: true });
+    expect(await found()).toBe(0);
+    await signups((repo) => repo.markVerified(id));
+    expect(await found()).toBe(1);
+  });
+});
+
+describe("the sign-in methods migration", () => {
+  it("gives each way in the policy it replaces, and opens only what trust opened", async () => {
+    const migration = readFileSync(
+      new URL("../../drizzle/20261020214045_sign_in_methods/migration.sql", import.meta.url),
+      "utf8",
+    );
+    const backfill = migration
+      .split("--> statement-breakpoint")
+      .filter((statement) => /^\s*(--[^\n]*\n\s*)*UPDATE/.test(statement));
+    expect(backfill).toHaveLength(2);
+    await pool.query(`ALTER TABLE auth_settings ADD COLUMN signup_policy text`);
+    await pool.query(
+      `ALTER TABLE oauth_providers ADD COLUMN trusted boolean NOT NULL DEFAULT false`,
+    );
+    try {
+      await addProvider("trusted", "approval");
+      await addProvider("plain", "approval");
+      await pool.query(`UPDATE oauth_providers SET trusted = true WHERE id = 'trusted'`);
+      const modes = async (policy: string) => {
+        await pool.query(`UPDATE auth_settings SET signup_policy = $1`, [policy]);
+        for (const statement of backfill) await pool.query(statement);
+        const { rows } = await pool.query<{ id: string; signup: string }>(
+          `SELECT id, signup FROM oauth_providers ORDER BY id`,
+        );
+        const settings = await signups((repo) => repo.settings());
+        return {
+          password: settings.passwordSignup,
+          ...Object.fromEntries(rows.map((r) => [r.id, r.signup])),
+        };
+      };
+      expect(await modes("approval")).toEqual({
+        password: "approval",
+        plain: "approval",
+        trusted: "open",
+      });
+      expect(await modes("open")).toEqual({ password: "open", plain: "open", trusted: "open" });
+      expect(await modes("closed")).toEqual({
+        password: "closed",
+        plain: "closed",
+        trusted: "closed",
+      });
+    } finally {
+      await pool.query(`ALTER TABLE auth_settings DROP COLUMN signup_policy`);
+      await pool.query(`ALTER TABLE oauth_providers DROP COLUMN trusted`);
+    }
   });
 });
 

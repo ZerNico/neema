@@ -81,6 +81,17 @@ export const activeAccountOf = (alias: string) => {
 export const activeAccountSql = activeAccountOf("user");
 
 /**
+ * An active account someone may find by typing its address. While the instance
+ * requires verification, an unproven address is whatever its owner typed, and
+ * finding it would hand them whatever was meant for the real person.
+ */
+export const addressableByEmailSql = sql<boolean>`(${activeAccountSql} and (
+  ${user.emailVerified}
+  or not coalesce((select s.require_email_verification from auth_settings s
+    where s.id = ${AUTH_SETTINGS_ID}), false)
+))`;
+
+/**
  * A short preflight, not a substitute for the check in the acceptance
  * transaction. It runs on every request, so it is one plain read: no lock that
  * one person's parallel requests would queue on. Only an account with no

@@ -9,7 +9,7 @@ const SOURCE = join(import.meta.dirname, "..");
  * before sign-in. Every other one must name a `require…` middleware.
  */
 const PUBLIC = new Set([
-  "modules/auth/server/oauth-functions.ts#getSignInProviders",
+  "modules/auth/server/signup-functions.ts#getSignInOptions",
   "modules/auth/server/signup-functions.ts#getApprovalStatus",
   "modules/auth/server/signup-functions.ts#getNeedsSetup",
   "modules/auth/server/functions.ts#getSessionUser",

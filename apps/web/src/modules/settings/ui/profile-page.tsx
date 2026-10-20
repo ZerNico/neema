@@ -3,6 +3,8 @@ import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
+import { signInOptionsQuery } from "~/modules/auth/queries.ts";
+import { ConnectedAccounts } from "~/modules/auth/ui/connected-accounts.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { initials } from "~/ui/initials";
 import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -10,6 +12,7 @@ import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
 import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
 
 const NameSchema = Schema.Struct({
@@ -27,20 +30,24 @@ const PasswordSchema = Schema.Struct({
 
 type PasswordStatus = { kind: "error"; message: string };
 
-export function ProfilePage() {
+/** `linkError` is Better Auth's code when connecting a sign-in failed. */
+export function ProfilePage({ linkError }: { linkError?: string | undefined }) {
   // The same session the app shell already resolved, not a second read of it:
   // `_app` cannot reach this route without it, and the name form patches this
   // cache on save, so reading anything else would show a stale display name.
   const { data: user } = useSuspenseQuery(sessionUserQuery);
   if (!user) return null;
-  return <ProfileForms user={user} />;
+  return <ProfileForms user={user} linkError={linkError} />;
 }
 
 function ProfileForms({
   user,
+  linkError,
 }: {
-  user: { name: string; email: string; role?: string | null | undefined };
+  user: { name: string; email: string; emailVerified: boolean; role?: string | null | undefined };
+  linkError: string | undefined;
 }) {
+  const { data: options } = useSuspenseQuery(signInOptionsQuery);
   const queryClient = useQueryClient();
   const [passwordStatus, setPasswordStatus] = useState<PasswordStatus | null>(null);
 
@@ -110,6 +117,7 @@ function ProfileForms({
               </span>
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>
+            {!user.emailVerified && options.mail ? <VerifyEmail email={user.email} /> : null}
             {user.role === "admin" ? <Badge variant="outline">Admin</Badge> : null}
           </ListRow>
           <ListRow className="flex-col items-stretch gap-3">
@@ -142,52 +150,82 @@ function ProfileForms({
         </ListCard>
       </Section>
 
-      <Section title="Password">
-        <ListCard>
-          <ListRow className="flex-col items-stretch gap-3">
-            <form
-              className="flex flex-col gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void passwordForm.handleSubmit();
-              }}
-            >
-              <passwordForm.AppField name="currentPassword">
-                {(field) => (
-                  <field.TextField
-                    label="Current password"
-                    type="password"
-                    autoComplete="current-password"
-                  />
-                )}
-              </passwordForm.AppField>
-              <passwordForm.AppField name="newPassword">
-                {(field) => (
-                  <field.TextField
-                    label="New password"
-                    description="Changing it signs you out on your other devices."
-                    type="password"
-                    autoComplete="new-password"
-                  />
-                )}
-              </passwordForm.AppField>
-              {passwordStatus?.kind === "error" ? (
-                <FieldError>{passwordStatus.message}</FieldError>
-              ) : null}
-              <passwordForm.AppForm>
-                <FormActions>
-                  <passwordForm.SubmitButton size="sm">
-                    <SaveLabel justSaved={passwordJustSaved} savedLabel="Password updated">
-                      Update password
-                    </SaveLabel>
-                  </passwordForm.SubmitButton>
-                  <SaveStatus justSaved={passwordJustSaved} savedLabel="Password updated" />
-                </FormActions>
-              </passwordForm.AppForm>
-            </form>
-          </ListRow>
-        </ListCard>
-      </Section>
+      <ConnectedAccounts error={linkError} />
+
+      {options.passwordLogin ? (
+        <Section title="Password">
+          <ListCard>
+            <ListRow className="flex-col items-stretch gap-3">
+              <form
+                className="flex flex-col gap-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void passwordForm.handleSubmit();
+                }}
+              >
+                <passwordForm.AppField name="currentPassword">
+                  {(field) => (
+                    <field.TextField
+                      label="Current password"
+                      type="password"
+                      autoComplete="current-password"
+                    />
+                  )}
+                </passwordForm.AppField>
+                <passwordForm.AppField name="newPassword">
+                  {(field) => (
+                    <field.TextField
+                      label="New password"
+                      description="Changing it signs you out on your other devices."
+                      type="password"
+                      autoComplete="new-password"
+                    />
+                  )}
+                </passwordForm.AppField>
+                {passwordStatus?.kind === "error" ? (
+                  <FieldError>{passwordStatus.message}</FieldError>
+                ) : null}
+                <passwordForm.AppForm>
+                  <FormActions>
+                    <passwordForm.SubmitButton size="sm">
+                      <SaveLabel justSaved={passwordJustSaved} savedLabel="Password updated">
+                        Update password
+                      </SaveLabel>
+                    </passwordForm.SubmitButton>
+                    <SaveStatus justSaved={passwordJustSaved} savedLabel="Password updated" />
+                  </FormActions>
+                </passwordForm.AppForm>
+              </form>
+            </ListRow>
+          </ListCard>
+        </Section>
+      ) : null}
     </Page>
+  );
+}
+
+/** Proves the address by a mailed link, which comes back here once opened. */
+function VerifyEmail({ email }: { email: string }) {
+  const [sent, setSent] = useState(false);
+  const [pending, setPending] = useState(false);
+  if (sent) return <span className="text-muted-foreground text-xs">Link sent</span>;
+  return (
+    <PendingButton
+      size="sm"
+      variant="outline"
+      pending={pending}
+      onClick={async () => {
+        setPending(true);
+        const { error } = await authClient.sendVerificationEmail({
+          email,
+          callbackURL: "/settings/profile",
+        });
+        setPending(false);
+        if (error) toast.error(error.message ?? "Could not send the link.");
+        else setSent(true);
+      }}
+    >
+      Verify email
+    </PendingButton>
   );
 }

@@ -1,18 +1,26 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { Separator } from "~/ui/primitives/separator";
-import { signInProvidersQuery } from "../queries.ts";
+import type { SignInProvider } from "../oauth.ts";
+import { loginErrorURL } from "../oauth-errors.ts";
 
 /**
- * One button per enabled provider. Both built-in and OpenID Connect entries go
+ * One button per provider given. Both built-in and OpenID Connect entries go
  * through `signIn.social`: the generic-oauth plugin registers its providers as
  * ordinary social providers, so there is no second sign-in call to make.
  */
-export function SignInProviders({ callbackURL = "/" }: { callbackURL?: string }) {
-  const { data: providers } = useSuspenseQuery(signInProvidersQuery);
+export function SignInProviders({
+  providers,
+  callbackURL = "/",
+  separated,
+}: {
+  providers: readonly SignInProvider[];
+  callbackURL?: string;
+  /** Whether a password form follows, which the "or" divider introduces. */
+  separated: boolean;
+}) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +42,8 @@ export function SignInProviders({ callbackURL = "/" }: { callbackURL?: string })
               const { error: failure } = await authClient.signIn.social({
                 provider: provider.id,
                 callbackURL,
+                // Better Auth's own error page is a dead end; ours explains.
+                errorCallbackURL: loginErrorURL(callbackURL),
               });
               // A success redirects away, so only a failure resumes here.
               if (failure) {
@@ -47,11 +57,13 @@ export function SignInProviders({ callbackURL = "/" }: { callbackURL?: string })
         ))}
       </div>
       {error ? <FieldError>{error}</FieldError> : null}
-      <div className="flex items-center gap-3">
-        <Separator className="flex-1" />
-        <span className="text-muted-foreground text-xs">or</span>
-        <Separator className="flex-1" />
-      </div>
+      {separated ? (
+        <div className="flex items-center gap-3">
+          <Separator className="flex-1" />
+          <span className="text-muted-foreground text-xs">or</span>
+          <Separator className="flex-1" />
+        </div>
+      ) : null}
     </div>
   );
 }

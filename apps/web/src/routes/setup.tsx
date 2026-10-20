@@ -4,9 +4,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { authClient, needsSetupQuery } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
-import { setSignupPolicy } from "~/modules/auth/server/signup-functions.ts";
+import { saveAuthSettings } from "~/modules/auth/server/signup-functions.ts";
 import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
-import { SIGNUP_POLICIES, SIGNUP_POLICY_LABELS, type SignupPolicy } from "~/modules/auth/signup.ts";
+import { SIGNUP_MODE_ITEMS, SIGNUP_MODE_LABELS, type SignupMode } from "~/modules/auth/signup.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -27,11 +27,6 @@ const SetupSchema = Schema.Struct({
   ),
 });
 
-const POLICY_ITEMS = SIGNUP_POLICIES.map((value) => ({
-  value,
-  label: SIGNUP_POLICY_LABELS[value].title,
-}));
-
 /**
  * The first account on an instance, and the only page that creates one. Sign-in
  * providers are added by an admin, so before this there is no other way in.
@@ -51,8 +46,8 @@ function SetupPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { redirect: destination = "/" } = Route.useSearch();
-  const policyId = useId();
-  const [policy, setPolicy] = useState<SignupPolicy>("approval");
+  const modeId = useId();
+  const [mode, setMode] = useState<SignupMode>("approval");
   const [serverError, setServerError] = useState<string | null>(null);
 
   const form = useAppForm({
@@ -66,8 +61,17 @@ function SetupPage() {
         return;
       }
       // Someone who set the instance up a moment earlier gets an ordinary
-      // account under their policy, and has no say over it.
-      if (data.user.role === "admin") await setSignupPolicy({ data: { policy } });
+      // account under their settings, and has no say over them.
+      // A fresh instance has no providers, so password signup is every way in.
+      if (data.user.role === "admin")
+        await saveAuthSettings({
+          data: {
+            passwordSignup: mode,
+            passwordLogin: true,
+            requireEmailVerification: false,
+            admitDomains: [],
+          },
+        });
       queryClient.clear();
       await navigate({ href: destination });
     },
@@ -100,24 +104,24 @@ function SetupPage() {
               )}
             </form.AppField>
             <Field>
-              <FieldLabel htmlFor={policyId}>Who can join</FieldLabel>
+              <FieldLabel htmlFor={modeId}>Who can join</FieldLabel>
               <Select
-                value={policy}
-                onValueChange={(value) => value && setPolicy(value as SignupPolicy)}
-                items={POLICY_ITEMS}
+                value={mode}
+                onValueChange={(value) => value && setMode(value)}
+                items={SIGNUP_MODE_ITEMS}
               >
-                <SelectTrigger id={policyId} className="w-full">
+                <SelectTrigger id={modeId} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {POLICY_ITEMS.map((item) => (
+                  {SIGNUP_MODE_ITEMS.map((item) => (
                     <SelectItem key={item.value} value={item.value}>
                       {item.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <FieldDescription>{SIGNUP_POLICY_LABELS[policy].description}</FieldDescription>
+              <FieldDescription>{SIGNUP_MODE_LABELS[mode].description}</FieldDescription>
             </Field>
             {serverError ? <FieldError>{serverError}</FieldError> : null}
             <form.AppForm>

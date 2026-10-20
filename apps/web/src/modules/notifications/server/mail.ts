@@ -51,6 +51,8 @@ export class MailService extends Context.Service<
     /** Whether an admin set up a server, so anyone can get email. */
     readonly available: Effect.Effect<boolean>;
     send(userId: string, notification: AppNotification): Effect.Effect<void>;
+    /** One message to one address, for mail that is not a notification. */
+    sendTo(to: string, subject: string, text: string): Effect.Effect<void, MailFailed>;
   }
 >()("chat/notifications/MailService") {
   static readonly layer = Layer.effect(
@@ -134,6 +136,7 @@ export class MailService extends Context.Service<
         test: (to) =>
           deliver(to, "neema test email", "Email from neema works. Schedules can notify you here."),
         available: Effect.map(row, (config) => config !== null),
+        sendTo: deliver,
         send: Effect.fn("MailService.send")(function* (userId, notification) {
           const [recipient] = yield* db
             .select({ address: user.email })

@@ -179,7 +179,8 @@ const google = {
   kind: "builtin" as const,
   label: "Google",
   enabled: true,
-  trusted: false,
+  signup: "approval" as const,
+  trustEmails: false,
   clientId: "google-client",
   config: {},
 };
@@ -200,6 +201,7 @@ describe("OAuth provider storage", () => {
       {
         kind: "builtin",
         id: "google",
+        trustEmails: false,
         clientId: "google-client",
         clientSecret: "first-secret",
         tenantId: undefined,
@@ -226,7 +228,9 @@ describe("OAuth provider storage", () => {
 
     expect(await repo((r) => r.list())).toHaveLength(2);
     expect(await repo((r) => r.listForAuth())).toEqual([]);
-    expect(await repo((r) => r.listForSignIn())).toEqual([{ id: "github", label: "GitHub" }]);
+    expect(await repo((r) => r.listForSignIn())).toEqual([
+      { id: "github", label: "GitHub", signup: "approval" },
+    ]);
   });
 
   it("drops a provider it can no longer configure rather than failing every sign-in", async () => {
@@ -236,7 +240,8 @@ describe("OAuth provider storage", () => {
         kind: "oidc",
         label: "Acme",
         enabled: true,
-        trusted: false,
+        signup: "approval",
+        trustEmails: false,
         clientId: "acme-client",
         secret: "acme-secret",
         config: { scopes: ["openid"] },
@@ -277,6 +282,7 @@ describe("native OAuth token storage", () => {
       const providers: AuthOAuthProvider[] = ["acme", "other"].map((id) => ({
         kind: "oidc",
         id,
+        trustEmails: false,
         label: id,
         clientId: "acme-client",
         clientSecret: "acme-secret",
@@ -341,7 +347,13 @@ describe("provider registration in the auth instance", () => {
   it("offers sign-in only for the providers it was built with", async () => {
     const withGoogle = await signInSocial(
       authWith([
-        { kind: "builtin", id: "google", clientId: "google-client", clientSecret: "google-secret" },
+        {
+          kind: "builtin",
+          id: "google",
+          trustEmails: false,
+          clientId: "google-client",
+          clientSecret: "google-secret",
+        },
       ]),
       "google",
     );
@@ -357,6 +369,7 @@ describe("provider registration in the auth instance", () => {
       {
         kind: "oidc",
         id: "acme",
+        trustEmails: false,
         label: "Acme",
         clientId: "acme-client",
         clientSecret: "acme-secret",

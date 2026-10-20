@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "./profile-page.tsx";
 import { authClient, sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
 import { toast } from "sonner";
+import { signInOptionsQuery } from "~/modules/auth/queries.ts";
 
 vi.mock("~/modules/auth/client.ts", () => ({
   authClient: {
     updateUser: vi.fn(),
     changePassword: vi.fn(),
+    listAccounts: vi.fn(async () => ({ data: [], error: null })),
   },
   // The page reads the session the app shell already loaded, so every render
   // here seeds that cache. Fetching instead would mean it found nothing.
@@ -21,6 +23,8 @@ vi.mock("~/modules/auth/client.ts", () => ({
     },
   },
 }));
+
+vi.mock("~/modules/auth/server/signup-functions.ts", () => ({ getSignInOptions: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -58,8 +62,15 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
-const renderPage = (client = new QueryClient()) => {
+const renderPage = (client = new QueryClient(), passwordLogin = true) => {
   client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+  client.setQueryData(signInOptionsQuery.queryKey, {
+    passwordLogin,
+    passwordSignup: passwordLogin,
+    passwordReset: false,
+    mail: false,
+    providers: [],
+  });
   render(
     <QueryClientProvider client={client}>
       <ProfilePage />
@@ -73,6 +84,12 @@ beforeEach(() => {
 });
 
 describe("ProfilePage", () => {
+  it("offers no password change where passwords are off", () => {
+    renderPage(new QueryClient(), false);
+    expect(screen.getByLabelText("Display name")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+  });
+
   it("submits the display name on Enter and keeps the label while pending", async () => {
     const user = userEvent.setup();
     const pending = deferred<{ error: null }>();

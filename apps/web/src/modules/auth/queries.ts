@@ -1,15 +1,19 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getSignInProviders, listOAuthProviders } from "./server/oauth-functions.ts";
-import { getSignupPolicy, listPendingAccounts } from "./server/signup-functions.ts";
+import { listOAuthProviders } from "./server/oauth-functions.ts";
+import {
+  getAuthSettings,
+  getSignInOptions,
+  listPendingAccounts,
+} from "./server/signup-functions.ts";
 
 export const oauthProvidersQuery = queryOptions({
   queryKey: ["admin", "oauth"],
   queryFn: () => listOAuthProviders(),
 });
 
-export const signupPolicyQuery = queryOptions({
-  queryKey: ["admin", "signup-policy"],
-  queryFn: () => getSignupPolicy(),
+export const authSettingsQuery = queryOptions({
+  queryKey: ["admin", "auth-settings"],
+  queryFn: () => getAuthSettings(),
 });
 
 export const pendingAccountsQuery = queryOptions({
@@ -17,7 +21,7 @@ export const pendingAccountsQuery = queryOptions({
   queryFn: () => listPendingAccounts(),
 });
 
-export const signInProvidersQuery = queryOptions({
-  queryKey: ["sign-in-providers"],
-  queryFn: () => getSignInProviders(),
+export const signInOptionsQuery = queryOptions({
+  queryKey: ["sign-in-options"],
+  queryFn: () => getSignInOptions(),
 });

@@ -14,14 +14,30 @@ import {
 import { invalidateAuth } from "./auth.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo, type UpsertOAuthProvider } from "./oauth-repo.ts";
+import { passwordLoginForced } from "./signup-gate.ts";
+import { SignupRepo } from "./signup-repo.ts";
+import { refuse } from "~/server/refusal.ts";
 
 const standard = Schema.toStandardSchemaV1;
+
+const LAST_WAY_IN = "Turn on password sign-in before switching off the last provider.";
+
+/** With passwords off, the last enabled provider is everyone's only way in. */
+const isLastWayIn = (id: string) =>
+  Effect.gen(function* () {
+    if (passwordLoginForced()) return false;
+    if ((yield* Effect.flatMap(SignupRepo, (repo) => repo.settings())).passwordLogin) return false;
+    const providers = yield* Effect.flatMap(OAuthRepo, (repo) => repo.list());
+    return !providers.some((p) => p.enabled && p.id !== id);
+  });
 
 const save = (input: UpsertOAuthProvider) =>
   runtime
     .runPromise(
       Effect.gen(function* () {
         const repo = yield* OAuthRepo;
+        if (!input.enabled && (yield* isLastWayIn(input.id)))
+          return { ok: false as const, error: LAST_WAY_IN };
         if (input.enabled && !input.secret) {
           const stored = (yield* repo.list()).find((p) => p.id === input.id);
           if (!stored?.secretConfigured) {
@@ -66,7 +82,8 @@ export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
       kind: "builtin",
       label: builtin.label,
       enabled: data.enabled,
-      trusted: data.trusted,
+      signup: data.signup,
+      trustEmails: data.trustEmails,
       clientId: data.clientId,
       ...(data.secret ? { secret: data.secret } : {}),
       config,
@@ -88,7 +105,8 @@ export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
       kind: "oidc",
       label: data.label,
       enabled: data.enabled,
-      trusted: data.trusted,
+      signup: data.signup,
+      trustEmails: data.trustEmails,
       clientId: data.clientId,
       ...(data.secret ? { secret: data.secret } : {}),
       config: { discoveryUrl: data.discoveryUrl, scopes: [...data.scopes] },
@@ -105,6 +123,8 @@ export const setOAuthProviderEnabled = createServerFn({ method: "POST" })
           const repo = yield* OAuthRepo;
           const stored = (yield* repo.list()).find((p) => p.id === data.id);
           if (!stored) return { ok: false as const, error: "That provider is gone." };
+          if (!data.enabled && (yield* isLastWayIn(data.id)))
+            return { ok: false as const, error: LAST_WAY_IN };
           if (data.enabled && !stored.secretConfigured) {
             return { ok: false as const, error: "Add the client secret before enabling this." };
           }
@@ -122,14 +142,11 @@ export const deleteOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(OAuthProviderId))
   .handler(async ({ data }) => {
-    await runServerFn(OAuthRepo.use((repo) => repo.remove(data.id)));
+    await runServerFn(
+      Effect.gen(function* () {
+        if (yield* isLastWayIn(data.id)) return yield* refuse(409, LAST_WAY_IN);
+        yield* Effect.flatMap(OAuthRepo, (repo) => repo.remove(data.id));
+      }),
+    );
     invalidateAuth();
   });
-
-/**
- * Unauthenticated on purpose: the sign-in page needs the buttons before anyone
- * is signed in. Ids and labels only; nothing about a client or its secret.
- */
-export const getSignInProviders = createServerFn({ method: "GET" }).handler(() =>
-  runServerFn(OAuthRepo.use((repo) => repo.listForSignIn())),
-);

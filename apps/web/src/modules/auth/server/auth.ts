@@ -2,14 +2,16 @@ import { Effect } from "effect";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { MailService } from "~/modules/notifications/server/mail.ts";
 import { mcpResourceFor } from "~/modules/mcp-server/resource.ts";
 import { fetchClientMetadata } from "~/modules/mcp-server/server/client-metadata-fetch.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
-import { createAppAuth } from "./config.ts";
+import { createAppAuth, type AuthMail } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
-import { makeSignupGate } from "./signup-gate.ts";
+import { makeSignupGate, passwordLoginForced } from "./signup-gate.ts";
+import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
 
 export type Auth = ReturnType<typeof createAppAuth>;
@@ -76,6 +78,31 @@ const clientIpSettings = () => {
   };
 };
 
+// A failed send is logged, not thrown: the reset endpoint must answer the same
+// for every address, and a stuck verification is retried by signing in again.
+const sendAuthMail = (to: string, subject: string, text: string) =>
+  runtime.runPromise(
+    Effect.flatMap(MailService, (mail) => mail.sendTo(to, subject, text)).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("auth email could not be sent", { reason: error.reason }),
+      ),
+    ),
+  );
+
+const authMail = () =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      if (!(yield* Effect.flatMap(MailService, (mail) => mail.available))) return undefined;
+      const settings = yield* Effect.flatMap(SignupRepo, (repo) => repo.settings());
+      return {
+        // The operator's way back in also lifts verification: a broken mail
+        // server would otherwise keep every password account out.
+        requireVerification: settings.requireEmailVerification && !passwordLoginForced(),
+        send: sendAuthMail,
+      } satisfies AuthMail;
+    }),
+  );
+
 const build = async (): Promise<Auth> =>
   createAppAuth({
     // The Better Auth pool is memoized, so a rebuild costs one provider query
@@ -85,6 +112,7 @@ const build = async (): Promise<Auth> =>
     secret: process.env.AUTH_SECRET,
     purgeUserFiles,
     signup,
+    mail: await authMail(),
     onDesktopRedeemed,
     mcp: mcpAuthorization(),
     clientIp: clientIpSettings(),
@@ -115,7 +143,7 @@ export function currentAuth(): Promise<Auth> {
   return entry.auth;
 }
 
-/** Call after a successful write to the provider table. */
+/** Call after a successful write to providers, mail, or verification. */
 export function invalidateAuth(): void {
   version += 1;
 }
