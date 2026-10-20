@@ -286,7 +286,7 @@ export const mcpAdapter: IntegrationAdapter = {
     if (url.protocol !== "https:" && url.protocol !== "http:")
       return { error: "The server address must start with https:// or http://." };
     if (url.username || url.password)
-      return { error: "Leave credentials out of the address; choose a sign-in instead." };
+      return { error: "Leave credentials out of the address. Choose a sign-in instead." };
     url.hash = "";
     const ticked = fieldValues(config.ways).filter(Boolean);
     if (!ticked.length) return { error: "Choose at least one way people connect." };

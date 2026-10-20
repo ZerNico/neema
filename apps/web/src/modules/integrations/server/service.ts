@@ -1156,7 +1156,8 @@ export class IntegrationService extends Context.Service<
           if (methods.open !== null) owners.add(null);
           if (owners.size === 0)
             return yield* new IntegrationRejected({
-              reason: `It lists its tools to each account. Connect yours in Settings to check now.`,
+              reason:
+                "Its tools show once someone connects. Connect your own account in Settings to check now.",
             });
           yield* listEach(integrationId, owners);
         }),

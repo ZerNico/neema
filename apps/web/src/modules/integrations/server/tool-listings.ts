@@ -19,7 +19,7 @@ const SWEEP_BATCHES = 20;
 
 const failureReason = (error: { _tag: string }) =>
   error._tag === "IntegrationAuthFailed"
-    ? "The server refused the sign-in used to list its tools."
+    ? "The server refused the account’s sign-in."
     : "reason" in error && typeof error.reason === "string"
       ? error.reason
       : "message" in error && typeof error.message === "string"
@@ -101,9 +101,9 @@ export const makeToolListings = (deps: {
             const eligible = yield* accountEligible(connection.userId).pipe(
               Effect.provideService(Db, db),
             );
-            if (!eligible) return yield* fail("Its account can no longer use it.");
+            if (!eligible) return yield* fail("Its owner can no longer use this integration.");
             return yield* sessionFor(connection.userId, connectionId).pipe(
-              Effect.catch(() => fail("Its account can no longer use it.")),
+              Effect.catch(() => fail("Its owner can no longer use this integration.")),
             );
           })
         : yield* Effect.gen(function* () {
@@ -138,7 +138,7 @@ export const makeToolListings = (deps: {
       );
       if (!recorded)
         return yield* new IntegrationRejected({
-          reason: "A newer check of this server replaced this one. Check again.",
+          reason: "Another check ran at the same time. Check again.",
         });
       // Most checks find what was there; only a change is news, and an account's only to its owner.
       const changed =

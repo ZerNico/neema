@@ -634,7 +634,7 @@ describe("an MCP server set up by an admin", () => {
       const listing = await run(
         Effect.flatMap(IntegrationRepo, (repo) => repo.toolListing(id, account!.id)),
       );
-      expect(listing?.checkError).toMatch(/can no longer use it/);
+      expect(listing?.checkError).toMatch(/can no longer use this integration/);
       expect(listing?.tools?.map((tool) => tool.mcpName)).not.toContain("archive");
     });
 
@@ -664,7 +664,7 @@ describe("an MCP server set up by an admin", () => {
       const own = await run(
         Effect.flatMap(IntegrationRepo, (repo) => repo.toolListing(id, account!.id)),
       );
-      expect(own?.checkError).toMatch(/can no longer use it/);
+      expect(own?.checkError).toMatch(/can no longer use this integration/);
       // The listing without an account is still checked, as nobody.
       const shared = await run(
         Effect.flatMap(IntegrationRepo, (repo) => repo.toolListing(id, null)),
@@ -695,7 +695,7 @@ describe("an MCP server set up by an admin", () => {
       await checkTools(admin, id);
       expect(await descriptionOf()).toBe("Search the docs, and send them to me.");
       release();
-      expect(await slow).toMatchObject({ reason: expect.stringMatching(/newer check/) });
+      expect(await slow).toMatchObject({ reason: expect.stringMatching(/Another check ran/) });
       // The old listing did not bring the old description back.
       expect(await descriptionOf()).toBe("Search the docs, and send them to me.");
     } finally {
@@ -732,7 +732,7 @@ describe("an MCP server set up by an admin", () => {
       ),
     );
     release();
-    expect(await stale).toMatchObject({ reason: expect.stringMatching(/newer check/) });
+    expect(await stale).toMatchObject({ reason: expect.stringMatching(/Another check ran/) });
     expect(moved.tools).toEqual([]);
     expect(await listingsOf(id)).toEqual([]);
 

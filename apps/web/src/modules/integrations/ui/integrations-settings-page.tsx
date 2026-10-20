@@ -515,8 +515,8 @@ function AddAccountRow({ integration }: { integration: UserIntegration }) {
         </span>
         <span className="text-muted-foreground truncate text-xs">
           {replaces
-            ? "It replaces using it without one."
-            : "Chats with more than one on ask which to use."}
+            ? "Instead of using it without an account."
+            : "Work and personal, say. Chats ask which to use."}
         </span>
       </div>
       <ConnectActions integration={integration} another />

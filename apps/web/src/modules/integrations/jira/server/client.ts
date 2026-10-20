@@ -160,7 +160,7 @@ const reason = (status: number, body: unknown) => {
   if (status === 404)
     return message ? `Jira: ${message}` : "Not found in Jira, or this account cannot see it.";
   if (status === 403) return `Jira refused access${message ? `: ${message}` : "."}`;
-  if (status === 429) return "Jira is rate limiting requests; try again shortly.";
+  if (status === 429) return "Jira is rate limiting requests. Try again shortly.";
   return message ? `Jira: ${message}` : `Jira answered ${status}.`;
 };
 
