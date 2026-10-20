@@ -1747,6 +1747,42 @@ describe("an MCP server a person adds for themselves", () => {
     ).not.toContain(id);
   });
 
+  it("lets its owner alone say what a tool does where the server says too little", async () => {
+    names.set("mcp.owned.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    await allowServers(true);
+    const owner = await activeUser();
+    const other = await activeUser();
+    const saved = await save(owner, "Owned", "https://mcp.owned.test/mcp");
+    if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
+    const id = saved.success.id;
+    const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(IntegrationService, f));
+    const tools = async () =>
+      (await service((s) => s.listForUser(owner))).find((row) => row.id === id)!.connections[0]!
+        .tools;
+    const changing = (await tools()).find((tool) => tool.access !== "read")!;
+    const claimed = changing.access;
+
+    const byOther = await service((s) =>
+      s.setOwnToolAccess(other, id, changing.name, "read").pipe(Effect.result),
+    );
+    expect(byOther._tag).toBe("Failure");
+    expect((await tools()).find((tool) => tool.name === changing.name)!.access).toBe(claimed);
+
+    await service((s) => s.setOwnToolAccess(owner, id, changing.name, "read"));
+    expect((await tools()).find((tool) => tool.name === changing.name)!.access).toBe("read");
+    // Back to what the server claims, nothing of the correction is kept.
+    await service((s) => s.setOwnToolAccess(owner, id, changing.name, claimed));
+    expect((await tools()).find((tool) => tool.name === changing.name)!.access).toBe(claimed);
+    expect(
+      JSON.stringify(
+        await service((s) =>
+          s.setOwnToolAccess(owner, id, "no_such_tool", "read").pipe(Effect.result),
+        ),
+      ),
+    ).toMatch(/Unknown tool/);
+  });
+
   it("asks its owner to connect before listing a server that needs an account", async () => {
     await allowServers(true);
     names.set("token.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });

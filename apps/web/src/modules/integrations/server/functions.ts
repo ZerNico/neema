@@ -15,6 +15,7 @@ import {
   ProbeServerInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
+  SetOwnToolAccessInput,
   SetToolInput,
   SavePersonalServerInput,
   SourceIdInput,
@@ -162,6 +163,25 @@ export const checkOwnTools = createServerFn({ method: "POST" })
       outcome(
         IntegrationService.use((service) =>
           service.checkOwnTools(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** What one tool of the person's own server does, when the server says too little. */
+export const setOwnToolAccess = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SetOwnToolAccessInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.setOwnToolAccess(
+            context.session.user.id,
+            data.integrationId,
+            data.tool,
+            data.access,
+          ),
         ),
       ),
     ),

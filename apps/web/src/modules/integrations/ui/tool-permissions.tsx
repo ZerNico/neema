@@ -19,12 +19,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import { findIntegrationType } from "../catalog.ts";
 import { permissionFor, type ToolPermission } from "../consent.ts";
-import type { IntegrationToolInfo } from "../manifest.ts";
+import type { IntegrationToolInfo, ToolAccess } from "../manifest.ts";
 
 const CHOICES: ReadonlyArray<{ value: ToolPermission; label: string; icon: typeof HandIcon }> = [
   { value: "allow", label: "Always allow", icon: CheckmarkCircle02Icon },
   { value: "ask", label: "Needs approval", icon: HandIcon },
   { value: "block", label: "Blocked", icon: UnavailableIcon },
+];
+
+/** What a tool does, for whoever may correct a server that says too little. */
+export const ACCESS_CHOICES: ReadonlyArray<{ value: ToolAccess; label: string }> = [
+  { value: "read", label: "Reads only" },
+  { value: "write", label: "Changes things" },
+  { value: "destructive", label: "Deletes or sends" },
 ];
 
 const GROUP_ITEMS = [
@@ -42,6 +49,7 @@ export function ToolPermissions({
   permissions,
   disabled,
   onChange,
+  onAccessChange,
 }: {
   /** The integration type whose tools these are. */
   kind: string;
@@ -51,6 +59,8 @@ export function ToolPermissions({
   disabled?: boolean;
   /** Only the tools that changed; the server merges them in. */
   onChange: (changes: Record<string, ToolPermission>) => void;
+  /** Given to whoever may say what each tool does: the owner of their own server. */
+  onAccessChange?: ((tool: string, access: ToolAccess) => void) | undefined;
 }) {
   const manifest = findIntegrationType(kind);
   const tools = given ?? manifest?.tools ?? [];
@@ -84,6 +94,7 @@ export function ToolPermissions({
           permissions={permissions}
           disabled={disabled}
           onChange={onChange}
+          onAccessChange={onAccessChange}
         />
       ))}
     </div>
@@ -96,12 +107,14 @@ function ToolGroup({
   permissions,
   disabled,
   onChange,
+  onAccessChange,
 }: {
   title: string;
   tools: ReadonlyArray<IntegrationToolInfo>;
   permissions: Readonly<Record<string, ToolPermission>>;
   disabled: boolean | undefined;
   onChange: (changes: Record<string, ToolPermission>) => void;
+  onAccessChange: ((tool: string, access: ToolAccess) => void) | undefined;
 }) {
   const [open, setOpen] = useState(true);
   const values = tools.map((tool) => permissionFor(tool, permissions));
@@ -168,6 +181,32 @@ function ToolGroup({
                 <span className="min-w-0 flex-1 truncate text-sm" title={tool.description}>
                   {tool.title}
                 </span>
+                {onAccessChange ? (
+                  <Select
+                    value={tool.access}
+                    items={ACCESS_CHOICES}
+                    disabled={disabled}
+                    onValueChange={(access) => {
+                      const choice = ACCESS_CHOICES.find((entry) => entry.value === access);
+                      if (choice) onAccessChange(tool.name, choice.value);
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-label={`What ${tool.title} does`}
+                      className="w-40"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ACCESS_CHOICES.map((choice) => (
+                        <SelectItem key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
                 <ToggleGroup
                   value={[value]}
                   onValueChange={(next) => {

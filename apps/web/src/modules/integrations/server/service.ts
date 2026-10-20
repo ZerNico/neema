@@ -172,6 +172,13 @@ export class IntegrationService extends Context.Service<
     sweepDrafts(): Effect.Effect<void>;
     /** Lists what a server offers this person's own accounts on it again, now. */
     checkOwnTools(userId: string, integrationId: string): Effect.Effect<void, IntegrationRejected>;
+    /** The owner's word on what one tool of their own server does, as an admin's is on theirs. */
+    setOwnToolAccess(
+      userId: string,
+      integrationId: string,
+      tool: string,
+      access: ToolAccess,
+    ): Effect.Effect<void, IntegrationRejected>;
     /** A new integration of a shipped type, off until set up. */
     /** Adds an integration of a type; the server picks its id. */
     createIntegration(input: {
@@ -939,6 +946,33 @@ export class IntegrationService extends Context.Service<
             if (accounts.length === 0)
               return yield* new IntegrationRejected({ reason: "Connect it first." });
             yield* listEach(integrationId, new Set(accounts.map(listingOwner)));
+            yield* changed(userId);
+          },
+        ),
+
+        setOwnToolAccess: Effect.fn("IntegrationService.setOwnToolAccess")(
+          function* (userId, integrationId, tool, access) {
+            const row = yield* repo.getConfig(integrationId);
+            if (!row || row.ownerUserId !== userId) return yield* unknownIntegration();
+            const entry = (yield* repo.listForUser(userId, integrationId)).find(
+              (item) => item.config.id === integrationId,
+            );
+            // Chats name a tool by its key; the word on it is kept under the server's own name.
+            const owner = entry?.connections.map(listingOwner).find((id) => id !== null) ?? null;
+            const listed = (yield* repo.toolListing(integrationId, owner))?.tools?.find(
+              (item) => item.key === tool,
+            );
+            if (!listed) return yield* new IntegrationRejected({ reason: "Unknown tool." });
+            const off = row.toolSettings[listed.mcpName]?.off;
+            const value = {
+              ...(off ? { off: true as const } : {}),
+              ...(access === listed.access ? {} : { access }),
+            };
+            yield* repo.setToolSetting(
+              integrationId,
+              listed.mcpName,
+              Object.keys(value).length ? value : null,
+            );
             yield* changed(userId);
           },
         ),

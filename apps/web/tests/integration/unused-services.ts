@@ -95,6 +95,7 @@ export const NoIntegrations = Layer.mergeAll(
     savePersonalServer: () => Effect.die("no integrations in these tests"),
     deletePersonalServer: () => Effect.die("no integrations in these tests"),
     checkOwnTools: () => Effect.die("no integrations in these tests"),
+    setOwnToolAccess: () => Effect.die("no integrations in these tests"),
     probeServer: () => Effect.die("no integrations in these tests"),
     serverSetup: () => Effect.die("no integrations in these tests"),
     finishServerSetup: () => Effect.die("no integrations in these tests"),

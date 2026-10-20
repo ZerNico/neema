@@ -46,8 +46,10 @@ import {
   type PersonalServer,
   type UserIntegration,
 } from "../schema.ts";
+import type { ToolAccess } from "../manifest.ts";
 import {
   checkOwnTools,
+  setOwnToolAccess,
   disconnectIntegration,
   updateIntegrationConnection,
 } from "../server/functions.ts";
@@ -300,6 +302,17 @@ function AccountSettings({
   const update = useConnectionUpdate(account.id);
   const fieldId = useId();
   const name = accountName(account);
+  const queryClient = useQueryClient();
+  // Their own server: they vouched for it, so they may say what a tool does where it says too little.
+  const correct = useMutation({
+    mutationFn: (input: { tool: string; access: ToolAccess }) =>
+      setOwnToolAccess({ data: { integrationId: integration.id, ...input } }),
+    onSuccess: (result) => {
+      if (!result.ok) toastError("Could not change the tool.", new Error(result.error));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["integrations"] }),
+    onError: (error) => toastError("Could not change the tool.", error),
+  });
   return (
     <>
       <Section title={titled ? name : "In chats"}>
@@ -338,6 +351,9 @@ function AccountSettings({
             tools={account.tools}
             permissions={account.toolPermissions}
             onChange={(toolPermissions) => update.mutate({ toolPermissions })}
+            onAccessChange={
+              integration.personal ? (tool, access) => correct.mutate({ tool, access }) : undefined
+            }
           />
         ) : (
           <EmptyState

@@ -232,6 +232,12 @@ export const SetToolInput = Schema.Struct({
   access: Schema.NullOr(ToolAccessInput),
 });
 
+export const SetOwnToolAccessInput = Schema.Struct({
+  integrationId: IntegrationId,
+  tool: Schema.String.check(Schema.isMaxLength(200)),
+  access: ToolAccessInput,
+});
+
 export const ConnectApiKeyInput = Schema.Struct({
   integrationId: IntegrationId,
   /** Replaces this account's key; absent adds an account. */

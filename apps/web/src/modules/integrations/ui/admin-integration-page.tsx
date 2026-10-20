@@ -45,6 +45,7 @@ import {
   setIntegrationTool,
 } from "../server/functions.ts";
 import { IntegrationConfigDialog } from "./integration-config-dialog.tsx";
+import { ACCESS_CHOICES } from "./tool-permissions.tsx";
 
 /** What a tool says of itself, beside the admin's correction. */
 const CLAIMS: Record<ToolAccess, string> = {
@@ -52,12 +53,6 @@ const CLAIMS: Record<ToolAccess, string> = {
   write: "changes things",
   destructive: "can delete or send",
 };
-
-const ACCESS: ReadonlyArray<{ value: ToolAccess; label: string }> = [
-  { value: "read", label: "Reads only" },
-  { value: "write", label: "Changes things" },
-  { value: "destructive", label: "Deletes or sends" },
-];
 
 /**
  * One integration as the admin runs it: its settings, who may connect, and
@@ -297,7 +292,7 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
               </div>
               <Select
                 value={tool.access}
-                items={ACCESS}
+                items={ACCESS_CHOICES}
                 disabled={Boolean(tool.unsupported) || set.isPending}
                 onValueChange={(access) =>
                   set.mutate({ tool, off: tool.off, access: access as ToolAccess })
@@ -307,7 +302,7 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ACCESS.map((choice) => (
+                  {ACCESS_CHOICES.map((choice) => (
                     <SelectItem key={choice.value} value={choice.value}>
                       {choice.label}
                     </SelectItem>

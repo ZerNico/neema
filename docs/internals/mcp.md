@@ -65,9 +65,10 @@ names the server, the account epoch and credential revision name whose token it 
 Annotations are the server's own word, so the spec's defaults apply. `readOnlyHint` reads as
 read; `destructiveHint: false` as a write; anything else, including saying nothing, as
 destructive. A destructive tool always asks unless a person allows it in Settings, and never
-runs in a scheduled run. An admin corrects a tool whose claim is wrong on the integration's
-page; the correction sticks across later listings, since it is kept by the server's name for
-the tool.
+runs in a scheduled run. Whoever vouched for the server corrects a tool whose claim is wrong:
+the admin on the integration's page, the owner of a server of their own in Settings. Either is
+the same `tool_settings` entry, kept by the server's name for the tool so it sticks across later
+listings.
 
 ## Ways in
 
