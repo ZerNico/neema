@@ -97,6 +97,7 @@ import { freshLease, generationWriteMethods } from "./repo/generation-writes.ts"
 import { queueMethods, type QueueGate } from "./repo/queue.ts";
 import { workTurnMethods } from "./repo/work-turns.ts";
 import type { DbTx } from "~/server/db.ts";
+import type { UsageLimitReached } from "~/modules/limits/errors.ts";
 export { PLAIN_GENERATION } from "./repo/generation-config.ts";
 export { QUEUE_LIMIT, type QueueGate } from "./repo/queue.ts";
 export { INTERRUPTED_MESSAGE, joinChunks } from "./repo/generation-writes.ts";
@@ -260,7 +261,8 @@ export type ResolveError =
   | SkillRejected
   | KnowledgeNotAvailable
   | KnowledgeRejected
-  | InvalidMessage;
+  | InvalidMessage
+  | UsageLimitReached;
 export type ResolveGeneration = (
   tx: DbTx,
   defaults: ConversationDefaults,

@@ -33,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
+import { LimitsSection } from "~/modules/limits/ui/limits-editor.tsx";
 import { GROUP_NAME_MAX } from "../schema.ts";
 import { groupsQuery } from "../client/queries.ts";
 
@@ -98,6 +99,7 @@ export function GroupsPage() {
           ))}
         </ListCard>
       )}
+      <LimitsSection groupId={null} />
       <DefaultAccessDialog open={editingDefaults} onOpenChange={setEditingDefaults} />
       <AddGroupDialog open={adding} onOpenChange={setAdding} />
     </Page>

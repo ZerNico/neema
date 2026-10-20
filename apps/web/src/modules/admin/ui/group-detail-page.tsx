@@ -62,6 +62,7 @@ import { GROUP_NAME_MAX } from "../schema.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { toastError } from "~/ui/error-toast.ts";
+import { LimitsSection } from "~/modules/limits/ui/limits-editor.tsx";
 
 interface PickableUser {
   id: string;
@@ -241,6 +242,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       </Section>
 
       <CapabilitySettings groupId={groupId} />
+      <LimitsSection groupId={groupId} />
       <MemberSharingDialog
         groupId={groupId}
         member={sharingFor}

@@ -849,6 +849,7 @@ export const ChatInput = forwardRef<
           {/* Below when there is room, as on an empty new chat, like the plus
               menu; both flip above the composer in a conversation. */}
           <ModelPicker
+            limited
             models={models}
             value={selectedModel?.id ?? null}
             onChange={onModelChange}

@@ -64,6 +64,10 @@ const queueFailure = (error: { readonly _tag: string }) => {
       return "This account can’t start messages. Try Send now after access is restored.";
     case "ModelNotFound":
       return "This message’s model is no longer available. Edit it to pick another.";
+    case "UsageLimitReached":
+      return "reason" in error && typeof error.reason === "string"
+        ? error.reason
+        : "You’ve reached a usage limit.";
     default:
       return "This message could not be started. Its model or collections may no longer be available.";
   }

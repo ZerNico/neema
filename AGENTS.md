@@ -308,6 +308,9 @@ skipped one on purpose.
   folder goes.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
+- `docs/internals/limits.md`: usage limits. Everyone's rules as the baseline that groups replace,
+  the most generous group winning, settled ledger rows only, calendar periods in one zone, and
+  the one check in the attempt resolver.
 - `docs/internals/analytics.md`: the usage ledger. What writes a row and when, rows that outlive
   their chat and model, costs resolved once, partial sums as floors, grouping by model.
 - `docs/internals/providers.md`: `@chat/model-client` and its presets, admin overrides,

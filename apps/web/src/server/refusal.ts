@@ -45,6 +45,7 @@ import type {
   KnowledgeRejected,
   SharingNotAllowed,
 } from "~/modules/knowledge/errors.ts";
+import type { LimitRejected, UsageLimitReached } from "~/modules/limits/errors.ts";
 import type { MailFailed } from "~/modules/notifications/server/mail.ts";
 import type { PushRejected } from "~/modules/notifications/server/push.ts";
 import type { FontRejected } from "~/modules/presentations/server/fonts.ts";
@@ -128,7 +129,9 @@ export type Refusable =
   | SkillRejected
   | ToolUnavailable
   | UnhostedImageFamily
-  | WorkDesktopRequired;
+  | WorkDesktopRequired
+  | UsageLimitReached
+  | LimitRejected;
 
 export type RefusalTable = {
   readonly [Tag in Refusable["_tag"]]: (error: Extract<Refusable, { _tag: Tag }>) => Refusal;
@@ -186,6 +189,7 @@ const refusals: RefusalTable = {
   InvalidUtilityModel: because(400),
   KnowledgeNotAvailable: notFound,
   KnowledgeRejected: because(400),
+  LimitRejected: because(400),
   MailFailed: because(400),
   MessageNotFound: notFound,
   ModelNotFound: () => ({ status: 400, body: "Unknown model" }),
@@ -220,6 +224,7 @@ const refusals: RefusalTable = {
   SkillRejected: because(400),
   ToolUnavailable: (error) => ({ status: 400, body: `Web search unavailable: ${error.reason}` }),
   UnhostedImageFamily: because(400),
+  UsageLimitReached: because(429),
   WorkDesktopRequired: () => ({
     status: 409,
     body: "This is a work chat; continue it from the desktop app",

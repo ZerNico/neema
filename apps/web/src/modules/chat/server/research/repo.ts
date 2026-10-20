@@ -253,6 +253,9 @@ export const createResearchStore = (db: Db["Service"]) => {
         modelName: run.modelName,
         conversationId: run.conversationId,
         messageId: run.messageId,
+        // Marks the row as a run's, not an answer: an answer's own row never names its
+        // generation, and this survives the run's tool call and row being deleted.
+        generationId: run.generationId,
         status,
         inputTokens: totals.inputTokens,
         outputTokens: totals.outputTokens,

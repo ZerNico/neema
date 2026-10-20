@@ -3,6 +3,7 @@ import type { DesktopSubmission } from "../schema.ts";
 import { Effect, Option } from "effect";
 import { sendsReasoningEffort } from "~/modules/providers/provider-presets.ts";
 import { InvalidMessage, ModelNotFound, WorkDesktopRequired } from "~/modules/chat/errors.ts";
+import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
@@ -45,6 +46,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
   const webSearch = yield* WebSearchExecutor;
   const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
   const policy = yield* FeaturePolicy;
+  const limits = yield* UsageLimits;
   const attachmentRepo = yield* AttachmentRepo;
   const agents = yield* AgentRepo;
   const knowledge = yield* KnowledgeRepo;
@@ -195,6 +197,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
       input: {
         userId: string;
         model: {
+          id: string;
           providerId: string;
           modelKey: string;
           contextLength: number | null | undefined;
@@ -243,6 +246,9 @@ export const makeAttemptOptions = Effect.gen(function* () {
     (tx, defaults: ConversationDefaults, continuation) =>
       Effect.gen(function* () {
         yield* requireEligibleAccount(tx, input.userId);
+        // Counts settled answers only, so one still running counts once it settles and two
+        // sends at once may both pass. Nothing is ever stopped halfway.
+        yield* limits.check(input.userId, input.model.id, tx);
         const imageModel = yield* resolveImageModel(tx, {
           userId: input.userId,
           conversationId: defaults.conversationId,

@@ -139,6 +139,7 @@ export const prepareGenerationTools = (
       processors,
       presentationFonts,
       toolRegistry,
+      limits,
       integrations,
       integrationApprovals,
       imageAttachments,
@@ -815,6 +816,11 @@ export const prepareGenerationTools = (
             messageId: input.messageId,
             generationId: fence.generationId,
             modelId: input.modelId,
+            // A run spends on its own, so it is held to the limits an answer would be.
+            admit: limits.check(input.userId, input.modelId).pipe(
+              Effect.as(null),
+              Effect.catchTag("UsageLimitReached", (error) => Effect.succeed(error.reason)),
+            ),
             rowFor: (providerCallId) =>
               Effect.suspend(() => Deferred.await(callRowReady(providerCallId))),
             emit: sink.pushTool,

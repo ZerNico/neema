@@ -11,6 +11,7 @@ export * from "./groups.ts";
 export * from "./help.ts";
 export * from "./integrations.ts";
 export * from "./knowledge.ts";
+export * from "./limits.ts";
 export * from "./memory.ts";
 export * from "./navigation.ts";
 export * from "./notifications.ts";

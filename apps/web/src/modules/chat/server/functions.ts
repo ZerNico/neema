@@ -2,6 +2,7 @@ import { notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { refuse, type RefusalOverrides } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
@@ -648,7 +649,27 @@ export const listChatModels = createServerFn({ method: "GET" })
       // Filtered to what THIS user may see: public models plus private ones
       // shared with a group they belong to (admins see everything). The rows
       // carry the provider's display name, which the picker groups by.
-      ProviderRepo.use((repo) => repo.listChatModelsFor(context.session.user.id)),
+      Effect.all({
+        models: ProviderRepo.use((repo) => repo.listChatModelsFor(context.session.user.id)),
+        standing: UsageLimits.use((limits) => limits.standing(context.session.user.id)),
+      }).pipe(
+        Effect.map(({ models, standing }) =>
+          models.map((model) => {
+            // Open again once every used-up limit covering it has reset.
+            const reached = standing.filter(
+              (limit) =>
+                limit.reached &&
+                (limit.models === null || limit.models.some((entry) => entry.id === model.id)),
+            );
+            return {
+              ...model,
+              limitedUntil: reached.length
+                ? reached.map((limit) => limit.resetsAt).toSorted().at(-1)!
+                : null,
+            };
+          }),
+        ),
+      ),
     ),
   );
 
