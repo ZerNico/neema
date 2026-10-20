@@ -66,7 +66,7 @@ const makeAuth = (mail?: AuthMail) =>
     mail,
   });
 
-const addProvider = (id: string, signup: SignupMode, trustEmails = false) =>
+const addProvider = (id: string, signup: SignupMode, trustEmails = false, exclusive = false) =>
   runtime.runPromise(
     Effect.flatMap(OAuthRepo, (repo) =>
       repo.upsert({
@@ -76,6 +76,7 @@ const addProvider = (id: string, signup: SignupMode, trustEmails = false) =>
         enabled: true,
         signup,
         trustEmails,
+        exclusive,
         clientId: `${id}-client`,
         secret: `${id}-secret`,
         config: { discoveryUrl: "https://id.test/.well-known/openid-configuration", scopes: [] },
@@ -395,6 +396,7 @@ describe("who gets an account", () => {
             enabled: true,
             signup: "open",
             trustEmails: false,
+            exclusive: false,
             clientId: "work-client",
             secret: "work-secret",
             config: {
@@ -409,6 +411,7 @@ describe("who gets an account", () => {
             enabled: true,
             signup: "approval",
             trustEmails: false,
+            exclusive: false,
             clientId: "gh-client",
             secret: "gh-secret",
             config: {},
@@ -766,6 +769,170 @@ describe("email verification", () => {
     expect(await found()).toBe(0);
     await signups((repo) => repo.markVerified(id));
     expect(await found()).toBe(1);
+  });
+});
+
+describe("a provider that is its accounts' only sign-in", () => {
+  const sent: { to: string; text: string }[] = [];
+  const mail: AuthMail = {
+    requireVerification: false,
+    send: async (to, _subject, text) => {
+      sent.push({ to, text });
+    },
+  };
+  const connect = async (userId: string, providerId: string) => {
+    const id = uuidv7();
+    await db.insert(account).values({
+      id,
+      accountId: `${providerId}-${userId}`,
+      providerId,
+      userId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return id;
+  };
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+
+  it("refuses a correct password, and only a correct one learns why", async () => {
+    await signUp("founder");
+    await signUp("member");
+    await addProvider("sso", "approval", false, true);
+    const [member] = await db.select().from(user).where(eq(user.email, "member@example.test"));
+    await connect(member!.id, "sso");
+
+    const right = await signIn("member@example.test");
+    expect(right.status).toBe(403);
+    expect(right.body.message).toBe("This account signs in with sso.");
+    expect(right.cookie).not.toContain("session_token");
+
+    const wrong = await auth.handler(
+      new Request(`${origin}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ email: "member@example.test", password: "not-the-password-1" }),
+      }),
+    );
+    expect(wrong.status).toBe(401);
+  });
+
+  it("lets passwords back in once the provider is switched off", async () => {
+    await signUp("founder");
+    await signUp("member");
+    await addProvider("sso", "approval", false, true);
+    const [member] = await db.select().from(user).where(eq(user.email, "member@example.test"));
+    await connect(member!.id, "sso");
+    await runtime.runPromise(Effect.flatMap(OAuthRepo, (repo) => repo.setEnabled("sso", false)));
+
+    expect((await signIn("member@example.test")).status).toBe(200);
+  });
+
+  it("gives an account that only has the provider no password through a reset", async () => {
+    await signUp("founder");
+    await addProvider("sso", "approval", false, true);
+    const id = await insertUser("sso-only");
+    await connect(id, "sso");
+    auth = makeAuth(mail);
+
+    await auth.handler(
+      new Request(`${origin}/api/auth/request-password-reset`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ email: "sso-only@example.test", redirectTo: "/reset-password" }),
+      }),
+    );
+    const token = sent[0]?.text.match(/reset-password\/([^?\s]+)/)?.[1];
+    expect(token).toBeTruthy();
+    const reset = await auth.handler(
+      new Request(`${origin}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ token, newPassword: "isolated-test-password-123" }),
+      }),
+    );
+    expect(reset.status).not.toBe(200);
+    expect(
+      await db.select().from(account).where(eq(account.providerId, "credential")),
+    ).toHaveLength(1);
+    expect((await signIn("sso-only@example.test")).status).not.toBe(200);
+  });
+
+  it("opens no session from an emailed verification link", async () => {
+    await signUp("founder");
+    await addProvider("sso", "approval", false, true);
+    const id = await insertUser("sso-only");
+    await connect(id, "sso");
+    auth = makeAuth(mail);
+
+    await auth.handler(
+      new Request(`${origin}/api/auth/send-verification-email`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ email: "sso-only@example.test" }),
+      }),
+    );
+    const link = sent[0]?.text.match(/https?:\/\/\S+/)?.[0];
+    expect(link).toBeTruthy();
+    const opened = await auth.handler(new Request(link!, { headers: { origin } }));
+
+    expect(opened.headers.getSetCookie().join(";")).not.toContain("session_token");
+    expect(await db.select().from(session).where(eq(session.userId, id))).toHaveLength(0);
+  });
+
+  it("still signs in from that link where no provider is exclusive", async () => {
+    await signUp("founder");
+    await addProvider("sso", "approval");
+    const id = await insertUser("bound-nowhere");
+    await connect(id, "sso");
+    auth = makeAuth(mail);
+
+    await auth.handler(
+      new Request(`${origin}/api/auth/send-verification-email`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ email: "bound-nowhere@example.test" }),
+      }),
+    );
+    const link = sent[0]?.text.match(/https?:\/\/\S+/)?.[0];
+    await auth.handler(new Request(link!, { headers: { origin } }));
+
+    expect(await db.select().from(session).where(eq(session.userId, id))).toHaveLength(1);
+  });
+
+  it("lets the operator's override past it", async () => {
+    await signUp("founder");
+    await signUp("member");
+    await addProvider("sso", "approval", false, true);
+    const [member] = await db.select().from(user).where(eq(user.email, "member@example.test"));
+    await connect(member!.id, "sso");
+
+    process.env.AUTH_PASSWORD_LOGIN = "force";
+    try {
+      expect((await signIn("member@example.test")).status).toBe(200);
+    } finally {
+      delete process.env.AUTH_PASSWORD_LOGIN;
+    }
+  });
+
+  it("can't be disconnected while it is the only sign-in", async () => {
+    await signUp("founder");
+    await signUp("member");
+    await addProvider("sso", "approval", false, true);
+    const [member] = await db.select().from(user).where(eq(user.email, "member@example.test"));
+    const { cookie } = await signIn("member@example.test");
+    const linked = await connect(member!.id, "sso");
+
+    const unlink = await auth.handler(
+      new Request(`${origin}/api/auth/unlink-account`, {
+        method: "POST",
+        headers: { origin, cookie, "content-type": "application/json" },
+        body: JSON.stringify({ accountId: linked }),
+      }),
+    );
+    expect(unlink.status).toBe(403);
   });
 });
 

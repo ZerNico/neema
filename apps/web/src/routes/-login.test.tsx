@@ -170,7 +170,7 @@ describe("what the pages offer", () => {
       ...everything,
       passwordLogin: false,
       passwordSignup: false,
-      providers: [{ id: "sso", label: "Work", signup: false }],
+      providers: [{ id: "sso", label: "Work", signup: false, exclusive: false }],
     });
 
     expect(await screen.findByRole("button", { name: "Continue with Work" })).toBeVisible();
@@ -183,8 +183,8 @@ describe("what the pages offer", () => {
       ...everything,
       passwordSignup: false,
       providers: [
-        { id: "sso", label: "Work", signup: true },
-        { id: "github", label: "GitHub", signup: false },
+        { id: "sso", label: "Work", signup: true, exclusive: false },
+        { id: "github", label: "GitHub", signup: false, exclusive: false },
       ],
     });
 

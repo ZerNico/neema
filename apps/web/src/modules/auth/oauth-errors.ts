@@ -1,6 +1,9 @@
 /** Our refusal of a new account, as the OAuth callback forwards it. */
 export const SIGNUP_CLOSED = "signup_closed";
 
+/** A password sign-in to an account that only signs in through its provider. */
+export const SIGN_IN_WITH_PROVIDER = "sign_in_with_provider";
+
 /**
  * Better Auth returns a failed OAuth sign-in to this URL with an `error` code
  * appended, keeping where the person was headed.

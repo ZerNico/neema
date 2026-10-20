@@ -41,6 +41,7 @@ interface Draft {
   scopes: string;
   signup: SignupMode;
   trustEmails: boolean;
+  exclusive: boolean;
 }
 
 const emptyDraft = (type: string): Draft => ({
@@ -54,6 +55,7 @@ const emptyDraft = (type: string): Draft => ({
   scopes: OIDC_DEFAULT_SCOPES.join(" "),
   signup: "approval",
   trustEmails: false,
+  exclusive: false,
 });
 
 const draftOf = (provider: PublicOAuthProvider): Draft => ({
@@ -67,6 +69,7 @@ const draftOf = (provider: PublicOAuthProvider): Draft => ({
   scopes: ((provider.config.scopes as string[] | undefined) ?? OIDC_DEFAULT_SCOPES).join(" "),
   signup: provider.signup,
   trustEmails: provider.trustEmails,
+  exclusive: provider.exclusive,
 });
 
 /**
@@ -122,6 +125,7 @@ export function OAuthProviderDialog({
               enabled: provider?.enabled ?? true,
               signup: draft.signup,
               trustEmails: draft.trustEmails,
+              exclusive: draft.exclusive,
               clientId: draft.clientId.trim(),
               ...(secret ? { secret } : {}),
               ...(builtin.field?.key === "tenantId" ? { tenantId: draft.extra.trim() } : {}),
@@ -135,6 +139,7 @@ export function OAuthProviderDialog({
               enabled: provider?.enabled ?? true,
               signup: draft.signup,
               trustEmails: draft.trustEmails,
+              exclusive: draft.exclusive,
               clientId: draft.clientId.trim(),
               ...(secret ? { secret } : {}),
               discoveryUrl: draft.discoveryUrl.trim(),
@@ -351,6 +356,23 @@ export function OAuthProviderDialog({
               </div>
               <FieldDescription>
                 Count its addresses as verified. Only for a provider that owns its domain.
+              </FieldDescription>
+            </Field>
+
+            <Field>
+              <div className="flex items-center justify-between gap-3">
+                <FieldLabel htmlFor={`${fieldId}-exclusive`}>
+                  Only sign-in for its accounts
+                </FieldLabel>
+                <Switch
+                  id={`${fieldId}-exclusive`}
+                  checked={draft.exclusive}
+                  onCheckedChange={(exclusive) => patch({ exclusive })}
+                  disabled={save.isPending}
+                />
+              </div>
+              <FieldDescription>
+                Accounts connected to it can’t use or set a password.
               </FieldDescription>
             </Field>
           </FieldGroup>

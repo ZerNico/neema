@@ -17,7 +17,7 @@ import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
 import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
-import { SIGNUP_CLOSED } from "../oauth-errors.ts";
+import { SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
 
@@ -139,6 +139,34 @@ export interface AuthMail {
   send: (to: string, subject: string, text: string) => Promise<void>;
 }
 
+/** The operator's way back in when no identity provider works. */
+export const passwordLoginForced = () => process.env.AUTH_PASSWORD_LOGIN?.trim() === "force";
+
+/**
+ * Endpoints that create a session for someone already signed in: a desktop
+ * ticket minted by a browser session, a session rotation, impersonation.
+ * Every other session is a sign-in, and must come through the right way in.
+ */
+const SESSION_CONTINUATIONS = new Set([
+  "/desktop/session",
+  "/update-user",
+  "/admin/impersonate-user",
+  "/admin/stop-impersonating",
+]);
+
+/**
+ * Whether a sign-in may open a session for an account bound to these exclusive
+ * providers: any way in for an unbound account, only one of them otherwise.
+ */
+export const signsInThrough = (
+  context: Parameters<typeof methodFromContext>[0],
+  exclusive: readonly { id: string }[],
+) => {
+  if (exclusive.length === 0) return true;
+  const method = methodFromContext(context);
+  return typeof method === "string" && exclusive.some((p) => p.id === method);
+};
+
 const PASSWORD_PATHS = [
   "/sign-in/email",
   "/sign-up/email",
@@ -222,6 +250,23 @@ export function createAppAuth({
   clientIp?: { trustedProxies: readonly string[]; header: string };
   log?: (event: ImpersonationEvent) => Promise<void>;
 }) {
+  /** The enabled exclusive providers an account is connected to, by id and label. */
+  const exclusiveSignIns = async (userId: string) => {
+    if (passwordLoginForced()) return [];
+    return db
+      .select({ id: schema.oauthProviders.id, label: schema.oauthProviders.label })
+      .from(schema.account)
+      .innerJoin(
+        schema.oauthProviders,
+        and(
+          eq(schema.oauthProviders.id, schema.account.providerId),
+          eq(schema.oauthProviders.enabled, true),
+          eq(schema.oauthProviders.exclusive, true),
+        ),
+      )
+      .where(eq(schema.account.userId, userId));
+  };
+
   return betterAuth({
     baseURL,
     secret,
@@ -284,6 +329,33 @@ export function createAppAuth({
     },
     rateLimit: { enabled: rateLimit },
     databaseHooks: {
+      // A provider marked exclusive is the only way in for accounts connected
+      // to it: every session they get comes through it, or continues one that
+      // did. Refused at the session rather than the request, so a password
+      // sign-in only learns this once the password has checked out.
+      session: {
+        create: {
+          before: async (created, context) => {
+            if (!context?.path || SESSION_CONTINUATIONS.has(context.path)) return;
+            const exclusive = await exclusiveSignIns(created.userId);
+            if (signsInThrough(context, exclusive)) return;
+            throw new APIError("FORBIDDEN", {
+              code: SIGN_IN_WITH_PROVIDER,
+              message: `This account signs in with ${exclusive[0]!.label}.`,
+            });
+          },
+        },
+      },
+      // Nor may such an account gain a password: a reset would otherwise add one.
+      account: {
+        create: {
+          before: async (created) => {
+            if (created.providerId !== "credential") return;
+            if ((await exclusiveSignIns(created.userId)).length > 0)
+              throw new APIError("FORBIDDEN", { message: "This account has no password." });
+          },
+        },
+      },
       user: {
         create: {
           before: async (userData, context) => {
@@ -338,6 +410,24 @@ export function createAppAuth({
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/unlink-account") {
+          // Leaving an exclusive provider would hand the account back to a password.
+          const leaving = String((ctx.body as { accountId?: unknown } | undefined)?.accountId);
+          const [bound] = await db
+            .select({ id: schema.account.id })
+            .from(schema.account)
+            .innerJoin(
+              schema.oauthProviders,
+              and(
+                eq(schema.oauthProviders.id, schema.account.providerId),
+                eq(schema.oauthProviders.enabled, true),
+                eq(schema.oauthProviders.exclusive, true),
+              ),
+            )
+            .where(eq(schema.account.id, leaving));
+          if (bound)
+            throw new APIError("FORBIDDEN", { message: "This sign-in can’t be disconnected." });
+        }
         if (ctx.path === "/unlink-account" && !(await signup.passwordAllowed())) {
           // Without passwords, the last account on an enabled provider is the only way back in.
           const session = await getAuthoritativeSessionFromCtx(ctx);

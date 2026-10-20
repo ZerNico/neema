@@ -10,7 +10,7 @@ const social = vi.mocked(authClient.signIn.social);
 const renderButtons = (providers: { id: string; label: string }[], separated = false) =>
   render(
     <SignInProviders
-      providers={providers.map((p) => ({ ...p, signup: true }))}
+      providers={providers.map((p) => ({ ...p, signup: true, exclusive: false }))}
       separated={separated}
     />,
   );

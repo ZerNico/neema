@@ -179,6 +179,7 @@ function ProviderRow({
             <Badge variant="secondary">{MODE_BADGES[provider.signup]}</Badge>
           ) : null}
           {provider.trustEmails ? <Badge variant="secondary">Trusted emails</Badge> : null}
+          {provider.exclusive ? <Badge variant="secondary">No passwords</Badge> : null}
         </span>
         {/* A built-in's label already names it; an OpenID Connect id is chosen,
             so it is the only one worth repeating under the name. */}

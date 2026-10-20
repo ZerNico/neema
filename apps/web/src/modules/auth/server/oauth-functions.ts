@@ -12,9 +12,9 @@ import {
   SetOAuthProviderEnabledInput,
 } from "../oauth.ts";
 import { invalidateAuth } from "./auth.ts";
+import { passwordLoginForced } from "./config.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo, type UpsertOAuthProvider } from "./oauth-repo.ts";
-import { passwordLoginForced } from "./signup-gate.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { refuse } from "~/server/refusal.ts";
 
@@ -84,6 +84,7 @@ export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
       enabled: data.enabled,
       signup: data.signup,
       trustEmails: data.trustEmails,
+      exclusive: data.exclusive,
       clientId: data.clientId,
       ...(data.secret ? { secret: data.secret } : {}),
       config,
@@ -107,6 +108,7 @@ export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
       enabled: data.enabled,
       signup: data.signup,
       trustEmails: data.trustEmails,
+      exclusive: data.exclusive,
       clientId: data.clientId,
       ...(data.secret ? { secret: data.secret } : {}),
       config: { discoveryUrl: data.discoveryUrl, scopes: [...data.scopes] },

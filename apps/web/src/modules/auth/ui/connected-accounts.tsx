@@ -6,18 +6,9 @@ import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { oauthErrorMessage } from "../oauth-errors.ts";
-import { signInOptionsQuery } from "../queries.ts";
+import { linkedAccountsQuery, signInOptionsQuery } from "../queries.ts";
 
 const RETURN_TO = "/settings/profile";
-
-const linkedAccountsQuery = {
-  queryKey: ["linked-accounts"],
-  queryFn: async () => {
-    const { data, error } = await authClient.listAccounts();
-    if (error) throw new Error(error.message);
-    return data;
-  },
-};
 
 /**
  * Linking while signed in is the one safe way to join a provider to an
@@ -41,17 +32,25 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
     onError: (cause) => toastError("Could not disconnect.", cause),
   });
 
-  if (options.providers.length === 0) return null;
+  // Bound to a provider that is its only sign-in, another one could never sign it in.
+  const bound = options.providers.filter(
+    (p) => p.exclusive && accounts?.some((a) => a.providerId === p.id),
+  );
+  const shown = bound.length > 0 ? bound : options.providers;
+  if (shown.length === 0) return null;
 
   return (
     <Section title="Connected sign-ins">
       <ListCard>
-        {options.providers.map((provider) => {
+        {shown.map((provider) => {
           const linked = accounts?.find((a) => a.providerId === provider.id);
           return (
             <ListRow key={provider.id}>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{provider.label}</span>
-              {linked ? (
+              {linked && provider.exclusive ? (
+                // Disconnecting would hand the account back to a password.
+                <span className="text-muted-foreground text-xs">Connected</span>
+              ) : linked ? (
                 <PendingButton
                   size="sm"
                   variant="outline"

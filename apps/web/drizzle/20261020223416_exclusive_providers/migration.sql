@@ -1,0 +1,1 @@
+ALTER TABLE "oauth_providers" ADD COLUMN "exclusive" boolean DEFAULT false NOT NULL;

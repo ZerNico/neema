@@ -59,6 +59,7 @@ type Provider = {
   enabled: boolean;
   signup: "open" | "approval" | "closed";
   trustEmails: boolean;
+  exclusive: boolean;
   clientId: string;
   secretConfigured: boolean;
   config: Record<string, unknown>;
@@ -68,6 +69,7 @@ const provider = (overrides: Partial<Provider> & Pick<Provider, "id" | "kind" | 
   enabled: true,
   signup: "approval" as const,
   trustEmails: false,
+  exclusive: false,
   clientId: `${overrides.id}-client`,
   secretConfigured: true,
   config: {},
@@ -161,6 +163,7 @@ describe("OAuthPage", () => {
       enabled: true,
       signup: "approval",
       trustEmails: false,
+      exclusive: false,
       clientId: "entra-client",
       secret: "entra-secret",
       tenantId: "contoso",
@@ -191,6 +194,7 @@ describe("OAuthPage", () => {
     await user.type(screen.getByLabelText("Client secret"), "sso-secret");
     await pick(user, "New accounts", "Anyone can join");
     await user.click(screen.getByRole("switch", { name: "Trust its emails" }));
+    await user.click(screen.getByRole("switch", { name: "Only sign-in for its accounts" }));
     await user.click(submit(dialog, "Add provider"));
 
     await waitFor(() => expect(saveOidc).toHaveBeenCalled());
@@ -200,6 +204,7 @@ describe("OAuthPage", () => {
       enabled: true,
       signup: "open",
       trustEmails: true,
+      exclusive: true,
       clientId: "sso-client",
       secret: "sso-secret",
       discoveryUrl: "https://id.test/.well-known/x",

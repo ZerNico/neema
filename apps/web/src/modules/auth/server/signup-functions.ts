@@ -15,9 +15,9 @@ import {
   type SignInOptions,
 } from "../signup.ts";
 import { invalidateAuth, sessionFromHeaders } from "./auth.ts";
+import { passwordLoginForced } from "./config.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
-import { passwordLoginForced } from "./signup-gate.ts";
 import { SignupRepo } from "./signup-repo.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -63,6 +63,7 @@ export const getSignInOptions = createServerFn({ method: "GET" }).handler(() =>
           id: p.id,
           label: p.label,
           signup: p.signup !== "closed" || domains,
+          exclusive: p.exclusive,
         })),
       } satisfies SignInOptions;
     }),

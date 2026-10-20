@@ -21,6 +21,9 @@ export const oauthProviders = pgTable("oauth_providers", {
   // Its emails count as verified without the claim, and may link to an
   // existing account. Only for an identity provider that owns its domain.
   trustEmails: boolean("trust_emails").notNull().default(false),
+  // Accounts connected to it sign in only through it: no password, not even a
+  // reset one, so turning someone off at the identity provider turns them off here.
+  exclusive: boolean().notNull().default(false),
   clientId: text("client_id").notNull(),
   // AES-256-GCM via KeyCipher, like provider API keys
   clientSecretCiphertext: text("client_secret_ciphertext"),

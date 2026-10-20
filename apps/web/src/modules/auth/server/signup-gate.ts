@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { SignupGate } from "./config.ts";
+import { passwordLoginForced, type SignupGate } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
@@ -7,9 +7,6 @@ import { Db } from "~/server/db.ts";
 import { emailDomain, type AuthSettings, type SignupMode } from "../signup.ts";
 
 type Run = <A>(effect: Effect.Effect<A, never, OAuthRepo | SignupRepo | Db>) => Promise<A>;
-
-/** The operator's way back in when no identity provider works. */
-export const passwordLoginForced = () => process.env.AUTH_PASSWORD_LOGIN?.trim() === "force";
 
 /**
  * One new account through one way in. A listed domain admits only a verified

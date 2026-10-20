@@ -71,3 +71,19 @@ new. Nothing is instance-wide except the domain list, verification, and the boot
   cannot switch off or delete the last enabled provider.
 - `AUTH_PASSWORD_LOGIN=force` keeps password sign-in on and lifts the verification requirement,
   for the day the identity provider or the mail server breaks.
+
+## A provider as the only sign-in
+
+- `oauth_providers.exclusive` makes a provider the only way in for every account connected to
+  it, while it is enabled. Its point is offboarding: someone switched off at the identity
+  provider must not keep another way in here.
+- Enforced on session creation, as an allowlist: such an account gets a session only through
+  that provider (its callback or an ID token), or by continuing a session it already has
+  (desktop ticket, session rotation, impersonation). A password, the emailed verification link
+  (which signs in by itself) and any other provider are all refused. Any new Better Auth path
+  that creates sessions is refused for them until it is named. Refusing at the session rather
+  than the request means a password sign-in only learns why once the password has checked out.
+- A credential account cannot be created for such a user, which is how a reset would otherwise
+  hand them a password, and the connection cannot be unlinked.
+- Switching the provider off lifts all of this, and so does `AUTH_PASSWORD_LOGIN=force`, so an
+  admin bound to a broken identity provider still has a way back.

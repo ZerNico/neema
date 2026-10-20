@@ -1,9 +1,9 @@
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
 import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
-import { signInOptionsQuery } from "~/modules/auth/queries.ts";
+import { linkedAccountsQuery, signInOptionsQuery } from "~/modules/auth/queries.ts";
 import { ConnectedAccounts } from "~/modules/auth/ui/connected-accounts.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { initials } from "~/ui/initials";
@@ -48,6 +48,11 @@ function ProfileForms({
   linkError: string | undefined;
 }) {
   const { data: options } = useSuspenseQuery(signInOptionsQuery);
+  const { data: accounts } = useQuery(linkedAccountsQuery);
+  // A provider that is its accounts' only sign-in leaves no password to change.
+  const exclusive = accounts?.some(
+    (a) => options.providers.find((p) => p.id === a.providerId)?.exclusive,
+  );
   const queryClient = useQueryClient();
   const [passwordStatus, setPasswordStatus] = useState<PasswordStatus | null>(null);
 
@@ -152,7 +157,7 @@ function ProfileForms({
 
       <ConnectedAccounts error={linkError} />
 
-      {options.passwordLogin ? (
+      {options.passwordLogin && !exclusive ? (
         <Section title="Password">
           <ListCard>
             <ListRow className="flex-col items-stretch gap-3">

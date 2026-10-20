@@ -181,6 +181,7 @@ const google = {
   enabled: true,
   signup: "approval" as const,
   trustEmails: false,
+  exclusive: false,
   clientId: "google-client",
   config: {},
 };
@@ -229,7 +230,7 @@ describe("OAuth provider storage", () => {
     expect(await repo((r) => r.list())).toHaveLength(2);
     expect(await repo((r) => r.listForAuth())).toEqual([]);
     expect(await repo((r) => r.listForSignIn())).toEqual([
-      { id: "github", label: "GitHub", signup: "approval" },
+      { id: "github", label: "GitHub", signup: "approval", exclusive: false },
     ]);
   });
 
@@ -242,6 +243,7 @@ describe("OAuth provider storage", () => {
         enabled: true,
         signup: "approval",
         trustEmails: false,
+        exclusive: false,
         clientId: "acme-client",
         secret: "acme-secret",
         config: { scopes: ["openid"] },

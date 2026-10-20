@@ -39,6 +39,7 @@ export interface UpsertOAuthProvider {
   readonly enabled: boolean;
   readonly signup: SignupMode;
   readonly trustEmails: boolean;
+  readonly exclusive: boolean;
   readonly clientId: string;
   /** Absent keeps whatever is stored; a value replaces it. */
   readonly secret?: string | undefined;
@@ -56,7 +57,9 @@ export class OAuthRepo extends Context.Service<
      */
     listForAuth(): Effect.Effect<AuthOAuthProvider[]>;
     /** Enabled providers with their mode, for what a signed-out page offers. */
-    listForSignIn(): Effect.Effect<{ id: string; label: string; signup: SignupMode }[]>;
+    listForSignIn(): Effect.Effect<
+      { id: string; label: string; signup: SignupMode; exclusive: boolean }[]
+    >;
     /**
      * How a new account from this provider is admitted, read on the creation
      * it governs. Null for a provider that is gone or switched off.
@@ -88,7 +91,12 @@ export class OAuthRepo extends Context.Service<
         listForSignIn: Effect.fn("OAuthRepo.listForSignIn")(function* () {
           return (yield* all())
             .filter((row) => row.enabled)
-            .map((row) => ({ id: row.id, label: row.label, signup: row.signup }));
+            .map((row) => ({
+              id: row.id,
+              label: row.label,
+              signup: row.signup,
+              exclusive: row.exclusive,
+            }));
         }),
 
         admission: Effect.fn("OAuthRepo.admission")(function* (id) {
@@ -163,6 +171,7 @@ export class OAuthRepo extends Context.Service<
               enabled: input.enabled,
               signup: input.signup,
               trustEmails: input.trustEmails,
+              exclusive: input.exclusive,
               clientId: input.clientId,
               clientSecretCiphertext: clientSecretCiphertext ?? null,
               config: input.config,
@@ -175,6 +184,7 @@ export class OAuthRepo extends Context.Service<
                 enabled: input.enabled,
                 signup: input.signup,
                 trustEmails: input.trustEmails,
+                exclusive: input.exclusive,
                 clientId: input.clientId,
                 // An omitted secret keeps the stored one, so the admin form
                 // never has to round-trip a value it cannot display.

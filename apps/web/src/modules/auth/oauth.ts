@@ -90,6 +90,7 @@ export const SaveBuiltinProviderInput = Schema.Struct({
   enabled: Schema.Boolean,
   signup: SignupModeSchema,
   trustEmails: Schema.Boolean,
+  exclusive: Schema.Boolean,
   clientId: ClientId,
   // empty means "keep the stored secret"
   secret: Schema.optionalKey(Schema.String),
@@ -104,6 +105,7 @@ export const SaveOidcProviderInput = Schema.Struct({
   enabled: Schema.Boolean,
   signup: SignupModeSchema,
   trustEmails: Schema.Boolean,
+  exclusive: Schema.Boolean,
   clientId: ClientId,
   secret: Schema.optionalKey(Schema.String),
   discoveryUrl: Schema.String.check(Schema.isMinLength(1)),
@@ -124,4 +126,6 @@ export interface SignInProvider {
   readonly label: string;
   /** Whether it may create accounts, so the register page can leave it out. */
   readonly signup: boolean;
+  /** Its accounts sign in only through it, so they have no password to change. */
+  readonly exclusive: boolean;
 }

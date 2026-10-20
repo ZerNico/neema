@@ -8,9 +8,9 @@ import { fetchClientMetadata } from "~/modules/mcp-server/server/client-metadata
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
-import { createAppAuth, type AuthMail } from "./config.ts";
+import { createAppAuth, passwordLoginForced, type AuthMail } from "./config.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
-import { makeSignupGate, passwordLoginForced } from "./signup-gate.ts";
+import { makeSignupGate } from "./signup-gate.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
 

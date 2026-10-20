@@ -11,7 +11,7 @@ vi.mock("~/modules/auth/client.ts", () => ({
   authClient: {
     updateUser: vi.fn(),
     changePassword: vi.fn(),
-    listAccounts: vi.fn(async () => ({ data: [], error: null })),
+    listAccounts: vi.fn(async () => ({ data: [] as unknown[], error: null })),
   },
   // The page reads the session the app shell already loaded, so every render
   // here seeds that cache. Fetching instead would mean it found nothing.
@@ -62,14 +62,18 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
-const renderPage = (client = new QueryClient(), passwordLogin = true) => {
+const renderPage = (
+  client = new QueryClient(),
+  passwordLogin = true,
+  providers: { id: string; label: string; signup: boolean; exclusive: boolean }[] = [],
+) => {
   client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
   client.setQueryData(signInOptionsQuery.queryKey, {
     passwordLogin,
     passwordSignup: passwordLogin,
     passwordReset: false,
     mail: false,
-    providers: [],
+    providers,
   });
   render(
     <QueryClientProvider client={client}>
@@ -84,6 +88,22 @@ beforeEach(() => {
 });
 
 describe("ProfilePage", () => {
+  it("offers no password change to an account its provider alone signs in", async () => {
+    vi.mocked(authClient.listAccounts).mockResolvedValueOnce({
+      data: [{ id: "a1", providerId: "sso", accountId: "subject" }],
+      error: null,
+    } as never);
+    renderPage(new QueryClient(), true, [
+      { id: "sso", label: "Work", signup: true, exclusive: true },
+      { id: "github", label: "GitHub", signup: true, exclusive: false },
+    ]);
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+    // Another provider could never sign this account in, so none is offered.
+    expect(screen.queryByText("GitHub")).toBeNull();
+  });
+
   it("offers no password change where passwords are off", () => {
     renderPage(new QueryClient(), false);
     expect(screen.getByLabelText("Display name")).toBeInTheDocument();
