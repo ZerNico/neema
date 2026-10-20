@@ -2,28 +2,11 @@ import { describe, expect, it } from "vitest";
 import { INTEGRATION_ID, integrationToolName } from "../manifest.ts";
 import {
   accessFromAnnotations,
-  applyDecisions,
   argumentDetails,
   assignKeys,
-  diffCatalog,
   keyBudget,
-  offeredEntries,
   summarizeArguments,
-  type McpToolEntry,
 } from "./catalog.ts";
-
-const entry = (mcpName: string, patch: Partial<McpToolEntry> = {}): McpToolEntry => ({
-  key: mcpName,
-  mcpName,
-  title: mcpName,
-  description: `${mcpName} things`,
-  inputSchema: { type: "object", properties: {} },
-  annotations: {},
-  access: "destructive",
-  enabled: false,
-  fingerprint: `${mcpName}-1`,
-  ...patch,
-});
 
 describe("access from annotations", () => {
   it("trusts nothing a server leaves unsaid", () => {
@@ -51,65 +34,16 @@ describe("model-facing keys", () => {
     expect(new Set(keys.values()).size).toBe(4);
   });
 
-  it("never renames an approved tool, whatever the server lists beside it", () => {
+  it("never renames a tool listed before, whatever the server lists beside it", () => {
     const keys = assignKeys("mcp", ["get_page", "get.page"], new Map([["get.page", "get_page"]]));
     expect(keys.get("get.page")).toBe("get_page");
     expect(keys.get("get_page")).not.toBe("get_page");
   });
-});
 
-describe("drift", () => {
-  const approved = [
-    entry("search", { enabled: true, access: "read", accessChosen: true }),
-    entry("delete", { enabled: true }),
-    entry("gone", { enabled: true }),
-  ];
-  const latest = [
-    entry("search"),
-    entry("delete", { fingerprint: "delete-2", description: "now also emails" }),
-    entry("new_tool"),
-  ];
-
-  it("names what was added, changed and removed", () => {
-    expect(
-      diffCatalog(approved, latest).map((change) => [
-        change.kind,
-        ("entry" in change ? change.entry : change.before).mcpName,
-      ]),
-    ).toEqual([
-      ["unchanged", "search"],
-      ["changed", "delete"],
-      ["added", "new_tool"],
-      ["removed", "gone"],
-    ]);
-  });
-
-  it("offers only approved tools the server still lists unchanged", () => {
-    expect(offeredEntries(approved, latest).map((tool) => tool.mcpName)).toEqual(["search"]);
-    // Without a listing to compare with, nothing is offered.
-    expect(offeredEntries(approved, null)).toEqual([]);
-  });
-
-  it("never offers a tool that cannot be offered, even if it was turned on", () => {
-    const broken = [
-      entry("odd", { enabled: true, unsupported: "Its input schema is not an object." }),
-    ];
-    expect(offeredEntries(broken, broken)).toEqual([]);
-  });
-
-  it("applies a review to exactly the current listing, keeping the admin's own choices", () => {
-    const next = applyDecisions(approved, latest, [
-      { mcpName: "delete", enabled: true, access: "destructive" },
-    ]);
-    expect(next.map((tool) => [tool.mcpName, tool.enabled, tool.access])).toEqual([
-      // Chosen before, so still read, still on.
-      ["search", true, "read"],
-      ["delete", true, "destructive"],
-      // New and undecided: off.
-      ["new_tool", false, "destructive"],
-    ]);
-    expect(next[0]!.accessChosen).toBe(true);
-    expect(offeredEntries(next, latest).map((tool) => tool.mcpName)).toEqual(["search", "delete"]);
+  it("never gives a tool the key another account's listing holds for a different one", () => {
+    // One account's server listed `a.b` as `a_b`; another's lists a tool really called `a_b`.
+    const keys = assignKeys("mcp", ["a_b"], new Map([["a.b", "a_b"]]));
+    expect(keys.get("a_b")).not.toBe("a_b");
   });
 });
 

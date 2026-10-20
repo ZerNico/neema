@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { safeRedirect } from "~/modules/auth/redirect.ts";
 import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
-import { callbackPath, OAUTH_STATE_COOKIE } from "~/modules/integrations/server/oauth.ts";
+import { oauthCookies } from "~/modules/integrations/server/oauth.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
+import { reportFailure, settingsPath, signInCookie, withSearch } from "./-sign-in.ts";
 
 const readCookie = (header: string | null, name: string) => {
   for (const part of header?.split(";") ?? []) {
@@ -14,42 +15,74 @@ const readCookie = (header: string | null, name: string) => {
   return null;
 };
 
+const BACK_COOKIE = "integration_oauth_back_";
+
+/**
+ * This sign-in's cookies: named by its state, or, for a service that answers
+ * a refusal without one, the one sign-in under way in this browser if there
+ * is only one, so its window still lands where it asked.
+ */
+const cookiesOf = (state: string | null, header: string | null) => {
+  if (state) return oauthCookies(state);
+  const backs = (header?.split(";") ?? [])
+    .map((part) => part.trim().split("=")[0]!)
+    .filter((name) => name.startsWith(BACK_COOKIE));
+  if (backs.length !== 1) return null;
+  const tag = backs[0]!.slice(BACK_COOKIE.length);
+  return { state: `integration_oauth_${tag}`, back: backs[0]! };
+};
+
+const decoded = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+};
+
 /** Finishes the flow `connect` started, in the same browser and session. */
 export const Route = createFileRoute("/api/integrations/$integrationId/callback")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
         const url = new URL(request.url);
-        const back = (search: Record<string, string>) =>
-          new Response(null, {
-            status: 302,
-            headers: {
-              location: `/settings/integrations/${encodeURIComponent(params.integrationId)}?${new URLSearchParams(search).toString()}`,
-              "set-cookie": `${OAUTH_STATE_COOKIE}=; Path=${callbackPath(params.integrationId)}; HttpOnly; SameSite=Lax; Max-Age=0`,
-            },
-          });
-        const current = await sessionFromHeaders(request.headers);
-        if (!current?.approved) return back({ error: "Sign in here first, then connect again." });
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
+        const cookieHeader = request.headers.get("cookie");
+        const names = cookiesOf(state, cookieHeader);
+        const back = names ? readCookie(cookieHeader, names.back) : null;
+        // Where the outcome is shown: the page the sign-in asked for, else Settings.
+        const returnTo = back ? safeRedirect(decoded(back)) : undefined;
+        const secure = url.protocol === "https:";
+        const finish = (location: string) => {
+          const headers = new Headers({ location });
+          for (const name of names ? [names.state, names.back] : [])
+            headers.append("set-cookie", signInCookie(params.integrationId, name, "", secure));
+          return new Response(null, { status: 302, headers });
+        };
+        const current = await sessionFromHeaders(request.headers);
+        const failed = async (error: string) => {
+          if (current) await reportFailure(current.session.user.id, returnTo, error);
+          return finish(withSearch(returnTo ?? settingsPath(params.integrationId), { error }));
+        };
+        if (!current?.approved) return failed("Sign in here first, then connect again.");
         if (!code || !state)
-          return back({
-            error:
-              url.searchParams.get("error") === "access_denied"
-                ? "The connection was cancelled."
-                : "The service did not finish the sign-in.",
-          });
+          return failed(
+            url.searchParams.get("error") === "access_denied"
+              ? "The connection was cancelled."
+              : "The service did not finish the sign-in.",
+          );
         const result = await runtime.runPromise(
           Effect.flatMap(IntegrationService, (service) =>
             service.completeOAuth(current.session.user.id, params.integrationId, {
               code,
               state,
-              cookieState: readCookie(request.headers.get("cookie"), OAUTH_STATE_COOKIE),
+              cookieState: names ? readCookie(cookieHeader, names.state) : null,
               // RFC 9207: who answered, checked against who was asked before the code is spent.
               iss: url.searchParams.get("iss"),
             }),
           ).pipe(
-            Effect.map(({ returnTo }) => ({ ok: true as const, returnTo })),
+            Effect.map((done) => ({ ok: true as const, returnTo: done.returnTo })),
             Effect.catch((error) =>
               Effect.succeed({
                 ok: false as const,
@@ -59,18 +92,12 @@ export const Route = createFileRoute("/api/integrations/$integrationId/callback"
             ),
           ),
         );
-        if (!result.ok) return back({ error: result.error });
-        // Started from a chat: go back there, where the new tools now show.
-        const returnTo = safeRedirect(result.returnTo);
-        if (returnTo)
-          return new Response(null, {
-            status: 302,
-            headers: {
-              location: returnTo,
-              "set-cookie": `${OAUTH_STATE_COOKIE}=; Path=${callbackPath(params.integrationId)}; HttpOnly; SameSite=Lax; Max-Age=0`,
-            },
-          });
-        return back({ connected: "1" });
+        if (!result.ok) return failed(result.error);
+        // Started from a chat or a window of its own: go back there, where the new tools now show.
+        const landing = safeRedirect(result.returnTo);
+        return finish(
+          landing ?? withSearch(settingsPath(params.integrationId), { connected: "1" }),
+        );
       },
     },
   },

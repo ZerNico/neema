@@ -25,7 +25,7 @@ export const Route = createFileRoute("/api/integrations/$integrationId/oauth-cli
         // Only while someone could sign in with it: a switched-off or open server names no client.
         const signsIn =
           row?.enabled && findAdapterType(row.kind)?.connectMethods?.(row.config).oauth;
-        if (!row || !origin?.startsWith("https://") || type?.toolSource !== "catalog" || !signsIn)
+        if (!row || !origin?.startsWith("https://") || type?.toolSource !== "listed" || !signsIn)
           return new Response("Not found", { status: 404 });
         const clientId = `${origin}/api/integrations/${row.id}/oauth-client`;
         return Response.json(

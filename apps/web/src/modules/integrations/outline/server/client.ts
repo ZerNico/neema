@@ -44,7 +44,7 @@ const reason = (status: number, body: unknown) => {
         : null;
   if (status === 404) return "Not found in Outline.";
   if (status === 403) return "Outline refused access to that.";
-  if (status === 429) return "Outline is rate limiting requests; try again shortly.";
+  if (status === 429) return "Outline is rate limiting requests. Try again shortly.";
   return message ? `Outline: ${message}` : `Outline answered ${status}.`;
 };
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MCP_LIMITS } from "../catalog.ts";
 import { listingEntries, normalizeSchema } from "./listing.ts";
 import { argumentCheck } from "./validate.ts";
 
@@ -151,17 +152,17 @@ describe("listing entries", () => {
     },
     { name: "search", description: "a duplicate the server should not send" },
     { name: "drop_table", inputSchema: { type: "object", properties: {} } },
-    { name: "wide", description: "x".repeat(3_000) },
+    { name: "wide", description: "x".repeat(9_000) },
     { description: "nameless" },
   ];
 
-  it("keeps the server's order, drops duplicates and nameless tools, and starts everything off", () => {
+  it("keeps the server's order and drops duplicates and nameless tools", () => {
     const entries = listingEntries("mcp", tools, []);
     expect(entries.map((entry) => entry.mcpName)).toEqual(["search", "drop_table", "wide"]);
-    expect(entries.every((entry) => !entry.enabled)).toBe(true);
     expect(entries.map((entry) => entry.access)).toEqual(["read", "destructive", "destructive"]);
     expect(entries[1]!.title).toBe("Drop table");
-    expect(entries[2]!.unsupported).toMatch(/longer than/);
+    expect(entries[2]!.unsupported).toBeUndefined();
+    expect(entries[2]!.description).toHaveLength(MCP_LIMITS.descriptionChars);
   });
 
   it("fingerprints what the server said, ignoring key order", () => {

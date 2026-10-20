@@ -1,4 +1,5 @@
 import { leaseFor } from "~/server/sql.ts";
+import type { ToolSetting } from "../manifest.ts";
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -14,7 +15,7 @@ import {
   integrationConnections,
   integrationGroupGrants,
   integrationOAuthClients,
-  integrationToolCatalogs,
+  integrationToolListings,
   integrationUserGrants,
   knowledgeCollections,
   knowledgeSources,
@@ -31,7 +32,7 @@ import { Db, type DbTx } from "~/server/db.ts";
 
 export type IntegrationConfigRow = typeof integrationConfigs.$inferSelect;
 export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;
-export type ToolCatalogRow = typeof integrationToolCatalogs.$inferSelect;
+export type ToolListingRow = typeof integrationToolListings.$inferSelect;
 export type AuthKind = IntegrationConnectionRow["authKind"];
 
 /** Scopes a connection may be waiting to be granted, in all. */
@@ -79,14 +80,25 @@ const decodeShared = Schema.decodeUnknownOption(
 );
 
 /**
-/** A type's own kind for its first integration, then numbered: `jira`, `jira-2`. */
-const freeId = (kind: string, taken: ReadonlyArray<string>) => {
+/** The base itself for the first, then numbered: `jira`, `jira-2`. A deleted one's id is free again. */
+const freeId = (base: string, taken: ReadonlyArray<string>) => {
   const used = new Set(taken);
-  if (!used.has(kind)) return kind;
+  if (!used.has(base)) return base;
   let n = 2;
-  while (used.has(`${kind}-${n}`)) n++;
-  return `${kind}-${n}`;
+  while (used.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
 };
+
+/** A name as an id: `DeepWiki` reads `deepwiki`, and one with no letters to keep falls back. */
+export const idFromName = (name: string, fallback: string) =>
+  name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "") || fallback;
 
 /**
  * Who may connect: everyone signed in when the audience is the instance,
@@ -116,6 +128,8 @@ const ownedBy = (ownerUserId: string | null) =>
 export interface SaveConfig {
   readonly id: string;
   readonly name: string;
+  /** Absent keeps the stored one; null clears it. */
+  readonly description?: string | null | undefined;
   readonly enabled: boolean;
   readonly config: Record<string, string>;
   readonly fingerprint: string;
@@ -125,7 +139,7 @@ export interface SaveConfig {
   readonly allowApiKeys: boolean;
   /** The shared credential's fields; absent keeps what is stored, null clears it. */
   readonly sharedCredential?: Record<string, string> | null | undefined;
-  /** Its tools come from the server, so another server starts their review over. */
+  /** Its tools come from the server, so another server's listings are dropped. */
   readonly listsTools: boolean;
 }
 
@@ -159,14 +173,24 @@ export class IntegrationRepo extends Context.Service<
     saveConfig(input: SaveConfig): Effect.Effect<IntegrationConfigRow | null>;
     /** A new integration, off and unconfigured; false when the id or name is taken. */
     /**
-     * Adds an integration under the first free id of its type (`jira`, then
+     * Adds an integration under the first free id from its base (`jira`, then
      * `jira-2`), or returns null when the name is already in use.
      */
     createConfig(input: {
       kind: string;
+      /** What its id is made from: its type unless said, such as `trello` or `deepwiki`. */
+      idBase?: string;
       name: string;
       ownerUserId?: string | null;
+      draft?: boolean;
     }): Effect.Effect<string | null>;
+    /** Lists a server its owner finished adding; false when it is not their draft. */
+    publishDraft(userId: string, integrationId: string): Effect.Effect<boolean>;
+    /**
+     * Deletes servers left half added: one person's (one is added at a time)
+     * or everyone's older than a time.
+     */
+    sweepDrafts(left: { ownerUserId: string } | { olderThanMs: number }): Effect.Effect<void>;
     /**
      * Removes an integration with everything that only meant something with it
      * (connections, grants, chat and agent settings, through their foreign keys)
@@ -182,7 +206,11 @@ export class IntegrationRepo extends Context.Service<
       ownerUserId: string | null,
     ): Effect.Effect<boolean>;
     /** Integrations this person may use, enabled or not, with their accounts, oldest first. */
-    listForUser(userId: string): Effect.Effect<
+    /** Every integration but drafts, except the one named: this person's being added. */
+    listForUser(
+      userId: string,
+      draftId?: string,
+    ): Effect.Effect<
       ReadonlyArray<{
         config: IntegrationConfigRow;
         usable: boolean;
@@ -272,41 +300,39 @@ export class IntegrationRepo extends Context.Service<
       connection: { connectionId: string; accountEpoch: string },
       scopes: ReadonlyArray<string>,
     ): Effect.Effect<void>;
-    catalog(integrationId: string): Effect.Effect<ToolCatalogRow | null>;
-    /** Makes a catalog due for a check now, creating it on first use. */
-    scheduleCatalogCheck(integrationId: string): Effect.Effect<void>;
-    /** Claims catalogs due for a check under a lease, so two sweeps never take the same one. */
-    claimCatalogChecks(input: {
+    /** One account's listing, or with `connectionId` null the one without an account. */
+    toolListing(
+      integrationId: string,
+      connectionId: string | null,
+    ): Effect.Effect<ToolListingRow | null>;
+    /** Every listing of an integration, for the admin's view of its tools. */
+    toolListings(integrationId: string): Effect.Effect<ReadonlyArray<ToolListingRow>>;
+    /** Claims listings due for a check under a lease, so two sweeps never take the same one. */
+    claimDueListings(input: {
       kinds: ReadonlyArray<string>;
       limit: number;
       leaseMs: number;
-    }): Effect.Effect<ReadonlyArray<ToolCatalogRow>>;
+    }): Effect.Effect<ReadonlyArray<ToolListingRow>>;
     /**
      * Starts a check, sweep or manual, and returns its token. Starting one
      * supersedes any still running: only the newest may record what it saw.
+     * Null when the integration or the account is gone.
      */
-    /** Null when the integration is gone, so there is nothing to check. */
-    startCatalogCheck(integrationId: string): Effect.Effect<string | null>;
-    /**
-     * False when a newer check, or another revision of the integration,
-     * superseded this one; nothing is written then. A listing equal to the
-     * stored one keeps its id, so a background check does not void a review.
-     */
-    recordCatalogCheck(
-      integrationId: string,
+    startListing(integrationId: string, connectionId: string | null): Effect.Effect<string | null>;
+    /** False when a newer check, or another revision of the integration, superseded this one. */
+    recordListing(
+      listingId: string,
       started: { token: string; revision: number },
-      outcome: { latest: McpToolEntry[]; server: Record<string, string> } | { error: string },
+      outcome: { tools: McpToolEntry[]; server: Record<string, string> } | { error: string },
       nextCheckAt: Date,
     ): Effect.Effect<boolean>;
-    /**
-     * Replaces what is offered with what the admin approved, only over the
-     * listing and approval count the review showed; false when either moved on.
-     */
-    approveCatalog(
+    /** Drops one listing, as when its way in closed and it could only fail from then on. */
+    deleteToolListing(integrationId: string, connectionId: string | null): Effect.Effect<void>;
+    /** Sets or, with null, clears the admin's word on one tool; false when the integration is gone. */
+    setToolSetting(
       integrationId: string,
-      approved: McpToolEntry[],
-      reviewedBy: string,
-      reviewed: { listingId: string; reviewSeq: number },
+      tool: string,
+      setting: ToolSetting | null,
     ): Effect.Effect<boolean>;
     /** The client this app registered with an issuer under this id, if it did. */
     oauthClient(
@@ -389,10 +415,11 @@ export class IntegrationRepo extends Context.Service<
           const rows = yield* db
             .select({
               config: integrationConfigs,
-              connectionCount: sql<number>`(select count(*)::int from ${integrationConnections} where ${integrationConnections.integrationId} = ${integrationConfigs.id})`,
+              // People, not accounts: one person may have several.
+              connectionCount: sql<number>`(select count(distinct ${integrationConnections.userId})::int from ${integrationConnections} where ${integrationConnections.integrationId} = ${integrationConfigs.id})`,
             })
             .from(integrationConfigs)
-            .where(ownedBy(ownerUserId))
+            .where(and(ownedBy(ownerUserId), eq(integrationConfigs.draft, false)))
             .pipe(Effect.orDie);
           return rows.map((row) => ({ ...row.config, connectionCount: row.connectionCount }));
         }),
@@ -442,6 +469,7 @@ export class IntegrationRepo extends Context.Service<
                   .update(integrationConfigs)
                   .set({
                     name: input.name,
+                    ...(input.description === undefined ? {} : { description: input.description }),
                     enabled: input.enabled,
                     config: input.config,
                     fingerprint: input.fingerprint,
@@ -465,30 +493,12 @@ export class IntegrationRepo extends Context.Service<
                       sql`${integrationConnections.configFingerprint} <> ${input.fingerprint}`,
                     ),
                   );
-                // What was approved and listed was another server's: review starts over,
-                // and a check still running for it finds its token gone.
-                if (anotherServer && input.listsTools) {
-                  const fresh = {
-                    approved: [],
-                    latest: null,
-                    listingId: null,
-                    server: null,
-                    checkedAt: null,
-                    checkError: null,
-                    reviewedBy: null,
-                    reviewedAt: null,
-                    nextCheckAt: now,
-                    checkLeaseUntil: null,
-                    checkToken: null,
-                  };
+                // What was listed was another server's; a check still running for it
+                // finds its row gone and records nothing.
+                if (anotherServer && input.listsTools)
                   yield* tx
-                    .insert(integrationToolCatalogs)
-                    .values({ integrationId: input.id, ...fresh })
-                    .onConflictDoUpdate({
-                      target: integrationToolCatalogs.integrationId,
-                      set: fresh,
-                    });
-                }
+                    .delete(integrationToolListings)
+                    .where(eq(integrationToolListings.integrationId, input.id));
                 return rows[0] ?? null;
               }),
             )
@@ -505,7 +515,7 @@ export class IntegrationRepo extends Context.Service<
               .from(integrationConfigs)
               .pipe(Effect.orDie);
             const id = freeId(
-              input.kind,
+              input.idBase ?? input.kind,
               taken.map((row) => row.id),
             );
             const rows = yield* db
@@ -515,6 +525,7 @@ export class IntegrationRepo extends Context.Service<
                 kind: input.kind,
                 name: input.name,
                 ownerUserId: input.ownerUserId ?? null,
+                draft: input.draft ?? false,
               })
               .onConflictDoNothing()
               .returning({ id: integrationConfigs.id })
@@ -557,7 +568,39 @@ export class IntegrationRepo extends Context.Service<
 
         nameTaken,
 
-        listForUser: Effect.fn("IntegrationRepo.listForUser")(function* (userId) {
+        publishDraft: Effect.fn("IntegrationRepo.publishDraft")(function* (userId, integrationId) {
+          const rows = yield* db
+            .update(integrationConfigs)
+            .set({ draft: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(integrationConfigs.id, integrationId),
+                eq(integrationConfigs.ownerUserId, userId),
+                eq(integrationConfigs.draft, true),
+              ),
+            )
+            .returning({ id: integrationConfigs.id })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
+
+        // Nothing names a draft (no chat, agent, schedule or source could pick it),
+        // so the foreign keys take its connections and listings with it.
+        sweepDrafts: Effect.fn("IntegrationRepo.sweepDrafts")(function* (left) {
+          yield* db
+            .delete(integrationConfigs)
+            .where(
+              and(
+                eq(integrationConfigs.draft, true),
+                "ownerUserId" in left
+                  ? eq(integrationConfigs.ownerUserId, left.ownerUserId)
+                  : sql`${integrationConfigs.createdAt} < now() - make_interval(secs => ${left.olderThanMs / 1000})`,
+              ),
+            )
+            .pipe(Effect.orDie);
+        }),
+
+        listForUser: Effect.fn("IntegrationRepo.listForUser")(function* (userId, draftId) {
           const rows = yield* db
             .select({
               config: integrationConfigs,
@@ -571,6 +614,11 @@ export class IntegrationRepo extends Context.Service<
                 eq(integrationConnections.integrationId, integrationConfigs.id),
                 eq(integrationConnections.userId, userId),
               ),
+            )
+            .where(
+              draftId
+                ? or(eq(integrationConfigs.draft, false), eq(integrationConfigs.id, draftId))
+                : eq(integrationConfigs.draft, false),
             )
             .pipe(Effect.orDie);
           const byConfig = new Map<
@@ -1047,69 +1095,71 @@ export class IntegrationRepo extends Context.Service<
           },
         ),
 
-        catalog: Effect.fn("IntegrationRepo.catalog")(function* (integrationId) {
-          const rows = yield* db
-            .select()
-            .from(integrationToolCatalogs)
-            .where(eq(integrationToolCatalogs.integrationId, integrationId))
-            .pipe(Effect.orDie);
-          return rows[0] ?? null;
-        }),
-
-        scheduleCatalogCheck: Effect.fn("IntegrationRepo.scheduleCatalogCheck")(
-          function* (integrationId) {
-            yield* db
-              .insert(integrationToolCatalogs)
-              .values({ integrationId, nextCheckAt: sql`now()` })
-              .onConflictDoUpdate({
-                target: integrationToolCatalogs.integrationId,
-                set: { nextCheckAt: sql`now()` },
-              })
+        toolListing: Effect.fn("IntegrationRepo.toolListing")(
+          function* (integrationId, connectionId) {
+            const rows = yield* db
+              .select()
+              .from(integrationToolListings)
+              .where(eq(integrationToolListings.id, connectionId ?? integrationId))
               .pipe(Effect.orDie);
+            return rows[0]?.integrationId === integrationId ? rows[0] : null;
           },
         ),
 
-        claimCatalogChecks: Effect.fn("IntegrationRepo.claimCatalogChecks")(function* (input) {
+        toolListings: Effect.fn("IntegrationRepo.toolListings")(function* (integrationId) {
+          return yield* db
+            .select()
+            .from(integrationToolListings)
+            .where(eq(integrationToolListings.integrationId, integrationId))
+            .pipe(Effect.orDie);
+        }),
+
+        claimDueListings: Effect.fn("IntegrationRepo.claimDueListings")(function* (input) {
           if (input.kinds.length === 0) return [];
           // Due and unleased by the database clock, like every other claim here.
           return yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
                 const due = yield* tx
-                  .select({ integrationId: integrationToolCatalogs.integrationId })
-                  .from(integrationToolCatalogs)
+                  .select({ id: integrationToolListings.id })
+                  .from(integrationToolListings)
                   .innerJoin(
                     integrationConfigs,
-                    eq(integrationConfigs.id, integrationToolCatalogs.integrationId),
+                    eq(integrationConfigs.id, integrationToolListings.integrationId),
+                  )
+                  .leftJoin(
+                    integrationConnections,
+                    eq(integrationConnections.id, integrationToolListings.connectionId),
                   )
                   .where(
                     and(
                       eq(integrationConfigs.enabled, true),
-                      lte(integrationToolCatalogs.nextCheckAt, sql`clock_timestamp()`),
+                      // An account signed out lists nothing until it is signed in again,
+                      // which lists it at once.
                       or(
-                        isNull(integrationToolCatalogs.checkLeaseUntil),
-                        lte(integrationToolCatalogs.checkLeaseUntil, sql`clock_timestamp()`),
+                        isNull(integrationToolListings.connectionId),
+                        eq(integrationConnections.status, "active"),
                       ),
-                      sql`${integrationConfigs.kind} in (${sql.join(
-                        input.kinds.map((kind) => sql`${kind}`),
-                        sql`, `,
-                      )})`,
+                      lte(integrationToolListings.nextCheckAt, sql`clock_timestamp()`),
+                      or(
+                        isNull(integrationToolListings.checkLeaseUntil),
+                        lte(integrationToolListings.checkLeaseUntil, sql`clock_timestamp()`),
+                      ),
+                      inArray(integrationConfigs.kind, [...input.kinds]),
                     ),
                   )
-                  .orderBy(integrationToolCatalogs.nextCheckAt)
+                  .orderBy(integrationToolListings.nextCheckAt)
                   .limit(input.limit)
-                  .for("update", { of: integrationToolCatalogs, skipLocked: true });
+                  .for("update", { of: integrationToolListings, skipLocked: true });
                 if (due.length === 0) return [];
                 return yield* tx
-                  .update(integrationToolCatalogs)
-                  .set({
-                    checkLeaseUntil: leaseFor(input.leaseMs / 1000),
-                  })
+                  .update(integrationToolListings)
+                  .set({ checkLeaseUntil: leaseFor(input.leaseMs / 1000) })
                   .where(
-                    sql`${integrationToolCatalogs.integrationId} in (${sql.join(
-                      due.map((row) => sql`${row.integrationId}`),
-                      sql`, `,
-                    )})`,
+                    inArray(
+                      integrationToolListings.id,
+                      due.map((row) => row.id),
+                    ),
                   )
                   .returning();
               }),
@@ -1117,47 +1167,63 @@ export class IntegrationRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
-        startCatalogCheck: Effect.fn("IntegrationRepo.startCatalogCheck")(
-          function* (integrationId) {
+        startListing: Effect.fn("IntegrationRepo.startListing")(
+          function* (integrationId, connectionId) {
             const token = uuidv7();
-            // Selected from the integration, holding it while the row goes in: one
-            // deleted meanwhile, say mid-sweep, starts no check instead of failing one.
-            const rows = yield* db
-              .insert(integrationToolCatalogs)
-              .select((qb) =>
-                qb
-                  .select({
-                    integrationId: integrationConfigs.id,
-                    checkToken: sql<string>`${token}`.as("check_token"),
-                  })
-                  .from(integrationConfigs)
-                  .where(eq(integrationConfigs.id, integrationId))
-                  .for("key share"),
-              )
-              .onConflictDoUpdate({
-                target: integrationToolCatalogs.integrationId,
-                set: { checkToken: token },
-              })
-              .returning({ integrationId: integrationToolCatalogs.integrationId })
-              .pipe(Effect.orDie);
+            // Selected from the integration (and the account), holding them while the
+            // row goes in: one deleted meanwhile, say mid-sweep, starts no check.
+            const upsert = { target: integrationToolListings.id, set: { checkToken: token } };
+            const rows = connectionId
+              ? yield* db
+                  .insert(integrationToolListings)
+                  .select((qb) =>
+                    qb
+                      .select({
+                        id: integrationConnections.id,
+                        integrationId: integrationConnections.integrationId,
+                        connectionId: integrationConnections.id,
+                        checkToken: sql<string>`${token}`.as("check_token"),
+                      })
+                      .from(integrationConnections)
+                      .where(
+                        and(
+                          eq(integrationConnections.id, connectionId),
+                          eq(integrationConnections.integrationId, integrationId),
+                        ),
+                      )
+                      .for("key share"),
+                  )
+                  .onConflictDoUpdate(upsert)
+                  .returning({ id: integrationToolListings.id })
+                  .pipe(Effect.orDie)
+              : yield* db
+                  .insert(integrationToolListings)
+                  .select((qb) =>
+                    qb
+                      .select({
+                        id: integrationConfigs.id,
+                        integrationId: integrationConfigs.id,
+                        checkToken: sql<string>`${token}`.as("check_token"),
+                      })
+                      .from(integrationConfigs)
+                      .where(eq(integrationConfigs.id, integrationId))
+                      .for("key share"),
+                  )
+                  .onConflictDoUpdate(upsert)
+                  .returning({ id: integrationToolListings.id })
+                  .pipe(Effect.orDie);
             return rows.length ? token : null;
           },
         ),
 
-        recordCatalogCheck: Effect.fn("IntegrationRepo.recordCatalogCheck")(
-          function* (integrationId, started, outcome, nextCheckAt) {
-            const latest = "error" in outcome ? null : JSON.stringify(outcome.latest);
+        recordListing: Effect.fn("IntegrationRepo.recordListing")(
+          function* (listingId, started, outcome, nextCheckAt) {
             const rows = yield* db
-              .update(integrationToolCatalogs)
+              .update(integrationToolListings)
               .set({
                 ...("error" in outcome
                   ? { checkError: outcome.error }
-                  : {
-                      latest: outcome.latest,
-                      listingId: sql`case when ${integrationToolCatalogs.listingId} is not null and ${integrationToolCatalogs.latest} = ${latest}::jsonb then ${integrationToolCatalogs.listingId} else ${uuidv7()} end`,
-                      server: outcome.server,
-                      checkError: null,
-                    }),
+                  : { tools: outcome.tools, server: outcome.server, checkError: null }),
                 checkedAt: new Date(),
                 nextCheckAt,
                 checkLeaseUntil: null,
@@ -1165,35 +1231,44 @@ export class IntegrationRepo extends Context.Service<
               })
               .where(
                 and(
-                  eq(integrationToolCatalogs.integrationId, integrationId),
-                  eq(integrationToolCatalogs.checkToken, started.token),
-                  sql`exists (select 1 from ${integrationConfigs} where ${integrationConfigs.id} = ${integrationId} and ${integrationConfigs.revision} = ${started.revision})`,
+                  eq(integrationToolListings.id, listingId),
+                  eq(integrationToolListings.checkToken, started.token),
+                  sql`exists (select 1 from ${integrationConfigs} where ${integrationConfigs.id} = ${integrationToolListings.integrationId} and ${integrationConfigs.revision} = ${started.revision})`,
                 ),
               )
-              .returning({ integrationId: integrationToolCatalogs.integrationId })
+              .returning({ id: integrationToolListings.id })
               .pipe(Effect.orDie);
             return rows.length > 0;
           },
         ),
 
-        approveCatalog: Effect.fn("IntegrationRepo.approveCatalog")(
-          function* (integrationId, approved, reviewedBy, reviewed) {
-            const rows = yield* db
-              .update(integrationToolCatalogs)
-              .set({
-                approved,
-                reviewedBy,
-                reviewedAt: new Date(),
-                reviewSeq: reviewed.reviewSeq + 1,
-              })
+        deleteToolListing: Effect.fn("IntegrationRepo.deleteToolListing")(
+          function* (integrationId, connectionId) {
+            yield* db
+              .delete(integrationToolListings)
               .where(
                 and(
-                  eq(integrationToolCatalogs.integrationId, integrationId),
-                  eq(integrationToolCatalogs.listingId, reviewed.listingId),
-                  eq(integrationToolCatalogs.reviewSeq, reviewed.reviewSeq),
+                  eq(integrationToolListings.id, connectionId ?? integrationId),
+                  eq(integrationToolListings.integrationId, integrationId),
                 ),
               )
-              .returning({ integrationId: integrationToolCatalogs.integrationId })
+              .pipe(Effect.orDie);
+          },
+        ),
+
+        // Not a new revision: nobody's sign-in or listing depends on what the admin says of a tool.
+        setToolSetting: Effect.fn("IntegrationRepo.setToolSetting")(
+          function* (integrationId, tool, setting) {
+            const rows = yield* db
+              .update(integrationConfigs)
+              .set({
+                toolSettings: setting
+                  ? sql`${integrationConfigs.toolSettings} || ${JSON.stringify({ [tool]: setting })}::jsonb`
+                  : sql`${integrationConfigs.toolSettings} - ${tool}::text`,
+                updatedAt: new Date(),
+              })
+              .where(eq(integrationConfigs.id, integrationId))
+              .returning({ id: integrationConfigs.id })
               .pipe(Effect.orDie);
             return rows.length > 0;
           },

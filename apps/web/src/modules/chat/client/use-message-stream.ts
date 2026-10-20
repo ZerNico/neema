@@ -23,7 +23,7 @@ import { createLiveText, type LiveText } from "./live-text.ts";
 import type { MemoryActivityReason, MemoryActivityOutcome } from "~/modules/tools/schema.ts";
 import type { AskUserQuestion } from "~/modules/tools/ask-user-schema.ts";
 import type { PlanStep } from "~/modules/tools/plan-schema.ts";
-import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import type { LoadableToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import type { AttachmentReadActivity } from "../attachment-tool-schema.ts";
 import type { HistoryActivity } from "../history-tool-schema.ts";
 import type { MapRouteSummary } from "~/modules/genui/map-tool-schema.ts";
@@ -71,7 +71,7 @@ export interface HistoryToolActivity extends ToolActivityBase {
 
 export interface ToolLoadActivity extends ToolActivityBase {
   family: "tool-load";
-  loaded?: ReadonlyArray<LazyToolFamily>;
+  loaded?: ReadonlyArray<LoadableToolFamily>;
 }
 
 export interface KnowledgeToolActivity extends ToolActivityBase {

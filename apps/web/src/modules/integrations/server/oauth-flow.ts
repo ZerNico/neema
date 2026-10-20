@@ -14,7 +14,7 @@ import {
   requestTokens,
   sha256,
 } from "./oauth.ts";
-import { IntegrationRepo, type DiscoveredServer } from "./repo.ts";
+import { IntegrationRepo, type DiscoveredServer, type IntegrationConnectionRow } from "./repo.ts";
 import { methodsFor, verified, type makeCredentials } from "./credentials.ts";
 
 const signInOutdated = () =>
@@ -72,12 +72,14 @@ export const makeOAuthFlow = (deps: {
     "available" | "discoveredSecret" | "sameAccount"
   >;
   changed: (userId: string) => Effect.Effect<void>;
+  /** A new or reconnected account, so what its server lists to it is known straight away. */
+  connected: (connection: IntegrationConnectionRow) => Effect.Effect<void>;
 }) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const repo = yield* IntegrationRepo;
     const { available, discoveredSecret, sameAccount } = deps.credentials;
-    const { changed } = deps;
+    const { changed, connected } = deps;
 
     const beginOAuth = Effect.fn("IntegrationService.beginOAuth")(function* (
       userId: string,
@@ -229,6 +231,7 @@ export const makeOAuthFlow = (deps: {
         });
         if (!saved) return yield* signInOutdated();
         yield* repo.clearRequiredScopes(saved.id);
+        yield* connected(saved);
         yield* changed(userId);
         return { returnTo: stored.returnTo ?? null };
       }
@@ -269,6 +272,7 @@ export const makeOAuthFlow = (deps: {
         connectionId: stored.connectionId ?? null,
       });
       if (!saved) return yield* signInOutdated();
+      yield* connected(saved);
       yield* changed(userId);
       return { returnTo: stored.returnTo ?? null };
     });

@@ -56,6 +56,9 @@ function DialogContent({
         className={cn(
           "fixed top-1/2 left-1/2 z-50 w-full max-h-[calc(var(--dialog-viewport-height,100dvh)-2rem)] max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-4xl bg-popover text-sm text-popover-foreground shadow-xl ring-1 ring-foreground/5 duration-100 outline-none sm:max-w-md dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           !scrollable && "grid gap-6 p-6",
+          // The base duration with no property would animate every property, so a
+          // change of content slid the popup as its padding and centring moved.
+          "transition-none",
           className,
         )}
         {...props}

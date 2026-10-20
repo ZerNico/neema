@@ -7,6 +7,7 @@ export const outlineManifest = {
   name: "Outline",
   description: "Search, read and write documents in an Outline knowledge base.",
   logo: OutlineLogo,
+  category: "docs",
   adminFields: [
     {
       key: "baseUrl",

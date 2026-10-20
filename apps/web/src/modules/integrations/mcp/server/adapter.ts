@@ -11,12 +11,10 @@ import type {
   OfferedTool,
 } from "../../server/adapter.ts";
 import {
-  applyDecisions,
   argumentDetails,
   argumentsInFull,
   briefValue,
   MCP_LIMITS,
-  offeredEntries,
   summarizeArguments,
   type McpToolEntry,
 } from "../catalog.ts";
@@ -288,7 +286,7 @@ export const mcpAdapter: IntegrationAdapter = {
     if (url.protocol !== "https:" && url.protocol !== "http:")
       return { error: "The server address must start with https:// or http://." };
     if (url.username || url.password)
-      return { error: "Leave credentials out of the address; choose a sign-in instead." };
+      return { error: "Leave credentials out of the address. Choose a sign-in instead." };
     url.hash = "";
     const ticked = fieldValues(config.ways).filter(Boolean);
     if (!ticked.length) return { error: "Choose at least one way people connect." };
@@ -359,20 +357,8 @@ export const mcpAdapter: IntegrationAdapter = {
   scopeOptions: null,
   handlers: {},
   knowledge: null,
-  catalog: {
+  listing: {
     tool: (integrationId, entry) => (isEntry(entry) ? offered(integrationId, entry) : null),
-    offer: (approved, latest) =>
-      offeredEntries(approved.filter(isEntry), latest ? latest.filter(isEntry) : null),
-
-    apply: (approved, latest, decisions) => {
-      const next = applyDecisions(approved.filter(isEntry), latest.filter(isEntry), decisions);
-      const enabled = next.filter((entry) => entry.enabled).length;
-      if (enabled > MCP_LIMITS.enabledTools)
-        return {
-          error: `Turn on at most ${MCP_LIMITS.enabledTools} tools; models choose poorly among more.`,
-        };
-      return { approved: next };
-    },
     list: (session, integrationId, previous) =>
       Effect.scoped(
         Effect.gen(function* () {

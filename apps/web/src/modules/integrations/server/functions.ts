@@ -5,7 +5,6 @@ import { publicUrl } from "~/server/public-url.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   AnswerElicitationInput,
-  ApproveCatalogInput,
   BrowseInput,
   ConnectApiKeyInput,
   ConnectionIdInput,
@@ -13,8 +12,11 @@ import {
   DecideIntegrationCallInput,
   CreateIntegrationInput,
   IntegrationIdInput,
+  ProbeServerInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
+  SetOwnToolAccessInput,
+  SetToolInput,
   SavePersonalServerInput,
   SourceIdInput,
   UpdateConnectionInput,
@@ -53,6 +55,8 @@ export const listAdminIntegrations = createServerFn({ method: "GET" })
     );
     const origin = appOrigin();
     return {
+      // What a service's own admin must allow before anyone here can sign in.
+      origin,
       integrations: integrations.map((integration) => ({
         ...integration,
         redirectUri: origin ? `${origin}${callbackPath(integration.id)}` : null,
@@ -107,34 +111,78 @@ export const deletePersonalServer = createServerFn({ method: "POST" })
     ),
   );
 
-/** Lists the person's own server's tools now; nothing is offered until they approve. */
-export const checkPersonalCatalog = createServerFn({ method: "POST" })
+/** How a person would reach a server at this address, asked of the server; nothing is saved. */
+export const probeServer = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(standard(IntegrationIdInput))
+  .validator(standard(ProbeServerInput))
   .handler(({ context, data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.checkPersonalCatalog(context.session.user.id, data.integrationId),
+        service.probeServer(context.session.user.id, data.url),
       ).pipe(
-        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.map((found) => ({ ok: true as const, ...found })),
         Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
       ),
     ),
   );
 
-export const approvePersonalCatalog = createServerFn({ method: "POST" })
+/** A server of one's own being added, as connecting it needs it. */
+export const getServerSetup = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(standard(ApproveCatalogInput))
+  .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.approvePersonalCatalog(context.session.user.id, data.integrationId, {
-          version: data.version,
-          decisions: data.decisions,
-        }),
+        service.serverSetup(context.session.user.id, data.integrationId),
       ).pipe(
-        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.map((integration) => ({ ok: true as const, integration })),
         Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const finishServerSetup = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.finishServerSetup(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** Lists what a server offers the person's own accounts on it again, now. */
+export const checkOwnTools = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.checkOwnTools(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** What one tool of the person's own server does, when the server says too little. */
+export const setOwnToolAccess = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(SetOwnToolAccessInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.setOwnToolAccess(
+            context.session.user.id,
+            data.integrationId,
+            data.tool,
+            data.access,
+          ),
+        ),
       ),
     ),
   );
@@ -145,7 +193,11 @@ export const createIntegration = createServerFn({ method: "POST" })
   .handler(({ data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.createIntegration({ kind: data.kind, name: data.name }),
+        service.createIntegration({
+          kind: data.kind,
+          name: data.name,
+          ...(data.server === undefined ? {} : { server: data.server }),
+        }),
       ).pipe(
         Effect.map((created) => ({ ok: true as const, id: created.id })),
         Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
@@ -172,6 +224,7 @@ export const saveIntegrationConfig = createServerFn({ method: "POST" })
           service.saveConfig({
             id: data.integrationId,
             name: data.name,
+            description: data.description,
             enabled: data.enabled,
             config: data.config,
             oauthClientId: data.oauthClientId,
@@ -226,33 +279,30 @@ export const connectIntegrationOpen = createServerFn({ method: "POST" })
     ),
   );
 
-/** Lists a server's tools now, as the admin asking; nothing is offered until approved. */
-export const checkIntegrationCatalog = createServerFn({ method: "POST" })
+/** Lists a server's tools now, without an account where it allows that and as the admin. */
+export const checkIntegrationTools = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
     runServerFn(
-      IntegrationService.use((service) =>
-        service.checkCatalog(data.integrationId, context.session.user.id),
-      ).pipe(
-        Effect.map((catalog) => ({ ok: true as const, catalog })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      outcome(
+        IntegrationService.use((service) =>
+          service.checkTools(context.session.user.id, data.integrationId),
+        ),
       ),
     ),
   );
 
-export const approveIntegrationCatalog = createServerFn({ method: "POST" })
+/** The admin's word on one tool, for everyone. */
+export const setIntegrationTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
-  .validator(standard(ApproveCatalogInput))
-  .handler(({ context, data }) =>
+  .validator(standard(SetToolInput))
+  .handler(({ data }) =>
     runServerFn(
       IntegrationService.use((service) =>
-        service.approveCatalog(context.session.user.id, data.integrationId, {
-          version: data.version,
-          decisions: data.decisions,
-        }),
+        service.setTool(data.integrationId, data.tool, { off: data.off, access: data.access }),
       ).pipe(
-        Effect.map((catalog) => ({ ok: true as const, catalog })),
+        Effect.map((integration) => ({ ok: true as const, integration })),
         Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
       ),
     ),

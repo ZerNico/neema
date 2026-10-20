@@ -25,7 +25,8 @@ import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import type { Capabilities } from "~/modules/groups/policy.ts";
 import { useCollectionSearch } from "~/modules/knowledge/client/search.ts";
 import { useScheduleSearch } from "~/modules/schedules/client/search.ts";
-import { SETTINGS_SECTIONS } from "~/modules/settings/sections.ts";
+import { useDesktop } from "~/modules/desktop/client/bridge.ts";
+import { settingsSections } from "~/modules/settings/sections.ts";
 import { useSkillSearch } from "~/modules/skills/client/search.ts";
 import { setTheme } from "~/ui/theme.tsx";
 import { useSidebar } from "~/ui/primitives/sidebar";
@@ -132,6 +133,7 @@ const page = (to: string, label: string, icon: SearchItem["icon"], detail?: stri
 const usePageSearch: SearchSource = (query, active) => {
   const { data: capabilities } = useQuery(capabilitiesQuery);
   const { data: user } = useQuery(sessionUserQuery);
+  const desktop = useDesktop();
   const can = (capability: keyof Capabilities) => !!capabilities?.[capability];
   const items =
     active && query
@@ -145,7 +147,7 @@ const usePageSearch: SearchSource = (query, active) => {
             can("skillsUse") && page("/skills", "Skills", Book02Icon),
             page("/help", "Help", HelpCircleIcon),
             page("/settings", "Settings", Settings02Icon),
-            ...SETTINGS_SECTIONS.map((section) =>
+            ...settingsSections(desktop !== null).map((section) =>
               page(section.to, section.label, section.icon, "Settings"),
             ),
             ...(user?.role === "admin"

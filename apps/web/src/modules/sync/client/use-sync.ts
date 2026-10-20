@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { announceSignIn } from "~/modules/integrations/client/sign-in-channel.ts";
 import { bringToTop, markGenerating } from "~/modules/chat/client/conversation-list-cache.ts";
 import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
@@ -276,6 +277,9 @@ export function useSync(
         case "integrations.changed":
           void queryClient.invalidateQueries({ queryKey: ["integrations"] });
           void queryClient.invalidateQueries({ queryKey: ["admin", "integrations"] });
+          break;
+        case "integration.signIn.failed":
+          announceSignIn({ attempt: event.attempt, error: event.error });
           break;
         case "integration.approval.changed":
           void queryClient.invalidateQueries({ queryKey: ["integration-approvals"] });

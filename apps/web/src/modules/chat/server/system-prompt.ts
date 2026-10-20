@@ -10,7 +10,7 @@ import { RESEARCH_APP_POLICY } from "./research/tool.ts";
 import { webToolsSystemHint } from "./search-prompt.ts";
 import { toolLoadPolicy } from "~/modules/tools/server/tool-load.ts";
 import { IMAGE_APP_POLICY } from "~/modules/images/server/policy.ts";
-import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import type { LoadableToolFamily } from "~/modules/tools/tool-load-schema.ts";
 
 /**
  * Who the model is in this app and what holds in every chat. Only what the
@@ -57,7 +57,10 @@ const historyToolsHint = (otherChats: boolean) =>
 /** What one attempt is offered, as the prompt needs to describe it. */
 export interface FixedPrefixInput {
   /** Families offered by name, loadable with load_tools. */
-  readonly lazyFamilies: ReadonlyArray<LazyToolFamily>;
+  readonly lazyFamilies: ReadonlyArray<{
+    readonly family: LoadableToolFamily;
+    readonly summary: string;
+  }>;
   readonly agentAuthoring: boolean;
   readonly documents: boolean;
   readonly knowledge: boolean;

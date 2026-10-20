@@ -1,0 +1,1 @@
+ALTER TABLE "integration_configs" ADD COLUMN "draft" boolean DEFAULT false NOT NULL;

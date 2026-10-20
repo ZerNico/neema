@@ -38,7 +38,13 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
     ? (pending.data?.find((call) => call.callId === activity.callId) ?? null)
     : null;
   const [open, setOpen] = useState(false);
-  const name = useIntegrationDirectory().name(activity.integrationId);
+  const directory = useIntegrationDirectory();
+  const name = directory.name(activity.integrationId);
+  // A server's own tools have no summary of their own, only their arguments:
+  // those are for whoever wants them, so the row says what the call was.
+  const argumentsOnly = directory.find(activity.integrationId)?.manifest.toolSource === "listed";
+  const shownSummary = argumentsOnly ? null : activity.summary;
+  const hiddenSummary = argumentsOnly ? activity.summary : null;
   const failed = activity.status === "error";
   const asking = waiting?.kind === "elicitation" && waiting.prompt ? waiting : null;
   const label = asking
@@ -52,7 +58,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
           : activity.label;
   const detail = [
     activity.account,
-    activity.summary,
+    shownSummary,
     activity.sources?.length ? `${activity.sources.length} results` : null,
     activity.decidedIn
       ? `${activity.decidedIn.decision === "allow" ? "Approved" : "Declined"} in ${activity.decidedIn.app}`
@@ -82,7 +88,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
       ) : waiting ? (
         <ApprovalCard call={waiting} name={name} label={activity.label} />
       ) : null}
-      {!activity.error && !activity.link ? (
+      {!activity.error && !activity.link && !hiddenSummary ? (
         <div className={cn(activityRowClassName, "mb-2")} aria-label={`${name}: ${label}`}>
           {row}
         </div>
@@ -94,6 +100,11 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
           </DisclosureTrigger>
           <DisclosureContent>
             <div className={disclosureBodyRailClassName}>
+              {hiddenSummary ? (
+                <p className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
+                  {hiddenSummary}
+                </p>
+              ) : null}
               {activity.error ? (
                 activity.refused ? (
                   <p className="text-xs [overflow-wrap:anywhere]">{activity.error}</p>

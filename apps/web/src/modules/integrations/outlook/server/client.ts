@@ -62,7 +62,7 @@ const reason = (status: number, body: unknown) => {
   if (status === 404) return "Not found in Outlook.";
   if (status === 403)
     return `Outlook refused access${message ? `: ${message}` : ""}. The app registration may lack a permission (Mail.ReadWrite, Mail.Send, Calendars.ReadWrite), or the tenant has not consented to it.`;
-  if (status === 429) return "Outlook is throttling requests; try again shortly.";
+  if (status === 429) return "Outlook is throttling requests. Try again shortly.";
   return message ? `Outlook: ${message}` : `Outlook answered ${status}.`;
 };
 

@@ -3,7 +3,13 @@ import { Tool, Toolkit } from "effect/unstable/ai";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { OFFICE_FAMILIES } from "~/modules/office/families.ts";
 import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
-import { LazyToolFamily, LoadToolsResult } from "../tool-load-schema.ts";
+import { parseIntegrationToolName } from "~/modules/integrations/manifest.ts";
+import {
+  integrationToolFamily,
+  LazyToolFamily,
+  LoadToolsResult,
+  type LoadableToolFamily,
+} from "../tool-load-schema.ts";
 import { advertisedParameter, type ToolGroup } from "./toolset.ts";
 
 /** Each lazy family's tool names, the unit `load_tools` makes available. */
@@ -24,14 +30,22 @@ const LAZY_FAMILY_SUMMARIES: Record<LazyToolFamily, string> = {
   "schedule-draft": "Draft a scheduled task that runs a prompt on a recurring schedule.",
 };
 
-export const lazyFamilyOfTool = (name: string): LazyToolFamily | null =>
-  LazyToolFamily.literals.find((family) => LAZY_FAMILY_TOOLS[family].includes(name)) ?? null;
+/** The family a tool belongs to: a fixed one, or its integration's, whether or not that is lazy here. */
+export const lazyFamilyOfTool = (name: string): LoadableToolFamily | null => {
+  const fixed = LazyToolFamily.literals.find((family) => LAZY_FAMILY_TOOLS[family].includes(name));
+  if (fixed) return fixed;
+  const integration = parseIntegrationToolName(name);
+  return integration ? integrationToolFamily(integration.integrationId) : null;
+};
+
+/** The catalogue line of a fixed family; an integration's comes from its tools. */
+export const fixedFamilySummary = (family: LazyToolFamily) => LAZY_FAMILY_SUMMARIES[family];
 
 /** Whether a toolkit tool's schema is shown: always, unless its family is offered unloaded. */
 export const isAdvertised = (
   name: string,
-  offered: ReadonlyArray<LazyToolFamily>,
-  unlocked: ReadonlySet<LazyToolFamily>,
+  offered: ReadonlyArray<LoadableToolFamily>,
+  unlocked: ReadonlySet<LoadableToolFamily>,
 ) => {
   const family = lazyFamilyOfTool(name);
   return !family || !offered.includes(family) || unlocked.has(family);
@@ -41,34 +55,38 @@ export const isAdvertised = (
  * The catalogue sits in the stable prefix, so it names every family the
  * attempt offers whether or not it is loaded yet: loading never rewrites it.
  */
-export const toolLoadPolicy = (offered: ReadonlyArray<LazyToolFamily>) =>
+export const toolLoadPolicy = (
+  offered: ReadonlyArray<{ readonly family: LoadableToolFamily; readonly summary: string }>,
+) =>
   [
     "More tools are available on request. Call load_tools with the families a task needs before you start on it; their tools can be used from your next step and stay available for the rest of this chat. Load only what the request calls for.",
-    ...offered.map((family) => `- ${family}: ${LAZY_FAMILY_SUMMARIES[family]}`),
+    ...offered.map(({ family, summary }) => `- ${family}: ${summary}`),
   ].join("\n");
 
-const loadToolsTool = Tool.make("load_tools", {
-  description:
-    "Make one or more tool families from the system prompt's list available. Their tools appear from your next step and stay for the rest of this chat.",
-  parameters: Schema.Struct({
-    families: advertisedParameter({
-      type: "array",
-      items: { type: "string", enum: [...LazyToolFamily.literals] },
-      minItems: 1,
+/** Its enum is what this attempt offers, which the catalogue lists in the same order. */
+const loadToolsTool = (offered: ReadonlyArray<LoadableToolFamily>) =>
+  Tool.make("load_tools", {
+    description:
+      "Make one or more tool families from the system prompt's list available. Their tools appear from your next step and stay for the rest of this chat.",
+    parameters: Schema.Struct({
+      families: advertisedParameter({
+        type: "array",
+        items: { type: "string", enum: [...offered] },
+        minItems: 1,
+      }),
     }),
-  }),
-  success: LoadToolsResult,
-});
+    success: LoadToolsResult,
+  });
 
 /**
  * `unlocked` belongs to the attempt and only grows: a family loaded once stays
  * advertised for the rest of the answer, whatever later compaction drops.
  */
 export const prepareToolLoad = (input: {
-  offered: ReadonlyArray<LazyToolFamily>;
-  unlocked: Set<LazyToolFamily>;
+  offered: ReadonlyArray<LoadableToolFamily>;
+  unlocked: Set<LoadableToolFamily>;
 }): ToolGroup => ({
-  toolkit: Toolkit.make(loadToolsTool),
+  toolkit: Toolkit.make(loadToolsTool(input.offered)),
   handlers: {
     load_tools: (args: { families?: unknown }) =>
       Effect.sync(() => {

@@ -1,6 +1,5 @@
 import { Schema } from "effect";
-import type { IntegrationToolInfo } from "./manifest.ts";
-import type { McpToolEntry } from "./mcp/catalog.ts";
+import type { IntegrationToolInfo, ToolAccess } from "./manifest.ts";
 import { EntityId } from "~/entity-id.ts";
 
 const IntegrationId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$/));
@@ -21,6 +20,10 @@ export interface AdminIntegration {
   /** The shipped type it runs on. */
   kind: string;
   name: string;
+  /** What it offers in the admin's words, or null for the type's own. */
+  description: string | null;
+  /** The known MCP server it points at, for its logo and setup note. */
+  server: string | null;
   enabled: boolean;
   config: Record<string, string>;
   oauthClientId: string | null;
@@ -29,20 +32,46 @@ export interface AdminIntegration {
   audience: "private" | "instance";
   connectionCount: number;
   sharedCredentialConfigured: boolean;
-  /** For a type whose tools come from its server: what was approved and what it lists now. */
-  catalog: AdminCatalog | null;
+  /** Every tool any account sees, with the admin's word on each. */
+  tools: ReadonlyArray<AdminTool>;
+  /** For a type whose tools its server lists: how the checks behind `tools` went. */
+  listings: ListingSummary | null;
 }
 
-/** A catalog type's tools as the admin reviews them. */
-export interface AdminCatalog {
-  approved: ReadonlyArray<McpToolEntry>;
-  latest: ReadonlyArray<McpToolEntry> | null;
+/** Every account's listing of one server, in short. */
+export interface ListingSummary {
+  /** The newest check that ran, worked or not. */
+  checkedAt: string | null;
+  /** Accounts whose last check failed. */
+  failing: number;
+  /** What one of them said. */
+  error: string | null;
+}
+
+/** One tool as the admin manages it, by the name the setting is kept under. */
+export interface AdminTool {
+  /** The server's or the manifest's name. */
+  name: string;
+  title: string;
+  description: string;
+  /** What it does as offered: the admin's correction, else what it claims. */
+  access: ToolAccess;
+  /** What it claims, or the manifest says. */
+  claimed: ToolAccess;
+  off: boolean;
+  /** Why it can never be offered as the server describes it. */
+  unsupported: string | null;
+  /** On, but past the most a chat is offered, so no chat gets it. */
+  pastLimit: boolean;
+}
+
+/** One check of what a server lists: to an account, or without one. */
+export interface ToolListingView {
   server: Readonly<Record<string, string>> | null;
   checkedAt: string | null;
   checkError: string | null;
-  reviewedAt: string | null;
-  /** Names `latest`; an approval sends it back. */
-  version: string | null;
+  /** Null before a check worked. */
+  count: number | null;
 }
 
 /**
@@ -72,6 +101,10 @@ export interface IntegrationConnectionView {
   scope: string[] | null;
   /** OAuth scopes a call was refused for; signing in again grants them. */
   requiredScopes: string[] | null;
+  /** For a type whose tools its server lists: the last check for this account. */
+  listing: ToolListingView | null;
+  /** What chats can be offered with this account, in order, before its permissions. */
+  tools: ReadonlyArray<IntegrationToolInfo>;
   /** What disconnecting it would leave without credentials. */
   dependents: { sources: number; schedules: number };
   createdAt: string;
@@ -89,9 +122,13 @@ export interface UserIntegration {
   id: string;
   kind: string;
   name: string;
+  /** The admin's own words for what it offers, over the type's. */
+  description: string | null;
+  /** The known MCP server it points at, for its logo and description. */
+  server: string | null;
   /** Enabled by an admin, configured, and shared with this person. */
   available: boolean;
-  /** Added by this person for themselves, so they set it up and review its tools. */
+  /** Added by this person for themselves, so they set it up. */
   personal: boolean;
   /** `everyone`: the open way is on for everyone without a press, so it cannot be disconnected. */
   methods: {
@@ -100,7 +137,10 @@ export interface UserIntegration {
     open: "none" | "shared" | null;
     everyone: boolean;
   };
-  /** What chats can be offered, in order, before any per-person permission. */
+  /**
+   * What chats can be offered before connecting: a shipped type's tools, or
+   * what the server lists without an account. Each account has its own.
+   */
   tools: ReadonlyArray<IntegrationToolInfo>;
   apiKeyHelpUrl: string | null;
   /** This person's accounts on it, oldest first; empty when not connected. */
@@ -109,15 +149,20 @@ export interface UserIntegration {
 
 export const IntegrationIdInput = Schema.Struct({ integrationId: IntegrationId });
 
+export const ProbeServerInput = Schema.Struct({
+  url: Schema.String.check(Schema.isMaxLength(2_000)),
+});
+
 export const ConnectionIdInput = Schema.Struct({ connectionId: EntityId });
 
-/** A public MCP server one person added for themselves; only they use and review it. */
+/** A public MCP server one person added for themselves; only they use it. */
 export interface PersonalServer {
   id: string;
   name: string;
   /** The MCP admin fields a person may set: address, way in, header. */
   config: Record<string, string>;
-  catalog: AdminCatalog;
+  /** The last check of what it lists, to their account or without one. */
+  listing: ToolListingView | null;
 }
 
 export interface PersonalServers {
@@ -142,6 +187,8 @@ export const SavePersonalServerInput = Schema.Struct({
 export const CreateIntegrationInput = Schema.Struct({
   kind: IntegrationId,
   name: Schema.String.check(Schema.isMaxLength(100)),
+  /** A known MCP server, whose address and sign-in come with it. */
+  server: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(40))),
 });
 
 /** One integration as anyone may see it: enough to name and draw a stored reference. */
@@ -149,11 +196,16 @@ export interface IntegrationDirectoryEntry {
   id: string;
   kind: string;
   name: string;
+  /** The admin's own words for what it offers, over the type's. */
+  description: string | null;
+  /** The known MCP server it points at, for its logo. */
+  server: string | null;
 }
 
 export const SaveIntegrationConfigInput = Schema.Struct({
   integrationId: IntegrationId,
   name: Schema.String.check(Schema.isMaxLength(100)),
+  description: Schema.String.check(Schema.isMaxLength(400)),
   enabled: Schema.Boolean,
   config: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))),
   oauthClientId: Schema.String.check(Schema.isMaxLength(500)),
@@ -172,17 +224,18 @@ export const SaveIntegrationConfigInput = Schema.Struct({
 
 export const ToolAccessInput = Schema.Literals(["read", "write", "destructive"]);
 
-export const ApproveCatalogInput = Schema.Struct({
+/** The admin's word on one tool: null clears it back to what the tool claims. */
+export const SetToolInput = Schema.Struct({
   integrationId: IntegrationId,
-  /** The listing the admin looked at; a newer one since is refused, not approved unseen. */
-  version: Schema.String.check(Schema.isMaxLength(200)),
-  decisions: Schema.Array(
-    Schema.Struct({
-      mcpName: Schema.String.check(Schema.isMaxLength(200)),
-      enabled: Schema.Boolean,
-      access: ToolAccessInput,
-    }),
-  ).check(Schema.isMaxLength(500)),
+  tool: Schema.String.check(Schema.isMaxLength(200)),
+  off: Schema.Boolean,
+  access: Schema.NullOr(ToolAccessInput),
+});
+
+export const SetOwnToolAccessInput = Schema.Struct({
+  integrationId: IntegrationId,
+  tool: Schema.String.check(Schema.isMaxLength(200)),
+  access: ToolAccessInput,
 });
 
 export const ConnectApiKeyInput = Schema.Struct({

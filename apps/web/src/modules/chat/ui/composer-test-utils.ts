@@ -81,7 +81,7 @@ export function setComposerCaret(field: HTMLElement, offset: number) {
 export function clientWithIntegrations() {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(integrationDirectoryQuery.queryKey, [
-    { id: "outline", kind: "outline", name: "Outline" },
+    { id: "outline", kind: "outline", name: "Outline", description: null, server: null },
   ]);
   return client;
 }

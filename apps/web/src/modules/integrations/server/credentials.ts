@@ -231,11 +231,12 @@ const needsReauth = (tx: DbTx, connectionId: string) =>
  * a credential that is refreshed under the locks that keep it to one setup.
  */
 export const makeCredentials = (deps: {
-  /** What an integration offers; see `ConnectedSession.tools`. */
+  /** What one account is offered; see `ConnectedSession.tools`. */
   toolsOf: (
     manifest: IntegrationManifest,
     adapter: IntegrationAdapter,
-    integrationId: string,
+    row: IntegrationConfigRow,
+    connection: { id: string; authKind: IntegrationConnectionRow["authKind"] } | null,
   ) => Effect.Effect<ReadonlyArray<OfferedTool>>;
   changed: (userId: string) => Effect.Effect<void>;
 }) =>
@@ -534,7 +535,7 @@ export const makeCredentials = (deps: {
         configIdentity: configIdentity(row, adapter)!,
         integration: { id: row.id, kind: row.kind, name: row.name },
         adapter,
-        tools: yield* toolsOf(manifest, adapter, row.id),
+        tools: yield* toolsOf(manifest, adapter, row, connection),
         authKind: connection.authKind,
         account: accountName(connection),
         config,
@@ -572,7 +573,7 @@ export const makeCredentials = (deps: {
           reason: `That is another account than “${accountName(current)}”. Add it as another account instead.`,
         });
       // A row from before it knew its account cannot take on one connected beside it.
-      const listed = yield* repo.listForUser(userId);
+      const listed = yield* repo.listForUser(userId, integrationId);
       const other = listed
         .find((entry) => entry.config.id === integrationId)
         ?.connections.find((entry) => entry.id !== connectionId && entry.accountKey === accountKey);
@@ -584,7 +585,7 @@ export const makeCredentials = (deps: {
 
     /** A session as any working account of theirs, oldest first, for work that is not a person's own call. */
     const anySessionFor = Effect.fn(function* (userId: string, integrationId: string) {
-      const listed = yield* repo.listForUser(userId);
+      const listed = yield* repo.listForUser(userId, integrationId);
       const accounts = listed.find((entry) => entry.config.id === integrationId)?.connections ?? [];
       for (const account of accounts) {
         const session = yield* sessionFor(userId, account.id).pipe(Effect.option);

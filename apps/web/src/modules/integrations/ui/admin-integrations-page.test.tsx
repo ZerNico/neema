@@ -5,29 +5,32 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { adminIntegrationsQuery } from "../client/queries.ts";
 import type { AdminIntegration } from "../schema.ts";
-import { createIntegration, saveIntegrationConfig } from "../server/functions.ts";
+import { createIntegration } from "../server/functions.ts";
 import { AdminIntegrationsPage } from "./admin-integrations-page.tsx";
 
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ to, children }: { to: string; children?: unknown }) => (
-    <a href={to}>{children as never}</a>
+  Link: ({ to, params, children }: { to: string; params?: object; children?: unknown }) => (
+    <a href={`${to}${params ? `#${JSON.stringify(params)}` : ""}`}>{children as never}</a>
   ),
-  useMatches: () => [],
-  useRouterState: () => "/admin/integrations",
+  useNavigate: () => navigate,
 }));
 vi.mock("../server/functions.ts", () => ({
   createIntegration: vi.fn(async () => ({ ok: true, id: "jira-2" })),
-  deleteIntegration: vi.fn(),
-  saveIntegrationConfig: vi.fn(async () => ({ ok: true })),
   listAdminIntegrations: vi.fn(),
   listIntegrationDirectory: vi.fn(async () => []),
 }));
-vi.mock("~/modules/sharing/ui/access-dialog.tsx", () => ({ AccessDialog: () => null }));
 
-const jira = (id: string, name: string): AdminIntegration & { redirectUri: string | null } => ({
+const adminRow = (
+  id: string,
+  name: string,
+  patch: Partial<AdminIntegration> = {},
+): AdminIntegration & { redirectUri: string | null } => ({
   id,
   kind: "jira",
   name,
+  description: null,
+  server: null,
   enabled: true,
   config: { site: "https://acme.atlassian.net" },
   oauthClientId: null,
@@ -36,13 +39,15 @@ const jira = (id: string, name: string): AdminIntegration & { redirectUri: strin
   audience: "instance",
   connectionCount: 2,
   sharedCredentialConfigured: false,
-  catalog: null,
+  tools: [],
+  listings: null,
   redirectUri: null,
+  ...patch,
 });
 
-const mount = (integrations: ReturnType<typeof jira>[]) => {
+const mount = (integrations: ReturnType<typeof adminRow>[]) => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  client.setQueryData(adminIntegrationsQuery.queryKey, { integrations });
+  client.setQueryData(adminIntegrationsQuery.queryKey, { integrations, origin: null });
   render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -53,65 +58,60 @@ const mount = (integrations: ReturnType<typeof jira>[]) => {
 };
 
 describe("admin integrations", () => {
-  it("names each integration, with its type when the name does not say it", () => {
-    mount([jira("jira", "Jira"), jira("jira-ops", "Ops tracker")]);
+  it("lists each integration on its own page, with its type when the name does not say it", () => {
+    mount([adminRow("jira", "Jira"), adminRow("jira-ops", "Ops tracker")]);
     expect(screen.getByText("2 people connected", { exact: true })).toBeInTheDocument();
     expect(screen.getByText("Jira · 2 people connected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set up Ops tracker" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ops tracker/ })).toHaveAttribute(
+      "href",
+      '/admin/integrations/$integrationId#{"integrationId":"jira-ops"}',
+    );
   });
 
-  it("adds a second integration of a type under a free name", async () => {
+  it("adds a type under a free name, then opens its settings", async () => {
     const user = userEvent.setup();
-    mount([jira("jira", "Jira")]);
+    mount([adminRow("jira", "Jira")]);
     await user.click(screen.getByRole("button", { name: "Add integration" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add integration" });
-    await user.click(within(dialog).getByRole("radio", { name: "Jira" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    await user.click(within(directory).getByRole("button", { name: /^Jira/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Add Jira" });
     // The type's name is taken, so the next one is numbered.
     expect(within(dialog).getByLabelText("Name")).toHaveValue("Jira 2");
     await user.clear(within(dialog).getByLabelText("Name"));
     await user.type(within(dialog).getByLabelText("Name"), "Jira · Ops");
     await user.click(within(dialog).getByRole("button", { name: "Add" }));
     await waitFor(() =>
-      expect(createIntegration).toHaveBeenCalledWith({
-        data: { kind: "jira", name: "Jira · Ops" },
+      expect(navigate).toHaveBeenCalledWith({
+        to: "/admin/integrations/$integrationId",
+        params: { integrationId: "jira-2" },
+        search: { setup: true },
       }),
     );
+    expect(createIntegration).toHaveBeenCalledWith({ data: { kind: "jira", name: "Jira · Ops" } });
   });
 
-  it("ticks the ways into an MCP server and shows only what they need", async () => {
+  it("adds a known server as it is, and offers each one once", async () => {
     const user = userEvent.setup();
-    mount([
-      {
-        ...jira("mcp", "DeepWiki"),
-        kind: "mcp",
-        config: { url: "https://mcp.deepwiki.com/mcp", ways: "anonymous", anonymous: "open" },
-        allowApiKeys: false,
-        connectionCount: 0,
-      },
-    ]);
-    await user.click(screen.getByRole("button", { name: "Set up DeepWiki" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set up DeepWiki" });
-    expect(within(dialog).getByRole("radio", { name: "No key" })).toBeChecked();
-    expect(within(dialog).queryByLabelText("Redirect URI")).not.toBeInTheDocument();
-
-    // Private repos want a token beside open use.
-    expect(within(dialog).queryByLabelText(/Header/)).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("checkbox", { name: "Personal token" }));
-    expect(within(dialog).getByLabelText(/Header/)).toBeInTheDocument();
-
-    // Signing in registers the app by itself, so its own client waits behind a switch.
-    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
-    expect(within(dialog).queryByLabelText("Redirect URI")).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("switch", { name: "Registered app" }));
-    expect(within(dialog).getByLabelText("Redirect URI")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    vi.mocked(createIntegration).mockResolvedValueOnce({ ok: true, id: "mcp" } as never);
+    mount([adminRow("mcp-2", "Linear", { kind: "mcp", server: "linear" })]);
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    expect(within(directory).queryByRole("button", { name: /^Linear/ })).toBeNull();
+    await user.type(within(directory).getByRole("searchbox", { name: "Search services" }), "card");
+    await user.click(within(directory).getByRole("button", { name: /^Trello/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Add Trello" });
+    // Nothing to fill in: its address and sign-in come with it.
+    expect(within(dialog).queryByLabelText("Name")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Add" }));
     await waitFor(() =>
-      expect(saveIntegrationConfig).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          config: expect.objectContaining({ ways: "token anonymous", anonymous: "open" }),
-        }),
+      expect(createIntegration).toHaveBeenCalledWith({
+        data: { kind: "mcp", name: "Trello", server: "trello" },
       }),
     );
+    expect(navigate).toHaveBeenLastCalledWith({
+      to: "/admin/integrations/$integrationId",
+      params: { integrationId: "mcp" },
+      search: {},
+    });
   });
 });

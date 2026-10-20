@@ -98,11 +98,7 @@ export function AppHeader({ children }: { children: ReactNode }) {
         )
       : null;
   }
-  return (
-    <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-      {children}
-    </header>
-  );
+  return <header className="flex h-12 shrink-0 items-center gap-2 px-3">{children}</header>;
 }
 
 /**
@@ -120,7 +116,10 @@ export function PanelTitlebar({ children }: { children: ReactNode }) {
         )
       : null;
   }
-  return <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">{children}</div>;
+  // Its left border continues the rail's below, so the line beside the page reaches the top.
+  return (
+    <div className="flex h-12 shrink-0 items-center gap-1 border-b border-l px-2">{children}</div>
+  );
 }
 
 /**

@@ -15,6 +15,7 @@ import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { groups } from "./groups.ts";
 import type { McpToolEntry } from "~/modules/integrations/mcp/catalog.ts";
+import type { ToolSetting } from "~/modules/integrations/manifest.ts";
 
 /**
  * One integration an admin set up: an instance of a type the code ships
@@ -33,8 +34,13 @@ export const integrationConfigs = pgTable(
     kind: text().notNull(),
     /** What people see; unique among what one person sees, so an @mention names one integration. */
     name: text().notNull(),
+    // What it offers, in the admin's words; null reads the type's or the known server's.
+    description: text(),
     // Set for a server a person added for themselves; null for the admin's.
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    // A person's server still being added: connecting needs the row, but no list shows
+    // it until its first account connects, and one left behind is swept.
+    draft: boolean().notNull().default(false),
     enabled: boolean().notNull().default(false),
     // Non-secret settings named by the manifest's admin fields (base URL…).
     config: jsonb().$type<Record<string, string>>().notNull().default({}),
@@ -52,6 +58,9 @@ export const integrationConfigs = pgTable(
     // review, a sign-in, a prepared call) may only finish under the same one.
     revision: integer().notNull().default(1),
     allowApiKeys: boolean("allow_api_keys").notNull().default(true),
+    // The admin's word on single tools, by the server's or the manifest's name:
+    // off for everyone, or what it really does when its own claim is wrong.
+    toolSettings: jsonb("tool_settings").$type<Record<string, ToolSetting>>().notNull().default({}),
     // A key the admin holds for everyone, as the manifest's shared credential
     // fields (KeyCipher JSON). Only a type whose calls cannot act as anyone has one.
     sharedCredentialCiphertext: text("shared_credential_ciphertext"),
@@ -235,40 +244,40 @@ export const integrationAllowanceUses = pgTable(
 );
 
 /**
- * The tools of an integration whose type reads them from its server (MCP).
- * Only `approved` is offered, in its order: a tool new or changed since waits
- * in `latest` until an admin approves it, so a server cannot put words in the
- * model's mouth unreviewed.
+ * What a server lists to one account, since accounts may see different tools
+ * (one Atlassian account has Confluence, another not). A way in with no
+ * account of one's own (open, or the admin's key) lists once for everyone,
+ * with no connection. Offered as listed: whoever added the server vouched
+ * for it, and the admin's `toolSettings` apply on top.
  */
-export const integrationToolCatalogs = pgTable(
-  "integration_tool_catalogs",
+export const integrationToolListings = pgTable(
+  "integration_tool_listings",
   {
+    // The connection's id, or the integration's for the listing without an account.
+    id: text().primaryKey(),
     integrationId: text("integration_id")
-      .primaryKey()
+      .notNull()
       .references(() => integrationConfigs.id, { onDelete: "cascade" }),
-    approved: jsonb().$type<McpToolEntry[]>().notNull().default([]),
+    connectionId: text("connection_id").references(() => integrationConnections.id, {
+      onDelete: "cascade",
+    }),
     // What the server listed at the last check that worked; null before one.
-    latest: jsonb().$type<McpToolEntry[]>(),
+    tools: jsonb().$type<McpToolEntry[]>(),
     // What the server says about itself, for the admin.
     server: jsonb().$type<Record<string, string>>(),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     checkError: text("check_error"),
-    // Whose connection the background check lists tools with.
-    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
-    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull().defaultNow(),
-    // A claimed check's lease; the sweep skips a catalog until it lapses.
+    // A claimed check's lease; the sweep skips a listing until it lapses.
     checkLeaseUntil: timestamp("check_lease_until", { withTimezone: true }),
     // The newest check started. Only it may record what it saw, so a slower,
     // older listing never overwrites a newer one or one for another address.
     checkToken: text("check_token"),
-    // Names the listing in `latest`: a new one per recorded check, null when
-    // there is none. A review approves exactly this listing.
-    listingId: text("listing_id"),
-    // Counts approvals, so two admins reviewing at once cannot both win.
-    reviewSeq: integer("review_seq").notNull().default(0),
   },
-  (t) => [index("integration_tool_catalogs_due_idx").on(t.nextCheckAt)],
+  (t) => [
+    index("integration_tool_listings_due_idx").on(t.nextCheckAt),
+    index("integration_tool_listings_integration_idx").on(t.integrationId),
+  ],
 );
 
 /**

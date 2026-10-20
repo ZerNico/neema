@@ -159,7 +159,7 @@ const draftResult = (draft: GraphMessage): AdapterToolResult => ({
     to: people(draft.toRecipients),
     cc: people(draft.ccRecipients),
     url: draft.webLink ?? null,
-    note: "Saved to Drafts; nothing was sent.",
+    note: "Saved to Drafts. Nothing was sent.",
   },
   ...(draft.webLink ? { link: { title: draft.subject || "Draft", url: draft.webLink } } : {}),
 });

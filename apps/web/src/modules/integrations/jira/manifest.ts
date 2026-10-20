@@ -8,6 +8,7 @@ export const jiraManifest = {
   description:
     "Search and read Jira issues, create and edit them, comment, assign and move them along.",
   logo: JiraLogo,
+  category: "projects",
   adminFields: [
     {
       key: "site",

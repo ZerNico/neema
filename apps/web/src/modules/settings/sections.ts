@@ -13,8 +13,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { SectionNavItem } from "~/ui/page-shell.tsx";
 
-/** Settings pages, shared by the section nav and search. */
-export const SETTINGS_SECTIONS: SectionNavItem[] = [
+/** Settings pages, shared by the section nav and search, in a browser. */
+const SETTINGS_SECTIONS: SectionNavItem[] = [
   {
     to: "/settings/profile",
     label: "Profile",
@@ -64,12 +64,6 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     matchPrefix: "/settings/api-keys",
   },
   {
-    to: "/settings/computer",
-    label: "This computer",
-    icon: ComputerIcon,
-    matchPrefix: "/settings/computer",
-  },
-  {
     to: "/settings/archived",
     label: "Archived chats",
     icon: Archive02Icon,
@@ -82,3 +76,18 @@ export const SETTINGS_SECTIONS: SectionNavItem[] = [
     matchPrefix: "/settings/usage",
   },
 ];
+
+/** What Work may do on this machine, which only the desktop app can set. */
+const COMPUTER_SECTION: SectionNavItem = {
+  to: "/settings/computer",
+  label: "This computer",
+  icon: ComputerIcon,
+  matchPrefix: "/settings/computer",
+};
+
+/** The pages for this app: a browser has no computer to set, so it is left out there. */
+export const settingsSections = (desktop: boolean): SectionNavItem[] => {
+  if (!desktop) return SETTINGS_SECTIONS;
+  const at = SETTINGS_SECTIONS.findIndex((section) => section.to === "/settings/archived");
+  return SETTINGS_SECTIONS.toSpliced(at, 0, COMPUTER_SECTION);
+};

@@ -141,7 +141,7 @@ export const integrationHandlers =
 /**
  * One tool as a generation offers it: what screens show, the parameters the
  * model is given, and the handler that prepares a call. Shipped tools carry
- * an Effect Schema; catalog tools carry the JSON Schema an admin approved.
+ * an Effect Schema; catalog tools carry the JSON Schema their server listed.
  */
 export interface OfferedTool extends IntegrationToolInfo {
   readonly parameters: Schema.Top | Readonly<Record<string, unknown>>;
@@ -152,52 +152,31 @@ export interface OfferedTool extends IntegrationToolInfo {
   /** Everything sent, when `details` cannot show it all; null when it can. */
   inFull?(args: unknown): string | null;
   /**
-   * Which approved version this is, for a catalog tool. A call runs only if
+   * Which listed version this is, for a catalog tool. A call runs only if
    * the tool is still offered at this version when it would go out.
    */
   readonly revision?: string;
   readonly prepare: ErasedHandler;
 }
 
-/** One stored tool of a catalog type; MCP is the only one so far. */
-export type CatalogEntry = McpToolEntry;
-
 /**
- * For a type whose tools come from each integration's server: turns one
- * approved catalog entry into a tool, and lists and reviews the catalog.
+ * For a type whose tools come from each integration's server: lists what the
+ * server offers an account, and turns one listed entry into a tool.
  */
-export interface CatalogAdapter {
-  tool(integrationId: string, entry: CatalogEntry): OfferedTool | null;
+export interface ToolListingAdapter {
+  tool(integrationId: string, entry: McpToolEntry): OfferedTool | null;
   /**
-   * What the server lists now, as unreviewed entries in its order. A tool
-   * listed before keeps its model-facing name.
+   * What the server lists now, in its order. A tool listed before keeps its
+   * model-facing name.
    */
   list(
     session: IntegrationSession,
     integrationId: string,
-    previous: ReadonlyArray<CatalogEntry>,
+    previous: ReadonlyArray<McpToolEntry>,
   ): Effect.Effect<
-    { entries: CatalogEntry[]; server: Record<string, string>; recheckAfterMs: number | null },
+    { entries: McpToolEntry[]; server: Record<string, string>; recheckAfterMs: number | null },
     AdapterFailure
   >;
-  /** The entries a generation may offer, from what was approved and what the server lists now. */
-  offer(
-    approved: ReadonlyArray<CatalogEntry>,
-    latest: ReadonlyArray<CatalogEntry> | null,
-  ): CatalogEntry[];
-  /** The approved catalog after a review, or what is wrong with the decisions. */
-  apply(
-    approved: ReadonlyArray<CatalogEntry>,
-    latest: ReadonlyArray<CatalogEntry>,
-    decisions: ReadonlyArray<CatalogDecision>,
-  ): { approved: CatalogEntry[] } | { error: string };
-}
-
-/** An admin's decision on one listed tool, by the server's own name for it. */
-export interface CatalogDecision {
-  readonly mcpName: string;
-  readonly enabled: boolean;
-  readonly access: "read" | "write" | "destructive";
 }
 
 /** How people may connect, when the admin's config decides it (MCP) rather than the type. */
@@ -335,8 +314,8 @@ export interface IntegrationAdapter {
     | null;
   /** Keyed by the manifest's tool names; `catalog.test.ts` checks the pairing. */
   readonly handlers: Readonly<Record<string, ErasedHandler>>;
-  /** Present for a `catalog` type, whose tools are not in `handlers`. */
-  readonly catalog?: CatalogAdapter;
+  /** Present for a `listed` type, whose tools are not in `handlers`. */
+  readonly listing?: ToolListingAdapter;
   readonly connectMethods?: (config: Readonly<Record<string, string>>) => ConnectMethods;
   readonly discoveredOAuth?: DiscoveredOAuth;
   readonly knowledge: KnowledgeAdapter | null;

@@ -3,39 +3,56 @@ import { Effect } from "effect";
 import { safeRedirect } from "~/modules/auth/redirect.ts";
 import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { appOrigin } from "~/modules/integrations/server/functions.ts";
-import {
-  callbackPath,
-  OAUTH_STATE_COOKIE,
-  OAUTH_STATE_TTL_MS,
-} from "~/modules/integrations/server/oauth.ts";
+import { oauthCookies } from "~/modules/integrations/server/oauth.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
-
-const settings = (integrationId: string, search: Record<string, string>) =>
-  `/settings/integrations/${encodeURIComponent(integrationId)}?${new URLSearchParams(search).toString()}`;
+import { reportFailure, settingsPath, signInCookie, withSearch } from "./-sign-in.ts";
 
 /**
  * Starts an OAuth connection in whatever browser opened it. The desktop app
  * sends this URL to the system browser, which therefore has to be signed in
- * here as the same person: the state is bound to this session and a cookie.
+ * here as the same person (`as` says who): the state is bound to this session
+ * and a cookie.
  */
 export const Route = createFileRoute("/api/integrations/$integrationId/connect")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
+        const url = new URL(request.url);
         const current = await sessionFromHeaders(request.headers);
         if (!current?.approved) {
-          const back = new URL(request.url).pathname;
+          // All of it, so the sign-in comes back to this same request: who asked included.
+          const back = `${url.pathname}${url.search}`;
           return Response.redirect(
             new URL(`/login?redirect=${encodeURIComponent(back)}`, request.url),
             302,
           );
         }
-        const origin = appOrigin(request) ?? new URL(request.url).origin;
+        const origin = appOrigin(request) ?? url.origin;
         // Only a path on this app; anything else would turn the flow into a redirector.
-        const returnTo = safeRedirect(new URL(request.url).searchParams.get("returnTo"));
+        const returnTo = safeRedirect(url.searchParams.get("returnTo"));
         // An account to reconnect; the service checks it is this person's own.
-        const connectionId = new URL(request.url).searchParams.get("account") ?? undefined;
+        const connectionId = url.searchParams.get("account") ?? undefined;
+        const failed = async (error: string, tell: string) => {
+          await reportFailure(tell, returnTo, error);
+          return new Response(null, {
+            status: 302,
+            headers: {
+              location: withSearch(returnTo ?? settingsPath(params.integrationId), { error }),
+            },
+          });
+        };
+        // The desktop app signs in in the system browser, which may hold someone
+        // else's session here: their account would land with them, not the asker.
+        // So every link names who asked, and one that names nobody starts nothing.
+        const asked = url.searchParams.get("as");
+        if (asked !== current.session.user.id)
+          return failed(
+            asked
+              ? "This browser is signed in here as someone else. Sign in as yourself, then try again."
+              : "Start connecting again from the app.",
+            asked ?? current.session.user.id,
+          );
         const started = await runtime.runPromise(
           Effect.flatMap(IntegrationService, (service) =>
             service.beginOAuth(
@@ -56,21 +73,22 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
             ),
           ),
         );
-        if (!started.ok)
-          return new Response(null, {
-            status: 302,
-            headers: {
-              location: settings(params.integrationId, { error: started.error }),
-            },
-          });
-        const secure = origin.startsWith("https:") ? "; Secure" : "";
-        return new Response(null, {
-          status: 302,
-          headers: {
-            location: started.url,
-            "set-cookie": `${OAUTH_STATE_COOKIE}=${started.state}; Path=${callbackPath(params.integrationId)}; HttpOnly; SameSite=Lax; Max-Age=${OAUTH_STATE_TTL_MS / 1000}${secure}`,
-          },
-        });
+        if (!started.ok) return failed(started.error, current.session.user.id);
+        const secure = origin.startsWith("https:");
+        const names = oauthCookies(started.state);
+        const headers = new Headers({ location: started.url });
+        headers.append(
+          "set-cookie",
+          signInCookie(params.integrationId, names.state, started.state, secure),
+        );
+        // Where a failure is shown too: a sign-in in its own window ends on the page that
+        // tells the window that opened it, whatever happened.
+        if (returnTo)
+          headers.append(
+            "set-cookie",
+            signInCookie(params.integrationId, names.back, encodeURIComponent(returnTo), secure),
+          );
+        return new Response(null, { status: 302, headers });
       },
     },
   },
