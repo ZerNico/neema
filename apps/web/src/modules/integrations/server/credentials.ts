@@ -231,11 +231,12 @@ const needsReauth = (tx: DbTx, connectionId: string) =>
  * a credential that is refreshed under the locks that keep it to one setup.
  */
 export const makeCredentials = (deps: {
-  /** What an integration offers; see `ConnectedSession.tools`. */
+  /** What one account is offered; see `ConnectedSession.tools`. */
   toolsOf: (
     manifest: IntegrationManifest,
     adapter: IntegrationAdapter,
-    integrationId: string,
+    row: IntegrationConfigRow,
+    connection: { id: string; authKind: IntegrationConnectionRow["authKind"] } | null,
   ) => Effect.Effect<ReadonlyArray<OfferedTool>>;
   changed: (userId: string) => Effect.Effect<void>;
 }) =>
@@ -534,7 +535,7 @@ export const makeCredentials = (deps: {
         configIdentity: configIdentity(row, adapter)!,
         integration: { id: row.id, kind: row.kind, name: row.name },
         adapter,
-        tools: yield* toolsOf(manifest, adapter, row.id),
+        tools: yield* toolsOf(manifest, adapter, row, connection),
         authKind: connection.authKind,
         account: accountName(connection),
         config,

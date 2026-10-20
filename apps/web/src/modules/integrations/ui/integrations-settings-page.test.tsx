@@ -9,6 +9,7 @@ import type { IntegrationConnectionView, PersonalServers, UserIntegration } from
 import {
   connectIntegrationApiKey,
   connectIntegrationOpen,
+  savePersonalServer,
   updateIntegrationConnection,
 } from "../server/functions.ts";
 import {
@@ -16,17 +17,21 @@ import {
   IntegrationsSettingsPage,
 } from "./integrations-settings-page.tsx";
 
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children }: { to: string; children?: unknown }) => (
     <a href={to}>{children as never}</a>
   ),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }));
 vi.mock("../server/functions.ts", () => ({
   disconnectIntegration: vi.fn(),
   updateIntegrationConnection: vi.fn(),
   connectIntegrationApiKey: vi.fn(),
   connectIntegrationOpen: vi.fn(async () => ({ ok: true })),
+  savePersonalServer: vi.fn(async () => ({ ok: false, error: "stop here" })),
+  checkPersonalCatalog: vi.fn(),
+  approvePersonalCatalog: vi.fn(),
   listIntegrationScopeOptions: vi.fn(async () => ({
     ok: true,
     options: [
@@ -34,6 +39,14 @@ vi.mock("../server/functions.ts", () => ({
       { id: "OPS", label: "Operations", detail: "OPS" },
     ],
   })),
+}));
+
+const OUTLINE_TOOLS = outlineManifest.tools.map(({ name, title, label, description, access }) => ({
+  name,
+  title,
+  label,
+  description,
+  access,
 }));
 
 const account = (patch: Partial<IntegrationConnectionView> = {}): IntegrationConnectionView => ({
@@ -46,6 +59,8 @@ const account = (patch: Partial<IntegrationConnectionView> = {}): IntegrationCon
   toolPermissions: {},
   scope: null,
   requiredScopes: null,
+  listing: null,
+  tools: OUTLINE_TOOLS,
   dependents: { sources: 0, schedules: 0 },
   createdAt: "2026-09-24T10:00:00Z",
   ...patch,
@@ -55,16 +70,12 @@ const outline = (connection: Partial<IntegrationConnectionView> | null): UserInt
   id: "outline",
   kind: "outline",
   name: "Outline",
+  description: null,
+  server: null,
   available: true,
   personal: false,
   methods: { oauth: true, apiKey: true, open: null, everyone: false },
-  tools: outlineManifest.tools.map(({ name, title, label, description, access }) => ({
-    name,
-    title,
-    label,
-    description,
-    access,
-  })),
+  tools: OUTLINE_TOOLS,
   apiKeyHelpUrl: null,
   connections: connection ? [account(connection)] : [],
 });
@@ -160,31 +171,22 @@ describe("integration account row", () => {
     expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
   });
 
-  it("lets the owner of their own server review its tools", async () => {
-    mount({ ...outline({ authKind: "none", accountLabel: "Mine" }), personal: true, tools: [] }, [
+  it("shows one's own server by its address, with its tools and menu", async () => {
+    mount({ ...outline({ authKind: "none", accountLabel: "Mine" }), personal: true }, [
       {
         id: "outline",
         name: "Mine",
         config: { url: "https://mcp.example.com/mcp", ways: "anonymous" },
-        catalog: {
-          approved: [],
-          latest: [],
-          server: null,
-          checkedAt: null,
-          checkError: null,
-          reviewedAt: null,
-          version: "listing.0",
-        },
+        listing: { server: null, checkedAt: null, checkError: null, count: 3 },
       },
     ]);
     expect(screen.getByText("https://mcp.example.com/mcp")).toBeInTheDocument();
-    expect(screen.getByText("Tools to review")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review tools" })).toBeVisible();
-    expect(screen.getByText(/Review this server’s tools/)).toBeInTheDocument();
-    // Changing and deleting it sit in the page's menu, as on other detail pages.
+    expect(screen.getByText("3 tools")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
+    // Changing and removing it sit in the page's menu, as on other detail pages.
     fireEvent.click(screen.getByRole("button", { name: "Server actions" }));
     expect(await screen.findByRole("menuitem", { name: "Edit server" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "Delete server" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeVisible();
   });
 
   it("keeps a working account's row to its name and a menu", async () => {
@@ -255,10 +257,13 @@ describe("integration account row", () => {
 });
 
 describe("integrations list", () => {
-  it("opens the dialog to add an MCP server of one's own", async () => {
+  const mountList = (
+    integrations: ReadonlyArray<UserIntegration>,
+    choices: { canAdd: boolean },
+  ) => {
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-    client.setQueryData(myIntegrationsQuery.queryKey, []);
-    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
+    client.setQueryData(myIntegrationsQuery.queryKey, integrations);
+    client.setQueryData(personalServersQuery.queryKey, { ...choices, servers: [] });
     render(
       <QueryClientProvider client={client}>
         <ConfirmProvider>
@@ -266,30 +271,68 @@ describe("integrations list", () => {
         </ConfirmProvider>
       </QueryClientProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add MCP server" }));
-    expect(await screen.findByText("Add an MCP server")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  };
+  const wiki = { ...outline(null), id: "wiki", name: "Wiki" };
+  const mine = {
+    ...outline({ authKind: "none" }),
+    id: "mcp",
+    kind: "mcp",
+    name: "Mine",
+    personal: true,
+  };
+
+  it("lists what one connected or added, and adds the rest from one directory", async () => {
+    const user = userEvent.setup();
+    mountList([outline({}), wiki, mine], { canAdd: true });
+    expect(screen.getByText("Outline")).toBeInTheDocument();
+    expect(screen.getByText("Your own server")).toBeInTheDocument();
+    // Not connected yet, so it waits in the directory.
+    expect(screen.queryByText("Wiki")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    expect(within(directory).queryByRole("button", { name: /^Outline/ })).toBeNull();
+    // Known servers come from the admin like anything else, never from the catalog itself.
+    expect(within(directory).queryByRole("button", { name: /^Trello/ })).toBeNull();
+    // What an admin set up connects on its own page.
+    await user.click(within(directory).getByRole("button", { name: /^Wiki/ }));
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/settings/integrations/$integrationId",
+      params: { integrationId: "wiki" },
+    });
+
+    // An address of one's own asks for it, and saves with what was typed.
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    await user.click(screen.getByRole("button", { name: /^MCP server by address/ }));
+    expect(await screen.findByLabelText(/Server address/)).toHaveValue("");
+    await user.type(screen.getByLabelText("Name"), "Docs");
+    await user.type(screen.getByLabelText(/Server address/), "https://mcp.example.com/mcp");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() =>
+      expect(savePersonalServer).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: "Docs",
+          config: expect.objectContaining({ url: "https://mcp.example.com/mcp" }),
+        }),
+      }),
+    );
   });
 
-  it("keeps one's own servers apart from the admin's", () => {
-    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-    client.setQueryData(myIntegrationsQuery.queryKey, [
-      outline({}),
-      { ...outline({ authKind: "none" }), id: "mcp", kind: "mcp", name: "Mine", personal: true },
-    ]);
-    client.setQueryData(personalServersQuery.queryKey, { canAdd: true, servers: [] });
-    render(
-      <QueryClientProvider client={client}>
-        <ConfirmProvider>
-          <IntegrationsSettingsPage />
-        </ConfirmProvider>
-      </QueryClientProvider>,
+  it("offers a known server an admin added like any of theirs, and no address without leave", async () => {
+    const user = userEvent.setup();
+    mountList(
+      [{ ...outline(null), id: "mcp-1", kind: "mcp", name: "Team Linear", server: "linear" }],
+      { canAdd: false },
     );
-    const admins = screen.getByRole("heading", { name: "From your admin" }).closest("section")!;
-    const own = screen.getByRole("heading", { name: "Your MCP servers" }).closest("section")!;
-    expect(admins).toHaveTextContent("Outline");
-    expect(admins).not.toHaveTextContent("Mine");
-    expect(own).toHaveTextContent("Mine");
-    expect(own).toHaveTextContent("Only you use it");
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    expect(within(directory).getByRole("button", { name: /^Team Linear/ })).toBeInTheDocument();
+    expect(within(directory).queryByRole("button", { name: /by address/ })).toBeNull();
+  });
+
+  it("says when there is nothing to add", () => {
+    mountList([], { canAdd: false });
+    expect(screen.getByText("No integrations yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add integration" })).toBeNull();
   });
 });

@@ -10,8 +10,17 @@ import type { ComponentProps, ComponentType } from "react";
 export type ToolAccess = "read" | "write" | "destructive";
 
 /**
- * What any screen needs to show one tool, whether the code ships it or an
- * admin approved it from a server's catalog.
+ * An admin's word on one tool, for everyone: off, or what it really does
+ * when the server's own claim is wrong. Absent keys leave it as it comes.
+ */
+export interface ToolSetting {
+  readonly off?: true;
+  readonly access?: ToolAccess;
+}
+
+/**
+ * What any screen needs to show one tool, whether the code ships it or a
+ * server lists it.
  */
 export interface IntegrationToolInfo {
   /** The handler's key; the model sees `int_<integration>__<name>`. */
@@ -145,12 +154,17 @@ export interface OAuthSetup {
  * admin, the composer, tool rows, approvals and knowledge sources. Behaviour
  * lives in the server adapter with the same id.
  */
+/** Where the add dialog files a service. */
+export type IntegrationCategory = "projects" | "docs" | "developer" | "productivity";
+
 export interface IntegrationManifest {
   /** The type: what instances name as their `kind`, and the adapter with the same key. */
   readonly kind: string;
   readonly name: string;
   readonly description: string;
   readonly logo: ComponentType<ComponentProps<"svg">>;
+  /** Null for a type that is no one service: the add dialog offers MCP as its own way in. */
+  readonly category: IntegrationCategory | null;
   readonly adminFields: ReadonlyArray<IntegrationField>;
   /**
    * Present when the service can act as an OAuth provider for us. `when`
@@ -186,11 +200,11 @@ export interface IntegrationManifest {
     readonly when: NonNullable<IntegrationField["when"]>;
   } | null;
   /**
-   * `static`: the code ships `tools`. `catalog`: each integration's tools come
-   * from its server and are offered only once an admin approved them, so
-   * `tools` is empty and screens read the integration's own list.
+   * `static`: the code ships `tools`. `catalog`: each integration's tools are
+   * what its server lists to each account, so `tools` is empty and screens
+   * read the integration's or the account's own list.
    */
-  readonly toolSource: "static" | "catalog";
+  readonly toolSource: "static" | "listed";
   readonly tools: ReadonlyArray<IntegrationToolDefinition>;
   readonly allowances: ReadonlyArray<IntegrationAllowance>;
   /**

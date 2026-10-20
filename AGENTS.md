@@ -70,8 +70,8 @@ edit the wrong thing.
 - **integration / type / connection / source**: a type is a service the code ships an
   adapter for (Outline, Outlook, Jira, or any MCP server); an integration is an
   admin-configured instance of a type, with its own id and name, so there may be two of one
-  type. An MCP integration offers only the tools an admin approved from its server's
-  catalog. Stored `integrationId`s
+  type. An MCP integration offers what its server lists to each account, with the admin's
+  word on single tools on top; nobody approves a listing. Stored `integrationId`s
   name the integration, never the type. A connection is one account of one person, with
   their own credentials, except an MCP shared key: the admin's key for everyone, offered
   read tools only. A person may connect several accounts to one integration; chats, grants,
@@ -270,9 +270,9 @@ skipped one on purpose.
 - `docs/internals/integrations.md`: connected services. Manifest and adapter, per-person
   connections and token refresh, OAuth bound to the starting browser, consent levels,
   schedule grants, knowledge sources.
-- `docs/internals/mcp.md`: remote MCP servers as an integration type. Approved tool
-  catalogs and drift, access from untrusted hints, discovered OAuth, origin locking,
-  elicitation, the shared key that only reads.
+- `docs/internals/mcp.md`: remote MCP servers as an integration type. Tool listings per
+  account, the admin's word on single tools, access from the server's own hints, known
+  servers, discovered OAuth, origin locking, elicitation, the shared key that only reads.
 - `docs/internals/mcp-server.md`: this instance as an MCP server. The OAuth provider inside
   the auth instance, opaque tokens checked in-process, what every request re-checks, grants
   that outlive the consenting browser, and why the router never sees a signed query. Delegated

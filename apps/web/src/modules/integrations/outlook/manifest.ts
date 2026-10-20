@@ -8,6 +8,7 @@ export const outlookManifest = {
   description:
     "Search and read Outlook mail, check calendars, draft and send mail, and create events.",
   logo: OutlookLogo,
+  category: "productivity",
   adminFields: [
     {
       key: "tenant",

@@ -14,7 +14,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Switch } from "~/ui/primitives/switch";
-import { findIntegrationType } from "../catalog.ts";
+import { integrationLook } from "../client/directory.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import type { ComposerIntegrations } from "../client/use-chat-integrations.ts";
 import { ConnectActions } from "./connect-actions.tsx";
@@ -61,7 +61,7 @@ export function AddIntegrationDialog({
         ) : (
           <ul className="flex min-w-0 flex-col gap-2">
             {list.map((integration) => {
-              const manifest = findIntegrationType(integration.kind);
+              const manifest = integrationLook(integration);
               if (!manifest) return null;
               // Each working account it has in this chat, switched on its own.
               const here = chat.items.filter((item) => item.integrationId === integration.id);

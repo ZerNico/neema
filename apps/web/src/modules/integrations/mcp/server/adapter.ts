@@ -11,12 +11,10 @@ import type {
   OfferedTool,
 } from "../../server/adapter.ts";
 import {
-  applyDecisions,
   argumentDetails,
   argumentsInFull,
   briefValue,
   MCP_LIMITS,
-  offeredEntries,
   summarizeArguments,
   type McpToolEntry,
 } from "../catalog.ts";
@@ -359,20 +357,8 @@ export const mcpAdapter: IntegrationAdapter = {
   scopeOptions: null,
   handlers: {},
   knowledge: null,
-  catalog: {
+  listing: {
     tool: (integrationId, entry) => (isEntry(entry) ? offered(integrationId, entry) : null),
-    offer: (approved, latest) =>
-      offeredEntries(approved.filter(isEntry), latest ? latest.filter(isEntry) : null),
-
-    apply: (approved, latest, decisions) => {
-      const next = applyDecisions(approved.filter(isEntry), latest.filter(isEntry), decisions);
-      const enabled = next.filter((entry) => entry.enabled).length;
-      if (enabled > MCP_LIMITS.enabledTools)
-        return {
-          error: `Turn on at most ${MCP_LIMITS.enabledTools} tools; models choose poorly among more.`,
-        };
-      return { approved: next };
-    },
     list: (session, integrationId, previous) =>
       Effect.scoped(
         Effect.gen(function* () {

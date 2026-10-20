@@ -5,62 +5,54 @@ type. Everything integrations already do applies to it unchanged: per-person con
 allow, ask or block per tool, approvals, schedule grants, tool rows, citations, branch and
 reload. This page is what MCP adds. Read [integrations](integrations.md) first.
 
-## Tools come from a catalog an admin approved
+## Tools are what the server lists to each account
 
-A shipped type's tools are code. An MCP server's tools are whatever it lists, and a server
-can change a description at any time, so a description is the one input a server writes
-straight into the model's context. That is the attack (tool poisoning, a "rug pull") the
-design is built around. The model therefore only ever sees descriptions an admin approved.
+A shipped type's tools are code. An MCP server's tools are whatever it lists, and a server can
+change a description at any time. Whoever adds a server vouches for it: the admin for a shared
+one, the owner for their own. So what it lists is offered as listed, at the access it claims,
+with nobody approving each change. The admin's word on single tools (`tool_settings` on the
+integration: off for everyone, or a corrected access) applies on top and never waits on a
+listing.
 
-`integration_tool_catalogs` keeps two lists per integration. `approved` is what the admin
-reviewed, with their decisions (on or off, and the access class). `latest` is what the server
-listed at the last check that worked. Each entry carries a fingerprint over everything the
-server said about the tool (name, title, description, both schemas, annotations), computed
-over canonical JSON so a reordered schema is not a change. A generation offers a tool only
-when it is approved, on, supported, and `latest` lists it with the same fingerprint:
+Accounts may see different tools (one Atlassian account has Confluence, another not), so
+`integration_tool_listings` keeps one listing per account, keyed by its connection. A way in
+with no account of one's own (open, or the admin's key) shows everyone the same tools, so it
+keeps one listing with no connection. A session offers its account's listing, without the
+tools that cannot be offered, in the server's order, capped at `MCP_LIMITS.enabledTools`. With
+several accounts in a chat, each tool is offered for the accounts whose listing has it, and a
+call goes out with that account's own version.
 
-- unchanged tools keep working;
-- a new or changed tool waits for review, never runs under words nobody read;
-- a tool the server dropped is gone at once, the safe direction.
-
-The same check runs again as each call goes out, after any approval wait, against the
+Each entry carries a fingerprint over everything the server said about the tool (name, title,
+description, both schemas, annotations), computed over canonical JSON so a reordered schema is
+not a change. The check runs again as each call goes out, after any approval wait, against the
 fingerprint and access the answer was offered: a tool turned off, reclassified or changed
-meanwhile does not run, however long the answer has been going.
+meanwhile does not run, however long the answer has been going. A tool keeps its model-facing
+key from the first listing that named it, across every account's listing, which keeps the tool
+block byte-stable for [prompt caching](prompt-caching.md) and never renames a tool the model
+already knows.
 
-An approval names the listing it was made on and how many approvals came before
-(`version`), so an admin cannot approve a listing they did not see, nor overwrite another
-admin's approval of it. A check that finds the same tools keeps the listing's id, so the
-background sweep does not void an open review. Offered tools keep
-the server's order and a model-facing key fixed at first approval, which keeps the tool
-block byte-stable for [prompt caching](prompt-caching.md) and never renames a tool the
-model already knows.
+A new account lists at once, in the request that connected it, so it has tools straight away.
+Afterwards `IntegrationCatalogSweep` lists what is due (a claim with a lease, every ten minutes,
+only for integrations that are on), each listing with the account it belongs to, and only while
+that account may still use the integration. Each check takes a token as it starts and only the
+newest token may write, so a slow check never puts back a listing a newer one replaced. Each
+check sets the next one from the server's `ttlMs` hint, between an hour and a day. An admin's
+"check now" lists without an account where the server allows that, and with the admin's own
+accounts, never anyone else's.
 
-An approval is of one server, not of words that happen to match: another server empties both
-lists in the same transaction, and the review starts over.
-
-Checks run when the admin asks, and in the background through `IntegrationCatalogSweep`
-(a claim with a lease, like schedules, every ten minutes, only for integrations that are on).
-Each check takes a token as it starts and only the newest token may write, so a slow check
-never puts back a listing a newer one replaced. Each check sets the next one
-from the server's `ttlMs` hint, between an hour and a day. A check the admin asks for runs as
-them. A background check runs as the admin who last reviewed, since listing may show what
-only an account can see. That uses their personal connection unattended, so it does so only
-while the database still holds what `requireAdmin` asks of their own requests: an eligible
-account (approved and not banned) with the admin role, read together in one query. Otherwise
-it lists as nobody, which can make approved tools that only the reviewer could see look
-withdrawn until an admin checks again. An open or shared-key server needs nobody.
+Another server (a new fingerprint) deletes every listing in the same transaction as the save.
 
 ## One server per revision
 
-Several things outlive the moment they start: a check, an open review, a sign-in, a
-prepared call waiting for approval, a refresh waiting for its row lock. Each must finish
+Several things outlive the moment they start: a check, a sign-in, a prepared call waiting
+for approval, a refresh waiting for its row lock. Each must finish
 against the server it started with. Comparing addresses read earlier does not hold: a save
 in between, or a move away and back, passes any such comparison.
 
 So `integration_configs` keeps the adapter's fingerprint of its setup and a `revision`. A
 save locks the row, compares the stored fingerprint and client ID with the new ones, and
-bumps the revision when either changed; only then does it reset the catalog and the issuer
-pin. Everything started under a revision carries it, and every write it makes requires it
+bumps the revision when either changed; only then does it drop the listings and the issuer
+pin. The admin's word on a tool is not part of it, so turning a tool off reconnects nobody. Everything started under a revision carries it, and every write it makes requires it
 in the same statement: recording a check, pinning an issuer, saving a connection (a sign-in
 whose code exchange outlived a save fails like one that found the save first), and handing
 a session its credential, which a refresh checks again with the integration's row and then
@@ -68,13 +60,14 @@ the connection's locked. This applies to every integration type, not only MCP, a
 sits beside the per-credential identity in [integrations](integrations.md): the revision
 names the server, the account epoch and credential revision name whose token it is.
 
-## Access is the admin's call, defaulting to the worst case
+## Access defaults to the worst case
 
-Annotations are hints from a party we do not trust, so the spec's defaults apply.
-`readOnlyHint` reads as read; `destructiveHint: false` as a write; anything else, including
-saying nothing, as destructive. A destructive tool always asks unless a person allows it in
-Settings, and never runs in a scheduled run. The review shows the hint and lets the admin
-choose; their choice sticks across later listings.
+Annotations are the server's own word, so the spec's defaults apply. `readOnlyHint` reads as
+read; `destructiveHint: false` as a write; anything else, including saying nothing, as
+destructive. A destructive tool always asks unless a person allows it in Settings, and never
+runs in a scheduled run. An admin corrects a tool whose claim is wrong on the integration's
+page; the correction sticks across later listings, since it is kept by the server's name for
+the tool.
 
 ## Ways in
 
@@ -103,20 +96,29 @@ disconnecting that returns them to the shared way. When the admin moves the serv
 which way without an account it uses, those connections follow on the next read.
 
 The fingerprint names where credentials go (the address and the header), not which ways are
-open, so opening another way asks nobody to reconnect and keeps the review. A connection
+open, so opening another way asks nobody to reconnect and keeps the listings. A connection
 whose way the admin closed reads as needing to reconnect, judged by its kind wherever a
 session or credential is handed out.
+
+## Known servers
+
+`mcp/known-servers.ts` names servers people commonly connect (Atlassian, Notion, Linear and
+others), each checked to sign in without registering an app first. Adding one is adding an
+ordinary MCP integration at its address with signing in as its way in, on at once: there is
+nothing to fill in. Which known server an integration is, for its logo and description, is read
+from its address each time, not stored. Some services need their own admin first, which nothing
+here can do or detect: Atlassian lets in only domains its organization admin allowed, so its
+`setup` note names this app's origin before anyone tries to sign in.
 
 ## Servers a person adds
 
 With the `mcpServers` capability, a person may add a server for themselves. It is an
 ordinary `integration_configs` row with an `owner_user_id`, so everything above applies, with
-the owner where the admin would be: they review its catalog, the sweep lists as them, and only
-they may use it. `integrationUsableBy` decides this in SQL, so losing the capability, or the
-account, stops the server everywhere at once without deleting it. Others never see it: not in
-their lists, the directory or the admin's page, and an agent cannot name one that is not the
-author's own. Names are unique among what one person sees (the admin's and their own), not
-across everyone.
+the owner where the admin would be: the sweep lists as them, and only they may use it.
+`integrationUsableBy` decides this in SQL, so losing the capability, or the account, stops the
+server everywhere at once without deleting it. Others never see it: not in their lists, the
+directory or the admin's page, and an agent cannot name one that is not the author's own.
+Names are unique among what one person sees (the admin's and their own), not across everyone.
 
 The address is the one thing that differs. An admin's server may be private because the admin
 chose it; a person's must be public HTTPS, or anyone could point the app at the internal

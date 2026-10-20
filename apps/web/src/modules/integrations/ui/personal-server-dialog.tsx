@@ -17,9 +17,12 @@ import { Input } from "~/ui/primitives/input";
 import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import { fieldDefaults, fieldShown, fieldValues } from "../fields.ts";
 import type { IntegrationField } from "../manifest.ts";
+import { knownMcpServerWithUrl } from "../mcp/known-servers.ts";
 import { mcpManifest } from "../mcp/manifest.ts";
-import { PERSONAL_SERVER_FIELDS, type PersonalServer } from "../schema.ts";
+import { PERSONAL_SERVER_FIELDS, type PersonalServer, type PersonalServers } from "../schema.ts";
 import { savePersonalServer } from "../server/functions.ts";
+import { DirectoryDialogContent, IntegrationDirectory } from "./integration-directory.tsx";
+import { byName, type DirectoryEntry } from "./directory-entries.ts";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 
 const MCP_FIELDS: ReadonlyArray<IntegrationField> = mcpManifest.adminFields;
@@ -55,13 +58,36 @@ const initialConfig = (stored: Readonly<Record<string, string>>) => {
   return values;
 };
 
-/** Adds or edits an MCP server of one's own; a new one opens on its page to review its tools. */
+/** Only what is shown: a header left from a way since unticked is not sent. */
+const sent = (config: Readonly<Record<string, string>>) =>
+  Object.fromEntries(
+    FIELDS.filter((field) => fieldShown(field, config, FIELDS)).map((field) => [
+      field.key,
+      config[field.key] ?? "",
+    ]),
+  );
+
+const NONE: ReadonlyArray<never> = [];
+
+/** A known server's address and sign-in come with it, so renaming asks only the name. */
+const KNOWN_KEYS = new Set(["url", "ways"]);
+
+/**
+ * Adds an integration, or edits a server of one's own. Adding starts from one
+ * directory: what an admin set up, to connect on its page, and any address for
+ * someone allowed to add servers of their own, which then opens on its page.
+ */
 export function PersonalServerDialog({
   server,
+  choices,
+  shared = NONE,
   open,
   onOpenChange,
 }: {
   server: PersonalServer | null;
+  choices: Pick<PersonalServers, "canAdd">;
+  /** Integrations an admin set up that this person has not connected. */
+  shared?: ReadonlyArray<DirectoryEntry>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -73,6 +99,10 @@ export function PersonalServerDialog({
     initialConfig(server?.config ?? {}),
   );
   const [error, setError] = useState<string | null>(null);
+  // A new server starts in the directory, until its address is asked for.
+  const [byAddress, setByAddress] = useState(server !== null);
+  // A server at a known address: its address and sign-in stay as they came.
+  const known = server ? knownMcpServerWithUrl(server.config.url) : null;
   const shown = FIELDS.filter((field) => fieldShown(field, config, FIELDS));
 
   const refresh = () =>
@@ -81,14 +111,9 @@ export function PersonalServerDialog({
       queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
     ]);
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: { name: string; config: Record<string, string> }) =>
       savePersonalServer({
-        data: {
-          integrationId: server?.id ?? null,
-          name: name.trim(),
-          // Only what is shown: a header left from a way since unticked is not sent.
-          config: Object.fromEntries(shown.map((field) => [field.key, config[field.key] ?? ""])),
-        },
+        data: { integrationId: server?.id ?? null, name: input.name.trim(), config: input.config },
       }),
     onSuccess: async (result) => {
       if (!result.ok) {
@@ -106,6 +131,9 @@ export function PersonalServerDialog({
     onError: () => setError("Could not save the server."),
   });
   const busy = save.isPending;
+  const entries = shared.toSorted(byName);
+  // A new server keeps the directory’s width, so its step reads as the same dialog.
+  const FormContent = server ? DialogContent : DirectoryDialogContent;
 
   return (
     <Dialog
@@ -115,52 +143,104 @@ export function PersonalServerDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{server ? `Set up ${server.name}` : "Add an MCP server"}</DialogTitle>
-          <DialogDescription>
-            Only you use it. Chats get only the tools you approve.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
-              <Input
-                id={`${fieldId}-name`}
-                value={name}
-                maxLength={60}
-                onChange={(event) => setName(event.target.value)}
-                disabled={busy}
-              />
-            </Field>
-            {shown.map((field) => (
-              <IntegrationFieldControl
-                key={field.key}
-                id={`${fieldId}-${field.key}`}
-                field={field}
-                value={config[field.key] ?? ""}
-                onChange={(value) => setConfig((current) => ({ ...current, [field.key]: value }))}
-                disabled={busy}
-              />
-            ))}
-          </FieldGroup>
-          {error ? <FieldError>{error}</FieldError> : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={busy} />}>Cancel</DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
-              {server ? "Save" : "Add"}
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+      {!byAddress ? (
+        <DirectoryDialogContent browsing={entries}>
+          <DialogHeader>
+            <DialogTitle>Add integration</DialogTitle>
+          </DialogHeader>
+          <IntegrationDirectory
+            entries={entries}
+            custom={
+              choices.canAdd
+                ? {
+                    label: "MCP server by address",
+                    onPick: () => {
+                      setByAddress(true);
+                      setName("");
+                      setConfig(initialConfig({}));
+                    },
+                  }
+                : null
+            }
+            onPick={(entry) => {
+              // Set up by an admin: connecting happens on its page.
+              onOpenChange(false);
+              void navigate({
+                to: "/settings/integrations/$integrationId",
+                params: { integrationId: entry.integrationId ?? entry.key },
+              });
+            }}
+          />
+        </DirectoryDialogContent>
+      ) : (
+        <FormContent>
+          <DialogHeader>
+            <DialogTitle>
+              {server
+                ? known
+                  ? `Rename ${server.name}`
+                  : `Set up ${server.name}`
+                : "Add an MCP server"}
+            </DialogTitle>
+            <DialogDescription>Only you use it. Chats get the tools it lists.</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setError(null);
+              save.mutate({ name, config: sent(config) });
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
+                <Input
+                  id={`${fieldId}-name`}
+                  value={name}
+                  maxLength={60}
+                  onChange={(event) => setName(event.target.value)}
+                  disabled={busy}
+                />
+              </Field>
+              {shown
+                .filter((field) => !(known && KNOWN_KEYS.has(field.key)))
+                .map((field) => (
+                  <IntegrationFieldControl
+                    key={field.key}
+                    id={`${fieldId}-${field.key}`}
+                    field={field}
+                    value={config[field.key] ?? ""}
+                    onChange={(value) =>
+                      setConfig((current) => ({ ...current, [field.key]: value }))
+                    }
+                    disabled={busy}
+                  />
+                ))}
+            </FieldGroup>
+            {error ? <FieldError>{error}</FieldError> : null}
+            <DialogFooter>
+              {server ? (
+                <DialogClose render={<Button variant="outline" disabled={busy} />}>
+                  Cancel
+                </DialogClose>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setByAddress(false)}
+                >
+                  Back
+                </Button>
+              )}
+              <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
+                {server ? "Save" : "Add"}
+              </PendingButton>
+            </DialogFooter>
+          </form>
+        </FormContent>
+      )}
     </Dialog>
   );
 }

@@ -37,7 +37,7 @@ export function ConnectActions({
   const [keyOpen, setKeyOpen] = useState(false);
   if (!manifest) return null;
   // A server from a catalog is known by its own name, not its type's.
-  const service = manifest.toolSource === "catalog" ? integration.name : manifest.name;
+  const service = manifest.toolSource === "listed" ? integration.name : manifest.name;
   const open = !another && integration.methods.open;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">

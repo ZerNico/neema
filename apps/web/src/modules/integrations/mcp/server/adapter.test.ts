@@ -168,7 +168,7 @@ const sessionAt = (
 });
 
 const list = (session: IntegrationSession) =>
-  Effect.runPromise(mcpAdapter.catalog!.list(session, "mcp", []));
+  Effect.runPromise(mcpAdapter.listing!.list(session, "mcp", []));
 
 const run = (
   session: IntegrationSession,
@@ -176,7 +176,7 @@ const run = (
   args: unknown,
   call?: CallContext,
 ) => {
-  const tool = mcpAdapter.catalog!.tool("mcp", { ...entry, enabled: true })!;
+  const tool = mcpAdapter.listing!.tool("mcp", entry)!;
   return Effect.runPromiseExit(
     tool.prepare(session, args, call).pipe(Effect.flatMap((prepared) => prepared.execute)),
   );
@@ -206,7 +206,6 @@ describe("an MCP server through the adapter", () => {
       "broken",
       "deploy",
     ]);
-    expect(listed.entries.every((entry) => !entry.enabled)).toBe(true);
     expect(listed.entries.map((entry) => entry.access)).toEqual([
       "read",
       "write",
@@ -244,7 +243,7 @@ describe("an MCP server through the adapter", () => {
     try {
       // The first try still trusts the old answer and fails; it is forgotten for the next.
       await Effect.runPromiseExit(
-        mcpAdapter.catalog!.list(sessionAt("/switch", credential), "mcp", []),
+        mcpAdapter.listing!.list(sessionAt("/switch", credential), "mcp", []),
       );
       const again = await list(sessionAt("/switch", credential));
       expect(again.server.protocol).not.toBe("2026-07-28");
@@ -307,7 +306,6 @@ describe("an MCP server through the adapter", () => {
         inputSchema: { type: "object", properties: {} },
         annotations: {},
         access: "read",
-        enabled: true,
         fingerprint: "f",
       },
     );
@@ -339,7 +337,6 @@ describe("an MCP server through the adapter", () => {
         inputSchema: { type: "object", properties: {} },
         annotations: {},
         access: "read",
-        enabled: true,
         fingerprint: "f",
       },
     );
@@ -434,7 +431,7 @@ describe("an MCP server through the adapter", () => {
       const good = await list(sessionAt("/secure", { kind: "api_key", values: { token: "good" } }));
       expect(good.entries).toHaveLength(4);
       const refused = await Effect.runPromiseExit(
-        mcpAdapter.catalog!.list(
+        mcpAdapter.listing!.list(
           sessionAt("/secure", { kind: "api_key", values: { token: "bad" } }),
           "mcp",
           [],
@@ -448,7 +445,7 @@ describe("an MCP server through the adapter", () => {
       const identity = { connectionId: "c", accountEpoch: "epoch", credentialRevision: "old" };
       const bad = sessionAt("/secure", { kind: "api_key", values: { token: "bad" }, identity });
       const called = await run(bad, byName(good.entries, "search"), { q: "x" });
-      const listed = await Effect.runPromiseExit(mcpAdapter.catalog!.list(bad, "mcp", []));
+      const listed = await Effect.runPromiseExit(mcpAdapter.listing!.list(bad, "mcp", []));
       const failureOf = (exit: Exit.Exit<unknown, unknown>) =>
         Exit.isFailure(exit) ? Option.getOrNull(Cause.findErrorOption(exit.cause)) : null;
       for (const failure of [failureOf(called), failureOf(listed)])

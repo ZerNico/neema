@@ -175,7 +175,7 @@ const featureGroups: ReadonlyArray<{
       },
       {
         label: "Their own MCP servers",
-        description: "Add public MCP servers for themselves and approve their tools.",
+        description: "Add public MCP servers for themselves.",
         key: "mcpServers",
       },
     ],

@@ -4,7 +4,7 @@ import type { ToolAccess } from "../manifest.ts";
 /** A JSON Schema as the server sent it, which is JSON by construction. */
 export type JsonSchemaObject = { readonly [key: string]: JsonValue };
 
-/** What a server says about a tool's behaviour; hints only, until an admin confirms them. */
+/** What a server says about a tool's behaviour; an admin may correct the access it implies. */
 export interface McpAnnotations {
   readonly title?: string;
   readonly readOnlyHint?: boolean;
@@ -14,10 +14,9 @@ export interface McpAnnotations {
 }
 
 /**
- * One tool of an MCP server as stored: everything the server said, made safe
- * to offer, plus the admin's decisions once reviewed. The server's own parts
- * are covered by `fingerprint`, so a changed description or schema is a
- * different tool until someone approves it.
+ * One tool of an MCP server as listed: everything the server said, made safe
+ * to offer. The server's own parts are covered by `fingerprint`, so a call
+ * prepared against one version never goes out under another.
  */
 export interface McpToolEntry {
   /** The model-facing suffix after `int_<integration>__`; kept for the tool's lifetime. */
@@ -36,11 +35,8 @@ export interface McpToolEntry {
   /** Only whether there is one matters: results are never checked against it. */
   readonly outputSchema?: JsonSchemaObject;
   readonly annotations: McpAnnotations;
-  /** Read from the annotations, or what the admin chose. */
+  /** Read from the annotations; the admin's tool settings may correct it. */
   readonly access: ToolAccess;
-  /** The admin chose `access` rather than taking the annotations' word. */
-  readonly accessChosen?: boolean;
-  readonly enabled: boolean;
   /** Why it can never be offered as the server describes it. */
   readonly unsupported?: string;
   readonly fingerprint: string;
@@ -49,7 +45,7 @@ export interface McpToolEntry {
 export const MCP_LIMITS = {
   descriptionChars: 2_000,
   schemaBytes: 32_000,
-  /** Offered at most; the admin turns off the rest. */
+  /** Offered at most, in the server's order; the admin turns off the rest. */
   enabledTools: 64,
   listedTools: 500,
   resultChars: 40_000,
@@ -89,9 +85,10 @@ const tag = (value: string) => {
 export const keyBudget = (integrationId: string) => 64 - `int_${integrationId}__`.length;
 
 /**
- * Model-safe keys for a listing. A tool keeps the key it was approved under,
- * so renaming nothing on the server never renames anything for the model;
- * new ones are cleaned, cut to fit and tagged when they would collide.
+ * Model-safe keys for a listing. A tool keeps the key it was first listed
+ * under, by any account, so renaming nothing on the server never renames
+ * anything for the model; new ones are cleaned, cut to fit and tagged when
+ * they would collide.
  */
 export const assignKeys = (
   integrationId: string,
@@ -99,7 +96,10 @@ export const assignKeys = (
   previous: ReadonlyMap<string, string>,
 ) => {
   const budget = keyBudget(integrationId);
-  const taken = new Set<string>();
+  // A key another tool holds stays its own, even one this listing does not name:
+  // another account's listing of the same server may still offer it.
+  const listed = new Set(names);
+  const taken = new Set([...previous].flatMap(([name, key]) => (listed.has(name) ? [] : [key])));
   const keys = new Map<string, string>();
   for (const name of names) {
     const kept = previous.get(name);
@@ -121,93 +121,6 @@ export const assignKeys = (
     keys.set(name, key);
   }
   return keys;
-};
-
-export type CatalogChange =
-  | { readonly kind: "added"; readonly entry: McpToolEntry }
-  | { readonly kind: "changed"; readonly entry: McpToolEntry; readonly before: McpToolEntry }
-  | { readonly kind: "removed"; readonly before: McpToolEntry }
-  | { readonly kind: "unchanged"; readonly entry: McpToolEntry; readonly before: McpToolEntry };
-
-/** What the server lists now against what was approved, in the server's order. */
-export const diffCatalog = (
-  approved: ReadonlyArray<McpToolEntry>,
-  latest: ReadonlyArray<McpToolEntry> | null,
-): CatalogChange[] => {
-  if (latest === null)
-    return approved.map((entry) => ({ kind: "unchanged", entry, before: entry }));
-  const before = new Map(approved.map((entry) => [entry.mcpName, entry]));
-  const now = new Set(latest.map((entry) => entry.mcpName));
-  const changes: CatalogChange[] = latest.map((entry) => {
-    const old = before.get(entry.mcpName);
-    if (!old) return { kind: "added", entry };
-    return old.fingerprint === entry.fingerprint
-      ? { kind: "unchanged", entry, before: old }
-      : { kind: "changed", entry, before: old };
-  });
-  for (const old of approved)
-    if (!now.has(old.mcpName)) changes.push({ kind: "removed", before: old });
-  return changes;
-};
-
-/** Whether anything waits for the admin: a tool new, changed or gone since approval. */
-export const hasPendingChanges = (
-  approved: ReadonlyArray<McpToolEntry>,
-  latest: ReadonlyArray<McpToolEntry> | null,
-) => diffCatalog(approved, latest).some((change) => change.kind !== "unchanged");
-
-/**
- * What a generation may offer: approved, enabled, supported, and still what
- * the server lists. A tool changed since approval waits for review rather
- * than running under a description nobody read; one the server dropped is
- * gone at once, the safe direction.
- */
-export const offeredEntries = (
-  approved: ReadonlyArray<McpToolEntry>,
-  latest: ReadonlyArray<McpToolEntry> | null,
-) => {
-  // No listing to compare with means nothing is known to still hold: offer nothing.
-  if (!latest) return [];
-  const current = new Map(latest.map((entry) => [entry.mcpName, entry]));
-  return approved.filter(
-    (entry) =>
-      entry.enabled &&
-      !entry.unsupported &&
-      current.get(entry.mcpName)?.fingerprint === entry.fingerprint,
-  );
-};
-
-/** The admin's decision on one listed tool. */
-export interface CatalogDecision {
-  readonly mcpName: string;
-  readonly enabled: boolean;
-  readonly access: ToolAccess;
-}
-
-/**
- * The catalog after a review: exactly what the server lists now, in its
- * order, with the admin's decisions applied. A tool the admin left out of
- * the decisions keeps its earlier choice, or comes in off.
- */
-export const applyDecisions = (
-  approved: ReadonlyArray<McpToolEntry>,
-  latest: ReadonlyArray<McpToolEntry>,
-  decisions: ReadonlyArray<CatalogDecision>,
-): McpToolEntry[] => {
-  const byName = new Map(decisions.map((decision) => [decision.mcpName, decision]));
-  const before = new Map(approved.map((entry) => [entry.mcpName, entry]));
-  return latest.map((entry) => {
-    const decision = byName.get(entry.mcpName);
-    const old = before.get(entry.mcpName);
-    const enabled = !entry.unsupported && (decision?.enabled ?? old?.enabled ?? false);
-    const access = decision?.access ?? (old?.accessChosen ? old.access : entry.access);
-    return {
-      ...entry,
-      enabled,
-      access,
-      ...(access !== entry.access || old?.accessChosen ? { accessChosen: true } : {}),
-    };
-  });
 };
 
 /** A JSON value in one short line, for an approval card or a summary. */

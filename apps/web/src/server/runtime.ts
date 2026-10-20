@@ -20,7 +20,7 @@ import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
-import { IntegrationCatalogSweep } from "~/modules/integrations/server/catalog-sweep.ts";
+import { ToolListingSweep } from "~/modules/integrations/server/tool-listing-sweep.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { KnowledgeSourceService } from "~/modules/integrations/server/sync.ts";
@@ -137,7 +137,7 @@ const KnowledgeLayer = Layer.mergeAll(
   KnowledgeSearch.layer,
   KnowledgeService.layer,
   KnowledgeSourceService.layer,
-  IntegrationCatalogSweep,
+  ToolListingSweep,
   AgentService.layer,
   AgentDraftService.layer,
   SharingService.layer,

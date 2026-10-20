@@ -41,14 +41,15 @@ const ANONYMOUS = { key: "ways", values: ["anonymous"] };
 const SHARED = { key: "anonymous", values: ["shared"] };
 
 /**
- * Any remote MCP server. Its tools are not known here: each integration lists
- * them from its server and offers only what an admin approved.
+ * Any remote MCP server. Its tools are not known here: each integration
+ * offers what its server lists to each account.
  */
 export const mcpManifest = {
   kind: "mcp",
   name: "MCP server",
   description: "Tools from a remote Model Context Protocol server.",
   logo: McpLogo,
+  category: null,
   adminFields: [
     {
       key: "url",
@@ -145,7 +146,7 @@ export const mcpManifest = {
     fields: [{ key: "token", label: "Shared key", kind: "secret", required: true }],
     when: SHARED,
   },
-  toolSource: "catalog",
+  toolSource: "listed",
   tools: [],
   allowances: [],
   scope: null,

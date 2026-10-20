@@ -1,4 +1,5 @@
 import {
+  Add01Icon,
   ArrowRight01Icon,
   Delete02Icon,
   MoreHorizontalIcon,
@@ -13,6 +14,7 @@ import type { ToolPermission } from "../consent.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -31,12 +33,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
-import { Field, FieldLabel } from "~/ui/primitives/field";
+import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
-import { findIntegrationType } from "../catalog.ts";
+import { integrationLook } from "../client/directory.ts";
 import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
-import { hasPendingChanges } from "../mcp/catalog.ts";
+import { knownMcpServerWithUrl } from "../mcp/known-servers.ts";
 import {
   accountName,
   usesNoAccount,
@@ -44,12 +46,16 @@ import {
   type PersonalServer,
   type UserIntegration,
 } from "../schema.ts";
-import { disconnectIntegration, updateIntegrationConnection } from "../server/functions.ts";
+import {
+  checkOwnTools,
+  disconnectIntegration,
+  updateIntegrationConnection,
+} from "../server/functions.ts";
 import { ApiKeyDialog, ConnectActions, SignInButton, TurnOnButton } from "./connect-actions.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { IntegrationScopeSection } from "./integration-scope.tsx";
-import { McpToolsReview } from "./mcp-tools-review.tsx";
 import { useDeletePersonalServer } from "../client/use-delete-personal-server.ts";
+import { integrationEntry } from "./directory-entries.ts";
 import { PersonalServerDialog } from "./personal-server-dialog.tsx";
 import { ToolPermissions } from "./tool-permissions.tsx";
 
@@ -86,12 +92,21 @@ export function IntegrationsSettingsPage() {
   const { data } = useSuspenseQuery(myIntegrationsQuery);
   const { data: personal } = useSuspenseQuery(personalServersQuery);
   const [adding, setAdding] = useState(false);
-  const listed = data.filter((integration) => findIntegrationType(integration.kind));
-  const shared = listed.filter((integration) => !integration.personal);
-  const own = listed.filter((integration) => integration.personal);
+  const listed = data.filter((integration) => integrationLook(integration));
+  // Yours: what you connected or added. The rest waits in the directory.
+  const yours = listed.filter(
+    (integration) => integration.personal || integration.connections.length > 0,
+  );
+  const toConnect = listed.flatMap((integration) =>
+    integration.available && !integration.personal && integration.connections.length === 0
+      ? (integrationEntry(integration) ?? [])
+      : [],
+  );
+  const mayAdd = toConnect.length > 0 || personal.canAdd;
   const addButton = (
-    <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-      Add MCP server
+    <Button size="sm" onClick={() => setAdding(true)}>
+      <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+      Add integration
     </Button>
   );
   return (
@@ -100,17 +115,26 @@ export function IntegrationsSettingsPage() {
       description="Connect your own accounts so chats can search, read and, with your approval, change things there."
       rootPath="/settings"
       rootLabel="Settings"
+      actions={mayAdd && yours.length ? addButton : null}
     >
-      {adding ? <PersonalServerDialog server={null} open onOpenChange={setAdding} /> : null}
-      {/* Without servers of one's own there is nothing to tell these apart from. */}
-      {personal.canAdd || own.length ? (
-        shared.length ? (
-          <Section title="From your admin">
-            <IntegrationList integrations={shared} />
-          </Section>
-        ) : null
-      ) : shared.length ? (
-        <IntegrationList integrations={shared} />
+      {adding ? (
+        <PersonalServerDialog
+          server={null}
+          choices={personal}
+          shared={toConnect}
+          open
+          onOpenChange={setAdding}
+        />
+      ) : null}
+      {yours.length ? (
+        <IntegrationList integrations={yours} />
+      ) : mayAdd ? (
+        <EmptyState
+          icon={PlugSocketIcon}
+          title="Nothing connected yet"
+          description="Add an integration to use its tools in your chats."
+          action={addButton}
+        />
       ) : (
         <EmptyState
           icon={PlugSocketIcon}
@@ -118,24 +142,6 @@ export function IntegrationsSettingsPage() {
           description="An admin turns integrations on for this instance. Once they do, you can connect your account here."
         />
       )}
-      {personal.canAdd || own.length ? (
-        <Section
-          title="Your MCP servers"
-          description="Servers you added. Only you can use them."
-          actions={personal.canAdd && own.length ? addButton : null}
-        >
-          {own.length ? (
-            <IntegrationList integrations={own} />
-          ) : (
-            <EmptyState
-              icon={PlugSocketIcon}
-              title="No servers of your own"
-              description="Add a public MCP server to use its tools in your chats."
-              action={addButton}
-            />
-          )}
-        </Section>
-      ) : null}
     </Page>
   );
 }
@@ -144,7 +150,7 @@ function IntegrationList({ integrations }: { integrations: ReadonlyArray<UserInt
   return (
     <ListCard>
       {integrations.map((integration) => {
-        const manifest = findIntegrationType(integration.kind)!;
+        const manifest = integrationLook(integration)!;
         return (
           <Link
             key={integration.id}
@@ -160,7 +166,7 @@ function IntegrationList({ integrations }: { integrations: ReadonlyArray<UserInt
                   <StatusBadge integration={integration} />
                 </p>
                 <p className="text-muted-foreground truncate text-xs">
-                  {integration.personal ? "Only you use it" : manifest.description}
+                  {integration.personal ? "Your own server" : manifest.description}
                 </p>
               </div>
               <HugeiconsIcon
@@ -182,7 +188,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
   const integration = data.find((item) => item.id === integrationId);
   const server = personal.servers.find((item) => item.id === integrationId) ?? null;
   const [editing, setEditing] = useState(false);
-  const manifest = integration ? findIntegrationType(integration.kind) : null;
+  const manifest = integration ? integrationLook(integration) : null;
   if (!integration || !manifest)
     return (
       <Page title="Integration" backTo="/settings/integrations" backLabel="Integrations">
@@ -193,10 +199,6 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
         />
       </Page>
     );
-  const accounts = integration.connections;
-  const working = integration.available
-    ? accounts.filter((account) => account.status === "active")
-    : [];
   return (
     <Page
       title={integration.name}
@@ -205,10 +207,28 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
       backLabel="Integrations"
       actions={server ? <ServerActions server={server} onEdit={() => setEditing(true)} /> : null}
     >
-      {server ? <ServerSection server={server} /> : null}
       {server && editing ? (
-        <PersonalServerDialog server={server} open onOpenChange={setEditing} />
+        <PersonalServerDialog server={server} choices={personal} open onOpenChange={setEditing} />
       ) : null}
+      {server ? <ServerSection server={server} /> : null}
+      <IntegrationDetails integration={integration} server={server} />
+    </Page>
+  );
+}
+
+function IntegrationDetails({
+  integration,
+  server,
+}: {
+  integration: UserIntegration;
+  server: PersonalServer | null;
+}) {
+  const accounts = integration.connections;
+  const working = integration.available
+    ? accounts.filter((account) => account.status === "active")
+    : [];
+  return (
+    <>
       <Section title={accounts.length > 1 ? "Accounts" : "Account"}>
         <ListCard>
           {accounts.length === 0 ? (
@@ -228,19 +248,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
           ) : null}
         </ListCard>
       </Section>
-      {integration.tools.length === 0 ? (
-        <Section title="What chats can do">
-          <EmptyState
-            icon={PlugSocketIcon}
-            title="No tools yet"
-            description={
-              server
-                ? "Review this server’s tools to choose which ones chats may use."
-                : "An admin approves which of this server’s tools chats may use."
-            }
-          />
-        </Section>
-      ) : working.length ? (
+      {working.length ? (
         // Each account decides for itself: when it is on, what it reaches, what may run unasked.
         working.map((account) => (
           <AccountSettings
@@ -250,6 +258,18 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
             titled={accounts.length > 1}
           />
         ))
+      ) : integration.tools.length === 0 ? (
+        <Section title="What chats can do">
+          <EmptyState
+            icon={PlugSocketIcon}
+            title="No tools yet"
+            description={
+              server
+                ? "The server lists none yet. Check again once it does."
+                : "Its tools show once you connect."
+            }
+          />
+        </Section>
       ) : (
         <Section title="What chats can do">
           <ListCard>
@@ -261,7 +281,7 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
           </ListCard>
         </Section>
       )}
-    </Page>
+    </>
   );
 }
 
@@ -278,7 +298,7 @@ function AccountSettings({
   account: Account;
   titled: boolean;
 }) {
-  const manifest = findIntegrationType(integration.kind)!;
+  const manifest = integrationLook(integration)!;
   const update = useConnectionUpdate(account.id);
   const fieldId = useId();
   const name = accountName(account);
@@ -310,27 +330,60 @@ function AccountSettings({
             ? "Chats only read with a key everyone shares. Choose when they may."
             : "Choose when chats may use each tool. Blocked tools are never offered."
         }
+        actions={account.listing ? <CheckToolsButton integrationId={integration.id} /> : null}
       >
-        <ToolPermissions
-          kind={integration.kind}
-          byAccess={!integration.personal}
-          // Shared keys only ever read, so their other tools have nothing to set.
-          tools={
-            account.authKind === "shared"
-              ? integration.tools.filter((tool) => tool.access === "read")
-              : integration.tools
-          }
-          permissions={account.toolPermissions}
-          onChange={(toolPermissions) => update.mutate({ toolPermissions })}
-        />
+        {account.listing?.checkError ? <FieldError>{account.listing.checkError}</FieldError> : null}
+        {account.tools.length ? (
+          <ToolPermissions
+            kind={integration.kind}
+            // Shared keys only ever read, so the server leaves their other tools out.
+            tools={account.tools}
+            permissions={account.toolPermissions}
+            onChange={(toolPermissions) => update.mutate({ toolPermissions })}
+          />
+        ) : (
+          <EmptyState
+            icon={PlugSocketIcon}
+            title="No tools yet"
+            description="The server lists none to this account yet."
+          />
+        )}
       </Section>
     </>
   );
 }
 
-/** Changing or deleting one's own server, in the page's menu like other detail pages. */
+/** Asks the server again what it offers this person's accounts, instead of waiting for the sweep. */
+function CheckToolsButton({ integrationId }: { integrationId: string }) {
+  const queryClient = useQueryClient();
+  const check = useMutation({
+    mutationFn: () => checkOwnTools({ data: { integrationId } }),
+    onSuccess: async (result) => {
+      if (!result.ok) toastError("Could not check its tools.", new Error(result.error));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: personalServersQuery.queryKey }),
+        queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
+      ]);
+    },
+    onError: (error) => toastError("Could not check its tools.", error),
+  });
+  return (
+    <PendingButton
+      size="sm"
+      variant="outline"
+      pending={check.isPending}
+      onClick={() => check.mutate()}
+    >
+      Check again
+    </PendingButton>
+  );
+}
+
+/** Changing or removing one's own server, in the page's menu like other detail pages. */
 function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () => void }) {
   const remove = useDeletePersonalServer();
+  // A known server's address and sign-in come with it; only its name is one's own.
+  const known = knownMcpServerWithUrl(server.config.url);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -341,7 +394,7 @@ function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () 
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onEdit}>
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-          Edit server
+          {known ? "Rename" : "Edit server"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* A menu item cannot hold a spinner; disabled is its pending state. */}
@@ -351,40 +404,30 @@ function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () 
           onClick={() => void remove.request(server)}
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-          Delete server
+          Remove
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-/** A person's own server: where it is, and their review of its tools. */
+/** A person's own server: where it is, and how many tools it gives chats. */
 function ServerSection({ server }: { server: PersonalServer }) {
-  const [reviewing, setReviewing] = useState(false);
-  const { catalog } = server;
-  const waiting =
-    catalog.latest !== null &&
-    (hasPendingChanges(catalog.approved, catalog.latest) || !catalog.reviewedAt);
+  const { listing } = server;
+  const tools = listing?.count ?? 0;
   return (
     <Section title="Server">
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-              <span className="truncate">{server.config.url}</span>
-              {waiting ? <Badge variant="secondary">Tools to review</Badge> : null}
-            </span>
+            <span className="truncate text-sm font-medium">{server.config.url}</span>
             <span className="text-muted-foreground truncate text-xs">
-              {catalog.checkError ??
-                `${catalog.approved.filter((entry) => entry.enabled).length} tools approved`}
+              {listing?.checkError ?? (tools === 1 ? "1 tool" : `${tools} tools`)}
             </span>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setReviewing(true)}>
-            Review tools
-          </Button>
+          <CheckToolsButton integrationId={server.id} />
         </ListRow>
       </ListCard>
-      {reviewing ? <McpToolsReview row={server} personal onOpenChange={setReviewing} /> : null}
     </Section>
   );
 }

@@ -155,10 +155,9 @@ describe("listing entries", () => {
     { description: "nameless" },
   ];
 
-  it("keeps the server's order, drops duplicates and nameless tools, and starts everything off", () => {
+  it("keeps the server's order and drops duplicates and nameless tools", () => {
     const entries = listingEntries("mcp", tools, []);
     expect(entries.map((entry) => entry.mcpName)).toEqual(["search", "drop_table", "wide"]);
-    expect(entries.every((entry) => !entry.enabled)).toBe(true);
     expect(entries.map((entry) => entry.access)).toEqual(["read", "destructive", "destructive"]);
     expect(entries[1]!.title).toBe("Drop table");
     expect(entries[2]!.unsupported).toMatch(/longer than/);

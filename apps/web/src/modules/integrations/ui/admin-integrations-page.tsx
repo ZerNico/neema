@@ -1,60 +1,36 @@
-import {
-  Add01Icon,
-  PencilEdit02Icon,
-  PlugSocketIcon,
-  UserMultipleIcon,
-  Wrench01Icon,
-} from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowRight01Icon, PlugSocketIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { AccessDialog } from "~/modules/sharing/ui/access-dialog.tsx";
-import { OptionalMark } from "~/ui/form/form-fields.tsx";
-import { useConfirm } from "~/ui/confirm-context.ts";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
+import { Dialog, DialogFooter, DialogHeader, DialogTitle } from "~/ui/primitives/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
-import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
-import { Switch } from "~/ui/primitives/switch";
-import { findIntegrationType, INTEGRATION_TYPES } from "../catalog.ts";
+import { integrationLook } from "../client/directory.ts";
 import { adminIntegrationsQuery } from "../client/queries.ts";
-import type { IntegrationField } from "../manifest.ts";
-import type { AdminIntegration } from "../schema.ts";
+import { mcpManifest } from "../mcp/manifest.ts";
+import { createIntegration } from "../server/functions.ts";
 import {
-  createIntegration,
-  deleteIntegration,
-  saveIntegrationConfig,
-} from "../server/functions.ts";
-import { fieldDefaults, fieldShown } from "../fields.ts";
-import { IntegrationFieldControl } from "./integration-field.tsx";
+  byName,
+  freeName,
+  SERVER_ENTRIES,
+  TYPE_ENTRIES,
+  type DirectoryEntry,
+} from "./directory-entries.ts";
+import {
+  DirectoryDialogContent,
+  DirectoryEntryHeader,
+  IntegrationDirectory,
+} from "./integration-directory.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
-import { hasPendingChanges } from "../mcp/catalog.ts";
-import { McpToolsReview } from "./mcp-tools-review.tsx";
-import { OAuthSetupGuide } from "./oauth-setup-guide.tsx";
-
-type AdminRow = AdminIntegration & { redirectUri: string | null };
 
 export function AdminIntegrationsPage() {
   const { data } = useSuspenseQuery(adminIntegrationsQuery);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [sharing, setSharing] = useState<string | null>(null);
-  const [reviewing, setReviewing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const current = data.integrations.find((row) => row.id === editing) ?? null;
-  const shared = data.integrations.find((row) => row.id === sharing) ?? null;
-  const reviewed = data.integrations.find((row) => row.id === reviewing) ?? null;
   const add = (
     <Button size="sm" onClick={() => setAdding(true)}>
       <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
@@ -78,140 +54,120 @@ export function AdminIntegrationsPage() {
       ) : (
         <ListCard>
           {data.integrations.map((row) => {
-            const type = findIntegrationType(row.kind);
-            if (!type) return null;
+            const look = integrationLook(row);
+            if (!look) return null;
             const people =
               row.connectionCount === 1
                 ? "1 person connected"
                 : `${row.connectionCount} people connected`;
             return (
-              <ListRow key={row.id}>
-                <IntegrationLogo integrationId={row.id} variant="tile" />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-2 text-sm font-medium">
-                    {row.name}
-                    {row.enabled ? (
-                      <Badge variant="secondary">On</Badge>
-                    ) : (
-                      <Badge variant="outline">Off</Badge>
-                    )}
-                  </span>
-                  <span className="text-muted-foreground truncate text-xs">
-                    {/* The type only when the name does not already say it. */}
-                    {row.name === type.name ? people : `${type.name} · ${people}`}
-                  </span>
-                </div>
-                {row.catalog ? (
-                  <>
-                    {/* Something the server changed waits here before chats see it. */}
-                    {row.catalog.latest &&
-                    (hasPendingChanges(row.catalog.approved, row.catalog.latest) ||
-                      !row.catalog.reviewedAt) ? (
-                      <Badge variant="secondary">Review tools</Badge>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Tools of ${row.name}`}
-                      onClick={() => setReviewing(row.id)}
-                    >
-                      <HugeiconsIcon icon={Wrench01Icon} strokeWidth={2} />
-                    </Button>
-                  </>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Who can use ${row.name}`}
-                  onClick={() => setSharing(row.id)}
-                >
-                  <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={2} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Set up ${row.name}`}
-                  onClick={() => setEditing(row.id)}
-                >
-                  <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                </Button>
-              </ListRow>
+              <Link
+                key={row.id}
+                to="/admin/integrations/$integrationId"
+                params={{ integrationId: row.id }}
+                className="block"
+              >
+                <ListRow interactive>
+                  <IntegrationLogo integrationId={row.id} variant="tile" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      {row.name}
+                      {row.enabled ? null : <Badge variant="outline">Off</Badge>}
+                    </span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      {/* The type only when the name does not already say it. */}
+                      {row.name === look.name ? people : `${look.name} · ${people}`}
+                    </span>
+                  </div>
+                  <HugeiconsIcon
+                    strokeWidth={2}
+                    icon={ArrowRight01Icon}
+                    className="text-muted-foreground size-4 shrink-0"
+                  />
+                </ListRow>
+              </Link>
             );
           })}
         </ListCard>
       )}
-      {current ? (
-        <IntegrationConfigDialog
-          key={current.id}
-          row={current}
-          open
-          onOpenChange={(open) => !open && setEditing(null)}
-        />
-      ) : null}
-      {reviewed?.catalog ? (
-        <McpToolsReview
-          key={reviewed.id}
-          row={reviewed}
-          onOpenChange={(open) => !open && setReviewing(null)}
-        />
-      ) : null}
-      {shared ? (
-        <AccessDialog
-          resource={{ kind: "integration", id: shared.id }}
-          title={shared.name}
-          open
-          onOpenChange={(open) => !open && setSharing(null)}
-        />
-      ) : null}
       {adding ? (
         <AddIntegrationDialog
           takenNames={data.integrations.map((row) => row.name)}
+          added={data.integrations.flatMap((row) => (row.server ? [row.server] : []))}
           onOpenChange={setAdding}
-          onCreated={(id) => {
-            setAdding(false);
-            setEditing(id);
-          }}
         />
       ) : null}
     </Page>
   );
 }
 
-/** A name not in use yet: the type's own, else numbered. */
-const freeName = (base: string, taken: ReadonlyArray<string>) => {
-  const used = new Set(taken.map((name) => name.toLowerCase()));
-  if (!used.has(base.toLowerCase())) return base;
-  let n = 2;
-  while (used.has(`${base} ${n}`.toLowerCase())) n++;
-  return `${base} ${n}`;
+/** Any MCP server by its address, the directory's last tile. */
+const CUSTOM_SERVER: DirectoryEntry = {
+  key: "mcp",
+  kind: "mcp",
+  server: null,
+  integrationId: null,
+  name: "MCP server",
+  description: mcpManifest.description,
+  category: null,
+  logo: mcpManifest.logo,
 };
 
+/**
+ * One directory of everything an admin can offer. A known server is added
+ * as it is, on and ready for people to connect; a type or an address is
+ * named here, then set up on its page.
+ */
 function AddIntegrationDialog({
   takenNames,
+  added,
   onOpenChange,
-  onCreated,
 }: {
   takenNames: ReadonlyArray<string>;
+  /** Known servers added already, so not offered again. */
+  added: ReadonlyArray<string>;
   onOpenChange: (open: boolean) => void;
-  onCreated: (id: string) => void;
 }) {
   const fieldId = useId();
   const queryClient = useQueryClient();
-  const [kind, setKind] = useState(INTEGRATION_TYPES[0]!.kind);
-  const [name, setName] = useState(() => freeName(INTEGRATION_TYPES[0]!.name, takenNames));
+  const navigate = useNavigate();
+  const [picked, setPicked] = useState<DirectoryEntry | null>(null);
+  const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: () => createIntegration({ data: { kind, name: name.trim() } }),
-    onSuccess: async (result) => {
+    mutationFn: (entry: DirectoryEntry) =>
+      createIntegration({
+        data: {
+          kind: entry.kind,
+          name: name.trim(),
+          ...(entry.server ? { server: entry.server } : {}),
+        },
+      }),
+    onSuccess: async (result, entry) => {
       if (!result.ok) {
         setError(result.error);
         return;
       }
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
-      onCreated(result.id);
+      onOpenChange(false);
+      // A known server is ready as it is; anything else opens on its settings.
+      void navigate({
+        to: "/admin/integrations/$integrationId",
+        params: { integrationId: result.id },
+        search: entry.server ? {} : { setup: true },
+      });
     },
     onError: () => setError("Could not add the integration."),
   });
+  const entries = [
+    ...TYPE_ENTRIES,
+    ...SERVER_ENTRIES.filter((entry) => entry.server && !added.includes(entry.server)),
+  ].toSorted(byName);
+  const pick = (entry: DirectoryEntry) => {
+    setPicked(entry);
+    setName(freeName(entry.name, takenNames));
+    setError(null);
+  };
 
   return (
     <Dialog
@@ -221,342 +177,72 @@ function AddIntegrationDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add integration</DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            create.mutate();
-          }}
-        >
-          <FieldGroup>
-            <ListCard>
-              <RadioGroup
-                variant="list"
-                value={kind}
-                aria-label="Service"
-                onValueChange={(value) => {
-                  const type = findIntegrationType(String(value));
-                  if (!type) return;
-                  setKind(type.kind);
-                  setName(freeName(type.name, takenNames));
-                }}
-              >
-                {INTEGRATION_TYPES.map((type) => (
-                  <label
-                    key={type.kind}
-                    htmlFor={`${fieldId}-${type.kind}`}
-                    className="hover:bg-accent/50 flex cursor-pointer items-center gap-3 px-4 py-3 text-sm font-medium transition-colors"
-                  >
-                    <RadioGroupItem
-                      id={`${fieldId}-${type.kind}`}
-                      value={type.kind}
-                      aria-labelledby={`${fieldId}-${type.kind}-name`}
-                    />
-                    <type.logo className="size-4 shrink-0" />
-                    <span id={`${fieldId}-${type.kind}-name`}>{type.name}</span>
-                  </label>
-                ))}
-              </RadioGroup>
-            </ListCard>
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
-              <Input
-                id={`${fieldId}-name`}
-                value={name}
-                maxLength={60}
-                onChange={(event) => setName(event.target.value)}
+      {picked ? (
+        <DirectoryDialogContent>
+          <DialogHeader>
+            <DialogTitle>Add {picked.name}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setError(null);
+              create.mutate(picked);
+            }}
+          >
+            <FieldGroup>
+              <Field>
+                <DirectoryEntryHeader entry={picked} />
+                <FieldDescription>
+                  {picked.server
+                    ? "Everyone can connect their own account once it’s added."
+                    : picked.kind === "mcp"
+                      ? "You enter its address next."
+                      : "You fill in its settings next."}
+                </FieldDescription>
+              </Field>
+              {picked.server ? null : (
+                <Field>
+                  <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
+                  <Input
+                    id={`${fieldId}-name`}
+                    value={name}
+                    maxLength={60}
+                    onChange={(event) => setName(event.target.value)}
+                    disabled={create.isPending}
+                  />
+                  <FieldDescription>Shown in chats and @mentions.</FieldDescription>
+                </Field>
+              )}
+            </FieldGroup>
+            {error ? <FieldError>{error}</FieldError> : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
                 disabled={create.isPending}
-              />
-              <FieldDescription>Shown in chats and @mentions.</FieldDescription>
-            </Field>
-          </FieldGroup>
-          {error ? <FieldError>{error}</FieldError> : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={create.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton type="submit" pending={create.isPending} disabled={!name.trim()}>
-              Add
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function IntegrationConfigDialog({
-  row,
-  open,
-  onOpenChange,
-}: {
-  row: AdminRow;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const fieldId = useId();
-  const queryClient = useQueryClient();
-  const manifest = findIntegrationType(row.kind)!;
-  const confirm = useConfirm();
-  const [name, setName] = useState(row.name);
-  const [config, setConfig] = useState<Record<string, string>>(() =>
-    fieldDefaults(manifest.adminFields, row.config),
-  );
-  const [shared, setShared] = useState<Record<string, string>>({});
-  const fields = manifest.adminFields;
-  const shownFields = fields.filter((field) => fieldShown(field, config, fields));
-  const showOAuth = Boolean(manifest.oauth && fieldShown(manifest.oauth, config, fields));
-  const showSharedKey = Boolean(
-    manifest.sharedCredential && fieldShown(manifest.sharedCredential, config, fields),
-  );
-  const optionalClient = Boolean(manifest.oauth?.optionalClient);
-  const [ownClient, setOwnClient] = useState(!optionalClient || Boolean(row.oauthClientId));
-  const [enabled, setEnabled] = useState(row.enabled);
-  const [clientId, setClientId] = useState(row.oauthClientId ?? "");
-  const [secret, setSecret] = useState("");
-  const [allowApiKeys, setAllowApiKeys] = useState(row.allowApiKeys);
-  const [error, setError] = useState<string | null>(null);
-  const redirectUri =
-    row.redirectUri ?? `${window.location.origin}/api/integrations/${row.id}/callback`;
-
-  const save = useMutation({
-    mutationFn: () =>
-      saveIntegrationConfig({
-        data: {
-          integrationId: row.id,
-          name: name.trim(),
-          enabled,
-          config,
-          // Switching the admin's own client off forgets it, secret included.
-          ...(ownClient
-            ? {
-                oauthClientId: clientId.trim(),
-                ...(secret.trim() ? { oauthClientSecret: secret.trim() } : {}),
-              }
-            : { oauthClientId: "", oauthClientSecret: "" }),
-          allowApiKeys,
-          // Only what was typed: an untouched shared key stays as stored.
-          ...(showSharedKey && Object.values(shared).some((value) => value.trim())
-            ? { sharedCredential: shared }
-            : {}),
-        },
-      }),
-    onSuccess: async (result) => {
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
-      onOpenChange(false);
-    },
-    onError: () => setError("Could not save the integration."),
-  });
-  const remove = useMutation({
-    mutationFn: () => deleteIntegration({ data: { integrationId: row.id } }),
-    onSuccess: async (result) => {
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
-      onOpenChange(false);
-    },
-    onError: () => setError("Could not delete the integration."),
-  });
-  const confirmRemove = async () => {
-    const people = row.connectionCount;
-    if (
-      await confirm({
-        title: `Delete ${row.name}?`,
-        description: `${people ? `${people === 1 ? "1 person loses their connection" : `${people} people lose their connections`}, and ` : ""}chats, agents and schedules stop using it. Past answers keep what it found.`,
-        confirmLabel: "Delete",
-      })
-    )
-      remove.mutate();
-  };
-
-  const fieldControl = (field: IntegrationField) => (
-    <IntegrationFieldControl
-      key={field.key}
-      id={`${fieldId}-${field.key}`}
-      field={field}
-      value={config[field.key] ?? ""}
-      onChange={(value) => setConfig((current) => ({ ...current, [field.key]: value }))}
-      disabled={save.isPending}
-    />
-  );
-  const oauthFields = manifest.oauth ? (
-    <>
-      <OAuthSetupGuide
-        id={`${fieldId}-redirect`}
-        setup={manifest.oauth.setup}
-        redirectUri={redirectUri}
-        config={config}
-        configured={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
-      />
-      <Field>
-        <FieldLabel htmlFor={`${fieldId}-client`}>
-          OAuth client ID <OptionalMark />
-        </FieldLabel>
-        <Input
-          id={`${fieldId}-client`}
-          value={clientId}
-          onChange={(event) => setClientId(event.target.value)}
-          disabled={save.isPending}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${fieldId}-secret`}>
-          OAuth client secret <OptionalMark />
-        </FieldLabel>
-        <Input
-          id={`${fieldId}-secret`}
-          type="password"
-          autoComplete="off"
-          placeholder={row.oauthSecretConfigured ? "Unchanged" : undefined}
-          value={secret}
-          onChange={(event) => setSecret(event.target.value)}
-          disabled={save.isPending}
-        />
-        {row.oauthSecretConfigured ? (
-          <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
-        ) : null}
-      </Field>
-    </>
-  ) : null;
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && save.isPending) return;
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Set up {row.name}</DialogTitle>
-          <DialogDescription>
-            Secrets are encrypted at rest and never shown again. People connect their own accounts
-            from Settings.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
-              <Input
-                id={`${fieldId}-name`}
-                value={name}
-                maxLength={60}
-                onChange={(event) => setName(event.target.value)}
-                disabled={save.isPending}
-              />
-            </Field>
-            <Field>
-              <div className="flex items-center justify-between gap-3">
-                <FieldLabel htmlFor={`${fieldId}-enabled`}>Enabled</FieldLabel>
-                <Switch
-                  id={`${fieldId}-enabled`}
-                  checked={enabled}
-                  onCheckedChange={setEnabled}
-                  disabled={save.isPending}
-                />
-              </div>
-              <FieldDescription>
-                Turning it off stops chat tools and syncing; connections are kept.
-              </FieldDescription>
-            </Field>
-            {shownFields.map(fieldControl)}
-            {showSharedKey && manifest.sharedCredential
-              ? manifest.sharedCredential.fields.map((field) => (
-                  <IntegrationFieldControl
-                    key={`shared-${field.key}`}
-                    id={`${fieldId}-shared-${field.key}`}
-                    field={{
-                      ...field,
-                      ...(row.sharedCredentialConfigured ? { placeholder: "Unchanged" } : {}),
-                    }}
-                    value={shared[field.key] ?? ""}
-                    onChange={(value) =>
-                      setShared((current) => ({ ...current, [field.key]: value }))
-                    }
-                    disabled={save.isPending}
-                  >
-                    <FieldDescription>
-                      Everyone uses it, so chats only ever read with it.
-                    </FieldDescription>
-                  </IntegrationFieldControl>
-                ))
-              : null}
-            {showOAuth && optionalClient ? (
-              <Field>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor={`${fieldId}-own-client`}>Registered app</FieldLabel>
-                  <Switch
-                    id={`${fieldId}-own-client`}
-                    checked={ownClient}
-                    onCheckedChange={setOwnClient}
-                    disabled={save.isPending}
-                  />
-                </div>
-                <FieldDescription>
-                  For a sign-in that only accepts apps registered with it.
-                </FieldDescription>
-              </Field>
-            ) : null}
-            {showOAuth && ownClient ? oauthFields : null}
-            {manifest.apiKey && !manifest.apiKey.when ? (
-              <Field>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor={`${fieldId}-keys`}>Allow personal API keys</FieldLabel>
-                  <Switch
-                    id={`${fieldId}-keys`}
-                    checked={allowApiKeys}
-                    onCheckedChange={setAllowApiKeys}
-                    disabled={save.isPending}
-                  />
-                </div>
-                <FieldDescription>
-                  People can paste a key from their own {manifest.name} account instead of signing
-                  in.
-                </FieldDescription>
-              </Field>
-            ) : null}
-          </FieldGroup>
-          {error ? <FieldError>{error}</FieldError> : null}
-          <DialogFooter>
-            <PendingButton
-              type="button"
-              variant="destructive"
-              className="mr-auto"
-              pending={remove.isPending}
-              disabled={save.isPending}
-              onClick={() => void confirmRemove()}
-            >
-              Delete
-            </PendingButton>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={remove.isPending}>
-              Save
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+                onClick={() => setPicked(null)}
+              >
+                Back
+              </Button>
+              <PendingButton type="submit" pending={create.isPending} disabled={!name.trim()}>
+                Add
+              </PendingButton>
+            </DialogFooter>
+          </form>
+        </DirectoryDialogContent>
+      ) : (
+        <DirectoryDialogContent browsing={entries}>
+          <DialogHeader>
+            <DialogTitle>Add integration</DialogTitle>
+          </DialogHeader>
+          <IntegrationDirectory
+            entries={entries}
+            custom={{ label: "MCP server", onPick: () => pick(CUSTOM_SERVER) }}
+            onPick={pick}
+          />
+        </DirectoryDialogContent>
+      )}
     </Dialog>
   );
 }

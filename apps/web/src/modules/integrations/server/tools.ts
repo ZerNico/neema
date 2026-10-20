@@ -233,16 +233,24 @@ export function prepareIntegrationTools(input: {
     const integrationName = first.session.integration.name;
     const several = accounts.length > 1;
     const labels = accountNames(accounts);
-    for (const tool of first.session.tools) {
+    // Each account offers what its server lists to it: one tool, by name, for
+    // every account that has it, described as the first of them lists it.
+    const toolNames = [
+      ...new Set(accounts.flatMap((offer) => offer.session.tools.map((tool) => tool.name))),
+    ];
+    for (const toolName of toolNames) {
       // A shared key acts as the admin's account for whoever chats: reads only.
       // Blocked tools are not offered, so the model never plans around them.
-      const usable = accounts.flatMap((offer, index) =>
-        (offer.session.authKind === "shared" && tool.access !== "read") ||
-        permissionFor(tool, offer.permissions) === "block"
+      const usable = accounts.flatMap((offer, index) => {
+        const own = offer.session.tools.find((entry) => entry.name === toolName);
+        return !own ||
+          (offer.session.authKind === "shared" && own.access !== "read") ||
+          permissionFor(own, offer.permissions) === "block"
           ? []
-          : [{ offer, label: labels[index]! }],
-      );
+          : [{ offer, label: labels[index]!, tool: own }];
+      });
       if (usable.length === 0) continue;
+      const { tool } = usable[0]!;
       const modelName = integrationToolName(integrationId, tool.name);
       names.set(modelName, { integrationId, tool, chooses: several });
       const limits = usable.flatMap(({ offer, label }) =>
@@ -270,7 +278,7 @@ export function prepareIntegrationTools(input: {
         }),
       );
       handlers[modelName] = (args: unknown, context: { readonly toolCallId: string }) => {
-        if (!several) return callAs(first, labels[0]!, tool, args, context);
+        if (!several) return callAs(usable[0]!.offer, usable[0]!.label, tool, args, context);
         const { [ACCOUNT_KEY]: named, ...rest } = (args ?? {}) as Record<string, unknown>;
         const choices = usable.map(({ label }) => `“${label}”`).join(", ");
         if (typeof named !== "string" || !named.trim())
@@ -281,8 +289,8 @@ export function prepareIntegrationTools(input: {
           );
         const wanted = named.trim().toLowerCase();
         const match = usable.find(({ label }) => label.toLowerCase() === wanted);
-        if (match) return callAs(match.offer, match.label, tool, rest, context);
-        // Named, but this tool is off for that account: never another one instead.
+        if (match) return callAs(match.offer, match.label, match.tool, rest, context);
+        // Named, but this tool is off for that account or not on its server: never another instead.
         const blocked = labels.findIndex((label) => label.toLowerCase() === wanted);
         if (blocked >= 0)
           return Effect.succeed(

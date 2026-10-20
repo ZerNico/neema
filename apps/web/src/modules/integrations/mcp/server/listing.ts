@@ -254,8 +254,8 @@ const humanTitle = (name: string) =>
     .replace(/^./, (first) => first.toUpperCase());
 
 /**
- * One listing as stored entries, in the server's order, unreviewed: off, at
- * the access the annotations claim. Keys stay what they were approved as.
+ * One listing as stored entries, in the server's order, at the access the
+ * annotations claim. Keys stay what they were listed as before.
  */
 export const listingEntries = (
   integrationId: string,
@@ -294,7 +294,6 @@ export const listingEntries = (
         inputSchema: { type: "object", properties: {} },
         annotations,
         access: accessFromAnnotations(annotations),
-        enabled: false,
         unsupported: "Its description could not be read.",
         fingerprint: createHash("sha256")
           .update(`unreadable:${name}`)
@@ -338,7 +337,6 @@ const entryOf = (
     ...(output && "schema" in output ? { outputSchema: output.schema } : {}),
     annotations,
     access: accessFromAnnotations(annotations),
-    enabled: false,
     ...(unsupported ? { unsupported } : {}),
     fingerprint,
   };
