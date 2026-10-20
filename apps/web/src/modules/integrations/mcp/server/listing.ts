@@ -319,19 +319,16 @@ const entryOf = (
   const rawDescription = typeof tool.description === "string" ? tool.description.trim() : "";
   const title =
     (typeof tool.title === "string" && tool.title.trim()) || annotations.title || humanTitle(name);
-  const unsupported =
-    "error" in shown
-      ? shown.error
-      : "error" in check
-        ? check.error
-        : rawDescription.length > MCP_LIMITS.descriptionChars
-          ? `Its description is longer than ${MCP_LIMITS.descriptionChars} characters.`
-          : undefined;
+  const unsupported = "error" in shown ? shown.error : "error" in check ? check.error : undefined;
   return {
     key,
     mcpName: name,
     title: title.slice(0, 120),
-    description: rawDescription.slice(0, MCP_LIMITS.descriptionChars),
+    // Cut, not refused: a long description is no reason to lose the tool, and its start says what it is.
+    description:
+      rawDescription.length > MCP_LIMITS.descriptionChars
+        ? `${rawDescription.slice(0, MCP_LIMITS.descriptionChars - 1)}…`
+        : rawDescription,
     inputSchema: "schema" in shown ? shown.schema : { type: "object", properties: {} },
     ...("schema" in checked ? { validation: checked.schema } : {}),
     ...(output && "schema" in output ? { outputSchema: output.schema } : {}),

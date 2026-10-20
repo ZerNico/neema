@@ -32,9 +32,11 @@ import {
 } from "~/ui/primitives/select";
 import { FieldError } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
+import { cn } from "~/ui/utils";
 import { integrationLook } from "../client/directory.ts";
 import { adminIntegrationsQuery } from "../client/queries.ts";
 import type { ToolAccess } from "../manifest.ts";
+import { MCP_LIMITS } from "../mcp/catalog.ts";
 import { findKnownMcpServer } from "../mcp/known-servers.ts";
 import type { AdminIntegration, AdminTool } from "../schema.ts";
 import {
@@ -244,8 +246,8 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
       title="Tools"
       description={
         listings
-          ? "What its server lists to people’s accounts. Turn off what nobody should use."
-          : "Turn off what nobody should use."
+          ? "What its server offers. Turn off any that nobody should use."
+          : "Turn off any that nobody should use."
       }
       actions={
         listings ? (
@@ -265,10 +267,7 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
         <EmptyState
           icon={PlugSocketIcon}
           title="No tools yet"
-          description={
-            failing ??
-            "They show once someone connects, since the server lists them to each account."
-          }
+          description={failing ?? "They show once someone connects."}
         />
       ) : (
         <ListCard>
@@ -282,12 +281,14 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
               />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="truncate text-sm font-medium">{tool.title}</span>
-                <span className="text-muted-foreground line-clamp-2 text-xs">
-                  {tool.unsupported ??
-                    (tool.pastLimit
-                      ? "Past the most chats are offered. Turn others off to make room."
-                      : tool.description)}
-                </span>
+                {tool.unsupported || tool.pastLimit ? (
+                  <span className="text-muted-foreground text-xs">
+                    {tool.unsupported ??
+                      `Chats get at most ${MCP_LIMITS.enabledTools} tools. Turn others off to make room.`}
+                  </span>
+                ) : tool.description ? (
+                  <ToolDescription text={tool.description} />
+                ) : null}
                 {tool.access === tool.claimed ? null : (
                   <span className="text-muted-foreground text-xs">
                     The server says it {CLAIMS[tool.claimed]}.
@@ -320,5 +321,23 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
       {row.tools.length && failing ? <FieldError>{failing}</FieldError> : null}
       {checked ? <p className="text-muted-foreground text-xs">{checked}</p> : null}
     </Section>
+  );
+}
+
+/** Two lines until clicked: a server's descriptions run long, and the admin may want all of one. */
+function ToolDescription({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      className={cn(
+        "text-muted-foreground text-left text-xs whitespace-pre-line",
+        !open && "line-clamp-2",
+      )}
+      onClick={() => setOpen((current) => !current)}
+    >
+      {text}
+    </button>
   );
 }

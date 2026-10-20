@@ -43,7 +43,8 @@ export interface McpToolEntry {
 }
 
 export const MCP_LIMITS = {
-  descriptionChars: 2_000,
+  /** Cut past this. Each one rides in every turn's tool list, so it is generous, not open. */
+  descriptionChars: 8_000,
   schemaBytes: 32_000,
   /** Offered at most, in the server's order; the admin turns off the rest. */
   enabledTools: 64,
