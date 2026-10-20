@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
+import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
 import { pendingIntegrationCallsQuery } from "~/modules/integrations/client/queries.ts";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
@@ -9,7 +10,13 @@ import { useElapsed } from "./use-elapsed.ts";
 import type { WorkPart, WorkStep } from "./assistant-body.ts";
 import { ActivityChevron } from "./activity-face.tsx";
 import { useRunDisclosure } from "./use-run-disclosure.ts";
-import { formatDuration, stepActivities, workStart, workSummary } from "./work-steps.ts";
+import {
+  formatDuration,
+  stepActivities,
+  workStart,
+  workSummary,
+  type IntegrationNamer,
+} from "./work-steps.ts";
 
 /**
  * Mounted only while an integration call runs, so a chat without one never
@@ -52,6 +59,7 @@ export function WorkGroupBlock({
 }) {
   const calls = part.steps.flatMap(stepActivities);
   const running = live || calls.some((call) => call.status === "running");
+
   const { expanded, onOpenChange } = useRunDisclosure(running);
   // Reasoning alone has no recorded start; the clock then starts when this
   // row first appears, which is when the work became visible.
@@ -74,11 +82,15 @@ export function WorkGroupBlock({
   // Live, the steps below name the detail and the header only that it is busy
   // and for how long: "Thinking" between calls read as stalled. Settled, it says
   // what was done, not how long, since the time spent thinking is not recorded.
-  const label = waiting
-    ? "Waiting for you"
-    : running
-      ? `Working · ${formatDuration(elapsed)}`
-      : workSummary(part.steps);
+  const label = waiting ? (
+    "Waiting for you"
+  ) : running ? (
+    `Working · ${formatDuration(elapsed)}`
+  ) : calls.some((call) => call.family === "integration") ? (
+    <IntegrationWorkSummary steps={part.steps} />
+  ) : (
+    workSummary(part.steps)
+  );
 
   return (
     <Disclosure open={expanded || waiting} onOpenChange={onOpenChange} className="mb-2">
@@ -98,4 +110,14 @@ export function WorkGroupBlock({
       </DisclosureContent>
     </Disclosure>
   );
+}
+
+/** A settled run with integration calls, named by service: only these need to know which is which. */
+function IntegrationWorkSummary({ steps }: { steps: ReadonlyArray<WorkStep> }) {
+  const directory = useIntegrationDirectory();
+  const describe: IntegrationNamer = (integrationId) => {
+    const found = directory.find(integrationId);
+    return found ? { name: found.name, listed: found.manifest.toolSource === "listed" } : null;
+  };
+  return workSummary(steps, describe);
 }

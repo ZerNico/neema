@@ -110,6 +110,49 @@ describe("a run of work", () => {
     expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
   });
 
+  it("names a server's calls by the service and what they did, and a shipped tool by its label", () => {
+    const integration = (
+      callId: string,
+      integrationId: string,
+      overrides: Partial<ToolActivity> = {},
+    ) => ({
+      kind: "tool" as const,
+      key: callId,
+      activity: call(callId, {
+        family: "integration",
+        name: `int_${integrationId}__x`,
+        integrationId,
+        label: "Read Trello board",
+        access: "read",
+        ...overrides,
+      } as never) as never,
+    });
+    const describe = (id: string) =>
+      id === "outline"
+        ? { name: "Outline", listed: false }
+        : { name: id === "trello" ? "Trello" : "Notion", listed: true };
+    expect(
+      workSummary(
+        [integration("a", "trello"), integration("b", "trello"), integration("c", "notion")],
+        describe,
+      ),
+    ).toBe("Looked in Trello and Notion");
+    // A change that went through makes it an update; one refused leaves it a look.
+    expect(
+      workSummary(
+        [
+          integration("a", "trello"),
+          integration("b", "trello", { access: "write" }),
+          integration("c", "notion", { access: "write", refused: true }),
+        ],
+        describe,
+      ),
+    ).toBe("Looked in Notion and updated Trello");
+    expect(
+      workSummary([integration("a", "outline", { label: "Searched Outline" })], describe),
+    ).toBe("Searched Outline");
+  });
+
   it("names an access request as one, not as looking through files", () => {
     const desktop = (name: "request_network_access" | "request_path_access" | "find_files") => ({
       kind: "tool" as const,

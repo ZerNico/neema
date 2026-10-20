@@ -133,6 +133,8 @@ const pastLabels = (step: WorkStep): string[] => {
     if (done.some((call) => call.name.startsWith("edit_"))) return [`Edited the ${noun}`];
     return [`Read the ${noun}`];
   }
+  // A shipped integration's label already says what the call did: "Searched Outline".
+  if (step.kind === "tool" && step.activity.family === "integration") return [step.activity.label];
   const present = stepLabel(step);
   return [
     PAST[present] ??
@@ -149,16 +151,62 @@ const failedDocumentStep = (step: WorkStep) =>
   step.activities.every((call) => call.status !== "running") &&
   !documentRunSucceeded(step.activities);
 
+/** How a summary names an integration: a server's own tools have no labels written for people. */
+export type IntegrationNamer = (integrationId: string) => { name: string; listed: boolean } | null;
+
+const joined = (names: ReadonlyArray<string>) =>
+  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
+
+/**
+ * A server's tools by the service and what they did: "Looked in Trello and
+ * Notion", "Updated Linear". Its tools' own names stay in the steps below.
+ */
+const serviceLabels = (calls: ReadonlyArray<ToolActivity>, describe: IntegrationNamer) => {
+  const services = new Map<string, boolean>();
+  for (const call of calls) {
+    if (call.family !== "integration") continue;
+    const name = describe(call.integrationId)?.name ?? call.label;
+    const changed =
+      call.access !== "read" && call.status === "complete" && !call.refused && !call.error;
+    services.set(name, (services.get(name) ?? false) || changed);
+  }
+  const looked = [...services].flatMap(([name, changed]) => (changed ? [] : [name]));
+  const updated = [...services].flatMap(([name, changed]) => (changed ? [name] : []));
+  return [
+    ...(looked.length ? [`Looked in ${joined(looked)}`] : []),
+    ...(updated.length ? [`Updated ${joined(updated)}`] : []),
+  ];
+};
+
 /**
  * "Searched the web, read 2 pages and ran a command": each kind of step once,
  * in order. Thinking is named only when it is all there was, and a failed
  * document step only when nothing else was done: a retry is not news.
  */
-export const workSummary = (steps: ReadonlyArray<WorkStep>) => {
+export const workSummary = (steps: ReadonlyArray<WorkStep>, describe?: IntegrationNamer) => {
   const all = steps.filter((step) => step.kind !== "reasoning");
   const succeeded = all.filter((step) => !failedDocumentStep(step));
   const acting = succeeded.length ? succeeded : all;
-  const labels = [...new Set((acting.length ? acting : steps).flatMap(pastLabels))];
+  const listedCall = (step: WorkStep) =>
+    step.kind === "tool" &&
+    step.activity.family === "integration" &&
+    Boolean(describe?.(step.activity.integrationId)?.listed);
+  const chosen = acting.length ? acting : steps;
+  const services = describe
+    ? serviceLabels(
+        chosen.flatMap((step) => (step.kind === "tool" && listedCall(step) ? [step.activity] : [])),
+        describe,
+      )
+    : [];
+  // Where the first of a server's calls came, so the summary keeps the order things happened in.
+  const first = chosen.findIndex(listedCall);
+  const labels = [
+    ...new Set(
+      chosen.flatMap((step, index) =>
+        listedCall(step) ? (index === first ? services : []) : pastLabels(step),
+      ),
+    ),
+  ];
   if (labels.length === 0) return "Worked";
   const shown = labels
     .slice(0, 3)
