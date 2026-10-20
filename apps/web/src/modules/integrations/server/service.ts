@@ -21,7 +21,11 @@ import {
   type ScopeOption,
   type UserIntegration,
 } from "../schema.ts";
-import { knownMcpServerAt, findKnownMcpServer } from "../mcp/known-servers.ts";
+import {
+  knownMcpServerAt,
+  knownMcpServerWithUrl,
+  findKnownMcpServer,
+} from "../mcp/known-servers.ts";
 import type { McpToolEntry } from "../mcp/catalog.ts";
 import { MCP_LIMITS } from "../mcp/catalog.ts";
 import { resolvePublicHttpUrl } from "~/modules/tools/server/url-safety.ts";
@@ -40,11 +44,13 @@ import {
 import {
   makeCredentials,
   methodsFor,
+  probe,
   verified,
   wayOpen,
   type ConnectedSession,
 } from "./credentials.ts";
 import { makeOAuthFlow } from "./oauth-flow.ts";
+import { offersSignIn } from "../mcp/server/auth.ts";
 import { listingOwner, makeToolListings, toListingView } from "./tool-listings.ts";
 
 const connectOutdated = () =>
@@ -110,6 +116,8 @@ const toAdmin = (
 
 const NAME_MAX = 60;
 const DESCRIPTION_MAX = 160;
+/** How long a server left half added waits for its owner; a sign-in lives ten minutes. */
+const DRAFT_TTL_MS = 60 * 60_000;
 
 const byName = <A extends { name: string }>(a: A, b: A) => a.name.localeCompare(b.name);
 
@@ -141,6 +149,26 @@ export class IntegrationService extends Context.Service<
       userId: string,
       integrationId: string,
     ): Effect.Effect<void, IntegrationRejected>;
+    /**
+     * How a person reaches a server at an address, found by asking it: open to
+     * anyone, signing in, or a token from their account there. Nothing is saved.
+     */
+    probeServer(
+      userId: string,
+      url: string,
+    ): Effect.Effect<{ ways: "anonymous" | "oauth" | "token"; name: string }, IntegrationRejected>;
+    /** A server of one's own being added, as connecting it needs it. */
+    serverSetup(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<UserIntegration, IntegrationRejected>;
+    /** Lists a server being added once an account of its owner's connected. */
+    finishServerSetup(
+      userId: string,
+      integrationId: string,
+    ): Effect.Effect<void, IntegrationRejected>;
+    /** Deletes servers left half added; the listing sweep calls this. */
+    sweepDrafts(): Effect.Effect<void>;
     /** Lists what a server offers this person's own accounts on it again, now. */
     checkOwnTools(userId: string, integrationId: string): Effect.Effect<void, IntegrationRejected>;
     /** A new integration of a shipped type, off until set up. */
@@ -155,7 +183,8 @@ export class IntegrationService extends Context.Service<
     saveConfig(
       input: Omit<SaveConfig, "fingerprint" | "listsTools">,
     ): Effect.Effect<AdminIntegration, IntegrationRejected>;
-    listForUser(userId: string): Effect.Effect<ReadonlyArray<UserIntegration>>;
+    /** With `draftId`, also this person's server of that id still being added. */
+    listForUser(userId: string, draftId?: string): Effect.Effect<ReadonlyArray<UserIntegration>>;
     /** Adds an account by key, or with `connectionId` replaces that account's key. */
     connectApiKey(
       userId: string,
@@ -437,8 +466,8 @@ export class IntegrationService extends Context.Service<
        * connection holds nothing personal, so it is made on read, without
        * asking the server, and an earlier one is pointed at the current setup.
        */
-      const listWithEveryone = Effect.fn(function* (userId: string) {
-        const rows = yield* repo.listForUser(userId);
+      const listWithEveryone = Effect.fn(function* (userId: string, draftId?: string) {
+        const rows = yield* repo.listForUser(userId, draftId);
         let added = false;
         for (const row of rows) {
           const manifest = findIntegrationType(row.config.kind);
@@ -478,7 +507,7 @@ export class IntegrationService extends Context.Service<
           // Only ever the first time: once the shared listing exists, the sweep keeps it.
           yield* listings.listForConnection(saved);
         }
-        return added ? yield* repo.listForUser(userId) : rows;
+        return added ? yield* repo.listForUser(userId, draftId) : rows;
       });
 
       /** Accounts that work right now, by integration then age. */
@@ -537,6 +566,96 @@ export class IntegrationService extends Context.Service<
             defaultEnabled,
           };
         });
+      });
+
+      const listForUser = Effect.fn("IntegrationService.listForUser")(function* (
+        userId: string,
+        draftId?: string,
+      ) {
+        const rows = yield* listWithEveryone(userId, draftId);
+        const result: UserIntegration[] = [];
+        for (const entry of rows.toSorted((a, b) => byName(a.config, b.config))) {
+          const manifest = findIntegrationType(entry.config.kind);
+          const adapter = findAdapterType(entry.config.kind);
+          if (!manifest || !adapter) continue;
+          const normalized = adapter.normalizeConfig(entry.config.config);
+          const configured = !("error" in normalized);
+          const methods = methodsFor(
+            manifest,
+            adapter,
+            entry.config,
+            configured ? normalized.config : {},
+            Boolean(entry.config.sharedCredentialCiphertext),
+          );
+          const open =
+            entry.config.enabled &&
+            entry.usable &&
+            configured &&
+            (methods.oauth || methods.apiKey || methods.open !== null);
+          // A connection outlives its integration being switched off, so it
+          // still shows (and can be removed) even when nothing new may start.
+          if (!open && entry.connections.length === 0) continue;
+          // The admin's key only ever reads, and stands alone: an own account replaces it.
+          const readsOnly = entry.connections.length
+            ? entry.connections.every((connection) => connection.authKind === "shared")
+            : methods.open === "shared" && !methods.oauth && !methods.apiKey;
+          const stale = (connection: IntegrationConnectionRow) =>
+            configured &&
+            (connection.configFingerprint !== normalized.fingerprint ||
+              !wayOpen(manifest, adapter, entry.config, normalized.config, connection.authKind));
+          // A shared key only ever reads, so its other tools are not anyone's to set.
+          const toolInfo = (tools: ReadonlyArray<OfferedTool>): IntegrationToolInfo[] =>
+            tools
+              .filter((tool) => !readsOnly || tool.access === "read")
+              .map((tool) => ({
+                name: tool.name,
+                title: tool.title,
+                label: tool.label,
+                description: tool.description,
+                access: tool.access,
+              }));
+          result.push({
+            id: entry.config.id,
+            kind: entry.config.kind,
+            name: entry.config.name,
+            description: entry.config.description,
+            server: knownServer(entry.config),
+            available: open,
+            personal: entry.config.ownerUserId !== null,
+            methods,
+            tools: toolInfo(yield* toolsOf(manifest, adapter, entry.config, null)),
+            apiKeyHelpUrl: configured
+              ? (manifest.apiKey?.helpUrl(normalized.config) ?? null)
+              : null,
+            connections: yield* Effect.forEach(entry.connections, (connection) =>
+              Effect.all({
+                dependents: repo.dependents(userId, connection.id),
+                tools: toolsOf(manifest, adapter, entry.config, connection),
+                listing:
+                  manifest.toolSource === "listed"
+                    ? repo.toolListing(entry.config.id, listingOwner(connection))
+                    : Effect.succeed(null),
+              }).pipe(
+                Effect.map(({ dependents, tools, listing }): IntegrationConnectionView => ({
+                  id: connection.id,
+                  authKind: connection.authKind,
+                  accountLabel: connection.accountLabel,
+                  name: connection.name,
+                  status: stale(connection) ? "needs_reauth" : connection.status,
+                  offerByDefault: connection.offerByDefault,
+                  toolPermissions: connection.toolPermissions,
+                  scope: connection.scope,
+                  requiredScopes: connection.requiredScopes,
+                  listing: toListingView(listing),
+                  tools: toolInfo(tools),
+                  dependents,
+                  createdAt: connection.createdAt.toISOString(),
+                })),
+              ),
+            ),
+          });
+        }
+        return result;
       });
 
       return IntegrationService.of({
@@ -679,8 +798,13 @@ export class IntegrationService extends Context.Service<
                   }),
               ),
             );
+            // One added at a time: a server left half added makes way, name and all.
+            if (!stored) yield* repo.sweepDrafts({ ownerUserId: userId });
+            const opens = mcpWaysOf(normalized.config).anonymous === "open";
+            // Open, it is done once saved; anything else waits for its first account.
             const id =
-              stored?.id ?? (yield* repo.createConfig({ kind: "mcp", name, ownerUserId: userId }));
+              stored?.id ??
+              (yield* repo.createConfig({ kind: "mcp", name, ownerUserId: userId, draft: !opens }));
             if (!id)
               return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
             const row = yield* repo.saveConfig({
@@ -697,7 +821,7 @@ export class IntegrationService extends Context.Service<
             // Needing no account, it is on for its owner once saved, as connecting would
             // make it; their own token or sign-in, if any, stays.
             const accounts =
-              (yield* repo.listForUser(userId)).find((entry) => entry.config.id === id)
+              (yield* repo.listForUser(userId, id)).find((entry) => entry.config.id === id)
                 ?.connections ?? [];
             const opened =
               mcpWaysOf(normalized.config).anonymous === "open" &&
@@ -715,7 +839,7 @@ export class IntegrationService extends Context.Service<
                 : null;
             if (opened) yield* listings.listForConnection(opened);
             yield* changed(userId);
-            return yield* personalView(row, yield* repo.listForUser(userId));
+            return yield* personalView(row, yield* repo.listForUser(userId, row.id));
           },
         ),
 
@@ -728,9 +852,79 @@ export class IntegrationService extends Context.Service<
           },
         ),
 
+        probeServer: Effect.fn("IntegrationService.probeServer")(function* (userId, url) {
+          if (!(yield* repo.mayAddServers(userId)))
+            return yield* new IntegrationRejected({
+              reason: "Your admin has not let you add MCP servers.",
+            });
+          const adapter = findAdapterType("mcp");
+          if (!adapter) return yield* unknownIntegration();
+          const normalized = adapter.normalizeConfig({
+            url: url.trim(),
+            ways: "anonymous",
+            anonymous: "open",
+            reach: "public",
+          });
+          if ("error" in normalized)
+            return yield* new IntegrationRejected({ reason: normalized.error });
+          yield* resolvePublicHttpUrl(normalized.config.url!).pipe(
+            Effect.mapError(
+              () =>
+                new IntegrationRejected({
+                  reason: "Use a public address. An admin can add servers on a private network.",
+                }),
+            ),
+          );
+          const address = new URL(normalized.config.url!);
+          const name =
+            knownMcpServerWithUrl(normalized.config.url)?.name ??
+            address.hostname.replace(/^(mcp|api)\./, "");
+          // Asked as nobody, as anyone may: a refusal says it wants an account.
+          const asNobody = yield* adapter
+            .verify(probe(normalized.config, { kind: "none" }))
+            .pipe(Effect.result);
+          if (asNobody._tag === "Success") return { ways: "anonymous" as const, name };
+          if (asNobody.failure._tag !== "IntegrationAuthFailed")
+            return yield* new IntegrationRejected({
+              reason:
+                "message" in asNobody.failure && typeof asNobody.failure.message === "string"
+                  ? asNobody.failure.message
+                  : "Could not reach the server.",
+            });
+          const signIn = yield* offersSignIn(normalized.config);
+          return { ways: signIn ? ("oauth" as const) : ("token" as const), name };
+        }),
+
+        serverSetup: Effect.fn("IntegrationService.serverSetup")(function* (userId, integrationId) {
+          const row = yield* repo.getConfig(integrationId);
+          if (row?.ownerUserId !== userId) return yield* unknownIntegration();
+          const integration = (yield* listForUser(userId, integrationId)).find(
+            (entry) => entry.id === integrationId,
+          );
+          if (!integration) return yield* unknownIntegration();
+          return integration;
+        }),
+
+        finishServerSetup: Effect.fn("IntegrationService.finishServerSetup")(
+          function* (userId, integrationId) {
+            const entry = (yield* repo.listForUser(userId, integrationId)).find(
+              (row) => row.config.id === integrationId,
+            );
+            if (entry?.config.ownerUserId !== userId) return yield* unknownIntegration();
+            if (entry.connections.length === 0)
+              return yield* new IntegrationRejected({ reason: "Connect it first." });
+            yield* repo.publishDraft(userId, integrationId);
+            yield* changed(userId);
+          },
+        ),
+
+        sweepDrafts: Effect.fn("IntegrationService.sweepDrafts")(function* () {
+          yield* repo.sweepDrafts({ olderThanMs: DRAFT_TTL_MS });
+        }),
+
         checkOwnTools: Effect.fn("IntegrationService.checkOwnTools")(
           function* (userId, integrationId) {
-            const entry = (yield* repo.listForUser(userId)).find(
+            const entry = (yield* repo.listForUser(userId, integrationId)).find(
               (row) => row.config.id === integrationId,
             );
             if (!entry?.usable) return yield* unknownIntegration();
@@ -874,93 +1068,7 @@ export class IntegrationService extends Context.Service<
           return yield* adminView(counted!);
         }),
 
-        listForUser: Effect.fn("IntegrationService.listForUser")(function* (userId) {
-          const rows = yield* listWithEveryone(userId);
-          const result: UserIntegration[] = [];
-          for (const entry of rows.toSorted((a, b) => byName(a.config, b.config))) {
-            const manifest = findIntegrationType(entry.config.kind);
-            const adapter = findAdapterType(entry.config.kind);
-            if (!manifest || !adapter) continue;
-            const normalized = adapter.normalizeConfig(entry.config.config);
-            const configured = !("error" in normalized);
-            const methods = methodsFor(
-              manifest,
-              adapter,
-              entry.config,
-              configured ? normalized.config : {},
-              Boolean(entry.config.sharedCredentialCiphertext),
-            );
-            const open =
-              entry.config.enabled &&
-              entry.usable &&
-              configured &&
-              (methods.oauth || methods.apiKey || methods.open !== null);
-            // A connection outlives its integration being switched off, so it
-            // still shows (and can be removed) even when nothing new may start.
-            if (!open && entry.connections.length === 0) continue;
-            // The admin's key only ever reads, and stands alone: an own account replaces it.
-            const readsOnly = entry.connections.length
-              ? entry.connections.every((connection) => connection.authKind === "shared")
-              : methods.open === "shared" && !methods.oauth && !methods.apiKey;
-            const stale = (connection: IntegrationConnectionRow) =>
-              configured &&
-              (connection.configFingerprint !== normalized.fingerprint ||
-                !wayOpen(manifest, adapter, entry.config, normalized.config, connection.authKind));
-            // A shared key only ever reads, so its other tools are not anyone's to set.
-            const toolInfo = (tools: ReadonlyArray<OfferedTool>): IntegrationToolInfo[] =>
-              tools
-                .filter((tool) => !readsOnly || tool.access === "read")
-                .map((tool) => ({
-                  name: tool.name,
-                  title: tool.title,
-                  label: tool.label,
-                  description: tool.description,
-                  access: tool.access,
-                }));
-            result.push({
-              id: entry.config.id,
-              kind: entry.config.kind,
-              name: entry.config.name,
-              description: entry.config.description,
-              server: knownServer(entry.config),
-              available: open,
-              personal: entry.config.ownerUserId !== null,
-              methods,
-              tools: toolInfo(yield* toolsOf(manifest, adapter, entry.config, null)),
-              apiKeyHelpUrl: configured
-                ? (manifest.apiKey?.helpUrl(normalized.config) ?? null)
-                : null,
-              connections: yield* Effect.forEach(entry.connections, (connection) =>
-                Effect.all({
-                  dependents: repo.dependents(userId, connection.id),
-                  tools: toolsOf(manifest, adapter, entry.config, connection),
-                  listing:
-                    manifest.toolSource === "listed"
-                      ? repo.toolListing(entry.config.id, listingOwner(connection))
-                      : Effect.succeed(null),
-                }).pipe(
-                  Effect.map(({ dependents, tools, listing }): IntegrationConnectionView => ({
-                    id: connection.id,
-                    authKind: connection.authKind,
-                    accountLabel: connection.accountLabel,
-                    name: connection.name,
-                    status: stale(connection) ? "needs_reauth" : connection.status,
-                    offerByDefault: connection.offerByDefault,
-                    toolPermissions: connection.toolPermissions,
-                    scope: connection.scope,
-                    requiredScopes: connection.requiredScopes,
-                    listing: toListingView(listing),
-                    tools: toolInfo(tools),
-                    dependents,
-                    createdAt: connection.createdAt.toISOString(),
-                  })),
-                ),
-              ),
-            });
-          }
-          return result;
-        }),
-
+        listForUser,
         connectApiKey: Effect.fn("IntegrationService.connectApiKey")(
           function* (userId, integrationId, input, connectionId) {
             const { manifest, adapter, row, config, fingerprint } = yield* available(

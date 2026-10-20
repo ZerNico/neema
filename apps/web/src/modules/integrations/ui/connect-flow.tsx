@@ -29,12 +29,21 @@ type Step =
  */
 export function ConnectFlow({
   integration,
+  live,
+  fresh = false,
   onBack,
+  onReady,
   onDone,
   onOpenPage,
 }: {
   integration: UserIntegration;
+  /** The integration as it is now, when it is not in the person's list yet (being added). */
+  live?: UserIntegration | undefined;
+  /** Just made: any account on it is new, even one made with it. */
+  fresh?: boolean;
   onBack: () => void;
+  /** Once, when its account shows up. */
+  onReady?: () => void;
   onDone: () => void;
   onOpenPage: () => void;
 }) {
@@ -43,15 +52,25 @@ export function ConnectFlow({
   const [step, setStep] = useState<Step>({ kind: "start" });
   const [keyOpen, setKeyOpen] = useState(false);
   // The accounts there were before, so a new one reads as this connection finishing.
-  const [known] = useState(() => new Set(integration.connections.map((account) => account.id)));
-  const { data } = useQuery(myIntegrationsQuery);
+  const [known] = useState(
+    () => new Set(fresh ? [] : integration.connections.map((account) => account.id)),
+  );
+  const { data } = useQuery({ ...myIntegrationsQuery, enabled: live === undefined });
   // Who is asking, which every sign-in link names; until it is known there is no link.
   const { data: me } = useQuery(sessionUserQuery);
   // The window of the sign-in under way: a new one or Cancel closes it, so an earlier
   // sign-in cannot finish behind the dialog's back and add a second account.
   const popup = useRef<Window | null>(null);
-  const current = data?.find((entry) => entry.id === integration.id) ?? integration;
+  const current = live ?? data?.find((entry) => entry.id === integration.id) ?? integration;
   const added = current.connections.find((account) => !known.has(account.id));
+  const addedId = added?.id ?? null;
+  // Told once per account, however often it renders: finishing it is not repeatable.
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (!addedId || reported.current === addedId) return;
+    reported.current = addedId;
+    onReady?.();
+  }, [addedId, onReady]);
   const manifest = findIntegrationType(integration.kind);
   const entry = integrationEntry(integration);
   // A server from a catalog is known by its own name, not its type's.
@@ -62,7 +81,8 @@ export function ConnectFlow({
     if (!waitingFor) return;
     return onSignIn(waitingFor, (outcome) => {
       if (outcome.error) setStep({ kind: "failed", error: outcome.error });
-      else void queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey });
+      // Under `integrations`: the person's list, and a server being added's own view.
+      else void queryClient.invalidateQueries({ queryKey: ["integrations"] });
     });
   }, [waitingFor, queryClient]);
 

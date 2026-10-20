@@ -12,6 +12,7 @@ import {
   DecideIntegrationCallInput,
   CreateIntegrationInput,
   IntegrationIdInput,
+  ProbeServerInput,
   SaveIntegrationConfigInput,
   SaveKnowledgeSourceInput,
   SetToolInput,
@@ -104,6 +105,49 @@ export const deletePersonalServer = createServerFn({ method: "POST" })
       outcome(
         IntegrationService.use((service) =>
           service.deletePersonalServer(context.session.user.id, data.integrationId),
+        ),
+      ),
+    ),
+  );
+
+/** How a person would reach a server at this address, asked of the server; nothing is saved. */
+export const probeServer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(ProbeServerInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.probeServer(context.session.user.id, data.url),
+      ).pipe(
+        Effect.map((found) => ({ ok: true as const, ...found })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+/** A server of one's own being added, as connecting it needs it. */
+export const getServerSetup = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      IntegrationService.use((service) =>
+        service.serverSetup(context.session.user.id, data.integrationId),
+      ).pipe(
+        Effect.map((integration) => ({ ok: true as const, integration })),
+        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+      ),
+    ),
+  );
+
+export const finishServerSetup = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(IntegrationIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      outcome(
+        IntegrationService.use((service) =>
+          service.finishServerSetup(context.session.user.id, data.integrationId),
         ),
       ),
     ),

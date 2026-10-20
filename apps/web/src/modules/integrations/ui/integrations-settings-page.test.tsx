@@ -9,7 +9,6 @@ import type { IntegrationConnectionView, PersonalServers, UserIntegration } from
 import {
   connectIntegrationApiKey,
   connectIntegrationOpen,
-  savePersonalServer,
   updateIntegrationConnection,
 } from "../server/functions.ts";
 import {
@@ -300,20 +299,10 @@ describe("integrations list", () => {
     expect(within(connect).getByRole("button", { name: "Sign in" })).toBeInTheDocument();
     await user.click(within(connect).getByRole("button", { name: "Back" }));
 
-    // An address of one's own asks for it, and saves with what was typed.
+    // An address of one's own asks for nothing else; how it connects is the server's to say.
     await user.click(screen.getByRole("button", { name: /^MCP server by address/ }));
     expect(await screen.findByLabelText(/Server address/)).toHaveValue("");
-    await user.type(screen.getByLabelText("Name"), "Docs");
-    await user.type(screen.getByLabelText(/Server address/), "https://mcp.example.com/mcp");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await waitFor(() =>
-      expect(savePersonalServer).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          name: "Docs",
-          config: expect.objectContaining({ url: "https://mcp.example.com/mcp" }),
-        }),
-      }),
-    );
+    expect(screen.queryByLabelText("Name")).toBeNull();
   });
 
   it("offers a known server an admin added like any of theirs, and no address without leave", async () => {

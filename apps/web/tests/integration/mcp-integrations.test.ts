@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   conversations,
   defaultCapabilities,
+  integrationConfigs,
   integrationToolListings,
   user,
   userApprovals,
@@ -1590,6 +1591,78 @@ describe("an MCP server a person adds for themselves", () => {
       ).pipe(Effect.result),
     );
   afterAll(() => allowServers(false));
+
+  it("asks an address how it is reached instead of asking the person", async () => {
+    names.set("mcp.probe.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    await allowServers(true);
+    const owner = await activeUser();
+    const probe = (url: string) =>
+      run(Effect.flatMap(IntegrationService, (s) => s.probeServer(owner, url).pipe(Effect.result)));
+    expect(await probe("https://mcp.probe.test/mcp")).toMatchObject({
+      _tag: "Success",
+      success: { ways: "anonymous", name: "probe.test" },
+    });
+    // Refused without a key, and no sign-in on offer: a token from the person's account.
+    expect(await probe("https://mcp.probe.test/keyed")).toMatchObject({
+      _tag: "Success",
+      success: { ways: "token" },
+    });
+    expect(JSON.stringify(await probe("http://mcp.probe.test/mcp"))).toMatch(/https:/);
+  });
+
+  it("keeps a server needing an account out of every list until it is connected", async () => {
+    names.set("mcp.drafts.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    await allowServers(true);
+    const owner = await activeUser();
+    const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(IntegrationService, f));
+    const saved = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.savePersonalServer(owner, {
+          integrationId: null,
+          name: "Keyed",
+          config: { url: "https://mcp.drafts.test/keyed", ways: "token", header: "X-Api-Key" },
+        }),
+      ),
+    );
+    const listed = async () => (await service((s) => s.listForUser(owner))).map((row) => row.id);
+    expect(await listed()).not.toContain(saved.id);
+    expect((await service((s) => s.personalServers(owner))).servers).toEqual([]);
+    expect(
+      (await service((s) => s.finishServerSetup(owner, saved.id).pipe(Effect.result)))._tag,
+    ).toBe("Failure");
+
+    // Its setup still sees it, and connecting there is what finishes it.
+    expect((await service((s) => s.serverSetup(owner, saved.id))).methods.apiKey).toBe(true);
+    await service((s) => s.connectApiKey(owner, saved.id, { token: "admin-key" }));
+    await service((s) => s.finishServerSetup(owner, saved.id));
+    expect(await listed()).toContain(saved.id);
+
+    // Another one left half added makes way for the next, and the sweep takes old ones.
+    const left = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.savePersonalServer(owner, {
+          integrationId: null,
+          name: "Left",
+          config: { url: "https://mcp.drafts.test/keyed", ways: "token" },
+        }),
+      ),
+    );
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(integrationConfigs)
+          .set({ createdAt: new Date(Date.now() - 2 * 60 * 60_000) })
+          .where(eq(integrationConfigs.id, left.id))
+          .pipe(Effect.orDie),
+      ),
+    );
+    await service((s) => s.sweepDrafts());
+    expect((await service((s) => s.serverSetup(owner, left.id).pipe(Effect.result)))._tag).toBe(
+      "Failure",
+    );
+    expect(await listed()).toContain(saved.id);
+  });
 
   it("is listed and used by its owner alone, with no approval step, while they may add servers", async () => {
     names.set("mcp.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });

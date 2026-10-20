@@ -120,6 +120,14 @@ server everywhere at once without deleting it. Others never see it: not in their
 directory or the admin's page, and an agent cannot name one that is not the author's own.
 Names are unique among what one person sees (the admin's and their own), not across everyone.
 
+A person gives only the address. The server is asked how it is reached rather than the person:
+answering as nobody makes it open; refusing, and naming an authorization server with PKCE,
+makes it signing in; refusing without one, a token. Open, it is done once saved. Otherwise it
+is a `draft` until its first account connects, since signing in needs the row and its callback
+names it: no list, directory or offer shows a draft, only its own setup, and going back deletes
+it. One person adds one at a time, so a new one replaces any left half added, and the sweep
+deletes drafts older than an hour.
+
 The address is the one thing that differs. An admin's server may be private because the admin
 chose it; a person's must be public HTTPS, or anyone could point the app at the internal
 network. The server sets `reach: public` on the config, a key no form can send, and with it

@@ -169,7 +169,15 @@ export class IntegrationRepo extends Context.Service<
       kind: string;
       name: string;
       ownerUserId?: string | null;
+      draft?: boolean;
     }): Effect.Effect<string | null>;
+    /** Lists a server its owner finished adding; false when it is not their draft. */
+    publishDraft(userId: string, integrationId: string): Effect.Effect<boolean>;
+    /**
+     * Deletes servers left half added: one person's (one is added at a time)
+     * or everyone's older than a time.
+     */
+    sweepDrafts(left: { ownerUserId: string } | { olderThanMs: number }): Effect.Effect<void>;
     /**
      * Removes an integration with everything that only meant something with it
      * (connections, grants, chat and agent settings, through their foreign keys)
@@ -185,7 +193,11 @@ export class IntegrationRepo extends Context.Service<
       ownerUserId: string | null,
     ): Effect.Effect<boolean>;
     /** Integrations this person may use, enabled or not, with their accounts, oldest first. */
-    listForUser(userId: string): Effect.Effect<
+    /** Every integration but drafts, except the one named: this person's being added. */
+    listForUser(
+      userId: string,
+      draftId?: string,
+    ): Effect.Effect<
       ReadonlyArray<{
         config: IntegrationConfigRow;
         usable: boolean;
@@ -394,7 +406,7 @@ export class IntegrationRepo extends Context.Service<
               connectionCount: sql<number>`(select count(distinct ${integrationConnections.userId})::int from ${integrationConnections} where ${integrationConnections.integrationId} = ${integrationConfigs.id})`,
             })
             .from(integrationConfigs)
-            .where(ownedBy(ownerUserId))
+            .where(and(ownedBy(ownerUserId), eq(integrationConfigs.draft, false)))
             .pipe(Effect.orDie);
           return rows.map((row) => ({ ...row.config, connectionCount: row.connectionCount }));
         }),
@@ -500,6 +512,7 @@ export class IntegrationRepo extends Context.Service<
                 kind: input.kind,
                 name: input.name,
                 ownerUserId: input.ownerUserId ?? null,
+                draft: input.draft ?? false,
               })
               .onConflictDoNothing()
               .returning({ id: integrationConfigs.id })
@@ -542,7 +555,39 @@ export class IntegrationRepo extends Context.Service<
 
         nameTaken,
 
-        listForUser: Effect.fn("IntegrationRepo.listForUser")(function* (userId) {
+        publishDraft: Effect.fn("IntegrationRepo.publishDraft")(function* (userId, integrationId) {
+          const rows = yield* db
+            .update(integrationConfigs)
+            .set({ draft: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(integrationConfigs.id, integrationId),
+                eq(integrationConfigs.ownerUserId, userId),
+                eq(integrationConfigs.draft, true),
+              ),
+            )
+            .returning({ id: integrationConfigs.id })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
+        }),
+
+        // Nothing names a draft (no chat, agent, schedule or source could pick it),
+        // so the foreign keys take its connections and listings with it.
+        sweepDrafts: Effect.fn("IntegrationRepo.sweepDrafts")(function* (left) {
+          yield* db
+            .delete(integrationConfigs)
+            .where(
+              and(
+                eq(integrationConfigs.draft, true),
+                "ownerUserId" in left
+                  ? eq(integrationConfigs.ownerUserId, left.ownerUserId)
+                  : sql`${integrationConfigs.createdAt} < now() - make_interval(secs => ${left.olderThanMs / 1000})`,
+              ),
+            )
+            .pipe(Effect.orDie);
+        }),
+
+        listForUser: Effect.fn("IntegrationRepo.listForUser")(function* (userId, draftId) {
           const rows = yield* db
             .select({
               config: integrationConfigs,
@@ -556,6 +601,11 @@ export class IntegrationRepo extends Context.Service<
                 eq(integrationConnections.integrationId, integrationConfigs.id),
                 eq(integrationConnections.userId, userId),
               ),
+            )
+            .where(
+              draftId
+                ? or(eq(integrationConfigs.draft, false), eq(integrationConfigs.id, draftId))
+                : eq(integrationConfigs.draft, false),
             )
             .pipe(Effect.orDie);
           const byConfig = new Map<

@@ -102,6 +102,29 @@ const challenge = (url: URL, publicOnly: boolean) =>
     catch: () => reject("The MCP server could not be reached."),
   });
 
+/**
+ * Whether a server that refused a request without an account says where to sign
+ * in, safely enough to use: an authorization server with PKCE. Otherwise it
+ * takes a token pasted from the person's account there.
+ */
+export const offersSignIn = (config: Readonly<Record<string, string>>) =>
+  Effect.gen(function* () {
+    const url = new URL(config.url!);
+    const publicOnly = reachesPublicOnly(config);
+    const hint = yield* challenge(url, publicOnly);
+    const info = yield* Effect.tryPromise({
+      try: (signal) =>
+        discoverOAuthServerInfo(url, {
+          fetchFn: bounded(url, signal, publicOnly),
+          ...(hint?.resourceMetadataUrl ? { resourceMetadataUrl: hint.resourceMetadataUrl } : {}),
+        }),
+      catch: () => null,
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
+    return Boolean(
+      info?.authorizationServerMetadata?.code_challenge_methods_supported?.includes("S256"),
+    );
+  });
+
 export const mcpOAuth: DiscoveredOAuth = {
   begin: (input) =>
     Effect.gen(function* () {

@@ -38,6 +38,9 @@ export const integrationConfigs = pgTable(
     description: text(),
     // Set for a server a person added for themselves; null for the admin's.
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    // A person's server still being added: connecting needs the row, but no list shows
+    // it until its first account connects, and one left behind is swept.
+    draft: boolean().notNull().default(false),
     enabled: boolean().notNull().default(false),
     // Non-secret settings named by the manifest's admin fields (base URL…).
     config: jsonb().$type<Record<string, string>>().notNull().default({}),

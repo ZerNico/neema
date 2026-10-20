@@ -28,6 +28,7 @@ import {
 import { savePersonalServer } from "../server/functions.ts";
 import { DirectoryDialogContent, IntegrationDirectory } from "./integration-directory.tsx";
 import { byName, integrationEntry } from "./directory-entries.ts";
+import { AddByAddress } from "./add-by-address.tsx";
 import { ConnectFlow } from "./connect-flow.tsx";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 
@@ -80,8 +81,8 @@ const KNOWN_KEYS = new Set(["url", "ways"]);
 
 /**
  * Adds an integration, or edits a server of one's own. Adding starts from one
- * directory: what an admin set up, to connect on its page, and any address for
- * someone allowed to add servers of their own, which then opens on its page.
+ * directory: what an admin set up, and any address for someone allowed to add
+ * servers of their own. Either is connected right in the dialog.
  */
 export function PersonalServerDialog({
   server,
@@ -128,11 +129,6 @@ export function PersonalServerDialog({
       }
       await refresh();
       onOpenChange(false);
-      if (!server)
-        void navigate({
-          to: "/settings/integrations/$integrationId",
-          params: { integrationId: result.server.id },
-        });
     },
     onError: () => setError("Could not save the server."),
   });
@@ -146,8 +142,6 @@ export function PersonalServerDialog({
     onOpenChange(false);
     void navigate({ to: "/settings/integrations/$integrationId", params: { integrationId } });
   };
-  // A new server keeps the directory’s width, so its step reads as the same dialog.
-  const FormContent = server ? DialogContent : DirectoryDialogContent;
 
   return (
     <Dialog
@@ -180,11 +174,7 @@ export function PersonalServerDialog({
               choices.canAdd
                 ? {
                     label: "MCP server by address",
-                    onPick: () => {
-                      setByAddress(true);
-                      setName("");
-                      setConfig(initialConfig({}));
-                    },
+                    onPick: () => setByAddress(true),
                   }
                 : null
             }
@@ -195,16 +185,22 @@ export function PersonalServerDialog({
             }
           />
         </DirectoryDialogContent>
-      ) : (
-        <FormContent>
+      ) : !server ? (
+        // A new server keeps the directory’s width, so its steps read as the same dialog.
+        <DirectoryDialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {server
-                ? known
-                  ? `Rename ${server.name}`
-                  : `Set up ${server.name}`
-                : "Add an MCP server"}
-            </DialogTitle>
+            <DialogTitle>Add an MCP server</DialogTitle>
+          </DialogHeader>
+          <AddByAddress
+            onBack={() => setByAddress(false)}
+            onDone={() => onOpenChange(false)}
+            onOpenPage={openPage}
+          />
+        </DirectoryDialogContent>
+      ) : (
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{known ? `Rename ${server.name}` : `Set up ${server.name}`}</DialogTitle>
             <DialogDescription>Only you use it. Chats get the tools it lists.</DialogDescription>
           </DialogHeader>
           <form
@@ -243,26 +239,15 @@ export function PersonalServerDialog({
             </FieldGroup>
             {error ? <FieldError>{error}</FieldError> : null}
             <DialogFooter>
-              {server ? (
-                <DialogClose render={<Button variant="outline" disabled={busy} />}>
-                  Cancel
-                </DialogClose>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => setByAddress(false)}
-                >
-                  Back
-                </Button>
-              )}
+              <DialogClose render={<Button variant="outline" disabled={busy} />}>
+                Cancel
+              </DialogClose>
               <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
-                {server ? "Save" : "Add"}
+                Save
               </PendingButton>
             </DialogFooter>
           </form>
-        </FormContent>
+        </DialogContent>
       )}
     </Dialog>
   );

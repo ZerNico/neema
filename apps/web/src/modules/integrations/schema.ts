@@ -149,6 +149,10 @@ export interface UserIntegration {
 
 export const IntegrationIdInput = Schema.Struct({ integrationId: IntegrationId });
 
+export const ProbeServerInput = Schema.Struct({
+  url: Schema.String.check(Schema.isMaxLength(2_000)),
+});
+
 export const ConnectionIdInput = Schema.Struct({ connectionId: EntityId });
 
 /** A public MCP server one person added for themselves; only they use it. */

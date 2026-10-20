@@ -5,14 +5,15 @@ import { IntegrationService } from "./service.ts";
 const SWEEP_INTERVAL = Duration.minutes(10);
 
 /**
- * Lists every catalog type's tools again when due, for each account, so what
- * chats are offered follows what the server offers now. A layer of its own,
- * so tests that hold the service have no timer.
+ * Lists every listed type's tools again when due, for each account, so what
+ * chats are offered follows what the server offers now, and drops servers
+ * people left half added. A layer of its own, so tests that hold the service
+ * have no timer.
  */
 export const ToolListingSweep = Layer.effectDiscard(
   Effect.gen(function* () {
     const service = yield* IntegrationService;
-    yield* service.checkDueListings().pipe(
+    yield* Effect.all([service.checkDueListings(), service.sweepDrafts()], { discard: true }).pipe(
       Effect.catchCause((cause) => Effect.logError("integration tool listing sweep failed", cause)),
       Effect.repeat(Schedule.spaced(SWEEP_INTERVAL)),
       Effect.forkScoped,

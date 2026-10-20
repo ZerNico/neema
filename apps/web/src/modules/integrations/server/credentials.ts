@@ -573,7 +573,7 @@ export const makeCredentials = (deps: {
           reason: `That is another account than “${accountName(current)}”. Add it as another account instead.`,
         });
       // A row from before it knew its account cannot take on one connected beside it.
-      const listed = yield* repo.listForUser(userId);
+      const listed = yield* repo.listForUser(userId, integrationId);
       const other = listed
         .find((entry) => entry.config.id === integrationId)
         ?.connections.find((entry) => entry.id !== connectionId && entry.accountKey === accountKey);
@@ -585,7 +585,7 @@ export const makeCredentials = (deps: {
 
     /** A session as any working account of theirs, oldest first, for work that is not a person's own call. */
     const anySessionFor = Effect.fn(function* (userId: string, integrationId: string) {
-      const listed = yield* repo.listForUser(userId);
+      const listed = yield* repo.listForUser(userId, integrationId);
       const accounts = listed.find((entry) => entry.config.id === integrationId)?.connections ?? [];
       for (const account of accounts) {
         const session = yield* sessionFor(userId, account.id).pipe(Effect.option);
