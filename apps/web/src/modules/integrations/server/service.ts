@@ -37,6 +37,7 @@ import { findAdapterType } from "./adapters.ts";
 import { shippedTools } from "./tools.ts";
 import {
   IntegrationRepo,
+  idFromName,
   type IntegrationConfigRow,
   type IntegrationConnectionRow,
   type SaveConfig,
@@ -804,7 +805,13 @@ export class IntegrationService extends Context.Service<
             // Open, it is done once saved; anything else waits for its first account.
             const id =
               stored?.id ??
-              (yield* repo.createConfig({ kind: "mcp", name, ownerUserId: userId, draft: !opens }));
+              (yield* repo.createConfig({
+                kind: "mcp",
+                idBase: idFromName(name, "mcp"),
+                name,
+                ownerUserId: userId,
+                draft: !opens,
+              }));
             if (!id)
               return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
             const row = yield* repo.saveConfig({
@@ -948,7 +955,16 @@ export class IntegrationService extends Context.Service<
             return yield* new IntegrationRejected({ reason: "Give it a name." });
           if (yield* repo.nameTaken(name, null, null))
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
-          const id = yield* repo.createConfig({ kind: input.kind, name });
+          // A known server is named by its preset, any other server by what the admin called it.
+          const id = yield* repo.createConfig({
+            kind: input.kind,
+            name,
+            ...(known
+              ? { idBase: known.id }
+              : input.kind === "mcp"
+                ? { idBase: idFromName(name, "mcp") }
+                : {}),
+          });
           if (!id)
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           // A known server needs nothing more: on at once, at its address, people signing in.

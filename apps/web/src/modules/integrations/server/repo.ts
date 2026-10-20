@@ -80,14 +80,25 @@ const decodeShared = Schema.decodeUnknownOption(
 );
 
 /**
-/** A type's own kind for its first integration, then numbered: `jira`, `jira-2`. */
-const freeId = (kind: string, taken: ReadonlyArray<string>) => {
+/** The base itself for the first, then numbered: `jira`, `jira-2`. A deleted one's id is free again. */
+const freeId = (base: string, taken: ReadonlyArray<string>) => {
   const used = new Set(taken);
-  if (!used.has(kind)) return kind;
+  if (!used.has(base)) return base;
   let n = 2;
-  while (used.has(`${kind}-${n}`)) n++;
-  return `${kind}-${n}`;
+  while (used.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
 };
+
+/** A name as an id: `DeepWiki` reads `deepwiki`, and one with no letters to keep falls back. */
+export const idFromName = (name: string, fallback: string) =>
+  name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "") || fallback;
 
 /**
  * Who may connect: everyone signed in when the audience is the instance,
@@ -162,11 +173,13 @@ export class IntegrationRepo extends Context.Service<
     saveConfig(input: SaveConfig): Effect.Effect<IntegrationConfigRow | null>;
     /** A new integration, off and unconfigured; false when the id or name is taken. */
     /**
-     * Adds an integration under the first free id of its type (`jira`, then
+     * Adds an integration under the first free id from its base (`jira`, then
      * `jira-2`), or returns null when the name is already in use.
      */
     createConfig(input: {
       kind: string;
+      /** What its id is made from: its type unless said, such as `trello` or `deepwiki`. */
+      idBase?: string;
       name: string;
       ownerUserId?: string | null;
       draft?: boolean;
@@ -502,7 +515,7 @@ export class IntegrationRepo extends Context.Service<
               .from(integrationConfigs)
               .pipe(Effect.orDie);
             const id = freeId(
-              input.kind,
+              input.idBase ?? input.kind,
               taken.map((row) => row.id),
             );
             const rows = yield* db
