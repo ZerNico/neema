@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
+import { invalidateAuth } from "~/modules/auth/server/auth.ts";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
+import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
+import { refuse } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MailService, SmtpSettingsInput } from "./mail.ts";
 import { PushService } from "./push.ts";
@@ -66,11 +69,26 @@ export const getSmtpSettings = createServerFn({ method: "GET" })
 export const saveSmtpSettings = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(Schema.toStandardSchemaV1(SmtpSettingsInput))
-  .handler(({ data }) => runServerFn(Effect.flatMap(MailService, (mail) => mail.save(data))));
+  .handler(async ({ data }) => {
+    await runServerFn(Effect.flatMap(MailService, (mail) => mail.save(data)));
+    // The auth instance offers password reset and verification only with mail.
+    invalidateAuth();
+  });
 
 export const clearSmtpSettings = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
-  .handler(() => runServerFn(Effect.flatMap(MailService, (mail) => mail.clear)));
+  .handler(async () => {
+    await runServerFn(
+      Effect.gen(function* () {
+        const settings = yield* Effect.flatMap(SignupRepo, (repo) => repo.settings());
+        // Accounts could no longer prove their address, and nobody new could get in.
+        if (settings.requireEmailVerification)
+          return yield* refuse(409, "Turn off email verification under Sign-in first");
+        yield* Effect.flatMap(MailService, (mail) => mail.clear);
+      }),
+    );
+    invalidateAuth();
+  });
 
 /** Mails the admin who asked, with what is saved now. */
 export const sendTestEmail = createServerFn({ method: "POST" })

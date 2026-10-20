@@ -7,6 +7,8 @@ import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import { membershipsQuery, usersQuery } from "../client/queries.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { PendingAccounts } from "~/modules/auth/ui/pending-accounts.tsx";
+import { authSettingsQuery } from "~/modules/auth/queries.ts";
+import { markEmailVerified } from "~/modules/auth/server/signup-functions.ts";
 import { initials } from "~/ui/initials";
 import { ErrorState, ListCard, ListRow, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
@@ -34,6 +36,8 @@ export function UsersPage() {
   const memberships = useQuery(membershipsQuery);
 
   const users = useQuery(usersQuery);
+  // Only while verification is required does an unproven address change anything.
+  const { data: authSettings } = useQuery(authSettingsQuery);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
 
@@ -76,6 +80,16 @@ export function UsersPage() {
     },
     onSuccess: invalidate,
     onError: (error) => toastError("Could not unban the user.", error),
+  });
+
+  const verify = useMutation({
+    mutationFn: (userId: string) => markEmailVerified({ data: { userId } }),
+    onSuccess: () =>
+      Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({ queryKey: ["admin", "pending-accounts"] }),
+      ]),
+    onError: (error) => toastError("Could not mark the email verified.", error),
   });
 
   return (
@@ -125,6 +139,9 @@ export function UsersPage() {
                       +{hiddenGroups} more
                     </Badge>
                   ) : null}
+                  {authSettings?.requireEmailVerification && !user.emailVerified ? (
+                    <Badge variant="outline">Unverified</Badge>
+                  ) : null}
                   {user.banned ? <Badge variant="destructive">Banned</Badge> : null}
                   {/* Only "Admin" carries information: every row here is a user. */}
                   {isAdmin ? <Badge>Admin</Badge> : null}
@@ -167,6 +184,24 @@ export function UsersPage() {
                       >
                         {isAdmin ? "Remove admin" : "Make admin"}
                       </DropdownMenuItem>
+                      {user.emailVerified ? null : (
+                        <DropdownMenuItem
+                          onClick={async () => {
+                            if (
+                              await confirm({
+                                title: `Mark ${user.email} verified?`,
+                                description:
+                                  "Do this only if you know the address is theirs. Others can then find them by it, and a waiting account in a listed domain is let in.",
+                                confirmLabel: "Mark verified",
+                                destructive: false,
+                              })
+                            )
+                              verify.mutate(user.id);
+                          }}
+                        >
+                          Mark email verified
+                        </DropdownMenuItem>
+                      )}
                       {user.banned ? (
                         <DropdownMenuItem onClick={() => unban.mutate(user.id)}>
                           Unban user

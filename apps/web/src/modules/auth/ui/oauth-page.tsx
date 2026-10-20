@@ -24,16 +24,32 @@ import { Switch } from "~/ui/primitives/switch";
 import { OAUTH_BUILTINS } from "../oauth.ts";
 import { deleteOAuthProvider, setOAuthProviderEnabled } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
-import { setSignupPolicy } from "../server/signup-functions.ts";
-import { SIGNUP_POLICIES, SIGNUP_POLICY_LABELS, type SignupPolicy } from "../signup.ts";
+import { saveAuthSettings } from "../server/signup-functions.ts";
+import {
+  MAX_ADMIT_DOMAINS,
+  parseDomain,
+  SIGNUP_MODE_ITEMS,
+  SIGNUP_MODE_LABELS,
+  type AuthSettings,
+  type SignupMode,
+} from "../signup.ts";
 import { OAuthProviderDialog } from "./oauth-provider-dialog.tsx";
 import { toastError } from "~/ui/error-toast.ts";
-import { oauthProvidersQuery, signupPolicyQuery } from "../queries.ts";
+import { authSettingsQuery, oauthProvidersQuery } from "../queries.ts";
+import {
+  Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
+  ComboboxValue,
+  useComboboxAnchor,
+} from "~/ui/primitives/combobox";
 
-const POLICY_ITEMS = SIGNUP_POLICIES.map((value) => ({
-  value,
-  label: SIGNUP_POLICY_LABELS[value].title,
-}));
+// Approval is the ordinary case, so only the other two earn a badge.
+const MODE_BADGES: Partial<Record<SignupMode, string>> = {
+  open: "Joins directly",
+  closed: "Sign-in only",
+};
 
 export function OAuthPage() {
   const { data } = useSuspenseQuery(oauthProvidersQuery);
@@ -79,7 +95,7 @@ export function OAuthPage() {
   return (
     <Page
       title="Sign-in"
-      description="How people get into this instance, beside email and password."
+      description="How people get into this instance and who can join."
       actions={addButton}
     >
       {data.providers.length === 0 ? (
@@ -111,7 +127,8 @@ export function OAuthPage() {
         </ListCard>
       )}
 
-      <SignupPolicySection />
+      <PasswordSection />
+      <DomainsSection />
 
       {adding ? (
         <OAuthProviderDialog
@@ -158,7 +175,10 @@ function ProviderRow({
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-2 text-sm font-medium">
           <span className="min-w-0 truncate">{provider.label}</span>
-          {provider.trusted ? <Badge variant="secondary">Skips approval</Badge> : null}
+          {MODE_BADGES[provider.signup] ? (
+            <Badge variant="secondary">{MODE_BADGES[provider.signup]}</Badge>
+          ) : null}
+          {provider.trustEmails ? <Badge variant="secondary">Trusted emails</Badge> : null}
         </span>
         {/* A built-in's label already names it; an OpenID Connect id is chosen,
             so it is the only one worth repeating under the name. */}
@@ -188,40 +208,185 @@ function ProviderRow({
   );
 }
 
-function SignupPolicySection() {
-  const fieldId = useId();
-  const { data: policy } = useSuspenseQuery(signupPolicyQuery);
+function useSaveSettings() {
+  const { data: settings } = useSuspenseQuery(authSettingsQuery);
   const queryClient = useQueryClient();
   const save = useMutation({
-    mutationFn: (next: SignupPolicy) => setSignupPolicy({ data: { policy: next } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "signup-policy"] }),
-    onError: (error) => toastError("Could not change who can join.", error),
+    mutationFn: (patch: Partial<AuthSettings>) =>
+      saveAuthSettings({
+        data: {
+          passwordSignup: settings.passwordSignup,
+          passwordLogin: settings.passwordLogin,
+          requireEmailVerification: settings.requireEmailVerification,
+          admitDomains: [...settings.admitDomains],
+          ...patch,
+        },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "auth-settings"] }),
+    onError: (error) => toastError("Could not save.", error),
   });
+  return { settings, save };
+}
+
+function PasswordSection() {
+  const fieldId = useId();
+  const { settings, save } = useSaveSettings();
+  // The server treats a forced switch as on, so the page does too.
+  const passwordOn = settings.passwordLogin || settings.passwordLoginForced;
 
   return (
-    <Section title="New accounts">
+    <Section title="Email and password">
       <ListCard>
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
-            <FieldLabel htmlFor={fieldId}>Who can join</FieldLabel>
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel htmlFor={`${fieldId}-login`}>Password sign-in</FieldLabel>
+              <Switch
+                id={`${fieldId}-login`}
+                checked={passwordOn}
+                onCheckedChange={(passwordLogin) => save.mutate({ passwordLogin })}
+                disabled={save.isPending || settings.passwordLoginForced}
+              />
+            </div>
+            <FieldDescription>
+              {settings.passwordLoginForced
+                ? "Kept on by AUTH_PASSWORD_LOGIN on the server."
+                : "Off leaves only the providers above."}
+            </FieldDescription>
+          </Field>
+        </ListRow>
+        <ListRow className="flex-col items-stretch gap-3">
+          <Field>
+            <FieldLabel htmlFor={`${fieldId}-signup`}>New accounts</FieldLabel>
             <Select
-              value={policy}
-              onValueChange={(value) => value && save.mutate(value as SignupPolicy)}
-              items={POLICY_ITEMS}
-              disabled={save.isPending}
+              value={settings.passwordSignup}
+              onValueChange={(passwordSignup) => passwordSignup && save.mutate({ passwordSignup })}
+              items={SIGNUP_MODE_ITEMS}
+              disabled={save.isPending || !passwordOn}
             >
-              <SelectTrigger id={fieldId} className="w-full">
+              <SelectTrigger id={`${fieldId}-signup`} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {POLICY_ITEMS.map((item) => (
+                {SIGNUP_MODE_ITEMS.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <FieldDescription>{SIGNUP_POLICY_LABELS[policy].description}</FieldDescription>
+            <FieldDescription>
+              {SIGNUP_MODE_LABELS[settings.passwordSignup].description}
+            </FieldDescription>
+          </Field>
+        </ListRow>
+        <ListRow className="flex-col items-stretch gap-3">
+          <Field>
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel htmlFor={`${fieldId}-verify`}>Require email verification</FieldLabel>
+              <Switch
+                id={`${fieldId}-verify`}
+                checked={settings.requireEmailVerification}
+                onCheckedChange={(requireEmailVerification) =>
+                  save.mutate({ requireEmailVerification })
+                }
+                disabled={
+                  save.isPending || (!settings.smtpConfigured && !settings.requireEmailVerification)
+                }
+              />
+            </div>
+            <FieldDescription>
+              {settings.smtpConfigured
+                ? "Password accounts confirm their address before signing in. Only confirmed addresses can be found by email."
+                : "Set up email under Email first."}
+            </FieldDescription>
+          </Field>
+        </ListRow>
+      </ListCard>
+    </Section>
+  );
+}
+
+function DomainsSection() {
+  const fieldId = useId();
+  const anchor = useComboboxAnchor();
+  const { settings, save } = useSaveSettings();
+  // Shown at once and saved behind it; a failed save puts the stored list back.
+  const [domains, setDomains] = useState<readonly string[]>(settings.admitDomains);
+  const [text, setText] = useState("");
+  const [rejected, setRejected] = useState<string | null>(null);
+
+  const apply = (next: readonly string[]) => {
+    setDomains(next);
+    save.mutate({ admitDomains: [...next] }, { onError: () => setDomains(settings.admitDomains) });
+  };
+
+  // Typed or pasted text becomes chips at a separator; anything that is not a domain stays put.
+  const commit = (raw: string) => {
+    const added: string[] = [];
+    const left: string[] = [];
+    for (const part of raw.split(/[\s,;]+/).filter(Boolean)) {
+      const domain = parseDomain(part);
+      if (domain && domains.length + added.length < MAX_ADMIT_DOMAINS) {
+        if (!domains.includes(domain) && !added.includes(domain)) added.push(domain);
+      } else left.push(part);
+    }
+    if (added.length) apply([...domains, ...added]);
+    setText(left.join(" "));
+    setRejected(left[0] ?? null);
+  };
+
+  return (
+    <Section title="Domains">
+      <ListCard>
+        <ListRow className="flex-col items-stretch gap-3">
+          <Field>
+            <FieldLabel htmlFor={`${fieldId}-domains`}>Domains that join directly</FieldLabel>
+            <Combobox
+              multiple
+              items={[...domains]}
+              value={[...domains]}
+              onValueChange={(next: string[]) => apply(next)}
+              inputValue={text}
+              onInputValueChange={(value: string) => {
+                setRejected(null);
+                if (/[\s,;]/.test(value)) commit(value);
+                else setText(value);
+              }}
+            >
+              <ComboboxChips ref={anchor} aria-invalid={rejected !== null}>
+                <ComboboxValue>
+                  {(value: string[]) => (
+                    <>
+                      {value.map((domain) => (
+                        <ComboboxChip key={domain} aria-label={domain}>
+                          {domain}
+                        </ComboboxChip>
+                      ))}
+                      <ComboboxChipsInput
+                        id={`${fieldId}-domains`}
+                        placeholder={value.length ? "" : "example.com"}
+                        disabled={domains.length >= MAX_ADMIT_DOMAINS}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && text.trim()) {
+                            event.preventDefault();
+                            commit(text);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (text.trim()) commit(text);
+                        }}
+                      />
+                    </>
+                  )}
+                </ComboboxValue>
+              </ComboboxChips>
+            </Combobox>
+            <FieldDescription>
+              {rejected
+                ? `“${rejected}” isn’t a domain.`
+                : "A verified address here gets in even where new accounts wait or are refused."}
+            </FieldDescription>
           </Field>
         </ListRow>
       </ListCard>

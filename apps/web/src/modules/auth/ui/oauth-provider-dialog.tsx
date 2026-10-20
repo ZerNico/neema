@@ -25,6 +25,7 @@ import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { findBuiltin, OIDC_DEFAULT_SCOPES, type OAuthBuiltin } from "../oauth.ts";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
+import { SIGNUP_MODE_ITEMS, SIGNUP_MODE_LABELS, type SignupMode } from "../signup.ts";
 
 const OIDC = "oidc";
 
@@ -38,7 +39,8 @@ interface Draft {
   extra: string;
   discoveryUrl: string;
   scopes: string;
-  trusted: boolean;
+  signup: SignupMode;
+  trustEmails: boolean;
 }
 
 const emptyDraft = (type: string): Draft => ({
@@ -50,7 +52,8 @@ const emptyDraft = (type: string): Draft => ({
   extra: "",
   discoveryUrl: "",
   scopes: OIDC_DEFAULT_SCOPES.join(" "),
-  trusted: false,
+  signup: "approval",
+  trustEmails: false,
 });
 
 const draftOf = (provider: PublicOAuthProvider): Draft => ({
@@ -62,7 +65,8 @@ const draftOf = (provider: PublicOAuthProvider): Draft => ({
   extra: String(provider.config[findBuiltin(provider.id)?.field?.key ?? ""] ?? ""),
   discoveryUrl: String(provider.config.discoveryUrl ?? ""),
   scopes: ((provider.config.scopes as string[] | undefined) ?? OIDC_DEFAULT_SCOPES).join(" "),
-  trusted: provider.trusted,
+  signup: provider.signup,
+  trustEmails: provider.trustEmails,
 });
 
 /**
@@ -116,7 +120,8 @@ export function OAuthProviderDialog({
               // Adding turns it on: the callback URL is on screen to register,
               // and a provider nobody can use is not what Add meant.
               enabled: provider?.enabled ?? true,
-              trusted: draft.trusted,
+              signup: draft.signup,
+              trustEmails: draft.trustEmails,
               clientId: draft.clientId.trim(),
               ...(secret ? { secret } : {}),
               ...(builtin.field?.key === "tenantId" ? { tenantId: draft.extra.trim() } : {}),
@@ -128,7 +133,8 @@ export function OAuthProviderDialog({
               id: draft.id.trim(),
               label: draft.label.trim(),
               enabled: provider?.enabled ?? true,
-              trusted: draft.trusted,
+              signup: draft.signup,
+              trustEmails: draft.trustEmails,
               clientId: draft.clientId.trim(),
               ...(secret ? { secret } : {}),
               discoveryUrl: draft.discoveryUrl.trim(),
@@ -309,20 +315,42 @@ export function OAuthProviderDialog({
             )}
 
             <Field>
+              <FieldLabel htmlFor={`${fieldId}-signup`}>New accounts</FieldLabel>
+              <Select
+                value={draft.signup}
+                onValueChange={(signup) => signup && patch({ signup })}
+                items={SIGNUP_MODE_ITEMS}
+                disabled={save.isPending}
+              >
+                <SelectTrigger id={`${fieldId}-signup`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SIGNUP_MODE_ITEMS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>{SIGNUP_MODE_LABELS[draft.signup].description}</FieldDescription>
+            </Field>
+
+            <Field>
               {/* The description sits outside the label: Base UI points the
                   switch at it with aria-labelledby, so anything in there ends
                   up read aloud as the control's name. */}
               <div className="flex items-center justify-between gap-3">
-                <FieldLabel htmlFor={`${fieldId}-trusted`}>Skip approval</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-trust-emails`}>Trust its emails</FieldLabel>
                 <Switch
-                  id={`${fieldId}-trusted`}
-                  checked={draft.trusted}
-                  onCheckedChange={(trusted) => patch({ trusted })}
+                  id={`${fieldId}-trust-emails`}
+                  checked={draft.trustEmails}
+                  onCheckedChange={(trustEmails) => patch({ trustEmails })}
                   disabled={save.isPending}
                 />
               </div>
               <FieldDescription>
-                New accounts from this provider are approved automatically.
+                Count its addresses as verified. Only for a provider that owns its domain.
               </FieldDescription>
             </Field>
           </FieldGroup>

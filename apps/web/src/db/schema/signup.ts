@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 
 /**
@@ -11,8 +11,12 @@ export const authSettings = pgTable("auth_settings", {
   // One row, seeded by migration. The constant primary key is what keeps it
   // one row: a second insert conflicts instead of creating a rival policy.
   id: text().primaryKey(),
-  // "open" admits anyone, "approval" queues them, "closed" refuses creation.
-  signupPolicy: text("signup_policy").$type<"open" | "approval" | "closed">().notNull(),
+  // How email-and-password registration admits; each OAuth provider has its own.
+  passwordSignup: text("password_signup").$type<"open" | "approval" | "closed">().notNull(),
+  passwordLogin: boolean("password_login").notNull().default(true),
+  requireEmailVerification: boolean("require_email_verification").notNull().default(false),
+  // A verified email in one of these joins whatever its method's mode says.
+  admitDomains: text("admit_domains").array().notNull().default([]),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

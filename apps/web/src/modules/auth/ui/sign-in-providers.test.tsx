@@ -1,26 +1,19 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authClient } from "~/modules/auth/client.ts";
 import { SignInProviders } from "./sign-in-providers.tsx";
 
-vi.mock("../server/oauth-functions.ts", () => ({ getSignInProviders: vi.fn() }));
 vi.mock("~/modules/auth/client.ts", () => ({ authClient: { signIn: { social: vi.fn() } } }));
 
 const social = vi.mocked(authClient.signIn.social);
 
-const renderButtons = (providers: { id: string; label: string }[]) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(["sign-in-providers"], providers);
-  return render(
-    <QueryClientProvider client={client}>
-      <Suspense fallback={null}>
-        <SignInProviders />
-      </Suspense>
-    </QueryClientProvider>,
+const renderButtons = (providers: { id: string; label: string }[], separated = false) =>
+  render(
+    <SignInProviders
+      providers={providers.map((p) => ({ ...p, signup: true }))}
+      separated={separated}
+    />,
   );
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -42,7 +35,18 @@ describe("SignInProviders", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Continue with Acme" }));
 
     await waitFor(() => expect(social).toHaveBeenCalled());
-    expect(social.mock.calls[0]?.[0]).toMatchObject({ provider: "acme", callbackURL: "/" });
+    expect(social.mock.calls[0]?.[0]).toMatchObject({
+      provider: "acme",
+      callbackURL: "/",
+      errorCallbackURL: "/login",
+    });
+  });
+
+  it("introduces a password form only when one follows", () => {
+    renderButtons([{ id: "google", label: "Google" }]);
+    expect(screen.queryByText("or")).toBeNull();
+    renderButtons([{ id: "google", label: "Google" }], true);
+    expect(screen.getByText("or")).toBeInTheDocument();
   });
 
   it("reports a failure instead of leaving the button spinning", async () => {

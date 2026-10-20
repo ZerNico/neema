@@ -17,6 +17,7 @@ const load = () => import("./auth.ts");
 const provider = (id: string): AuthOAuthProvider => ({
   kind: "builtin",
   id,
+  trustEmails: false,
   clientId: `${id}-client`,
   clientSecret: `${id}-secret`,
 });

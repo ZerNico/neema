@@ -11,12 +11,13 @@ import { cimd } from "@better-auth/cimd";
 import { mcp as mcpProvider } from "@better-auth/mcp";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
 import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
+import { SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
 
@@ -37,6 +38,7 @@ export type AuthOAuthProvider =
   | {
       kind: "builtin";
       id: string;
+      trustEmails: boolean;
       clientId: string;
       clientSecret: string;
       tenantId?: string | undefined;
@@ -45,6 +47,7 @@ export type AuthOAuthProvider =
   | {
       kind: "oidc";
       id: string;
+      trustEmails: boolean;
       label: string;
       clientId: string;
       clientSecret: string;
@@ -88,42 +91,87 @@ function socialProvidersFrom(providers: readonly AuthOAuthProvider[]): SocialPro
 }
 
 /**
- * How a new account is treated, decided by the caller because the policy and
- * the provider's trust live in the database and this factory deliberately
+ * How a new account is treated, decided by the caller because the settings
+ * and each provider's mode live in the database and this factory deliberately
  * reaches no further than the arguments it is given.
  */
 export interface SignupGate {
-  /** False refuses creation outright, before any row is written. */
-  allow: () => Promise<boolean>;
+  /**
+   * Before any row is written. False refuses creation; `emailVerified` is what
+   * the new row records, which a provider whose emails are trusted raises.
+   */
+  admit: (input: {
+    providerId: string | null;
+    email: string;
+    emailVerified: boolean;
+  }) => Promise<{ allowed: boolean; emailVerified: boolean }>;
   /** Records whether the new account may be used yet. */
   record: (input: {
     userId: string;
     providerId: string | null;
+    email: string;
+    emailVerified: boolean;
     isFirstUser: boolean;
   }) => Promise<void>;
+  /** An address was just proven, which a listed domain turns into admission. */
+  verified: (user: { id: string; email: string }) => Promise<void>;
+  /** Whether password sign-in, registration and reset are offered right now. */
+  passwordAllowed: () => Promise<boolean>;
   /** Whether an existing account may use the app; missing approvals are reconciled first. */
   approved: (userId: string) => Promise<boolean>;
 }
 
 const openSignup: SignupGate = {
-  allow: async () => true,
+  admit: async ({ emailVerified }) => ({ allowed: true, emailVerified }),
   record: async () => {},
+  verified: async () => {},
+  passwordAllowed: async () => true,
   approved: async () => true,
 };
 
 /**
- * The provider an account is being created through, or null for email and
- * password. Better Auth routes every OAuth return through `callback/:id`, so
- * the route parameter is the provider id for built-in and generic entries
- * alike; no other user-creating endpoint carries one.
+ * Mail the auth instance sends. Absent without an SMTP server, which leaves
+ * verification off and password reset unavailable.
  */
-const providerFromContext = (context: { path?: string; params?: unknown } | null) => {
-  if (!context?.path?.startsWith("/callback")) return null;
-  const params = context.params;
-  if (typeof params !== "object" || params === null) return null;
-  const id = (params as Record<string, unknown>).id;
-  return typeof id === "string" ? id : null;
+export interface AuthMail {
+  /** Baked into the instance, so changing it rebuilds through `invalidateAuth`. */
+  requireVerification: boolean;
+  send: (to: string, subject: string, text: string) => Promise<void>;
+}
+
+const PASSWORD_PATHS = [
+  "/sign-in/email",
+  "/sign-up/email",
+  "/request-password-reset",
+  "/reset-password",
+];
+
+/**
+ * The way in an account is being created through: a provider id, null for
+ * email and password, or undefined for any other endpoint, which admits nobody
+ * new. An OAuth return carries the provider as `callback/:id`, generic entries
+ * included; an ID token signs up within `/sign-in/social` itself.
+ */
+export const methodFromContext = (
+  context: { path?: string; params?: unknown; body?: unknown } | null,
+): string | null | undefined => {
+  if (context?.path === "/sign-up/email") return null;
+  const source = context?.path?.startsWith("/callback/")
+    ? context.params
+    : context?.path === "/sign-in/social"
+      ? context.body
+      : undefined;
+  if (typeof source !== "object" || source === null) return undefined;
+  const id = (source as Record<string, unknown>).id ?? (source as Record<string, unknown>).provider;
+  return typeof id === "string" ? id : undefined;
 };
+
+const refuseNewAccount = () =>
+  new APIError("FORBIDDEN", {
+    // The OAuth callback forwards a code to the error page.
+    code: SIGNUP_CLOSED,
+    message: "This instance is not accepting new accounts.",
+  });
 
 /**
  * This instance as an OAuth authorization server for its own MCP endpoint.
@@ -151,6 +199,7 @@ export function createAppAuth({
   purgeUserFiles,
   oauthProviders = [],
   signup = openSignup,
+  mail,
   onDesktopRedeemed = async () => {},
   mcp,
   // Better Auth's own default; named so a test can turn the limiter on.
@@ -164,6 +213,7 @@ export function createAppAuth({
   purgeUserFiles: (userId: string) => Promise<void>;
   oauthProviders?: readonly AuthOAuthProvider[];
   signup?: SignupGate;
+  mail?: AuthMail | undefined;
   /** Announces a redeemed desktop ticket to the user's open tabs. */
   onDesktopRedeemed?: (userId: string, ticketId: string) => Promise<void>;
   mcp?: McpAuthorization | undefined;
@@ -176,8 +226,50 @@ export function createAppAuth({
     baseURL,
     secret,
     database: drizzleAdapter(db, { provider: "pg", schema }),
-    emailAndPassword: { enabled: true },
-    account: { encryptOAuthTokens: true },
+    emailAndPassword: {
+      enabled: true,
+      // Without mail there is no way to prove an address, so nothing waits on one.
+      requireEmailVerification: mail?.requireVerification ?? false,
+      revokeSessionsOnPasswordReset: true,
+      ...(mail
+        ? {
+            sendResetPassword: async ({ user, url }) =>
+              mail.send(
+                user.email,
+                "Reset your password",
+                `Someone asked to reset the password for this address. If it was you, open this link within an hour:\n\n${url}\n\nIf not, ignore this email.`,
+              ),
+          }
+        : {}),
+    },
+    emailVerification: {
+      sendOnSignUp: mail?.requireVerification ?? false,
+      sendOnSignIn: mail?.requireVerification ?? false,
+      autoSignInAfterVerification: true,
+      ...(mail
+        ? {
+            sendVerificationEmail: async ({ user, url }) =>
+              mail.send(
+                user.email,
+                "Confirm your email",
+                `Open this link to confirm this address:\n\n${url}\n\nIf you did not create an account, ignore this email.`,
+              ),
+          }
+        : {}),
+    },
+    account: {
+      encryptOAuthTokens: true,
+      accountLinking: {
+        enabled: true,
+        // Never merge a sign-in into an account whose address nobody proved:
+        // whoever typed it first would own the real person's login.
+        requireLocalEmailVerified: true,
+        trustedProviders: oauthProviders.filter((p) => p.trustEmails).map((p) => p.id),
+        // Only reaches a link the signed-in person starts, who proves both
+        // accounts; a company login rarely shares a personal address.
+        allowDifferentEmails: true,
+      },
+    },
     socialProviders: socialProvidersFrom(oauthProviders),
     advanced: {
       database: { generateId: () => uuidv7() },
@@ -194,7 +286,7 @@ export function createAppAuth({
     databaseHooks: {
       user: {
         create: {
-          before: async (userData) => {
+          before: async (userData, context) => {
             // Better Auth writes the user after this hook, outside our claim
             // transaction. Keep the preallocated id even if that write fails:
             // recycling it could admit a late writer as a second admin.
@@ -209,21 +301,36 @@ export function createAppAuth({
                     .returning({ ownerId: schema.signupBootstrap.ownerId })
                 : [];
             const isFirstUser = claimed?.ownerId === id;
-            if (!isFirstUser && !(await signup.allow())) {
-              throw new APIError("FORBIDDEN", {
-                message: "This instance is not accepting new accounts.",
-              });
-            }
-            return { data: { ...userData, id, role: isFirstUser ? "admin" : "user" } };
+            if (isFirstUser) return { data: { ...userData, id, role: "admin" } };
+            const method = methodFromContext(context);
+            if (method === undefined) throw refuseNewAccount();
+            const admission = await signup.admit({
+              providerId: method,
+              email: userData.email,
+              emailVerified: userData.emailVerified,
+            });
+            if (!admission.allowed) throw refuseNewAccount();
+            return {
+              data: { ...userData, id, role: "user", emailVerified: admission.emailVerified },
+            };
           },
           after: async (created, context) => {
             await signup.record({
               userId: created.id,
-              providerId: providerFromContext(context),
+              providerId: methodFromContext(context) ?? null,
+              email: created.email,
+              emailVerified: created.emailVerified,
               // Recounting here would find the row just written, so the role
               // the before hook assigned is what identifies the first user.
               isFirstUser: created.role === "admin",
             });
+          },
+        },
+        // Every way an address becomes verified updates the row: the emailed
+        // link, a provider confirming it on a later sign-in, an admin.
+        update: {
+          after: async (updated) => {
+            if (updated.emailVerified) await signup.verified(updated);
           },
         },
         delete: { after: (deleted) => purgeUserFiles(deleted.id) },
@@ -231,6 +338,45 @@ export function createAppAuth({
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/unlink-account" && !(await signup.passwordAllowed())) {
+          // Without passwords, the last account on an enabled provider is the only way back in.
+          const session = await getAuthoritativeSessionFromCtx(ctx);
+          if (!session) return;
+          // The account row's own id, which is what Better Auth unlinks by.
+          const leaving = String((ctx.body as { accountId?: unknown } | undefined)?.accountId);
+          const [left] = await db
+            .select({ n: count() })
+            .from(schema.account)
+            .innerJoin(
+              schema.oauthProviders,
+              and(
+                eq(schema.oauthProviders.id, schema.account.providerId),
+                eq(schema.oauthProviders.enabled, true),
+              ),
+            )
+            .where(and(eq(schema.account.userId, session.user.id), ne(schema.account.id, leaving)));
+          if ((left?.n ?? 0) === 0)
+            throw new APIError("FORBIDDEN", {
+              message: "Connect another sign-in first. Passwords are turned off.",
+            });
+          return;
+        }
+        if (PASSWORD_PATHS.some((path) => ctx.path.startsWith(path))) {
+          if (!(await signup.passwordAllowed()))
+            throw new APIError("FORBIDDEN", { message: "Password sign-in is turned off." });
+          if (ctx.path !== "/sign-up/email") return;
+          // Asked here as well as at creation: with verification required,
+          // Better Auth answers a refused creation as success, so the person
+          // would wait for a link that never comes.
+          const email = (ctx.body as { email?: unknown } | undefined)?.email;
+          const admission = await signup.admit({
+            providerId: null,
+            email: typeof email === "string" ? email.toLowerCase() : "",
+            emailVerified: false,
+          });
+          if (!admission.allowed) throw refuseNewAccount();
+          return;
+        }
         if (!ctx.path.startsWith("/admin/")) return;
         const session = await getAuthoritativeSessionFromCtx(ctx);
         if (!session) return; // Native endpoint owns unauthenticated errors.

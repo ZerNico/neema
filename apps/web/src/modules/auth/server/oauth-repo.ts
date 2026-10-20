@@ -4,7 +4,8 @@ import type { JsonValue } from "~/db/schema/providers.ts";
 import { oauthProviders } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
-import { BuiltinOAuthConfig, OidcOAuthConfig, type SignInProvider } from "../oauth.ts";
+import { BuiltinOAuthConfig, OidcOAuthConfig } from "../oauth.ts";
+import type { SignupMode } from "../signup.ts";
 import type { AuthOAuthProvider } from "./config.ts";
 
 type OAuthProviderRow = typeof oauthProviders.$inferSelect;
@@ -36,7 +37,8 @@ export interface UpsertOAuthProvider {
   readonly kind: "builtin" | "oidc";
   readonly label: string;
   readonly enabled: boolean;
-  readonly trusted: boolean;
+  readonly signup: SignupMode;
+  readonly trustEmails: boolean;
   readonly clientId: string;
   /** Absent keeps whatever is stored; a value replaces it. */
   readonly secret?: string | undefined;
@@ -53,10 +55,13 @@ export class OAuthRepo extends Context.Service<
      * rather than failing the rebuild, which would take every sign-in down.
      */
     listForAuth(): Effect.Effect<AuthOAuthProvider[]>;
-    /** Public: what a sign-in button needs, for signed-out callers. */
-    listForSignIn(): Effect.Effect<SignInProvider[]>;
-    /** Whether accounts this provider creates skip the approval queue. */
-    isTrusted(id: string): Effect.Effect<boolean>;
+    /** Enabled providers with their mode, for what a signed-out page offers. */
+    listForSignIn(): Effect.Effect<{ id: string; label: string; signup: SignupMode }[]>;
+    /**
+     * How a new account from this provider is admitted, read on the creation
+     * it governs. Null for a provider that is gone or switched off.
+     */
+    admission(id: string): Effect.Effect<{ signup: SignupMode; trustEmails: boolean } | null>;
     upsert(input: UpsertOAuthProvider): Effect.Effect<PublicOAuthProvider>;
     /**
      * Turning a provider on or off touches nothing else, so a page showing
@@ -83,16 +88,20 @@ export class OAuthRepo extends Context.Service<
         listForSignIn: Effect.fn("OAuthRepo.listForSignIn")(function* () {
           return (yield* all())
             .filter((row) => row.enabled)
-            .map((row) => ({ id: row.id, label: row.label }));
+            .map((row) => ({ id: row.id, label: row.label, signup: row.signup }));
         }),
 
-        isTrusted: Effect.fn("OAuthRepo.isTrusted")(function* (id) {
-          const rows = yield* db
-            .select({ trusted: oauthProviders.trusted })
+        admission: Effect.fn("OAuthRepo.admission")(function* (id) {
+          const [row] = yield* db
+            .select({
+              signup: oauthProviders.signup,
+              trustEmails: oauthProviders.trustEmails,
+              enabled: oauthProviders.enabled,
+            })
             .from(oauthProviders)
             .where(eq(oauthProviders.id, id))
             .pipe(Effect.orDie);
-          return rows[0]?.trusted ?? false;
+          return row?.enabled ? { signup: row.signup, trustEmails: row.trustEmails } : null;
         }),
 
         listForAuth: Effect.fn("OAuthRepo.listForAuth")(function* () {
@@ -113,6 +122,7 @@ export class OAuthRepo extends Context.Service<
               configured.push({
                 kind: "oidc",
                 id: row.id,
+                trustEmails: row.trustEmails,
                 label: row.label,
                 clientId: row.clientId,
                 clientSecret,
@@ -129,6 +139,7 @@ export class OAuthRepo extends Context.Service<
             configured.push({
               kind: "builtin",
               id: row.id,
+              trustEmails: row.trustEmails,
               clientId: row.clientId,
               clientSecret,
               tenantId: config.tenantId,
@@ -150,7 +161,8 @@ export class OAuthRepo extends Context.Service<
               kind: input.kind,
               label: input.label,
               enabled: input.enabled,
-              trusted: input.trusted,
+              signup: input.signup,
+              trustEmails: input.trustEmails,
               clientId: input.clientId,
               clientSecretCiphertext: clientSecretCiphertext ?? null,
               config: input.config,
@@ -161,7 +173,8 @@ export class OAuthRepo extends Context.Service<
               set: {
                 label: input.label,
                 enabled: input.enabled,
-                trusted: input.trusted,
+                signup: input.signup,
+                trustEmails: input.trustEmails,
                 clientId: input.clientId,
                 // An omitted secret keeps the stored one, so the admin form
                 // never has to round-trip a value it cannot display.

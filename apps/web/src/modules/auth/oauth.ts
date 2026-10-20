@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { SignupModeSchema } from "./signup.ts";
 
 /**
  * A provider Better Auth ships an implementation for. The id is Better Auth's
@@ -87,7 +88,8 @@ const ClientId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(5
 export const SaveBuiltinProviderInput = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1)),
   enabled: Schema.Boolean,
-  trusted: Schema.Boolean,
+  signup: SignupModeSchema,
+  trustEmails: Schema.Boolean,
   clientId: ClientId,
   // empty means "keep the stored secret"
   secret: Schema.optionalKey(Schema.String),
@@ -100,7 +102,8 @@ export const SaveOidcProviderInput = Schema.Struct({
   id: OidcProviderId,
   label: Label,
   enabled: Schema.Boolean,
-  trusted: Schema.Boolean,
+  signup: SignupModeSchema,
+  trustEmails: Schema.Boolean,
   clientId: ClientId,
   secret: Schema.optionalKey(Schema.String),
   discoveryUrl: Schema.String.check(Schema.isMinLength(1)),
@@ -119,4 +122,6 @@ export const OAuthProviderId = Schema.Struct({ id: Schema.String.check(Schema.is
 export interface SignInProvider {
   readonly id: string;
   readonly label: string;
+  /** Whether it may create accounts, so the register page can leave it out. */
+  readonly signup: boolean;
 }

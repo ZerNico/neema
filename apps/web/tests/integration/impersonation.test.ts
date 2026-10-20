@@ -76,7 +76,9 @@ beforeAll(async () => {
     secret: "isolated-auth-test-secret-at-least-32-characters",
     purgeUserFiles: async () => {},
     signup: {
-      allow: async () => true,
+      admit: async ({ emailVerified }) => ({ allowed: true, emailVerified }),
+      verified: async () => {},
+      passwordAllowed: async () => true,
       record: async ({ userId }) => {
         await db.insert(userApprovals).values({ userId, status: "approved" });
       },

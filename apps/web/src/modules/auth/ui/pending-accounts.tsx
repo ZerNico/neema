@@ -4,6 +4,7 @@ import { initials } from "~/ui/initials";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
+import { Badge } from "~/ui/primitives/badge";
 import { decideAccount } from "../server/signup-functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { pendingAccountsQuery } from "../queries.ts";
@@ -11,7 +12,7 @@ import { pendingAccountsQuery } from "../queries.ts";
 /**
  * Only rendered while somebody is waiting. An empty queue is the ordinary
  * state, and a permanent empty section would be a heading about nothing; the
- * policy that fills this queue is explained where it is set, under Sign-in.
+ * modes that fill this queue are explained where they are set, under Sign-in.
  */
 export function PendingAccounts() {
   const { data: pending } = useSuspenseQuery(pendingAccountsQuery);
@@ -43,6 +44,8 @@ export function PendingAccounts() {
               <span className="truncate text-sm font-medium">{account.name}</span>
               <span className="text-muted-foreground truncate text-xs">{account.email}</span>
             </div>
+            {/* Approving lets them in, not whoever owns the address they typed. */}
+            {account.emailVerified ? null : <Badge variant="outline">Unverified</Badge>}
             <PendingButton
               size="sm"
               variant="outline"

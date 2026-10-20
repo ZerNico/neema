@@ -10,7 +10,7 @@ import {
   saveOidcOAuthProvider,
   setOAuthProviderEnabled,
 } from "../server/oauth-functions.ts";
-import { setSignupPolicy } from "../server/signup-functions.ts";
+import { saveAuthSettings } from "../server/signup-functions.ts";
 import { OAuthPage } from "./oauth-page.tsx";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -33,22 +33,32 @@ vi.mock("../server/oauth-functions.ts", () => ({
 }));
 
 vi.mock("../server/signup-functions.ts", () => ({
-  getSignupPolicy: vi.fn(),
-  setSignupPolicy: vi.fn(),
+  getAuthSettings: vi.fn(),
+  saveAuthSettings: vi.fn(),
 }));
 
 const saveBuiltin = vi.mocked(saveBuiltinOAuthProvider);
 const saveOidc = vi.mocked(saveOidcOAuthProvider);
 const setEnabled = vi.mocked(setOAuthProviderEnabled);
 const remove = vi.mocked(deleteOAuthProvider);
-const savePolicy = vi.mocked(setSignupPolicy);
+const saveSettings = vi.mocked(saveAuthSettings);
+
+const settings = {
+  passwordSignup: "approval",
+  passwordLogin: true,
+  requireEmailVerification: false,
+  admitDomains: [] as string[],
+  smtpConfigured: false,
+  passwordLoginForced: false,
+};
 
 type Provider = {
   id: string;
   kind: "builtin" | "oidc";
   label: string;
   enabled: boolean;
-  trusted: boolean;
+  signup: "open" | "approval" | "closed";
+  trustEmails: boolean;
   clientId: string;
   secretConfigured: boolean;
   config: Record<string, unknown>;
@@ -56,7 +66,8 @@ type Provider = {
 
 const provider = (overrides: Partial<Provider> & Pick<Provider, "id" | "kind" | "label">) => ({
   enabled: true,
-  trusted: false,
+  signup: "approval" as const,
+  trustEmails: false,
   clientId: `${overrides.id}-client`,
   secretConfigured: true,
   config: {},
@@ -65,10 +76,14 @@ const provider = (overrides: Partial<Provider> & Pick<Provider, "id" | "kind" | 
   ...overrides,
 });
 
-const renderPage = (providers: ReturnType<typeof provider>[], baseURL = "https://chat.example") => {
+const renderPage = (
+  providers: ReturnType<typeof provider>[],
+  baseURL = "https://chat.example",
+  stored: Partial<typeof settings> = {},
+) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "oauth"], { baseURL, providers });
-  client.setQueryData(["admin", "signup-policy"], "approval");
+  client.setQueryData(["admin", "auth-settings"], { ...settings, ...stored });
   return render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
@@ -101,7 +116,7 @@ beforeEach(() => {
   saveOidc.mockResolvedValue({ ok: true } as never);
   setEnabled.mockResolvedValue({ ok: true } as never);
   remove.mockResolvedValue(undefined as never);
-  savePolicy.mockResolvedValue(undefined as never);
+  saveSettings.mockResolvedValue(undefined as never);
 });
 
 describe("OAuthPage", () => {
@@ -144,7 +159,8 @@ describe("OAuthPage", () => {
     expect(saveBuiltin.mock.calls[0]?.[0].data).toEqual({
       id: "microsoft",
       enabled: true,
-      trusted: false,
+      signup: "approval",
+      trustEmails: false,
       clientId: "entra-client",
       secret: "entra-secret",
       tenantId: "contoso",
@@ -173,7 +189,8 @@ describe("OAuthPage", () => {
     await user.type(screen.getByLabelText("Discovery URL"), "https://id.test/.well-known/x");
     await user.type(screen.getByLabelText("Client ID"), "sso-client");
     await user.type(screen.getByLabelText("Client secret"), "sso-secret");
-    await user.click(screen.getByRole("switch", { name: "Skip approval" }));
+    await pick(user, "New accounts", "Anyone can join");
+    await user.click(screen.getByRole("switch", { name: "Trust its emails" }));
     await user.click(submit(dialog, "Add provider"));
 
     await waitFor(() => expect(saveOidc).toHaveBeenCalled());
@@ -181,7 +198,8 @@ describe("OAuthPage", () => {
       id: "authentik",
       label: "Company SSO",
       enabled: true,
-      trusted: true,
+      signup: "open",
+      trustEmails: true,
       clientId: "sso-client",
       secret: "sso-secret",
       discoveryUrl: "https://id.test/.well-known/x",
@@ -239,13 +257,54 @@ describe("OAuthPage", () => {
     expect(remove.mock.calls[0]?.[0].data).toEqual({ id: "google" });
   });
 
-  it("changes who can join without a save step", async () => {
+  it("turns each typed domain into a chip and saves the list as it grows", async () => {
     renderPage([]);
     const user = userEvent.setup();
+    const input = await screen.findByLabelText("Domains that join directly");
 
-    await pick(user, "Who can join", "Nobody new");
+    await user.type(input, "Corp.example,");
+    await user.type(input, "ada@lab.example{Enter}");
 
-    await waitFor(() => expect(savePolicy).toHaveBeenCalled());
-    expect(savePolicy.mock.calls[0]?.[0].data).toEqual({ policy: "closed" });
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2));
+    expect(saveSettings.mock.calls[1]?.[0].data.admitDomains).toEqual([
+      "corp.example",
+      "lab.example",
+    ]);
+    expect(screen.getByLabelText("corp.example")).toBeVisible();
+  });
+
+  it("adds a pasted list at once and keeps what isn’t a domain to fix", async () => {
+    renderPage([]);
+    const user = userEvent.setup();
+    const input = await screen.findByLabelText("Domains that join directly");
+
+    await user.click(input);
+    await user.paste("one.example two.example nonsense ");
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalled());
+    expect(saveSettings.mock.calls[0]?.[0].data.admitDomains).toEqual([
+      "one.example",
+      "two.example",
+    ]);
+    expect(input).toHaveValue("nonsense");
+    expect(screen.getByText("“nonsense” isn’t a domain.")).toBeVisible();
+  });
+
+  it("removes a domain from its chip", async () => {
+    renderPage([], undefined, { admitDomains: ["corp.example", "lab.example"] });
+    const user = userEvent.setup();
+
+    const chip = await screen.findByLabelText("corp.example");
+    await user.click(within(chip).getByRole("button"));
+
+    await waitFor(() => expect(saveSettings).toHaveBeenCalled());
+    expect(saveSettings.mock.calls[0]?.[0].data.admitDomains).toEqual(["lab.example"]);
+  });
+
+  it("holds verification off until email is set up", async () => {
+    renderPage([]);
+    expect(
+      await screen.findByRole("switch", { name: "Require email verification" }),
+    ).toHaveAttribute("aria-disabled", "true");
   });
 });

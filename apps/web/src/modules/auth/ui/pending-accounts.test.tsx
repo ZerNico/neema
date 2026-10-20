@@ -13,10 +13,11 @@ vi.mock("../server/signup-functions.ts", () => ({
 
 const decide = vi.mocked(decideAccount);
 
-const account = (name: string) => ({
+const account = (name: string, emailVerified = true) => ({
   userId: `${name}-id`,
   name,
   email: `${name}@example.test`,
+  emailVerified,
   requestedAt: new Date("2026-09-01T00:00:00Z"),
 });
 
@@ -67,5 +68,13 @@ describe("PendingAccounts", () => {
 
     await waitFor(() => expect(decide).toHaveBeenCalled());
     expect(decide.mock.calls[0]?.[0].data).toEqual({ userId: "ada-id", status: "rejected" });
+  });
+
+  it("marks an address nobody has proven, so approving it is a choice", async () => {
+    renderQueue([account("ada"), account("typed", false)]);
+
+    const [badge, ...others] = await screen.findAllByText("Unverified");
+    expect(others).toHaveLength(0);
+    expect(badge?.parentElement).toHaveTextContent("typed@example.test");
   });
 });
