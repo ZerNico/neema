@@ -255,6 +255,7 @@ const accountLabel = (credential: { kind: string; accessToken?: string }) => {
   // The service names a shared key itself; a key here is the person's own.
   if (credential.kind === "api_key") return "Personal token";
   // An access token is often a JWT naming the person; only read for display.
+  // Never `sub`: it is an opaque id by definition, which reads as noise (Trello's is hex).
   const payload = credential.accessToken?.split(".")[1];
   if (payload) {
     try {
@@ -262,7 +263,7 @@ const accountLabel = (credential: { kind: string; accessToken?: string }) => {
         string,
         unknown
       >;
-      for (const key of ["email", "preferred_username", "name", "sub"])
+      for (const key of ["email", "preferred_username", "name"])
         if (typeof claims[key] === "string" && claims[key])
           return String(claims[key]).slice(0, 120);
     } catch {
