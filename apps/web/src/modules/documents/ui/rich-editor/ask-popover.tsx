@@ -57,7 +57,8 @@ export function AskPopover({ editor }: { editor: Editor }) {
       .run();
     // Named now: by the time the message goes out, focus has left this spot.
     const block = editor.state.doc.nodeAt(position)?.attrs.id as string | undefined;
-    const sent = await ask(text, { blocks: block ? [block] : [] }).catch(() => false);
+    // A refused send has already said why; only one the chat could not take asks to wait.
+    const sent = await ask(text, { blocks: block ? [block] : [] }).catch(() => null);
     setSending(false);
     if (!sent) {
       // Put it back as an open question rather than leave a request nobody sent.
@@ -68,7 +69,7 @@ export function AskPopover({ editor }: { editor: Editor }) {
           return true;
         })
         .run();
-      setError("Wait for the current answer to finish, then ask again.");
+      if (sent === false) setError("Wait for the current answer to finish, then ask again.");
       return;
     }
     setRequest("");
