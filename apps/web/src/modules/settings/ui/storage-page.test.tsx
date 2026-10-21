@@ -47,6 +47,30 @@ const renderPage = () => {
         ],
       },
       {
+        blobId: "c",
+        size: 5 * MB,
+        mediaType: "image/png",
+        createdAt: "2026-10-03T00:00:00.000Z",
+        places: [{ kind: "upload", attachmentId: "att-c", name: "screenshot.png" }],
+      },
+      {
+        blobId: "d",
+        size: 1 * MB,
+        mediaType: "image/jpeg",
+        createdAt: "2026-10-04T00:00:00.000Z",
+        places: [
+          {
+            kind: "document",
+            attachmentId: "att-d",
+            name: "diagram.jpg",
+            documentId: "doc-1",
+            title: "Notes",
+            projectId: "p1",
+            conversationId: null,
+          },
+        ],
+      },
+      {
         blobId: "b",
         size: 10 * MB,
         mediaType: "application/vnd.ms-excel",
@@ -100,5 +124,12 @@ describe("Settings › Storage", () => {
     await user.type(screen.getByLabelText("Search files"), "plan");
     expect(screen.queryByText("report.pdf")).not.toBeInTheDocument();
     expect(screen.getByText("plan.xlsx")).toBeVisible();
+  });
+
+  it("shows an image as itself and other files by their type", () => {
+    renderPage();
+    const pictures = [...document.querySelectorAll("img")].map((img) => img.getAttribute("src"));
+    // A document's image comes through its document, the only place that serves it.
+    expect(pictures).toEqual(["/api/files/att-c", "/api/documents/doc-1/images/att-d"]);
   });
 });

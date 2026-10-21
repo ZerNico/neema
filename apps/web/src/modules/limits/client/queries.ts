@@ -18,10 +18,12 @@ export const usageLimitRulesQuery = queryOptions({
   queryFn: () => getUsageLimitRules(),
 });
 
+// Always fresh when the page opens or its tab comes back: an upload elsewhere sends no event.
 export const myStorageQuery = queryOptions({
   queryKey: ["my-storage"],
   queryFn: () => getMyStorage(),
-  staleTime: 30_000,
+  staleTime: 0,
+  refetchOnWindowFocus: "always",
 });
 
 export const storageQuotasQuery = queryOptions({
@@ -32,4 +34,6 @@ export const storageQuotasQuery = queryOptions({
 export const myLibraryQuery = queryOptions({
   queryKey: ["my-storage", "library"],
   queryFn: () => getMyLibrary(),
+  staleTime: 0,
+  refetchOnWindowFocus: "always",
 });

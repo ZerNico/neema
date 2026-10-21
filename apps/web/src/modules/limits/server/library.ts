@@ -40,6 +40,7 @@ export type LibraryPlace =
   | { readonly kind: "upload"; readonly attachmentId: string; readonly name: string }
   | {
       readonly kind: "document";
+      readonly attachmentId: string;
       readonly name: string;
       readonly documentId: string;
       readonly title: string;
@@ -164,6 +165,7 @@ export class StorageLibrary extends Context.Service<
               if (file.documentId)
                 add(file.blobId, {
                   kind: "document",
+                  attachmentId: file.attachmentId,
                   name: file.name,
                   documentId: file.documentId,
                   title: file.documentTitle ?? "",

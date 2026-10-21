@@ -192,6 +192,29 @@ describe("useSync", () => {
     ]);
   });
 
+  it("refreshes what the person stores once an answer settles or a chat is purged, not mid-answer", () => {
+    const { invalidate, source } = renderSync();
+    const storage = () =>
+      invalidate.mock.calls.filter(([filter]) => filter?.queryKey?.[0] === "my-storage").length;
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "m1",
+      status: "streaming",
+    });
+    expect(storage()).toBe(0);
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "m1",
+      status: "complete",
+    });
+    source.emit("sync", { type: "conversation.purged", conversationId: "c1" });
+    expect(storage()).toBe(2);
+    source.emit("sync", { type: "document.changed", conversationId: "c1", documentId: "doc1" });
+    expect(storage()).toBe(2);
+  });
+
   it("leaves the chat's detail alone when only a document's text changed", () => {
     const { invalidate, source } = renderSync();
     source.emit("sync", {

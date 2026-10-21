@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { deleteAttachment } from "~/modules/attachments/server/functions.ts";
 import { myLibraryQuery, myStorageQuery } from "~/modules/limits/client/queries.ts";
 import { formatBytes, LIBRARY_LISTED } from "~/modules/limits/rules.ts";
@@ -10,7 +10,7 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import { Button } from "~/ui/primitives/button";
+import { buttonVariants } from "~/ui/primitives/button";
 import { Progress } from "~/ui/primitives/progress";
 import {
   Select,
@@ -20,7 +20,22 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { SearchInput } from "~/ui/search-input.tsx";
-import { HardDriveIcon } from "@hugeicons/core-free-icons";
+import {
+  Csv01Icon,
+  Doc01Icon,
+  File01Icon,
+  HardDriveIcon,
+  Image01Icon,
+  Pdf01Icon,
+  Ppt01Icon,
+  Txt01Icon,
+  Xls01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
+import { documentImagePath } from "~/modules/documents/schema.ts";
+import { cardSurfaceClassName } from "~/ui/card-surface.ts";
+import { cn } from "~/ui/utils";
 
 type Filter = "all" | LibraryPlace["kind"];
 
@@ -175,9 +190,9 @@ export function StoragePage() {
             }
           />
         ) : (
-          <ListCard>
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {files.map((file) => (
-              <FileRow
+              <FileTile
                 key={file.blobId}
                 file={file}
                 pending={remove.isPending && remove.variables?.blobId === file.blobId}
@@ -197,14 +212,45 @@ export function StoragePage() {
                 }}
               />
             ))}
-          </ListCard>
+          </ul>
         )}
       </Section>
     </Page>
   );
 }
 
-function FileRow({
+/** What a file is, for a tile without a picture of it. */
+const typeIcon = (mediaType: string) =>
+  mediaType.startsWith("image/")
+    ? Image01Icon
+    : mediaType === "application/pdf"
+      ? Pdf01Icon
+      : mediaType.includes("presentation")
+        ? Ppt01Icon
+        : mediaType.includes("spreadsheet") || mediaType === "application/vnd.ms-excel"
+          ? Xls01Icon
+          : mediaType.includes("wordprocessing") || mediaType === "application/msword"
+            ? Doc01Icon
+            : mediaType === "text/csv"
+              ? Csv01Icon
+              : mediaType.startsWith("text/")
+                ? Txt01Icon
+                : File01Icon;
+
+/**
+ * An image the person stores, drawn from the attachment it is: its bytes as they are, loaded
+ * only when the tile scrolls into view. A document's image is served only through its
+ * document. Project files are downloads only, so they show icons.
+ */
+const imageOf = (file: LibraryFile) => {
+  if (!file.mediaType.startsWith("image/")) return null;
+  for (const place of file.places)
+    if (place.kind === "chat" || place.kind === "upload") return attachmentUrl(place.attachmentId);
+  const document = file.places.find((place) => place.kind === "document");
+  return document ? documentImagePath(document.documentId, document.attachmentId) : null;
+};
+
+function FileTile({
   file,
   pending,
   onDelete,
@@ -228,29 +274,58 @@ function FileRow({
   const where = first
     ? `${placeText(first)}${more > 0 ? ` and ${more === 1 ? "1 more place" : `${more} more places`}` : ""}`
     : "Not in use";
+  const image = imageOf(file);
+  const [broken, setBroken] = useState(false);
   return (
-    <ListRow className="flex-wrap">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{first?.name ?? "Untitled file"}</span>
-        <span className="text-muted-foreground truncate text-xs">
+    <li className={cn(cardSurfaceClassName, "flex min-w-0 flex-col overflow-hidden")}>
+      <div className="bg-muted text-muted-foreground flex aspect-[4/3] items-center justify-center">
+        {image && !broken ? (
+          <img
+            src={image}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="size-full object-cover"
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <HugeiconsIcon icon={typeIcon(file.mediaType)} strokeWidth={2} className="size-8" />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 pt-2.5">
+        <span className="truncate text-sm font-medium" title={first?.name}>
+          {first?.name ?? "Untitled file"}
+        </span>
+        <span className="text-muted-foreground line-clamp-2 text-xs">
           {formatBytes(file.size)} · {where}
         </span>
       </div>
-      {removable(file) ? (
-        <PendingButton size="sm" variant="ghost" pending={pending} onClick={onDelete}>
-          Delete
-        </PendingButton>
-      ) : managed ? (
-        <Button size="sm" variant="ghost" render={<PlaceLink place={managed} />}>
-          Open
-        </Button>
-      ) : null}
-    </ListRow>
+      <div className="flex justify-end px-1.5 pb-1.5">
+        {removable(file) ? (
+          <PendingButton size="sm" variant="ghost" pending={pending} onClick={onDelete}>
+            Delete
+          </PendingButton>
+        ) : managed ? (
+          <PlaceLink place={managed} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            Open
+          </PlaceLink>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
 /** Where a file is managed, for the places this page does not delete from. */
-function PlaceLink({ place, ...props }: { place: LibraryPlace } & Record<string, unknown>) {
+function PlaceLink({
+  place,
+  className,
+  children,
+}: {
+  place: LibraryPlace;
+  className: string;
+  children: ReactNode;
+}) {
+  const props = { className, children };
   switch (place.kind) {
     case "project":
       return <Link to="/projects/$projectId" params={{ projectId: place.projectId }} {...props} />;

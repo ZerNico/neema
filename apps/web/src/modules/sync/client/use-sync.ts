@@ -7,6 +7,20 @@ import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
 
+/**
+ * Events after which a person may store more or less: an answer's files, a file taken out, a
+ * purge, project files, skills. Indexing and document edits are left out: they come in bursts
+ * and store nothing new, and uploads are caught by the page refetching when shown.
+ */
+const STORAGE_EVENTS: ReadonlySet<string> = new Set([
+  "message.status",
+  "conversation.updated",
+  "conversation.deleted",
+  "conversation.purged",
+  "project.changed",
+  "resources.changed",
+]);
+
 // Prefixes owned by the routing below. Knowledge and work use their coalesced refreshes.
 const recoveryPrefixes = [
   ["conversations"],
@@ -37,6 +51,7 @@ const recoveryPrefixes = [
   ["desktop-sessions"],
   ["search", "recent-chats"],
   ["search", "chats"],
+  ["my-storage"],
 ] as const;
 
 /**
@@ -153,6 +168,12 @@ export function useSync(
         return;
       }
       if (!authorized) return;
+      // What the person stores moves with these; only an open Storage page refetches.
+      if (
+        STORAGE_EVENTS.has(event.type) &&
+        !(event.type === "message.status" && event.status === "streaming")
+      )
+        void queryClient.invalidateQueries({ queryKey: ["my-storage"] });
       switch (event.type) {
         case "account.approval.changed":
           void reconcileIdentity?.();
