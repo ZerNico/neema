@@ -25,8 +25,11 @@ export interface DocumentFeedSource {
 export interface DocumentSyncOptions {
   documentId: string;
   push: (input: PushDocumentInput) => Promise<PushDocumentResult>;
-  /** The browser's editor extensions; the connection adds collaboration and cursors. */
-  extensions: AnyExtension[];
+  /**
+   * The browser's editor extensions, made afresh for each editor (a reset builds
+   * another); the connection adds collaboration and cursors.
+   */
+  extensions: () => AnyExtension[];
   editorProps?: EditorOptions["editorProps"];
   /** Where unsent changes wait across reloads. */
   outbox: OutboxStore;
@@ -480,7 +483,7 @@ export class DocumentSync {
     this.#editor = new Editor({
       element: document.createElement("div"),
       extensions: [
-        ...this.options.extensions,
+        ...this.options.extensions(),
         Extension.create({
           name: "documentCollab",
           addProseMirrorPlugins: () => [

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Editor } from "@tiptap/core";
+import { Editor } from "@tiptap/core";
+import type { Marked } from "marked";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -112,6 +113,22 @@ const editorOf = async (label = "Document") => {
 };
 
 describe("document editor", () => {
+  it("gives each editor its own marked, so editors opened earlier do not pile up on it", () => {
+    // The manager keeps its marked private; this reads what it registered there.
+    const tokenizers = (editor: Editor) => {
+      const marked: Marked = Reflect.get(editor.storage.markdown.manager, "markedInstance");
+      return marked.defaults.extensions?.block?.length ?? 0;
+    };
+    const first = new Editor({ extensions: browserEditorExtensions() });
+    const count = tokenizers(first);
+    first.destroy();
+    const second = new Editor({ extensions: browserEditorExtensions() });
+    expect(count).toBeGreaterThan(0);
+    // A shared instance held the first editor's tokenizers too, and with them that editor.
+    expect(tokenizers(second)).toBe(count);
+    second.destroy();
+  });
+
   it("shows the shared tree formatted and writes the toolbar's formats into it", async () => {
     const sync = await replica("Ship it today");
     mount(sync);
