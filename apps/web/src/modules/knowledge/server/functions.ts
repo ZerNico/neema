@@ -18,6 +18,7 @@ import {
 import { EmbeddingSpace } from "./embedding-space.ts";
 import { KnowledgeService } from "./service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 const standard = Schema.toStandardSchemaV1;
 export const listKnowledgeCollections = createServerFn({ method: "GET" })
@@ -125,15 +126,19 @@ export const uploadKnowledgeDocument = createServerFn({ method: "POST" })
       throw refusal(400, "Invalid document fields");
     const bytes = new Uint8Array(await file.arrayBuffer());
     return runServerFn(
-      KnowledgeService.use((service) =>
-        service.upload(context.session.user.id, {
-          collectionId,
-          ...(documentId === null ? {} : { documentId }),
-          title,
-          fileName: file.name,
-          declaredMediaType: file.type,
-          bytes,
-        }),
+      StorageQuota.use((quota) => quota.admit(context.session.user.id, [bytes])).pipe(
+        Effect.andThen(
+          KnowledgeService.use((service) =>
+            service.upload(context.session.user.id, {
+              collectionId,
+              ...(documentId === null ? {} : { documentId }),
+              title,
+              fileName: file.name,
+              declaredMediaType: file.type,
+              bytes,
+            }),
+          ),
+        ),
       ),
     );
   });

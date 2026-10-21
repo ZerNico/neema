@@ -113,6 +113,7 @@ function RetryMenu({
   return (
     <Tooltip>
       <ModelPicker
+        limited
         models={models ?? []}
         // Marks whichever model wrote the answer being replaced, so "same
         // again" and "something else" are one glance apart in the list too.
@@ -174,6 +175,7 @@ export function ResumeMenu({
   const { data: models } = useQuery(chatModelsQuery);
   return (
     <ModelPicker
+      limited
       models={models ?? []}
       value={modelId}
       onChange={onResumeWith}

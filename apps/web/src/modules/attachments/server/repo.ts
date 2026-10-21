@@ -15,10 +15,13 @@ import {
   messageAttachments,
   messages,
 } from "~/db/schema/index.ts";
-import { ownedConversation } from "~/modules/chat/server/owned-conversation.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import { attachmentKind } from "../constants.ts";
 import type { Attachment, MessageAttachment, QueuedAttachment } from "../schema.ts";
-import { AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
+import { AttachmentBusy, AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 
@@ -213,6 +216,17 @@ export class AttachmentRepo extends Context.Service<
       /** A document holds it as an image: its readers are the document's, not the uploader. */
       claimedByDocument: boolean;
     } | null>;
+    /**
+     * Takes a file out of a sent message in the person's own chat, for room; returns storage
+     * keys to remove. Refused while that chat is answering, which may be reading it.
+     */
+    deleteFromChat(
+      userId: string,
+      attachmentId: string,
+    ): Effect.Effect<
+      { keys: ReadonlyArray<string>; conversationId: string },
+      AttachmentNotAvailable | AttachmentBusy
+    >;
     /** Deletes an unclaimed attachment; returns storage keys to remove. */
     deleteUnclaimed(
       userId: string,
@@ -522,6 +536,59 @@ export class AttachmentRepo extends Context.Service<
           .pipe(Effect.orDie);
         if (keys === null) return yield* new AttachmentNotAvailable({ attachmentId });
         return keys;
+      });
+
+      const deleteFromChat = Effect.fn("AttachmentRepo.deleteFromChat")(function* (
+        userId: string,
+        attachmentId: string,
+      ) {
+        const outcome = yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const [link] = yield* tx
+                .select({ conversationId: messages.conversationId })
+                .from(attachments)
+                .innerJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))
+                .innerJoin(messages, eq(messages.id, messageAttachments.messageId))
+                .where(
+                  and(
+                    eq(attachments.id, attachmentId),
+                    eq(attachments.userId, userId),
+                    // Only a file the person sent: an answer's files live in its output too.
+                    eq(messages.role, "user"),
+                    eq(messageAttachments.kind, "file"),
+                  ),
+                );
+              if (!link) return null;
+              // The chat's lock first, as every attempt takes it before files.
+              const [chat] = yield* tx
+                .select({ id: conversations.id })
+                .from(conversations)
+                .where(ownedConversationById(link.conversationId, userId))
+                .for("update");
+              if (!chat) return null;
+              const [live] = yield* tx
+                .select({ id: messages.id })
+                .from(messages)
+                .where(
+                  and(
+                    eq(messages.conversationId, chat.id),
+                    eq(messages.status, "streaming"),
+                    sql`${messages.generationLeaseUntil} > now()`,
+                  ),
+                )
+                .limit(1);
+              if (live) return "busy" as const;
+              return {
+                keys: yield* deleteAttachmentRows(tx, [attachmentId]),
+                conversationId: chat.id,
+              };
+            }),
+          )
+          .pipe(Effect.orDie);
+        if (outcome === null) return yield* new AttachmentNotAvailable({ attachmentId });
+        if (outcome === "busy") return yield* new AttachmentBusy({ attachmentId });
+        return outcome;
       });
 
       /**
@@ -1135,6 +1202,7 @@ export class AttachmentRepo extends Context.Service<
         findBlob,
         findForAccess,
         deleteUnclaimed,
+        deleteFromChat,
         recordBlobCandidate,
         clearBlobIntents,
         claimBlobCleanup,

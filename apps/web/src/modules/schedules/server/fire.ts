@@ -158,6 +158,13 @@ export class ScheduleFire extends Context.Service<
                   status: "error",
                   reason: error.reason,
                 }),
+              // An error, not a skip, so the person hears that it did not run.
+              UsageLimitReached: (error) =>
+                Effect.succeed<FireOutcome>({
+                  conversationId: null,
+                  status: "error",
+                  reason: error.reason,
+                }),
               ConversationBusy: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,

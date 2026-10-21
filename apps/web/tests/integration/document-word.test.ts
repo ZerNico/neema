@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { attachments, documentImages, documents, user } from "~/db/schema/index.ts";
+import { attachments, documentImages, documents, limitSettings, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -19,6 +19,7 @@ import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { wordExportInput } from "~/modules/documents/server/word-export.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { documentToWord } from "~/modules/word/server/document-export.ts";
@@ -49,6 +50,7 @@ type Services =
   | DocumentService
   | ProjectService
   | FeaturePolicy
+  | StorageQuota
   | WordProcessor;
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
@@ -77,6 +79,7 @@ beforeAll(async () => {
   });
   const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, bus, fsBlobStoreLayer).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
     Layer.provideMerge(infrastructure),
   );
   runtime = ManagedRuntime.make(
@@ -341,6 +344,27 @@ describe("starting a document from a Word file", () => {
     // The exported file says what it is; a title typed in the dialog wins.
     const titled = await importWord(owner, projectId, { name: "Plan.docx", bytes }, "Mine");
     expect(Exit.isSuccess(titled) && titled.value.document.title).toBe("Mine");
+  });
+
+  it("fails an import whose pictures a person has no room for, saying so", async () => {
+    const { owner, projectId } = await project();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(limitSettings).set({ storageBytes: 1 }).where(eq(limitSettings.id, 1)),
+      ),
+    );
+    try {
+      const bytes = wordFile("See ![Dot](/api/documents/old/images/dot)\n\nShip it.", false);
+      const exit = await importWord(owner, projectId, { name: "Plan.docx", bytes });
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(JSON.stringify(exit)).toMatch(/Not enough storage/);
+    } finally {
+      await run(
+        Effect.flatMap(Db, (db) =>
+          db.update(limitSettings).set({ storageBytes: null }).where(eq(limitSettings.id, 1)),
+        ),
+      );
+    }
   });
 
   it("stores a member's imported pictures as the project owner's, so they outlive the member", async () => {

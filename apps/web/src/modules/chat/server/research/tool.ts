@@ -97,6 +97,8 @@ export const prepareResearchTool = (input: {
   messageId: string;
   generationId: string;
   modelId: string;
+  /** Why a new run may not start now, or null; a usage limit, say. */
+  admit?: Effect.Effect<string | null>;
   rowFor: (providerCallId: string) => Effect.Effect<ToolCallRowRef | undefined>;
   emit: (event: ToolChunkEnvelope) => Effect.Effect<void>;
   emitCompaction: (event: CompactionChunkEnvelope) => Effect.Effect<void>;
@@ -115,6 +117,10 @@ export const prepareResearchTool = (input: {
     // A label, not prose: one line, short enough for a card.
     const title =
       typeof rawTitle === "string" ? rawTitle.replaceAll(/\s+/g, " ").trim().slice(0, 80) : "";
+
+    const refused = input.admit ? yield* input.admit : null;
+    if (refused)
+      return { outcome: "unavailable" as const, message: refused } satisfies ResearchToolResult;
 
     // The row this call already has: the observer mints it from the same
     // `tool-call` part the toolkit forked this handler on, so the wait is for

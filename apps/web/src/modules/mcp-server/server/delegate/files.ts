@@ -7,6 +7,7 @@ import {
 import { AttachmentRejected } from "~/modules/attachments/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 /**
  * What all of one send's files may weigh, decoded. One file as large as the
@@ -63,6 +64,12 @@ export const uploadFiles = Effect.fn("mcp.uploadFiles")(function* (
   if (!(yield* FeaturePolicy.use((policy) => policy.can(userId, "attachments"))))
     return yield* new AttachmentRejected({ cause: "type", reason: "files are unavailable" });
   const attachments = yield* AttachmentService;
+  yield* StorageQuota.use((quota) =>
+    quota.admit(
+      userId,
+      files.map((file) => Buffer.from(file.data, "base64")),
+    ),
+  );
   const ids: string[] = [];
   const upload = Effect.forEach(files, (file) =>
     attachments

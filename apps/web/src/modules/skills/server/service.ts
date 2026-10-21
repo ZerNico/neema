@@ -10,6 +10,7 @@ import { isBinarySkillFile, validateSkillPackage, type SkillFile } from "../pack
 import { decodeStoredFile, skillContentHash, verifyStoredFile } from "./content-hash.ts";
 import type { SkillDetail, SkillSaveResult, SkillSummary } from "../schema.ts";
 import { SkillRepo, type SaveRevision, type StoredSkillFile } from "./repo.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 export type SkillSaveInput = {
   skillId?: string;
@@ -63,6 +64,7 @@ export class SkillService extends Context.Service<
       const blobs = yield* BlobStore;
       const registry = yield* AttachmentRepo;
       const attachments = yield* AttachmentService;
+      const storage = yield* StorageQuota;
       const bus = yield* SyncBus;
       // Bound in-flight candidate bytes as well as committed per-account quotas.
       const saves = yield* Semaphore.make(2);
@@ -247,6 +249,21 @@ export class SkillService extends Context.Service<
                 }
                 return files;
               });
+              // The bytes this save would store anew, against the person's quota; kept ones are free.
+              const fresh = (contents: readonly SkillFile[], pending: Pending) =>
+                contents.flatMap((file) => {
+                  const known = pending.get(file.path);
+                  if (known && !(known instanceof Uint8Array)) return [];
+                  return [
+                    known ?? new TextEncoder().encode(isBinarySkillFile(file) ? "" : file.content),
+                  ];
+                });
+              yield* storage
+                .admit(userId, [
+                  ...fresh(validated.files, current),
+                  ...(baseline ? fresh(baseline.files, upstream) : []),
+                ])
+                .pipe(Effect.catchTag("StorageFull", (full) => Effect.fail(rejected(full.reason))));
               const files = yield* storeFiles(validated.files, current);
               const baselineFiles = baseline ? yield* storeFiles(baseline.files, upstream) : [];
               const save: SaveRevision = {

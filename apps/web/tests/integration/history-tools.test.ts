@@ -105,7 +105,12 @@ const withRepo = <A>(use: (repo: ChatRepo["Service"]) => Effect.Effect<A>) =>
   runtime.runPromise(Effect.flatMap(ChatRepo, use));
 
 const call = (
-  input: { userId: string; conversationId: string; messageId: string; otherChats: ChatScope | null },
+  input: {
+    userId: string;
+    conversationId: string;
+    messageId: string;
+    otherChats: ChatScope | null;
+  },
   name: string,
   args: unknown,
 ) =>

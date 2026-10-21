@@ -10,6 +10,8 @@ export interface PickableModel {
   contextLength: number | null;
   capabilities: Capabilities | null;
   reasoningEfforts?: ReadonlyArray<ReasoningEffort>;
+  /** When a used-up usage limit lets this model answer again; null or absent when it can now. */
+  limitedUntil?: string | null;
 }
 
 // Lower is better. A name hit outranks a provider or description hit, and the

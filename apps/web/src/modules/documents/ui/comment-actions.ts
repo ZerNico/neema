@@ -55,11 +55,12 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
     const ask = editorHooks(editor).ask;
     const anchor = commentAnchors(editor.state.doc).get(threadId);
     const block = anchor ? blockAt(editor, anchor.from) : null;
+    // A refused send has already said why; only one the chat could not take says this.
     const sent = await ask?.(commentMessage(quote, body), {
       blocks: block ? [block] : [],
       thread: threadId,
-    }).catch(() => false);
-    if (!sent)
+    }).catch(() => null);
+    if (sent === false || sent === undefined)
       toast.error("Couldn’t send it to the assistant", {
         description: "Try again once the current answer is done.",
       });

@@ -33,7 +33,7 @@ import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dia
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
-import { toastError } from "~/ui/error-toast.ts";
+import { AlreadyTold, toastError } from "~/ui/error-toast.ts";
 import {
   EmptyState,
   ErrorState,
@@ -350,6 +350,7 @@ function useAskInNewChat(
     }
     const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
     if (!model) return false;
+    // Refused, it says why here, and the caller then knows not to say it again.
     const result = await sendMessage({
       data: {
         conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
@@ -365,6 +366,10 @@ function useAskInNewChat(
           ...(asked.thread ? { thread: asked.thread } : {}),
         },
       },
+    }).catch((error: unknown) => {
+      toastError("Could not send it to the assistant.", error);
+      void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
+      throw new AlreadyTold("ask refused");
     });
     await queryClient.invalidateQueries({ queryKey: ["conversations"] });
     await navigate({

@@ -10,6 +10,8 @@ import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import { projectQuery } from "~/modules/projects/client/queries.ts";
+import { toastError } from "~/ui/error-toast.ts";
+import { chatModelsQuery } from "../client/queries.ts";
 import { HeaderContent } from "~/ui/header-slot.tsx";
 import { MotionSwap } from "~/ui/motion.tsx";
 import { motionEase } from "~/ui/motion-presets.ts";
@@ -184,7 +186,11 @@ export function NewChatView({
     },
     // The draft and its chips survive a failure, so the composer travels back
     // up to where the user left it.
-    onError: () => setSending(false),
+    onError: (error) => {
+      setSending(false);
+      toastError("Could not send the message.", error);
+      void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
+    },
     onSuccess: async (result) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),

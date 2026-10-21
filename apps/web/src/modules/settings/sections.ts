@@ -2,6 +2,7 @@ import {
   Analytics01Icon,
   Archive02Icon,
   Brain02Icon,
+  HardDriveIcon,
   ComputerIcon,
   Key01Icon,
   LaptopPhoneSyncIcon,
@@ -62,6 +63,12 @@ const SETTINGS_SECTIONS: SectionNavItem[] = [
     label: "API keys",
     icon: Key01Icon,
     matchPrefix: "/settings/api-keys",
+  },
+  {
+    to: "/settings/storage",
+    label: "Storage",
+    icon: HardDriveIcon,
+    matchPrefix: "/settings/storage",
   },
   {
     to: "/settings/archived",

@@ -6,6 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import {
   user,
   skills,
@@ -122,6 +123,7 @@ beforeAll(async () => {
   );
   const repos = Layer.mergeAll(SkillRepo.layer, AttachmentRepo.layer).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
     Layer.provideMerge(infra),
   );
   const base = Layer.mergeAll(repos, MemoryBlobs, QuietSync);

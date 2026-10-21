@@ -31,6 +31,7 @@ export function ModelPicker({
   align = "start",
   side = "top",
   emptyLabel = "No models match",
+  limited = false,
 }: {
   models: readonly PickableModel[];
   /** Currently selected model id; null leaves the list unmarked. */
@@ -51,11 +52,15 @@ export function ModelPicker({
   align?: "start" | "center" | "end";
   side?: "top" | "bottom";
   emptyLabel?: string;
+  /** Picking to answer now: a model whose usage limit is used up cannot be chosen. */
+  limited?: boolean;
 }) {
   // Controlled so the header's actions can close the popup, and so the search
   // starts empty each time it opens.
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // When the list opened: a limit whose reset has passed since it loaded frees its model.
+  const [openedAt, setOpenedAt] = useState(0);
 
   const items = useMemo(() => rankModels(models, query), [models, query]);
   const selected = useMemo(
@@ -73,7 +78,10 @@ export function ModelPicker({
       open={open}
       onOpenChange={(next: boolean) => {
         setOpen(next);
-        if (next) setQuery("");
+        if (next) {
+          setQuery("");
+          setOpenedAt(Date.now());
+        }
       }}
       items={items}
       // rankModels filters and orders; the primitive's filter would only keep or drop.
@@ -100,7 +108,13 @@ export function ModelPicker({
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
         <ComboboxList>
           {items.map((model) => (
-            <ModelRow key={model.id} model={model} showProvider={showProvider} />
+            <ModelRow
+              key={model.id}
+              model={model}
+              showProvider={showProvider}
+              respectLimit={limited}
+              now={openedAt}
+            />
           ))}
         </ComboboxList>
       </ComboboxContent>
@@ -108,13 +122,39 @@ export function ModelPicker({
   );
 }
 
-function ModelRow({ model, showProvider }: { model: PickableModel; showProvider: boolean }) {
-  const detail = [showProvider ? model.providerName : null, model.description]
-    .filter(Boolean)
-    .join(" · ");
+/** "Available again at 14:00", or on another day "Available again Monday 1 Dec". */
+const availableAgain = (iso: string) => {
+  const at = new Date(iso);
+  const today = new Date().toDateString() === at.toDateString();
+  return `Available again ${
+    today
+      ? `at ${at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+      : at.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })
+  }`;
+};
+
+function ModelRow({
+  model,
+  showProvider,
+  respectLimit,
+  now,
+}: {
+  model: PickableModel;
+  showProvider: boolean;
+  respectLimit: boolean;
+  now: number;
+}) {
+  const limited =
+    respectLimit && model.limitedUntil && new Date(model.limitedUntil).getTime() > now
+      ? model.limitedUntil
+      : null;
+  const detail = limited
+    ? availableAgain(limited)
+    : [showProvider ? model.providerName : null, model.description].filter(Boolean).join(" · ");
   return (
     <ComboboxItem
       value={model}
+      disabled={limited !== null}
       // oxlint-disable-next-line shadcn/no-restyle -- reserves room for the selected check, which sits absolute at right-2
       className="pr-9"
     >

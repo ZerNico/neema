@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { AgentNotAvailable, AgentRejected } from "~/modules/agents/errors.ts";
 import type {
+  AttachmentBusy,
   AttachmentNotAvailable,
   AttachmentRejected,
   AttachmentUnsupported,
@@ -45,6 +46,7 @@ import type {
   KnowledgeRejected,
   SharingNotAllowed,
 } from "~/modules/knowledge/errors.ts";
+import type { LimitRejected, StorageFull, UsageLimitReached } from "~/modules/limits/errors.ts";
 import type { MailFailed } from "~/modules/notifications/server/mail.ts";
 import type { PushRejected } from "~/modules/notifications/server/push.ts";
 import type { FontRejected } from "~/modules/presentations/server/fonts.ts";
@@ -128,7 +130,11 @@ export type Refusable =
   | SkillRejected
   | ToolUnavailable
   | UnhostedImageFamily
-  | WorkDesktopRequired;
+  | WorkDesktopRequired
+  | AttachmentBusy
+  | UsageLimitReached
+  | LimitRejected
+  | StorageFull;
 
 export type RefusalTable = {
   readonly [Tag in Refusable["_tag"]]: (error: Extract<Refusable, { _tag: Tag }>) => Refusal;
@@ -150,6 +156,7 @@ const refusals: RefusalTable = {
   AgentNotAvailable: notFound,
   AgentRejected: because(400),
   AttachmentNotAvailable: notFound,
+  AttachmentBusy: () => ({ status: 409, body: "Stop the answer in that chat first." }),
   AttachmentRejected: (error) => ({
     status: error.cause === "size" ? 413 : 415,
     body: error.reason,
@@ -186,6 +193,7 @@ const refusals: RefusalTable = {
   InvalidUtilityModel: because(400),
   KnowledgeNotAvailable: notFound,
   KnowledgeRejected: because(400),
+  LimitRejected: because(400),
   MailFailed: because(400),
   MessageNotFound: notFound,
   ModelNotFound: () => ({ status: 400, body: "Unknown model" }),
@@ -218,8 +226,10 @@ const refusals: RefusalTable = {
   }),
   SkillNotAvailable: notFound,
   SkillRejected: because(400),
+  StorageFull: because(413),
   ToolUnavailable: (error) => ({ status: 400, body: `Web search unavailable: ${error.reason}` }),
   UnhostedImageFamily: because(400),
+  UsageLimitReached: because(429),
   WorkDesktopRequired: () => ({
     status: 409,
     body: "This is a work chat; continue it from the desktop app",

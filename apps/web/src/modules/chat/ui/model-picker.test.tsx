@@ -167,4 +167,28 @@ describe("ModelPicker", () => {
       "Claude Opus 5",
     ]);
   });
+
+  it("disables a model whose limit is used up when picking to answer, and only then", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const models = [MODELS[0]!, { ...MODELS[1]!, limitedUntil: until }];
+    renderPicker({ models, limited: true });
+    await openPicker();
+    const limited = screen.getByRole("option", { name: /Claude Opus 5/ });
+    expect(limited).toHaveAttribute("aria-disabled", "true");
+    expect(limited).toHaveTextContent(/Available again/);
+    expect(screen.getByRole("option", { name: /Claude Sonnet 5/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("offers a limited model where choosing it spends nothing", async () => {
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    renderPicker({ models: [{ ...MODELS[1]!, limitedUntil: until }] });
+    await openPicker();
+    expect(screen.getByRole("option", { name: /Claude Opus 5/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
 });

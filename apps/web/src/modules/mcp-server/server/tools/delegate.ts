@@ -343,6 +343,10 @@ export const explainRefusal = (error: { readonly _tag: string }) => {
       return "A skill or knowledge collection this chat uses is no longer available.";
     case "AccountIneligible":
       return "This account can't start chats right now.";
+    case "UsageLimitReached":
+      return "reason" in error && typeof error.reason === "string"
+        ? `${error.reason} Tell the user.`
+        : "The user has reached a usage limit.";
     case "ProjectNotAvailable":
       return "That project isn't available. Call list_projects.";
     case "AttachmentRejected":
@@ -465,9 +469,10 @@ export const sendMessage = defineTool({
       const clientName = yield* appName(context.principal.clientId);
       const attachmentIds = args.files?.length
         ? yield* uploadFiles(userId, args.files).pipe(
-            Effect.catchTag("AttachmentRejected", (error) =>
-              Effect.fail(refused(explainRefusal(error))),
-            ),
+            Effect.catchTags({
+              AttachmentRejected: (error) => Effect.fail(refused(explainRefusal(error))),
+              StorageFull: (error) => Effect.fail(refused(`${error.reason} Tell the user.`)),
+            }),
           )
         : [];
 

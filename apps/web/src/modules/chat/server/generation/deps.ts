@@ -32,6 +32,7 @@ import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { UsageLimits } from "~/modules/limits/server/service.ts";
 
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -75,6 +76,7 @@ export const generationDeps = Effect.gen(function* () {
   const presentationFonts = yield* Effect.serviceOption(PresentationFonts);
   const toolRegistry = yield* Effect.serviceOption(ToolsRepo);
   const policy = yield* FeaturePolicy;
+  const limits = yield* UsageLimits;
   const integrations = yield* IntegrationService;
   const integrationApprovals = yield* IntegrationApprovals;
   const attachments = yield* AttachmentRepo;
@@ -121,6 +123,7 @@ export const generationDeps = Effect.gen(function* () {
     presentationFonts,
     toolRegistry,
     policy,
+    limits,
     integrations,
     integrationApprovals,
     attachments,

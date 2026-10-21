@@ -352,8 +352,10 @@ function CommentButton({
     const text = body.trim();
     if (!text || sending) return;
     setSending(true);
-    const sent = await onComment(quote, text).catch(() => false);
+    // A refused send has already said why; only one the chat could not take says this.
+    const sent = await onComment(quote, text).catch(() => null);
     setSending(false);
+    if (sent === null) return;
     if (!sent) {
       toast.error("Couldn’t send it to the assistant", {
         description: "Try again once the current answer is done.",

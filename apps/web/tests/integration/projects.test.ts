@@ -24,6 +24,7 @@ import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { resolveProject } from "~/modules/projects/server/access.ts";
 import { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
 import { PROJECT_LIMITS } from "~/modules/projects/schema.ts";
@@ -63,7 +64,11 @@ beforeAll(async () => {
     AttachmentRepo.layer,
     TestBus,
     fsBlobStoreLayer,
-  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
+  ).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
+    Layer.provideMerge(infrastructure),
+  );
   runtime = ManagedRuntime.make(
     Layer.mergeAll(DocumentService.layer, ProjectService.layer, ProjectMemoryService.layer).pipe(
       Layer.provideMerge(core),

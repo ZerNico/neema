@@ -4,6 +4,7 @@ import { startTransition, useState } from "react";
 import { myUsageQuery } from "~/modules/analytics/client/queries.ts";
 import { DEFAULT_USAGE_RANGE, type UsageRangeEncoded } from "~/modules/analytics/schema.ts";
 import { UsageOverview, UsageRangePicker } from "~/modules/analytics/ui/usage-dashboard.tsx";
+import { MyLimitsSection } from "~/modules/limits/ui/my-limits-section.tsx";
 import { EmptyState, Page } from "~/ui/page-shell.tsx";
 
 export function UsagePage() {
@@ -22,6 +23,7 @@ export function UsagePage() {
       width="wide"
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
+      <MyLimitsSection />
       {data.daily.length === 0 ? (
         <EmptyState
           icon={Analytics01Icon}

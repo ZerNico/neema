@@ -21,6 +21,11 @@ export class AttachmentNotAvailable extends Schema.TaggedError<AttachmentNotAvai
   { attachmentId: Schema.String },
 ) {}
 
+/** A file in a chat that is answering, which may be reading it right now. */
+export class AttachmentBusy extends Schema.TaggedError<AttachmentBusy>()("AttachmentBusy", {
+  attachmentId: Schema.String,
+}) {}
+
 export class BlobStoreError extends Schema.TaggedError<BlobStoreError>()("BlobStoreError", {
   operation: Schema.Literals(["put", "get", "delete", "exists", "deletePrefix"]),
   key: Schema.String,

@@ -1,5 +1,10 @@
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
-import { AttachmentNotAvailable, AttachmentRejected, BlobStoreError } from "../errors.ts";
+import {
+  AttachmentBusy,
+  AttachmentNotAvailable,
+  AttachmentRejected,
+  BlobStoreError,
+} from "../errors.ts";
 import type { AttachmentKind } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
@@ -53,6 +58,11 @@ export class AttachmentService extends Context.Service<
       userId: string;
       attachmentId: string;
     }): Effect.Effect<void, AttachmentNotAvailable>;
+    /** Takes a file out of a sent message in the person's own chat, to free its room. */
+    removeFromChat(input: {
+      userId: string;
+      attachmentId: string;
+    }): Effect.Effect<{ conversationId: string }, AttachmentNotAvailable | AttachmentBusy>;
     /** Reads bytes for serving, enforcing the access policy. */
     read(input: {
       userId: string;
@@ -113,6 +123,18 @@ export class AttachmentService extends Context.Service<
       }) {
         const keys = yield* repo.deleteUnclaimed(input.userId, input.attachmentId);
         yield* deleteBlobs(keys);
+      });
+
+      const removeFromChat = Effect.fn("AttachmentService.removeFromChat")(function* (input: {
+        userId: string;
+        attachmentId: string;
+      }) {
+        const { keys, conversationId } = yield* repo.deleteFromChat(
+          input.userId,
+          input.attachmentId,
+        );
+        yield* deleteBlobs(keys);
+        return { conversationId };
       });
 
       const open = Effect.fn("AttachmentService.open")(function* (input: {
@@ -212,6 +234,7 @@ export class AttachmentService extends Context.Service<
         upload,
         copyImage,
         remove,
+        removeFromChat,
         read,
         open,
         readDocumentImage,

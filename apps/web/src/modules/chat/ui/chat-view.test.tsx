@@ -1195,7 +1195,10 @@ describe("ChatView inline question answers", () => {
     await waitFor(() => expect(conversationMock).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole("button", { name: "Save answers" })).toBeEnabled());
     expect(draft).toHaveValue("Keep my revision");
-    expect(toast.error).toHaveBeenCalledWith("Could not save your answers.");
+    // The title, with whatever reason the server gave beside it.
+    expect(vi.mocked(toast.error).mock.calls.map(([title]) => title)).toContain(
+      "Could not save your answers.",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Simple")).toBeInTheDocument();
     expect(resetUploads).not.toHaveBeenCalled();

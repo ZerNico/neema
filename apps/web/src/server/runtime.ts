@@ -19,6 +19,9 @@ import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { CustomToolRuntime } from "~/modules/custom-tools/server/runtime.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { UsageLimits } from "~/modules/limits/server/service.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
+import { StorageLibrary } from "~/modules/limits/server/library.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { ToolListingSweep } from "~/modules/integrations/server/tool-listing-sweep.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
@@ -85,6 +88,9 @@ const ReposLayer = Layer.mergeAll(
   SearchProviderRepo.layer,
   GroupRepo.layer,
   FeaturePolicy.layer,
+  UsageLimits.layer,
+  StorageQuota.layer,
+  StorageLibrary.layer,
   IntegrationRepo.layer,
   KnowledgeRepo.layer,
   SkillRepo.layer,

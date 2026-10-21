@@ -37,7 +37,12 @@ declared type, and only the kinds we understand are shown or handed to a model.
   `attachments/server/repo.ts` reads all four, so an owned upload is never swept, deleted as
   abandoned or claimed again, and every claim takes the blob lock first, since the owner tables
   share no unique index. An owner that cascades away leaves its attachment to the unclaimed
-  sweep. Sweeping takes at most ten batches of 100 uploads, each in an independent transaction.
+  sweep. Its person may also take a file they sent out of their message from Settings ›
+  Storage, to free room: the attachment row goes, under the chat's lock and never while that
+  chat is answering, and the message shows the file no more. The change to history costs one
+  cache miss. An answer's files cannot be taken out this way, since its output lists them too
+  and later turns and branches read them there. Branches made before keep their own copy.
+  Sweeping takes at most ten batches of 100 uploads, each in an independent transaction.
   The cutoff stays fixed and deletion rechecks claims after sorted blob locks, so a large backlog
   makes progress without one large transaction or oversized parameter lists.
   A document's images are claimed attachments, served to that document's readers at

@@ -11,6 +11,7 @@ import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { chatModelsQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import {
   activateWorkTurn,
@@ -92,6 +93,12 @@ export function useAttemptMutations({
   } = edit;
 
   const checkWorkReady = () => work.check();
+  // A refused start says why, a usage limit among them; the models' standing may have moved too.
+  const refused = (title: string, error: unknown) => {
+    cancelAnchor();
+    toastError(title, error);
+    void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
+  };
   /** What every way of starting an answer saves first, so it reads current drafts. */
   const flushPending = async () => {
     await flushBlockSaves();
@@ -108,7 +115,7 @@ export function useAttemptMutations({
   };
   const sendMutation = useMutation({
     onMutate: beforeGeneration,
-    onError: cancelAnchor,
+    onError: (error) => refused("Could not send the message.", error),
     mutationFn: async (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
@@ -209,6 +216,7 @@ export function useAttemptMutations({
     onError: (error) => {
       cancelAnchor();
       toastError("Could not send your answers.", error);
+      void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
     },
     onSettled: refreshQuestionState,
   });
@@ -217,7 +225,7 @@ export function useAttemptMutations({
 
   const retryMutation = useMutation({
     onMutate: beforeGeneration,
-    onError: cancelAnchor,
+    onError: (error) => refused("Could not retry the answer.", error),
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -251,6 +259,7 @@ export function useAttemptMutations({
     },
     onError: (error) => {
       toastError("Could not resume the answer.", error);
+      void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
     },
     mutationFn: async (input: { messageId: string; modelId?: string }) =>
       resumeMessage({
@@ -353,10 +362,10 @@ export function useAttemptMutations({
       }
       setEditingMessageId(null);
     },
-    onError: async (_error, input) => {
+    onError: async (error, input) => {
+      if (!input.questionResponse) return refused("Could not send the edit.", error);
       cancelAnchor();
-      if (!input.questionResponse) return;
-      toast.error("Could not save your answers.");
+      toastError("Could not save your answers.", error);
       await refreshQuestionState();
     },
     onSettled: (_result, _error, input) => input.releaseUploads?.(),
