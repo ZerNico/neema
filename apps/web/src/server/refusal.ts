@@ -45,7 +45,7 @@ import type {
   KnowledgeRejected,
   SharingNotAllowed,
 } from "~/modules/knowledge/errors.ts";
-import type { LimitRejected, UsageLimitReached } from "~/modules/limits/errors.ts";
+import type { LimitRejected, StorageFull, UsageLimitReached } from "~/modules/limits/errors.ts";
 import type { MailFailed } from "~/modules/notifications/server/mail.ts";
 import type { PushRejected } from "~/modules/notifications/server/push.ts";
 import type { FontRejected } from "~/modules/presentations/server/fonts.ts";
@@ -131,7 +131,8 @@ export type Refusable =
   | UnhostedImageFamily
   | WorkDesktopRequired
   | UsageLimitReached
-  | LimitRejected;
+  | LimitRejected
+  | StorageFull;
 
 export type RefusalTable = {
   readonly [Tag in Refusable["_tag"]]: (error: Extract<Refusable, { _tag: Tag }>) => Refusal;
@@ -222,6 +223,7 @@ const refusals: RefusalTable = {
   }),
   SkillNotAvailable: notFound,
   SkillRejected: because(400),
+  StorageFull: because(413),
   ToolUnavailable: (error) => ({ status: 400, body: `Web search unavailable: ${error.reason}` }),
   UnhostedImageFamily: because(400),
   UsageLimitReached: because(429),

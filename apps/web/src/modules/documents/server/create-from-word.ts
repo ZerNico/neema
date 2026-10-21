@@ -4,6 +4,7 @@ import { WordProcessor } from "~/modules/word/server/runtime.ts";
 import { DocumentRejected } from "../schema.ts";
 import { DocumentService, type DocumentWriteGuard } from "./document-service.ts";
 import { readWordDocument, titleFromFile } from "./word-import.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 /**
  * A new project or chat document started from a Word file a person gave:
@@ -26,17 +27,27 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
 ) {
   const word = yield* Effect.serviceOption(WordProcessor);
   const attachments = yield* AttachmentService;
+  const storage = yield* StorageQuota;
+  // A picture the import may not store is dropped quietly by the reader, but a person's full
+  // storage is theirs to hear: it fails the import with the reason. The model's are kept.
+  let full: string | null = null;
   const read = yield* readWordDocument(input.file, Option.getOrNull(word), userId, (image) =>
-    attachments
-      .upload({
-        userId,
-        fileName: image.name,
-        declaredMediaType: image.mediaType,
-        bytes: image.bytes,
-        allowedKinds: ["image"],
-      })
-      .pipe(Effect.map((attachment) => attachment.id)),
+    (input.by === "user" ? storage.admit(userId, [image.bytes]) : Effect.void).pipe(
+      // Its pictures are the uploader's files while it is read, like any they add.
+      Effect.tapError((refused) => Effect.sync(() => (full ??= refused.reason))),
+      Effect.andThen(
+        attachments.upload({
+          userId,
+          fileName: image.name,
+          declaredMediaType: image.mediaType,
+          bytes: image.bytes,
+          allowedKinds: ["image"],
+        }),
+      ),
+      Effect.map((attachment) => attachment.id),
+    ),
   ).pipe(Effect.mapError((reason) => new DocumentRejected({ reason })));
+  if (full !== null) return yield* new DocumentRejected({ reason: full });
   const title = input.title?.trim() || read.title || titleFromFile(read.name);
   const created = yield* DocumentService.use((service) =>
     service.create(

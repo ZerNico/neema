@@ -99,3 +99,31 @@ export const PERIOD_WORDS: Record<LimitPeriod, { noun: string; current: string; 
 /** "$10.00" or "20 answers". */
 export const formatAmount = (metric: LimitMetric, amount: number) =>
   metric === "cost" ? `$${amount.toFixed(2)}` : `${amount} ${amount === 1 ? "answer" : "answers"}`;
+
+/**
+ * The bytes a person may store: everyone's quota, unless groups set their own, when the most
+ * generous of those wins and one without a number lifts it.
+ */
+export const effectiveQuota = (
+  everyone: number | null,
+  fromGroups: ReadonlyArray<number | null>,
+): number | null =>
+  fromGroups.length
+    ? fromGroups.some((bytes) => bytes === null)
+      ? null
+      : Math.max(...(fromGroups as number[]))
+    : everyone;
+
+/** "1.5 GB", "300 MB", in the binary units file managers use. */
+export const formatBytes = (bytes: number) => {
+  const units = ["bytes", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return unit === 0
+    ? `${value} bytes`
+    : `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+};

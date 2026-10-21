@@ -12,6 +12,7 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
@@ -44,6 +45,7 @@ beforeAll(async () => {
   });
   const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, bus, fsBlobStoreLayer).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
     Layer.provideMerge(infrastructure),
   );
   runtime = ManagedRuntime.make(

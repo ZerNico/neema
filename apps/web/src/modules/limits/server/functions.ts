@@ -2,8 +2,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
-import { LimitIdInput, SaveLimitInput, TimeZoneInput } from "../schema.ts";
+import {
+  EveryoneStorageInput,
+  GroupStorageInput,
+  LimitIdInput,
+  SaveLimitInput,
+  TimeZoneInput,
+} from "../schema.ts";
 import { UsageLimits } from "./service.ts";
+import { StorageQuota } from "./storage.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -40,4 +47,31 @@ export const setLimitTimeZone = createServerFn({ method: "POST" })
   .validator(standard(TimeZoneInput))
   .handler(({ data }) =>
     runServerFn(UsageLimits.use((limits) => limits.setTimeZone(data.timeZone))),
+  );
+
+/** What the signed-in person stores, against their quota. */
+export const getMyStorage = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(StorageQuota.use((quota) => quota.standing(context.session.user.id))),
+  );
+
+export const getStorageQuotas = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() => runServerFn(StorageQuota.use((quota) => quota.quotas())));
+
+export const setEveryoneStorage = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(EveryoneStorageInput))
+  .handler(({ data }) => runServerFn(StorageQuota.use((quota) => quota.setEveryone(data.bytes))));
+
+export const setGroupStorage = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(GroupStorageInput))
+  .handler(({ data }) =>
+    runServerFn(
+      StorageQuota.use((quota) =>
+        quota.setGroup(data.groupId, "bytes" in data ? data.bytes : undefined),
+      ),
+    ),
   );

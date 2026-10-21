@@ -8,6 +8,7 @@ import { SkillService } from "./service.ts";
 import { readUpload } from "~/modules/attachments/server/functions.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 export const listSkills = createServerFn({ method: "GET" })
   .middleware([requireSession])
@@ -75,6 +76,7 @@ export const uploadSkillAsset = createServerFn({ method: "POST" })
       Effect.gen(function* () {
         if (!(yield* FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate"))))
           return yield* refuse(403, "Skill authoring is unavailable");
+        yield* StorageQuota.use((quota) => quota.admit(userId, [bytes]));
         const attachment = yield* AttachmentService.use((service) =>
           service.upload({ userId, fileName: file.name, declaredMediaType: file.type, bytes }),
         );

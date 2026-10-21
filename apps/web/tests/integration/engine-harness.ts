@@ -12,6 +12,7 @@ import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
@@ -52,6 +53,7 @@ const baseLayer = (url: string, maxConnections: number) =>
     GroupRepo.layer,
     FeaturePolicy.layer,
     UsageLimits.layer,
+    StorageQuota.layer,
     IntegrationRepo.layer,
     KnowledgeRepo.layer,
     SkillRepo.layer,

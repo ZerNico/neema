@@ -17,3 +17,11 @@ export const LimitIdInput = Schema.Struct({ id: Schema.String.check(Schema.isMax
 export const TimeZoneInput = Schema.Struct({
   timeZone: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 });
+
+export const EveryoneStorageInput = Schema.Struct({ bytes: Schema.NullOr(Schema.Number) });
+
+export const GroupStorageInput = Schema.Struct({
+  groupId: Schema.String.check(Schema.isMaxLength(64)),
+  /** Absent hands the group back to everyone's quota; null lifts it. */
+  bytes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+});

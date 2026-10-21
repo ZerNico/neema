@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveLimits, limitKey, type LimitRule } from "./rules.ts";
+import { effectiveLimits, effectiveQuota, formatBytes, limitKey, type LimitRule } from "./rules.ts";
 
 const rule = (overrides: Partial<LimitRule> & Pick<LimitRule, "id">): LimitRule => ({
   groupId: null,
@@ -89,5 +89,22 @@ describe("effective limits", () => {
 
   it("drops a rule whose models are all gone", () => {
     expect(effectiveLimits([rule({ id: "gone", modelIds: [] })], [])).toEqual([]);
+  });
+});
+
+describe("the storage quota", () => {
+  it("is everyone's unless groups set their own, the most generous of those winning", () => {
+    expect(effectiveQuota(1000, [])).toBe(1000);
+    expect(effectiveQuota(1000, [5000, 100])).toBe(5000);
+    expect(effectiveQuota(1000, [100])).toBe(100);
+    expect(effectiveQuota(1000, [100, null])).toBeNull();
+    expect(effectiveQuota(null, [])).toBeNull();
+  });
+
+  it("reads in the units file managers use", () => {
+    expect(formatBytes(512)).toBe("512 bytes");
+    expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB");
+    expect(formatBytes(20 * 1024 ** 2)).toBe("20 MB");
   });
 });

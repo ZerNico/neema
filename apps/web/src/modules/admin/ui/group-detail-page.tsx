@@ -63,6 +63,7 @@ import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { toastError } from "~/ui/error-toast.ts";
 import { LimitsSection } from "~/modules/limits/ui/limits-editor.tsx";
+import { StorageQuotaSection } from "~/modules/limits/ui/storage-quota-section.tsx";
 
 interface PickableUser {
   id: string;
@@ -243,6 +244,7 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
 
       <CapabilitySettings groupId={groupId} />
       <LimitsSection groupId={groupId} />
+      <StorageQuotaSection groupId={groupId} />
       <MemberSharingDialog
         groupId={groupId}
         member={sharingFor}

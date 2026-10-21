@@ -10,6 +10,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import {
   createPresentationDraft,
   inspectPresentation,
@@ -77,7 +78,11 @@ beforeAll(async () => {
     bus,
     fsBlobStoreLayer,
     FakeDocumentParser,
-  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
+  ).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
+    Layer.provideMerge(infrastructure),
+  );
   const attachments = AttachmentService.layer.pipe(Layer.provideMerge(repos));
   const processor = Layer.succeed(PresentationProcessor, {
     // The stub answers whichever job it is asked; the route asks for inspections and renders.

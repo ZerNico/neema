@@ -14,3 +14,8 @@ export class UsageLimitReached extends Schema.TaggedError<UsageLimitReached>()(
 export class LimitRejected extends Schema.TaggedError<LimitRejected>()("LimitRejected", {
   reason: Schema.String,
 }) {}
+
+/** An upload that would take the person, or a project's owner, past their storage quota. */
+export class StorageFull extends Schema.TaggedError<StorageFull>()("StorageFull", {
+  reason: Schema.String,
+}) {}

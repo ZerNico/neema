@@ -32,6 +32,7 @@ import { projectAudience, projectRole } from "./access.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { fileText } from "~/modules/attachments/server/file-text.ts";
 import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 type ProjectFileError = ProjectNotAvailable | ProjectRejected;
 /** Who is writing: a person, or the model inside one answer. */
@@ -222,6 +223,7 @@ export class ProjectFileService extends Context.Service<
       const db = yield* Db;
       const blobs = yield* BlobStore;
       const attachmentService = yield* AttachmentService;
+      const storage = yield* StorageQuota;
       const parser = yield* DocumentParser;
       const bus = yield* SyncBus;
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
@@ -333,6 +335,15 @@ export class ProjectFileService extends Context.Service<
           .where(eq(projects.id, input.projectId))
           .pipe(Effect.orDie);
         if (!project) return yield* new ProjectNotAvailable({ projectId: input.projectId });
+        // What a person adds costs the owner's quota; the model's saves are kept like its files.
+        if (writer.origin === "user")
+          yield* storage
+            .admitFor(project.ownerId, writer.userId, [input.bytes])
+            .pipe(
+              Effect.catchTag("StorageFull", (full) =>
+                Effect.fail(new ProjectRejected({ reason: full.reason })),
+              ),
+            );
         const stored = yield* attachmentService.storeBlob(project.ownerId, input.bytes);
         const { maxProjectBytes } = yield* settings();
         const result = yield* transaction((tx) =>

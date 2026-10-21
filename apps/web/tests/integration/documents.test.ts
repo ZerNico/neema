@@ -43,6 +43,7 @@ import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -82,7 +83,11 @@ beforeAll(async () => {
     AttachmentRepo.layer,
     TestBus,
     fsBlobStoreLayer,
-  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
+  ).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
+    Layer.provideMerge(infrastructure),
+  );
   appLayer = DocumentService.layer.pipe(Layer.provideMerge(core));
   runtime = ManagedRuntime.make(appLayer);
 }, 180_000);

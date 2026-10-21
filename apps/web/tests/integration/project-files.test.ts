@@ -13,6 +13,7 @@ import {
   blobCleanupIntents,
   conversations,
   conversationQueueEntries,
+  limitSettings,
   messageAttachments,
   messages,
   projectFileVersions,
@@ -26,6 +27,7 @@ import { makeToolFileResolver } from "~/modules/chat/server/tool-files.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { PROJECT_FILE_LIMITS } from "~/modules/projects/files.ts";
 import { ProjectFileService, type FileWriter } from "~/modules/projects/server/project-files.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
@@ -80,7 +82,11 @@ beforeAll(async () => {
     TestBus,
     ObservedBlobs,
     FakeDocumentParser,
-  ).pipe(Layer.provideMerge(FeaturePolicy.layer), Layer.provideMerge(infrastructure));
+  ).pipe(
+    Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
+    Layer.provideMerge(infrastructure),
+  );
   const attachments = AttachmentService.layer.pipe(Layer.provideMerge(repos));
   runtime = ManagedRuntime.make(
     Layer.mergeAll(ProjectService.layer, ProjectFileService.layer).pipe(
@@ -413,6 +419,34 @@ describe("project files", () => {
     expect((await files((s) => s.download(owner, byModel.versionId)))!.bytes).toEqual(
       text("model draft"),
     );
+  });
+
+  it("charges what members add to the owner's storage, after checking who may write", async () => {
+    const { owner, editor, viewer, projectId } = await setup();
+    await db((d) =>
+      d.update(limitSettings).set({ storageBytes: 10 }).where(eq(limitSettings.id, 1)),
+    );
+    try {
+      const refusal = (userId: string) =>
+        files((s) =>
+          s
+            .write(person(userId), {
+              projectId,
+              name: `${userId}.txt`,
+              bytes: text("x".repeat(20)),
+            })
+            .pipe(Effect.result),
+        ).then((result) => JSON.stringify(result));
+      // An editor learns only whose storage is full, never how full.
+      expect(await refusal(editor)).toMatch(/owner of where this goes is out of storage/);
+      expect(await refusal(owner)).toMatch(/Not enough storage/);
+      // Someone who may not write is told that, not anything about the owner's storage.
+      expect(await refusal(viewer)).not.toMatch(/storage/);
+    } finally {
+      await db((d) =>
+        d.update(limitSettings).set({ storageBytes: null }).where(eq(limitSettings.id, 1)),
+      );
+    }
   });
 
   it("writes nothing for a model whose answer no longer owns the chat", async () => {

@@ -469,9 +469,10 @@ export const sendMessage = defineTool({
       const clientName = yield* appName(context.principal.clientId);
       const attachmentIds = args.files?.length
         ? yield* uploadFiles(userId, args.files).pipe(
-            Effect.catchTag("AttachmentRejected", (error) =>
-              Effect.fail(refused(explainRefusal(error))),
-            ),
+            Effect.catchTags({
+              AttachmentRejected: (error) => Effect.fail(refused(explainRefusal(error))),
+              StorageFull: (error) => Effect.fail(refused(`${error.reason} Tell the user.`)),
+            }),
           )
         : [];
 

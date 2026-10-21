@@ -62,3 +62,22 @@ that zone), never the server's, like every other due-ness check here.
   connected app's tool error. Admins are never limited.
 - The chat model list carries `limitedUntil`, and the pickers that start answers disable such
   a model. Choosing a model for an agent or a schedule is not spending, so those do not.
+
+## Storage
+
+- One quota in bytes: everyone's (`limit_settings.storage_bytes`, none when null), replaced for
+  a group's members by the group's (`group_storage_quotas`), combined like the limits above.
+- What counts is every blob the person owns (`attachment_blobs`), so a file used in several
+  places counts once. Project files and a shared document's images are their owner's blobs,
+  so they count to the owner. A writer is told only that the owner is out of storage, never
+  the owner's numbers.
+- What a person adds is refused before its bytes are stored, each path after its own access
+  check: chat and connected-app files, knowledge files, skill saves and imports, a skill's
+  binary files, project files (in `writeVersion`, so upload, saving an attachment and restore
+  alike), document images copied to their owner and pictures inside a Word file a person
+  imports. Bytes the person already stores cost nothing. Files an answer makes, documents and
+  their pictures included, are kept and counted, since refusing them would break the answer.
+- A Word file's pictures count to the person importing it while it is read, then to the
+  document's owner. A refusal fails the import with its reason rather than dropping pictures.
+- It is soft by up to one batch: uploads at the same moment each see the same total, and
+  holding a lock across storing bytes is not worth that.

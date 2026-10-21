@@ -24,6 +24,7 @@ import { DocumentService } from "~/modules/documents/server/document-service.ts"
 import type { DocumentFrame } from "~/modules/documents/schema.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
@@ -53,6 +54,7 @@ beforeAll(async () => {
   });
   const core = Layer.mergeAll(DocumentRepo.layer, AttachmentRepo.layer, bus, fsBlobStoreLayer).pipe(
     Layer.provideMerge(FeaturePolicy.layer),
+    Layer.provideMerge(StorageQuota.layer),
     Layer.provideMerge(infrastructure),
   );
   runtime = ManagedRuntime.make(

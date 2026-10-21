@@ -15,6 +15,9 @@ const navigate = vi.hoisted(() => vi.fn());
 
 // The limits editor has its own tests; this page only places it.
 vi.mock("~/modules/limits/ui/limits-editor.tsx", () => ({ LimitsSection: () => null }));
+vi.mock("~/modules/limits/ui/storage-quota-section.tsx", () => ({
+  StorageQuotaSection: () => null,
+}));
 vi.mock("../server/functions.ts", () => ({
   listGroups: vi.fn(),
   listGroupMemberships: vi.fn(),

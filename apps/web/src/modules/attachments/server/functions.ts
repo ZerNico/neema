@@ -8,6 +8,7 @@ import { AttachmentIdInput } from "../schema.ts";
 import { AttachmentService } from "./service.ts";
 import { DocumentParser } from "./document-parser.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { AttachmentRejected } from "../errors.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -48,6 +49,7 @@ export const uploadAttachment = createServerFn({ method: "POST" })
             cause: "type",
             reason: "attachments are unavailable",
           });
+        yield* StorageQuota.use((quota) => quota.admit(context.session.user.id, [bytes]));
         return yield* AttachmentService.use((service) =>
           service.upload({
             userId: context.session.user.id,

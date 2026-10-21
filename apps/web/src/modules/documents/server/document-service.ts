@@ -7,6 +7,9 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { attachmentWriter } from "~/modules/attachments/server/service.ts";
 import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { StorageQuota } from "~/modules/limits/server/storage.ts";
+import { and, eq, inArray } from "drizzle-orm";
+import { attachmentBlobs, attachments as attachmentRows } from "~/db/schema/index.ts";
 import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -505,6 +508,7 @@ export class DocumentService extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const policy = yield* FeaturePolicy;
+      const storage = yield* StorageQuota;
       const documents = yield* DocumentRepo;
       const attachments = yield* AttachmentRepo;
       const files = attachmentWriter(attachments, yield* BlobStore);
@@ -623,12 +627,36 @@ export class DocumentService extends Context.Service<
         userId: string,
         owner: DocumentOwner | null,
         attachmentIds: ReadonlyArray<string>,
+        /** A person's images take the owner's quota; the model's are kept like its files. */
+        charged: boolean,
       ) =>
         Effect.gen(function* () {
           const copies = new Map<string, string>();
           if (!owner || !(yield* policy.can(userId, "documents"))) return { ownerId: null, copies };
           const ownerId = yield* documents.imageOwner(userId, owner);
           if (!ownerId || ownerId === userId) return { ownerId, copies };
+          // Copied under the owner, so it is the owner's quota they take, unless stored there already.
+          const images =
+            charged && attachmentIds.length
+              ? yield* db
+                  .select({ sha256: attachmentBlobs.sha256, size: attachmentBlobs.size })
+                  .from(attachmentRows)
+                  .innerJoin(attachmentBlobs, eq(attachmentBlobs.id, attachmentRows.blobId))
+                  .where(
+                    and(
+                      inArray(attachmentRows.id, [...attachmentIds]),
+                      eq(attachmentRows.userId, userId),
+                    ),
+                  )
+                  .pipe(Effect.orDie)
+              : [];
+          yield* storage
+            .admitFor(ownerId, userId, images)
+            .pipe(
+              Effect.catchTag("StorageFull", (full) =>
+                Effect.fail(new DocumentRejected({ reason: full.reason })),
+              ),
+            );
           for (const attachmentId of attachmentIds) {
             const copy = yield* files.copyImage({ userId, attachmentId, toUserId: ownerId });
             if (copy) copies.set(attachmentId, copy);
@@ -868,7 +896,12 @@ export class DocumentService extends Context.Service<
               reason: "a document belongs to a chat or a project",
             });
           const images = from?.images ?? [];
-          const plan = yield* planImages(userId, images.length ? owner : null, images);
+          const plan = yield* planImages(
+            userId,
+            images.length ? owner : null,
+            images,
+            parsed.by === "user",
+          );
           // An imported tree names the document and each claimed image in their
           // addresses, so both are settled first.
           const id = uuidv7();
@@ -1560,9 +1593,12 @@ export class DocumentService extends Context.Service<
         }),
         addImage: Effect.fn("DocumentService.addImage")(function* (userId, input) {
           const found = yield* documents.get(userId, input.documentId);
-          const plan = yield* planImages(userId, found ? ownerOf(found) : null, [
-            input.attachmentId,
-          ]);
+          const plan = yield* planImages(
+            userId,
+            found ? ownerOf(found) : null,
+            [input.attachmentId],
+            true,
+          );
           const spent = yield* transaction((tx) =>
             Effect.gen(function* () {
               yield* requireDocuments(userId, tx);

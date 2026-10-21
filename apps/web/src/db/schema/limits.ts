@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   doublePrecision,
   index,
@@ -51,5 +52,19 @@ export const limitSettings = pgTable("limit_settings", {
   id: integer().primaryKey(),
   /** Where a day, a week (from Monday) and a month begin, for everyone alike. */
   timeZone: text("time_zone").notNull().default("UTC"),
+  /** What everyone may store, in bytes; null is no quota. */
+  storageBytes: bigint("storage_bytes", { mode: "number" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A group's storage quota, replacing everyone's for its members; null lifts it.
+ * Among several groups with one, the most generous wins.
+ */
+export const groupStorageQuotas = pgTable("group_storage_quotas", {
+  groupId: text("group_id")
+    .primaryKey()
+    .references(() => groups.id, { onDelete: "cascade" }),
+  bytes: bigint({ mode: "number" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -27,6 +27,7 @@ import { listCollections, readKnowledgeDocument, searchKnowledge } from "./knowl
 import { archiveChat, branchChat, keepChat, readChat, renameChat, retryMessage } from "./manage.ts";
 import { deleteMemory, listMemories, saveMemory, updateMemory } from "./memory.ts";
 import { listSkills, readSkillFile } from "./skills.ts";
+import type { StorageQuota } from "~/modules/limits/server/storage.ts";
 
 export const MCP_TOOLS = [
   listAgents,
@@ -81,6 +82,7 @@ export type McpServices =
   | ProviderRepo
   | SkillReader
   | SkillRepo
+  | StorageQuota
   | Db
   | StreamEngine
   | SyncBus;
