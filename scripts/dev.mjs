@@ -392,10 +392,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  // On a line of its own: a child's spinner may have left the cursor mid-line.
   console.error(
-    importing && !error.safe
-      ? "Snapshot import failed; current state retained. Check source configuration and database availability; connection details suppressed."
-      : error.message,
+    "\n" +
+      (importing && !error.safe
+        ? "Snapshot import failed; current state retained. Check source configuration and database availability; connection details suppressed."
+        : error.message),
   );
   process.exitCode = 1;
 });
