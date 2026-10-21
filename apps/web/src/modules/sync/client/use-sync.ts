@@ -6,6 +6,9 @@ import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
+import { takeSyncFeed } from "./feed.ts";
+
+type DomainEvent = Exclude<SyncEvent, { type: "sync.ready" }>;
 
 /**
  * Events after which a person may store more or less: an answer's files, a file taken out, a
@@ -66,7 +69,9 @@ export function useSync(
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const source = new EventSource("/api/sync");
+    // The app route opens the feed before its loaders read; see feed.ts.
+    const feed = takeSyncFeed();
+    const source = feed?.source ?? new EventSource("/api/sync");
     let knowledgeTimer: ReturnType<typeof setTimeout> | undefined;
     const clearKnowledgeTimer = () => {
       clearTimeout(knowledgeTimer);
@@ -105,6 +110,8 @@ export function useSync(
     // Reconcile it on first open too; reconnects refresh every feed-backed cache.
     let opened = false;
     let authorized = !reconcileIdentity;
+    // Events that arrive while identity is being checked, applied once it holds.
+    let held: DomainEvent[] = [];
     let connection = 0;
     let identityRetry: ReturnType<typeof setTimeout> | undefined;
     let workRefreshing = false;
@@ -124,12 +131,13 @@ export function useSync(
           if (workDirty && !disposed && authorized) refreshWork();
         });
     };
-    source.addEventListener("error", () => {
+    const onError = () => {
       authorized = false;
+      held = [];
       connection += 1;
       clearTimeout(identityRetry);
       clearKnowledgeTimer();
-    });
+    };
     const open = async (currentConnection: number) => {
       const valid = reconcileIdentity ? await reconcileIdentity().catch(() => false) : true;
       if (disposed || currentConnection !== connection) return;
@@ -142,24 +150,28 @@ export function useSync(
       authorized = true;
       refreshKnowledge();
       refreshWork();
-      if (opened || reconcileIdentity) {
+      const pending = held;
+      held = [];
+      // A tree that read before subscribing can have missed anything, and so can
+      // a reconnect. A feed subscribed before the reads only missed what it held.
+      if (opened || (reconcileIdentity && !feed?.subscribedBeforeReads)) {
         for (const queryKey of recoveryPrefixes) {
           void queryClient.invalidateQueries({ queryKey });
         }
-      }
+      } else for (const event of pending) apply(event);
       opened = true;
     };
-    source.addEventListener("open", () => {
+    const onOpen = () => {
       authorized = false;
       clearTimeout(identityRetry);
       clearKnowledgeTimer();
       connection += 1;
       void open(connection);
-    });
+    };
 
-    source.addEventListener("sync", (raw) => {
+    const onSync = (data: string) => {
       if (disposed) return;
-      const event = JSON.parse((raw as MessageEvent).data) as SyncEvent;
+      const event = JSON.parse(data) as SyncEvent;
       if (event.type === "sync.ready") {
         clearTimeout(identityRetry);
         clearKnowledgeTimer();
@@ -167,7 +179,11 @@ export function useSync(
         void open(connection);
         return;
       }
-      if (!authorized) return;
+      if (authorized) apply(event);
+      else held.push(event);
+    };
+
+    function apply(event: DomainEvent) {
       // What the person stores moves with these; only an open Storage page refetches.
       if (
         STORAGE_EVENTS.has(event.type) &&
@@ -323,7 +339,16 @@ export function useSync(
           );
           break;
       }
-    });
+    }
+
+    source.addEventListener("error", onError);
+    source.addEventListener("open", onOpen);
+    source.addEventListener("sync", (raw) => onSync((raw as MessageEvent).data));
+    for (const frame of feed?.backlog ?? []) {
+      if (frame.type === "error") onError();
+      else if (frame.type === "open") onOpen();
+      else onSync(frame.data);
+    }
 
     return () => {
       disposed = true;

@@ -459,6 +459,75 @@ describe("desktop session events", () => {
   });
 });
 
+describe("a feed the app route opened before its loaders read", () => {
+  // Fresh modules: the feed is handed over once per document.
+  const load = async () => {
+    vi.resetModules();
+    const [feed, sync] = await Promise.all([import("./feed.ts"), import("./use-sync.ts")]);
+    return { ...feed, ...sync };
+  };
+
+  const mount = (useFreshSync: typeof useSync, reconcile: () => Promise<boolean>) => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    function FreshProbe() {
+      useFreshSync(reconcile);
+      return null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <FreshProbe />
+      </QueryClientProvider>,
+    );
+    return invalidate;
+  };
+
+  it("skips the first refresh and applies what arrived while identity was checked", async () => {
+    const { openSyncFeed, useSync: useFreshSync } = await load();
+    const opening = openSyncFeed();
+    const source = FakeEventSource.instances.at(-1)!;
+    source.emit("open");
+    source.emit("sync", { type: "sync.ready" });
+    await opening;
+
+    let confirm!: (valid: boolean) => void;
+    const reconcile = vi.fn(
+      () =>
+        new Promise<boolean>((done) => {
+          confirm = done;
+        }),
+    );
+    const invalidate = mount(useFreshSync, reconcile);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    source.emit("sync", { type: "memory.changed" });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["memory"] });
+
+    await act(async () => confirm(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["conversations"] });
+
+    // A later reconnect can have missed anything again.
+    source.emit("error");
+    source.emit("open");
+    await act(async () => confirm(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+  });
+
+  it("refreshes on first open when readiness came too late for the loaders", async () => {
+    vi.useFakeTimers();
+    const { openSyncFeed, useSync: useFreshSync } = await load();
+    const opening = openSyncFeed();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    const source = FakeEventSource.instances.at(-1)!;
+    const invalidate = mount(useFreshSync, () => Promise.resolve(true));
+    source.emit("open");
+    source.emit("sync", { type: "sync.ready" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+  });
+});
+
 describe("identity-gated reconnects", () => {
   it("retries a failed identity check before applying events and cancels retry on disposal", async () => {
     vi.useFakeTimers();
