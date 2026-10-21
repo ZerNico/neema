@@ -7,6 +7,7 @@ import {
 } from "~/modules/integrations/ui/knowledge-sources-section.tsx";
 import { useSyncableIntegrations } from "~/modules/integrations/client/use-syncable-integrations.ts";
 import { DocumentSourcePanel } from "./document-source-panel.tsx";
+import { InfiniteSentinel } from "~/modules/chat/ui/infinite-sentinel.tsx";
 import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import {
   Delete02Icon,
@@ -259,6 +260,12 @@ const documentCount = (count: number) => {
   return count === 1 ? "1 document" : `${count} documents`;
 };
 
+/**
+ * Rows shown at first and added per step. A full collection is 500 rows, each
+ * with its own menu, and mounting them all at once froze the page.
+ */
+const ROWS_PER_STEP = 100;
+
 export function CollectionPage({ collectionId }: { collectionId: string }) {
   const integrations = useIntegrationDirectory();
   const queryClient = useQueryClient();
@@ -271,6 +278,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const [sharing, setSharing] = useState(false);
   const [note, setNote] = useState<"new" | KnowledgeDocument | null>(null);
   const [syncing, setSyncing] = useState<SourceTarget | null>(null);
+  const [shownRows, setShownRows] = useState(ROWS_PER_STEP);
   const syncable = useSyncableIntegrations();
   const fileInput = useRef<HTMLInputElement>(null);
   const replacing = useRef<string | null>(null);
@@ -506,162 +514,172 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
               }
             />
           ) : (
-            <ListCard>
-              {ownDocuments.map((document) => (
-                <ListRow key={document.id} className="flex-wrap">
-                  {document.source ? (
-                    <IntegrationLogo integrationId={document.source.integrationId} variant="tile" />
-                  ) : (
-                    <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
-                      <HugeiconsIcon
-                        icon={document.kind === "note" ? NoteIcon : File01Icon}
-                        strokeWidth={2}
-                        className="size-4"
+            <>
+              <ListCard>
+                {ownDocuments.slice(0, shownRows).map((document) => (
+                  <ListRow key={document.id} className="flex-wrap">
+                    {document.source ? (
+                      <IntegrationLogo
+                        integrationId={document.source.integrationId}
+                        variant="tile"
                       />
+                    ) : (
+                      <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
+                        <HugeiconsIcon
+                          icon={document.kind === "note" ? NoteIcon : File01Icon}
+                          strokeWidth={2}
+                          className="size-4"
+                        />
+                      </div>
+                    )}
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium">{document.title}</span>
+                      <span className="text-muted-foreground truncate text-xs">
+                        {document.error ??
+                          document.replacement?.error ??
+                          [
+                            document.fileName,
+                            document.pageCount ? `${document.pageCount} pages` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                      </span>
+                      {document.replacement ? (
+                        <span className="text-muted-foreground text-xs">
+                          The current version remains available.
+                        </span>
+                      ) : document.status === "ready" && document.semanticStatus === "failed" ? (
+                        <span className="text-muted-foreground text-xs">
+                          This document is still usable with basic search.
+                        </span>
+                      ) : null}
                     </div>
-                  )}
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">{document.title}</span>
-                    <span className="text-muted-foreground truncate text-xs">
-                      {document.error ??
-                        document.replacement?.error ??
-                        [
-                          document.fileName,
-                          document.pageCount ? `${document.pageCount} pages` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                    </span>
-                    {document.replacement ? (
-                      <span className="text-muted-foreground text-xs">
-                        The current version remains available.
-                      </span>
-                    ) : document.status === "ready" && document.semanticStatus === "failed" ? (
-                      <span className="text-muted-foreground text-xs">
-                        This document is still usable with basic search.
-                      </span>
+                    {statusBadge(document)}
+                    {canEdit &&
+                    (document.status === "failed" || document.replacement?.status === "failed") ? (
+                      <PendingButton
+                        size="sm"
+                        variant="outline"
+                        pending={retry.isPending && retry.variables === document.id}
+                        disabled={retry.isPending}
+                        onClick={() => retry.mutate(document.id)}
+                      >
+                        Try again
+                      </PendingButton>
                     ) : null}
-                  </div>
-                  {statusBadge(document)}
-                  {canEdit &&
-                  (document.status === "failed" || document.replacement?.status === "failed") ? (
-                    <PendingButton
-                      size="sm"
-                      variant="outline"
-                      pending={retry.isPending && retry.variables === document.id}
-                      disabled={retry.isPending}
-                      onClick={() => retry.mutate(document.id)}
-                    >
-                      Try again
-                    </PendingButton>
-                  ) : null}
-                  {document.versionId && document.kind === "file" ? (
-                    <a
-                      href={`/api/knowledge/${encodeURIComponent(collectionId)}/${encodeURIComponent(document.id)}/${encodeURIComponent(document.versionId)}`}
-                      className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-                      aria-label={`Download ${document.title}`}
-                      download
-                    >
-                      <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-                    </a>
-                  ) : null}
-                  {document.kind === "note" &&
-                  document.versionId &&
-                  document.status === "ready" &&
-                  document.charCount ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      // oxlint-disable-next-line react/no-unstable-nested-components -- opens a panel with an element; nothing renders here
-                      onClick={() =>
-                        panel.open({
-                          id: `knowledge-note:${document.versionId}`,
-                          title: document.title,
-                          body: (
-                            <DocumentSourcePanel
-                              source={{
-                                kind: "document",
-                                index: 0,
-                                title: document.title,
-                                snippet: "",
-                                read: true,
-                                collectionId,
-                                documentId: document.id,
-                                versionId: document.versionId!,
-                                startOffset: 0,
-                                endOffset: document.charCount!,
-                                page: null,
-                                headingPath: "",
-                              }}
-                            />
-                          ),
-                        })
-                      }
-                    >
-                      Read note
-                    </Button>
-                  ) : null}
-                  {document.source?.url ? (
-                    <a
-                      href={document.source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={buttonVariants({ size: "sm", variant: "ghost" })}
-                    >
-                      Open in {integrations.name(document.source.integrationId)}
-                    </a>
-                  ) : null}
-                  {canEdit && !document.source ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label={`Actions for ${document.title}`}
-                          />
+                    {document.versionId && document.kind === "file" ? (
+                      <a
+                        href={`/api/knowledge/${encodeURIComponent(collectionId)}/${encodeURIComponent(document.id)}/${encodeURIComponent(document.versionId)}`}
+                        className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
+                        aria-label={`Download ${document.title}`}
+                        download
+                      >
+                        <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
+                      </a>
+                    ) : null}
+                    {document.kind === "note" &&
+                    document.versionId &&
+                    document.status === "ready" &&
+                    document.charCount ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        // oxlint-disable-next-line react/no-unstable-nested-components -- opens a panel with an element; nothing renders here
+                        onClick={() =>
+                          panel.open({
+                            id: `knowledge-note:${document.versionId}`,
+                            title: document.title,
+                            body: (
+                              <DocumentSourcePanel
+                                source={{
+                                  kind: "document",
+                                  index: 0,
+                                  title: document.title,
+                                  snippet: "",
+                                  read: true,
+                                  collectionId,
+                                  documentId: document.id,
+                                  versionId: document.versionId!,
+                                  startOffset: 0,
+                                  endOffset: document.charCount!,
+                                  page: null,
+                                  headingPath: "",
+                                }}
+                              />
+                            ),
+                          })
                         }
                       >
-                        <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {document.kind === "note" ? (
-                          <DropdownMenuItem onClick={() => setNote(document)}>
-                            <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                            Replace note
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            onClick={() => pickFile(document.id)}
-                            disabled={upload.isPending}
-                          >
-                            <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} />
-                            Replace file
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() => {
-                            void confirm({
-                              title: `Delete “${document.title}”?`,
-                              description:
-                                "Chats that cited it will show the source as unavailable. This cannot be undone.",
-                              confirmLabel: "Delete document",
-                            }).then((confirmed) => {
-                              if (confirmed) remove.mutate(document.id);
-                            });
-                          }}
+                        Read note
+                      </Button>
+                    ) : null}
+                    {document.source?.url ? (
+                      <a
+                        href={document.source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={buttonVariants({ size: "sm", variant: "ghost" })}
+                      >
+                        Open in {integrations.name(document.source.integrationId)}
+                      </a>
+                    ) : null}
+                    {canEdit && !document.source ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Actions for ${document.title}`}
+                            />
+                          }
                         >
-                          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
-                </ListRow>
-              ))}
-            </ListCard>
+                          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {document.kind === "note" ? (
+                            <DropdownMenuItem onClick={() => setNote(document)}>
+                              <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+                              Replace note
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => pickFile(document.id)}
+                              disabled={upload.isPending}
+                            >
+                              <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} />
+                              Replace file
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => {
+                              void confirm({
+                                title: `Delete “${document.title}”?`,
+                                description:
+                                  "Chats that cited it will show the source as unavailable. This cannot be undone.",
+                                confirmLabel: "Delete document",
+                              }).then((confirmed) => {
+                                if (confirmed) remove.mutate(document.id);
+                              });
+                            }}
+                          >
+                            <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null}
+                  </ListRow>
+                ))}
+              </ListCard>
+              <InfiniteSentinel
+                hasNext={ownDocuments.length > shownRows}
+                isFetching={false}
+                onLoadMore={() => setShownRows((rows) => rows + ROWS_PER_STEP)}
+              />
+            </>
           )}
         </Section>
         <m.div

@@ -167,6 +167,21 @@ describe("KnowledgePage", () => {
 });
 
 describe("CollectionPage", () => {
+  it("shows a full collection's documents a hundred at a time", () => {
+    renderDetail(
+      Array.from({ length: 250 }, (_, index) =>
+        document({ id: `d${index}`, title: `Chapter ${index}` }),
+      ),
+    );
+    expect(screen.getByText("Chapter 99")).toBeInTheDocument();
+    expect(screen.queryByText("Chapter 100")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("Chapter 199")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getByText("Chapter 249")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
   it("waits for note initialization and never replaces a draft on refetch", async () => {
     let release!: (value: Awaited<ReturnType<typeof readKnowledgeDocument>>) => void;
     vi.mocked(readKnowledgeDocument).mockReturnValueOnce(
