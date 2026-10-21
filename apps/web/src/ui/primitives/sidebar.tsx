@@ -39,6 +39,21 @@ type SidebarContextProps = {
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 
+/** True once the page has been idle after loading; Safari has no idle callback, so a timer stands in. */
+function useIdleAfterLoad(enabled: boolean) {
+  const [idle, setIdle] = React.useState(false);
+  React.useEffect(() => {
+    if (!enabled || idle) return;
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(() => setIdle(true), { timeout: 4000 });
+      return () => cancelIdleCallback(id);
+    }
+    const id = setTimeout(() => setIdle(true), 2000);
+    return () => clearTimeout(id);
+  }, [enabled, idle]);
+  return idle;
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
@@ -193,6 +208,7 @@ function Sidebar({
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
   useDocumentSidebar(collapsible === "none" || isMobile ? null : variant, state);
+  const warm = useIdleAfterLoad(isMobile);
 
   if (collapsible === "none") {
     return (
@@ -213,6 +229,10 @@ function Sidebar({
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
+          // Mounted while closed once the page is idle, like the desktop sidebar:
+          // opening the sheet otherwise rendered every chat row at once, a slow
+          // tap on a phone. Not at load, which a phone pays for already.
+          keepMounted={warm}
           dir={dir}
           data-sidebar="sidebar"
           data-slot="sidebar"
