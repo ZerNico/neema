@@ -698,7 +698,7 @@ describe("email verification", () => {
   const sent: { to: string; text: string }[] = [];
   const mail: AuthMail = {
     requireVerification: true,
-    send: async (to, _subject, text) => {
+    send: async (to, _subject, { text }) => {
       sent.push({ to, text });
     },
   };
@@ -776,7 +776,7 @@ describe("a provider that is its accounts' only sign-in", () => {
   const sent: { to: string; text: string }[] = [];
   const mail: AuthMail = {
     requireVerification: false,
-    send: async (to, _subject, text) => {
+    send: async (to, _subject, { text }) => {
       sent.push({ to, text });
     },
   };

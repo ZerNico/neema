@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { answered, runNotification } from "../settled-run.ts";
+import { answered, runEmail, runNotification } from "../settled-run.ts";
 import { ScheduleRepo } from "./repo.ts";
 
 /**
@@ -32,7 +32,8 @@ export class ScheduleSettlement extends Context.Service<
                   conversationId: run.conversationId!,
                 });
               const notification = runNotification(run);
-              if (notification) yield* notifications.deliver(run.userId, notification);
+              if (notification)
+                yield* notifications.deliver(run.userId, notification, runEmail(run));
             }).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("settled run could not be announced", {

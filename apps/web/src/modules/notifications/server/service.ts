@@ -4,7 +4,7 @@ import { notificationSettings } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import type { AppNotification, NotificationPreferences } from "../schema.ts";
-import { MailService } from "./mail.ts";
+import { MailService, type NotificationEmail } from "./mail.ts";
 import { PushService } from "./push.ts";
 
 /**
@@ -15,7 +15,11 @@ import { PushService } from "./push.ts";
 export class NotificationService extends Context.Service<
   NotificationService,
   {
-    deliver(userId: string, notification: AppNotification): Effect.Effect<void>;
+    deliver(
+      userId: string,
+      notification: AppNotification,
+      email?: NotificationEmail,
+    ): Effect.Effect<void>;
     preferences(userId: string): Effect.Effect<NotificationPreferences>;
     setPreferences(
       userId: string,
@@ -42,7 +46,7 @@ export class NotificationService extends Context.Service<
         );
 
       return NotificationService.of({
-        deliver: Effect.fn("NotificationService.deliver")(function* (userId, notification) {
+        deliver: Effect.fn("NotificationService.deliver")(function* (userId, notification, email) {
           const channels = yield* chosen(userId);
           yield* Effect.all(
             [
@@ -63,7 +67,7 @@ export class NotificationService extends Context.Service<
                     { discard: true },
                   )
                 : Effect.void,
-              channels.email ? mail.send(userId, notification) : Effect.void,
+              channels.email ? mail.send(userId, notification, email) : Effect.void,
             ],
             { concurrency: "unbounded", discard: true },
           );

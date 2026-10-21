@@ -1,5 +1,6 @@
 import { answerExcerpt } from "~/modules/notifications/excerpt.ts";
 import type { AppNotification } from "~/modules/notifications/schema.ts";
+import type { NotificationEmail } from "~/modules/notifications/server/mail.ts";
 import type { ScheduleNotify } from "./schema.ts";
 
 /** A run the settlement claim saw end, with what it needs to decide what to say. */
@@ -58,3 +59,16 @@ export function runNotification(run: SettledRun): AppNotification | null {
     path: `/chat/${run.conversationId}`,
   };
 }
+
+/**
+ * What the email adds to `runNotification`: the answer itself, when the run
+ * finished one and the person asked to hear about every run rather than the
+ * model's own message, and the schedule to change.
+ */
+export const runEmail = (run: SettledRun): NotificationEmail => ({
+  answer:
+    run.notify !== "conditional" && answered(run) && run.answer!.status === "complete"
+      ? run.answer!.content
+      : null,
+  managePath: `/schedules/${run.scheduleId}`,
+});

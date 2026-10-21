@@ -167,4 +167,24 @@ it("sends on the channels the person chose: push by default, email once turned o
 
   await mail((m) => m.test("owner@t.io"));
   expect(received).toHaveLength(2);
+
+  // The answer travels as HTML beside the text, and its markup arrives as text.
+  await notifications((n) =>
+    n.deliver("owner", notification, {
+      answer: "## Outlook\n\nDry **until** 3pm.\n\n<script>alert(1)</script>",
+      managePath: "/schedules/s",
+    }),
+  );
+  expect(received).toHaveLength(3);
+  const message = decodeQuotedPrintable(received[2]!.data);
+  expect(message).toContain("Content-Type: text/plain");
+  const html = message.slice(message.indexOf("Content-Type: text/html"));
+  expect(html).toContain("<strong>until</strong>");
+  expect(html).toContain("&lt;script&gt;");
+  expect(html).not.toContain("<script>");
 });
+
+const decodeQuotedPrintable = (data: string) =>
+  data
+    .replace(/=\n/g, "")
+    .replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));

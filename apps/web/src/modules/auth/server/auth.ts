@@ -13,6 +13,7 @@ import { OAuthRepo } from "./oauth-repo.ts";
 import { makeSignupGate } from "./signup-gate.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
+import type { MailContent } from "~/modules/notifications/server/email/templates.tsx";
 
 export type Auth = ReturnType<typeof createAppAuth>;
 export type Session = Auth["$Infer"]["Session"];
@@ -80,9 +81,9 @@ const clientIpSettings = () => {
 
 // A failed send is logged, not thrown: the reset endpoint must answer the same
 // for every address, and a stuck verification is retried by signing in again.
-const sendAuthMail = (to: string, subject: string, text: string) =>
+const sendAuthMail = (to: string, subject: string, content: MailContent) =>
   runtime.runPromise(
-    Effect.flatMap(MailService, (mail) => mail.sendTo(to, subject, text)).pipe(
+    Effect.flatMap(MailService, (mail) => mail.sendTo(to, subject, content)).pipe(
       Effect.catch((error) =>
         Effect.logWarning("auth email could not be sent", { reason: error.reason }),
       ),

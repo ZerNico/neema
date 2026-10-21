@@ -20,6 +20,11 @@ import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
 import { SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
+import {
+  resetPasswordMail,
+  verifyEmailMail,
+  type MailContent,
+} from "~/modules/notifications/server/email/templates.tsx";
 
 export interface ImpersonationEvent {
   action: "impersonation.start" | "impersonation.stop";
@@ -136,7 +141,7 @@ const openSignup: SignupGate = {
 export interface AuthMail {
   /** Baked into the instance, so changing it rebuilds through `invalidateAuth`. */
   requireVerification: boolean;
-  send: (to: string, subject: string, text: string) => Promise<void>;
+  send: (to: string, subject: string, content: MailContent) => Promise<void>;
 }
 
 /** The operator's way back in when no identity provider works. */
@@ -279,11 +284,7 @@ export function createAppAuth({
       ...(mail
         ? {
             sendResetPassword: async ({ user, url }) =>
-              mail.send(
-                user.email,
-                "Reset your password",
-                `Someone asked to reset the password for this address. If it was you, open this link within an hour:\n\n${url}\n\nIf not, ignore this email.`,
-              ),
+              mail.send(user.email, "Reset your password", await resetPasswordMail(url)),
           }
         : {}),
     },
@@ -294,11 +295,7 @@ export function createAppAuth({
       ...(mail
         ? {
             sendVerificationEmail: async ({ user, url }) =>
-              mail.send(
-                user.email,
-                "Confirm your email",
-                `Open this link to confirm this address:\n\n${url}\n\nIf you did not create an account, ignore this email.`,
-              ),
+              mail.send(user.email, "Confirm your email", await verifyEmailMail(url)),
           }
         : {}),
     },

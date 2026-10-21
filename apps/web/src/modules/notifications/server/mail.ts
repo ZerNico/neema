@@ -6,6 +6,9 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import type { AppNotification } from "../schema.ts";
+import { LOGO_CID, LOGO_PNG } from "./email/logo.ts";
+import { answerHtml } from "./email/markdown.ts";
+import { notificationMail, testMail, type MailContent } from "./email/templates.tsx";
 
 const SETTINGS_ID = "instance";
 
@@ -31,6 +34,14 @@ export interface SmtpSettingsView {
   fromAddress: string;
 }
 
+/** What only an email has room for, beside the notification every channel shows. */
+export interface NotificationEmail {
+  /** The answer as Markdown; the email shows its start. */
+  answer?: string | null;
+  /** Where the reader changes what notified them, an app path. */
+  managePath?: string;
+}
+
 export class MailFailed extends Schema.TaggedError<MailFailed>()("MailFailed", {
   reason: Schema.String,
 }) {}
@@ -50,9 +61,13 @@ export class MailService extends Context.Service<
     test(to: string): Effect.Effect<void, MailFailed>;
     /** Whether an admin set up a server, so anyone can get email. */
     readonly available: Effect.Effect<boolean>;
-    send(userId: string, notification: AppNotification): Effect.Effect<void>;
+    send(
+      userId: string,
+      notification: AppNotification,
+      email?: NotificationEmail,
+    ): Effect.Effect<void>;
     /** One message to one address, for mail that is not a notification. */
-    sendTo(to: string, subject: string, text: string): Effect.Effect<void, MailFailed>;
+    sendTo(to: string, subject: string, content: MailContent): Effect.Effect<void, MailFailed>;
   }
 >()("chat/notifications/MailService") {
   static readonly layer = Layer.effect(
@@ -66,7 +81,7 @@ export class MailService extends Context.Service<
         (rows) => rows[0] ?? null,
       );
 
-      const deliver = (to: string, subject: string, text: string) =>
+      const deliver = (to: string, subject: string, content: MailContent) =>
         Effect.gen(function* () {
           const config = yield* row;
           if (!config) return yield* new MailFailed({ reason: "email is not set up" });
@@ -85,7 +100,17 @@ export class MailService extends Context.Service<
             socketTimeout: 20_000,
           });
           yield* Effect.tryPromise({
-            try: () => transport.sendMail({ from: config.fromAddress, to, subject, text }),
+            try: () =>
+              transport.sendMail({
+                from: config.fromAddress,
+                to,
+                subject,
+                ...content,
+                // Every layout shows the mark; a plain-text-only message has nowhere to.
+                ...(content.html
+                  ? { attachments: [{ filename: "neema.png", content: LOGO_PNG, cid: LOGO_CID }] }
+                  : {}),
+              }),
             // The server's reply names the problem (auth, relay denied), and
             // the admin testing it needs that, never the password.
             catch: (error) =>
@@ -134,21 +159,31 @@ export class MailService extends Context.Service<
           .where(eq(smtpSettings.id, SETTINGS_ID))
           .pipe(Effect.orDie, Effect.asVoid),
         test: (to) =>
-          deliver(to, "neema test email", "Email from neema works. Schedules can notify you here."),
+          Effect.promise(testMail).pipe(
+            Effect.flatMap((content) => deliver(to, "neema test email", content)),
+          ),
         available: Effect.map(row, (config) => config !== null),
         sendTo: deliver,
-        send: Effect.fn("MailService.send")(function* (userId, notification) {
+        send: Effect.fn("MailService.send")(function* (userId, notification, email) {
           const [recipient] = yield* db
             .select({ address: user.email })
             .from(user)
             .where(eq(user.id, userId))
             .pipe(Effect.orDie);
           if (!recipient) return;
+          // Without a public address there is nowhere a link could point.
           const site = publicUrl();
-          const text = site
-            ? `${notification.body}\n\nOpen it: ${site}${notification.path}`
-            : notification.body;
-          yield* deliver(recipient.address, notification.title, text).pipe(
+          const content = yield* Effect.promise(() =>
+            notificationMail({
+              title: notification.title,
+              body: notification.body,
+              answer: email?.answer ? answerHtml(email.answer) : undefined,
+              openUrl: site && `${site}${notification.path}`,
+              manageUrl: site && email?.managePath && `${site}${email.managePath}`,
+              settingsUrl: site && `${site}/settings/notifications`,
+            }),
+          );
+          yield* deliver(recipient.address, notification.title, content).pipe(
             Effect.catch((error) =>
               Effect.logWarning("notification email could not be sent", { reason: error.reason }),
             ),

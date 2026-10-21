@@ -70,6 +70,10 @@ is its permission, which the settings page asks for only while push is on and it
 - Email goes through the SMTP server an admin set under Admin → Email, one row with the
   password under `KeyCipher`. The host is the admin's choice and may be an internal relay, so,
   like the SearXNG base URL, it is exempt from the public-address rule.
+- Every email is HTML with a text part, from React Email templates rendered on the server.
+  A schedule's email carries the start of the answer (`answerHtml`), cut between blocks, the
+  one channel with room for it. That text is the model's, so raw HTML is escaped, images are
+  dropped and only web and mail links stay links. Without `PUBLIC_URL` it has no links at all.
 - Every channel tags the notification with the run id, so tabs and the service worker
   show it once between them. A tab always shows its own rather than leaving it to the
   worker: a subscription the browser holds may be one the server no longer has, and then
