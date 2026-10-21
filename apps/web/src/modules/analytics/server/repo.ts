@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gte, lt, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { Db } from "~/server/db.ts";
@@ -177,7 +177,24 @@ export class AnalyticsRepo extends Context.Service<
         }),
 
         summary: Effect.fn("AnalyticsRepo.summary")(function* (scope) {
-          const rows = yield* db
+          // People with a row in the window, one index probe each. A distinct
+          // count over the rows sorted the whole window and spilled to disk.
+          const activeUsers = db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(user)
+            .where(
+              and(
+                scope.userId ? eq(user.id, scope.userId) : undefined,
+                exists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(usageEvents)
+                    .where(and(eq(usageEvents.userId, user.id), inWindow(scope))),
+                ),
+              ),
+            )
+            .pipe(Effect.orDie);
+          const totals = db
             .select({
               ...sums,
               ...detail,
@@ -186,7 +203,6 @@ export class AnalyticsRepo extends Context.Service<
               imageGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'image')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               ...costCompleteness,
-              activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
               cacheWriteTokens: sql`coalesce(sum(${usageEvents.cacheWriteTokens}), 0)`.mapWith(
                 tokenTotal,
               ),
@@ -194,6 +210,9 @@ export class AnalyticsRepo extends Context.Service<
             .from(usageEvents)
             .where(inScope(scope))
             .pipe(Effect.orDie);
+          const [rows, active] = yield* Effect.all([totals, activeUsers], {
+            concurrency: "unbounded",
+          });
           const row = rows[0]!;
           return {
             messages: row.messages,
@@ -211,7 +230,7 @@ export class AnalyticsRepo extends Context.Service<
             reasoningTokens: row.reasoningTokens,
             cost: row.cost,
             costComplete: row.costComplete,
-            activeUsers: row.activeUsers,
+            activeUsers: active[0]?.count ?? 0,
           };
         }),
 
