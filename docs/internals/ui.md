@@ -14,6 +14,13 @@ that bug.
   after `@import "tailwindcss"`: overlay primitives' `data-open:animate-in`/`fade-in-0`/`zoom-in-95`
   classes come from `tw-animate-css`, and without it overlays pop with no transition and no error. `cn`
   (the package) is re-exported by `src/ui/utils.ts`; primitives import `"cn"` directly, as the CLI emits.
+- No `:has()` on an ancestor of the element it styles: `group-has-*`, `peer-has-*`, `has-*:*:…`,
+  `[html:has(…)_&]`. Chrome cannot scope invalidation for those, and one such rule in the stylesheet,
+  used on the page or not, restyled the whole document on every DOM change: most of the cost of
+  streaming and scrolling a long chat. shadcn generates them, so a regenerated primitive fails the
+  build (`scripts/non-subject-has.mjs`). Rewrite with `has-*` on the styled element itself, a sibling
+  (`[x~&]`, `peer-*`), a variable set by the ancestor's own `has-*`, or a data attribute. The sidebar's
+  variant and state are on the root element for that reason.
 - A package that draws (`packages/sheet-react`) styles with the app's semantic token classes and
   imports nothing from `~/ui`. `app.css` lists the package with `@source`: without it Tailwind
   never sees its classes and they are silently missing. A workbook draws inside `.paper`, which

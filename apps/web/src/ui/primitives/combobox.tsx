@@ -69,7 +69,7 @@ function ComboboxInput({
             variant="ghost"
             render={<ComboboxTrigger />}
             data-slot="input-group-button"
-            className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
+            className="[&:has(~[data-slot=combobox-clear])]:hidden data-pressed:bg-transparent"
             disabled={disabled}
           />
         )}

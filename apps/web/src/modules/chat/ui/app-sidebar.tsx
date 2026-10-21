@@ -173,7 +173,7 @@ function ConversationList() {
                         // The "…" takes the status icon's place wherever it shows on
                         // hover, and the title ends where it did; on touch both stay.
                         // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between title and status icon
-                        className="gap-0 [&_[data-status-slot]]:ml-auto [&_[data-status-slot][data-filled]]:-mr-1 pointer-fine:group-hover/menu-item:[&_[data-status-slot]]:hidden pointer-fine:group-has-focus-visible/menu-item:[&_[data-status-slot]]:hidden pointer-fine:group-has-[[aria-expanded=true]]/menu-item:[&_[data-status-slot]]:hidden"
+                        className="gap-0 [&_[data-status-slot]]:ml-auto [&_[data-status-slot][data-filled]]:-mr-1 [&_[data-status-slot]]:[display:var(--menu-action-covered,flex)]"
                         render={
                           <Link
                             to="/chat/$conversationId"

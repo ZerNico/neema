@@ -102,7 +102,7 @@ function AlertDialogTitle({
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
       className={cn(
-        "text-lg font-medium wrap-anywhere sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
+        "text-lg font-medium wrap-anywhere sm:group-data-[size=default]/alert-dialog-content:[[data-slot=alert-dialog-media]~&]:col-start-2",
         className,
       )}
       {...props}
