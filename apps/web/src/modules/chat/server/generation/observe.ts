@@ -455,8 +455,9 @@ export const observePart = (
                     : {}
                   : (shownArgs as JsonValue),
         });
-        // Typed browser text may be a password; owned content has its own row.
-        if (STORED_ARGUMENTS[family] !== "none")
+        // Typed browser text may be a password; owned content has its own row. A
+        // failed document call wrote nothing, so its week-long copy outlives no row.
+        if (STORED_ARGUMENTS[family] !== "none" || family === "document")
           sink.keepDebugArguments(rowId, debugArguments(shownArgs));
         const start = (fields: StartFields) =>
           sink.pushTool({
