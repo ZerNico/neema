@@ -3,7 +3,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode, useState } from "react";
 import type { AttachmentKind } from "../constants.ts";
 import { formatFileSize } from "../constants.ts";
-import { AttachmentPreviewDialog, type AttachmentPreviewTarget } from "./attachment-preview.tsx";
+import type { AttachmentPreviewTarget } from "./attachment-preview.tsx";
+import {
+  LazyAttachmentPreviewDialog,
+  preloadAttachmentPreview,
+} from "./attachment-preview-lazy.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
@@ -121,7 +125,7 @@ export function AttachmentChip({
   );
 
   const dialog = preview ? (
-    <AttachmentPreviewDialog
+    <LazyAttachmentPreviewDialog
       target={{
         fileName: item.fileName,
         size: item.size,
@@ -152,6 +156,8 @@ export function AttachmentChip({
           rel="noreferrer"
           title={problem ?? item.fileName}
           className={cn(shell, focusRingClassName, "hover:bg-accent transition-colors")}
+          onPointerEnter={preview ? preloadAttachmentPreview : undefined}
+          onFocus={preview ? preloadAttachmentPreview : undefined}
           // Plain click previews in place; modified clicks keep the browser's
           // open-in-new-tab behavior for the raw file.
           onClick={
@@ -183,6 +189,8 @@ export function AttachmentChip({
             preview ? () => setPreviewOpen(true) : onOpenPreview ? () => onOpenPreview() : undefined
           }
           disabled={!preview && !onOpenPreview}
+          onPointerEnter={preview ? preloadAttachmentPreview : undefined}
+          onFocus={preview ? preloadAttachmentPreview : undefined}
           className={cn(
             focusRingClassName,
             "flex min-w-0 items-center gap-2 rounded-xl",
