@@ -54,6 +54,7 @@ class CaretLayer {
   readonly #layer = document.createElement("div");
   readonly #carets = new Map<string, HTMLElement>();
   readonly #resize = new ResizeObserver(() => this.update(this.view));
+  #frame = 0;
   constructor(private view: EditorView) {
     this.#layer.className = "remote-carets";
     this.#layer.setAttribute("aria-hidden", "true");
@@ -66,8 +67,23 @@ class CaretLayer {
     this.update(view);
   }
 
+  /**
+   * Every transaction lands here, a streamed edit's many steps included. Carets
+   * are placed once per frame, and not at all when there are none: measuring
+   * forced a layout of the whole document at each step.
+   */
   update(view: EditorView) {
     this.view = view;
+    const carets = key.getState(view.state)?.carets ?? [];
+    if (carets.length === 0 && this.#carets.size === 0) return;
+    this.#frame ||= requestAnimationFrame(() => {
+      this.#frame = 0;
+      this.#place();
+    });
+  }
+
+  #place() {
+    const view = this.view;
     const carets = key.getState(view.state)?.carets ?? [];
     const origin = this.#layer.getBoundingClientRect();
     const shown = new Set<string>();
@@ -102,6 +118,7 @@ class CaretLayer {
   }
 
   destroy() {
+    cancelAnimationFrame(this.#frame);
     this.#resize.disconnect();
     this.#layer.remove();
   }
