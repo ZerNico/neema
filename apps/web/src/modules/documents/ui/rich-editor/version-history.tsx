@@ -127,7 +127,7 @@ export function VersionHistoryDialog({
 /** A version drawn read-only by the editor's own extensions. */
 function VersionPreview({ json }: { json: JSONContent }) {
   const preview = useEditor({
-    extensions: browserEditorExtensions,
+    extensions: browserEditorExtensions(),
     // Named apart from the document itself, which stays open behind the dialog.
     editorProps: { attributes: { class: "rich-editor", "aria-label": "Version preview" } },
     content: json,

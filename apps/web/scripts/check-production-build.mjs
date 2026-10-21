@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { nonSubjectHasSelectors } from "./non-subject-has.mjs";
 
 const serverDirectory = resolve(".output/server");
 
@@ -357,3 +358,22 @@ await Promise.all(Array.from(assets, (asset) => access(resolve(publicDirectory, 
 console.log(
   `Checked ${modules.length} production server modules and the SPA shell (${assets.size} assets).`,
 );
+
+const stylesheets = (await readdir(resolve(publicDirectory, "assets"))).filter((name) =>
+  name.endsWith(".css"),
+);
+const slowSelectors = (
+  await Promise.all(
+    stylesheets.map(async (name) =>
+      nonSubjectHasSelectors(await readFile(resolve(publicDirectory, "assets", name), "utf8")),
+    ),
+  )
+).flat();
+if (slowSelectors.length > 0) {
+  console.error(
+    "These selectors put :has() on an ancestor of the styled element. Chrome then restyles the whole page on every DOM change. Put the :has() on the styled element, use a sibling selector, or a data attribute:",
+  );
+  for (const selector of slowSelectors) console.error(`  ${selector}`);
+  process.exit(1);
+}
+console.log(`Checked ${stylesheets.length} stylesheets for :has() on an ancestor.`);

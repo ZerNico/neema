@@ -21,6 +21,7 @@ import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { sidebarPinsQuery } from "~/modules/navigation/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
+import { closeSyncFeed, openSyncFeed } from "~/modules/sync/client/feed.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { usePush } from "~/modules/notifications/client/push.ts";
 import { FeatureTourProvider } from "~/modules/help/ui/feature-tour.tsx";
@@ -44,18 +45,27 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/s
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ context }) => {
-    const user = await context.queryClient.ensureQueryData(sessionUserQuery);
-    if (!user) throw redirect({ to: "/login" });
-    const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
-    if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
-    // Every server function this tree loads would refuse an unapproved
-    // account, so it is turned away before any of them runs.
-    const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
-    if (approval !== "approved") throw redirect({ to: "/pending" });
-    // Known before anything renders, so a cache can be read for the first frame.
-    // Browser only: on a server, module state would be shared by every request.
-    if (typeof window !== "undefined") setDeviceCacheOwner(cacheOwnerOf(identity));
-    return { user, identity };
+    // Subscribed while the session is checked, so the loaders read after it and
+    // the first sync open has nothing to refetch. Browser only, like the cache owner.
+    const feed = typeof window === "undefined" ? undefined : openSyncFeed();
+    try {
+      const user = await context.queryClient.ensureQueryData(sessionUserQuery);
+      if (!user) throw redirect({ to: "/login" });
+      const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
+      if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
+      // Every server function this tree loads would refuse an unapproved
+      // account, so it is turned away before any of them runs.
+      const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
+      if (approval !== "approved") throw redirect({ to: "/pending" });
+      // Known before anything renders, so a cache can be read for the first frame.
+      // Browser only: on a server, module state would be shared by every request.
+      if (typeof window !== "undefined") setDeviceCacheOwner(cacheOwnerOf(identity));
+      await feed;
+      return { user, identity };
+    } catch (error) {
+      closeSyncFeed();
+      throw error;
+    }
   },
   loader: async ({ context }) => {
     await Promise.all([

@@ -1,7 +1,9 @@
 import type { EditorOptions } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { Placeholder } from "@tiptap/extensions";
+import { Markdown } from "@tiptap/markdown";
 import { DocumentCodeBlock, documentExtensions } from "../../editor/extensions.ts";
+import { isolatedMarked } from "../../editor/isolated-marked.ts";
 import { SizeCap } from "./size-cap.ts";
 import { SlashCommand } from "./slash-command.tsx";
 import { DocumentDateChip, DocumentMention } from "./chip-items.tsx";
@@ -19,7 +21,7 @@ import { openLink } from "./links.ts";
  * checkbox, Mermaid blocks as diagrams, formulas through KaTeX and planned sections as placeholders (rendering only, the schema is
  * unchanged), the `/` menu, find, image uploads and the size cap. The connection adds collaboration and other people's cursors.
  */
-export const browserEditorExtensions = [
+const sharedExtensions = [
   ...documentExtensions.map(
     (extension) =>
       ({
@@ -47,6 +49,16 @@ export const browserEditorExtensions = [
   ImageUpload,
   SizeCap,
 ];
+
+/**
+ * The extensions for one editor. Each editor's Markdown manager registers its
+ * tokenizers on the marked it is given, so a shared one kept every editor ever
+ * opened, with its connection and DOM, and grew with each.
+ */
+export const browserEditorExtensions = () =>
+  sharedExtensions.map((extension) =>
+    extension.name === "markdown" ? Markdown.configure({ marked: isolatedMarked() }) : extension,
+  );
 
 /** How the editable surface presents itself; links open only on a modified click while editing. */
 export const browserEditorProps: EditorOptions["editorProps"] = {

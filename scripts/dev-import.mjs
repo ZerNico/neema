@@ -84,14 +84,21 @@ export async function checkMigrations(client, migrations = join(root, "apps/web/
 }
 
 export async function assertIdle(admin, instance) {
+  // Named by client and age, so a server left running from earlier is recognisable.
   const { rows } = await admin.query(
-    "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1",
+    `SELECT coalesce(nullif(application_name, ''), 'unnamed') AS client, count(*)::int AS n,
+       min(backend_start) AS since
+     FROM pg_stat_activity WHERE datname = $1 GROUP BY 1 ORDER BY 2 DESC`,
     [instance.database],
   );
-  if (rows[0].n !== 0)
-    throw safeError(
-      "This checkout’s database has active connections. Stop this checkout’s dev server and database tools first; the primary can keep running.",
-    );
+  if (rows.length === 0) return;
+  const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+  const held = rows
+    .map((row) => `  ${row.n} × ${row.client}, oldest from ${time.format(row.since)}`)
+    .join("\n");
+  throw safeError(
+    `This checkout’s database has active connections:\n${held}\nStop this checkout’s dev server and database tools first; the primary can keep running.`,
+  );
 }
 
 const snapshotPattern = (instance) => new RegExp(`^chat_dev_${instance.id}_[a-f0-9]{16}$`);

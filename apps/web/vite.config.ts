@@ -34,16 +34,24 @@ export default defineConfig({
     // Server-owned state lives here: blobs, and custom tool builds, which
     // install node_modules and write a tsconfig.json. Vite force-reloads every
     // client on any tsconfig.json it sees change, so a Check would reload the page.
-    watch: { ignored: ["**/.data/**"] },
+    // A production build beside dev writes .output, whose shell reloaded every tab.
+    watch: { ignored: ["**/.data/**", "**/.output/**"] },
   },
   resolve: {
     tsconfigPaths: true,
   },
+  // The code highlight Worker loads each grammar with a dynamic import, which
+  // only an ES module Worker bundle can split out. Every Worker here is a module.
+  worker: { format: "es" },
   plugins: [
     apiRoutesAreNeverAssets(),
     customToolRuntimeWorker(),
     tanstackStart({ spa: { enabled: true } }),
     nitro({
+      // Brotli and gzip copies written at build and served by content negotiation:
+      // the app's JavaScript is a third of its size compressed, at no request cost.
+      compressPublicAssets: { gzip: true, brotli: true },
+      plugins: ["./src/server/shutdown-plugin.ts"],
       rollupConfig: { external: [/^@npmcli\/arborist(?:\/|$)/] },
       // The custom tool builder resolves these from disk at runtime: tsc, and
       // the effect and Node declarations it checks tool modules against. A full

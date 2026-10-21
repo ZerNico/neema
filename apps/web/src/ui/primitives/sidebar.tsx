@@ -39,6 +39,21 @@ type SidebarContextProps = {
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 
+/** True once the page has been idle after loading; Safari has no idle callback, so a timer stands in. */
+function useIdleAfterLoad(enabled: boolean) {
+  const [idle, setIdle] = React.useState(false);
+  React.useEffect(() => {
+    if (!enabled || idle) return;
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(() => setIdle(true), { timeout: 4000 });
+      return () => cancelIdleCallback(id);
+    }
+    const id = setTimeout(() => setIdle(true), 2000);
+    return () => clearTimeout(id);
+  }, [enabled, idle]);
+  return idle;
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
@@ -145,7 +160,7 @@ function SidebarProvider({
           } as React.CSSProperties
         }
         className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+          "group/sidebar-wrapper flex min-h-svh w-full [html[data-sidebar-variant=inset]_&]:bg-sidebar",
           className,
         )}
         {...props}
@@ -154,6 +169,24 @@ function SidebarProvider({
       </div>
     </SidebarContext.Provider>
   );
+}
+
+/**
+ * The desktop sidebar's variant and state, on the root element for chrome that
+ * styles itself around the sidebar. A `:has()` looking for the sidebar from an
+ * ancestor would make Chrome restyle the whole page on every DOM change.
+ */
+function useDocumentSidebar(variant: string | null, state: "expanded" | "collapsed") {
+  React.useLayoutEffect(() => {
+    if (variant === null) return;
+    const root = document.documentElement;
+    root.dataset.sidebarVariant = variant;
+    root.dataset.sidebarState = state;
+    return () => {
+      delete root.dataset.sidebarVariant;
+      delete root.dataset.sidebarState;
+    };
+  }, [variant, state]);
 }
 
 function Sidebar({
@@ -174,6 +207,8 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "rail" | "none";
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  useDocumentSidebar(collapsible === "none" || isMobile ? null : variant, state);
+  const warm = useIdleAfterLoad(isMobile);
 
   if (collapsible === "none") {
     return (
@@ -194,6 +229,10 @@ function Sidebar({
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
+          // Mounted while closed once the page is idle, like the desktop sidebar:
+          // opening the sheet otherwise rendered every chat row at once, a slow
+          // tap on a phone. Not at load, which a phone pays for already.
+          keepMounted={warm}
           dir={dir}
           data-sidebar="sidebar"
           data-slot="sidebar"
@@ -481,14 +520,23 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
     <li
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
-      className={cn("group/menu-item relative", className)}
+      className={cn(
+        "group/menu-item relative",
+        // The item answers for its action, so the button never looks for it: a :has()
+        // on an ancestor of the styled element restyles the whole page on any change.
+        // `--menu-button-end` is the room the action takes; `--menu-action-covered` is
+        // `none` while a reveal action shows over the button's end.
+        "has-[[data-sidebar=menu-action]:not([data-reveal])]:[--menu-button-end:--spacing(8)] pointer-coarse:has-data-reveal:[--menu-button-end:--spacing(8)]",
+        "has-data-reveal:[&:is(:hover,:has(:focus-visible),:has([aria-expanded=true]))]:[--menu-button-end:--spacing(8)] pointer-fine:has-data-reveal:[&:is(:hover,:has(:focus-visible),:has([aria-expanded=true]))]:[--menu-action-covered:none]",
+        className,
+      )}
       {...props}
     />
   );
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-xl px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height] group-has-[[data-sidebar=menu-action]:not([data-reveal])]/menu-item:pr-8 [[data-slot=sidebar-menu-item]:has([data-reveal]):is(:hover,:has(:focus-visible),:has([aria-expanded=true]))_&]:pr-8 pointer-coarse:group-has-data-reveal/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-xl px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height] pr-[var(--menu-button-end,--spacing(3))] group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -500,7 +548,7 @@ const sidebarMenuButtonVariants = cva(
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
         lg: "h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!",
-        icon: "size-8 justify-center p-0",
+        icon: "size-8 justify-center p-0 [--menu-button-end:0px]",
       },
     },
     defaultVariants: {
@@ -582,7 +630,7 @@ function SidebarMenuAction({
           // Shown on hover or focus where there is a pointer to hover with,
           // always on touch. The menu button frees the room it took meanwhile.
           showOnHover &&
-            "group-hover/menu-item:opacity-100 group-has-focus-visible/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 focus-visible:opacity-100 pointer-fine:opacity-0",
+            "group-hover/menu-item:opacity-100 peer-focus-visible/menu-button:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 focus-visible:opacity-100 pointer-fine:opacity-0",
           className,
         ),
       },

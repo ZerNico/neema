@@ -169,8 +169,8 @@ const memoMap = Layer.makeMemoMapUnsafe();
 // Vite re-executes this module on any layer-graph change but never fires
 // import.meta.hot.dispose for server modules, so each evaluation must dispose
 // the previous runtime (pg pool, LISTEN connection, generation fibers) before
-// taking over. Otherwise repo/service edits would silently not apply until a
-// manual restart. Production runs once; nothing to dispose.
+// taking over, or edits would not apply until a restart. Production disposes
+// it on shutdown through this same global (shutdown-plugin.ts).
 const globalKey = Symbol.for("chat/server/runtime");
 type GlobalWithRuntime = typeof globalThis & {
   [globalKey]?: ManagedRuntime.ManagedRuntime<

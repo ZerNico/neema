@@ -16,6 +16,17 @@ describe("a document's statistics", () => {
     });
   });
 
+  it("counts block by block as the whole text reads, rules, tables and code included", () => {
+    const doc = parseMarkdown(
+      "# Plan\n\nShip it\n\n---\n\n| a | b |\n| --- | --- |\n| one two | three |\n\n```ts\nconst x = 1;\n```\n\n- [ ] task one\n  - nested item",
+    );
+    const text = doc.textBetween(0, doc.content.size, "\n", " ");
+    expect(documentCounts(doc)).toEqual({
+      words: countWords(text),
+      characters: text.replaceAll("\n", "").length,
+    });
+  });
+
   it("lists every heading in order, with its level and where its text starts", () => {
     const doc = parseMarkdown("# Plan\n\nText\n\n## Risks\n\n> ### Quoted");
     const headings = documentHeadings(doc);

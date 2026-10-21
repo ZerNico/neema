@@ -391,7 +391,10 @@ describe("useSync", () => {
       status: "complete",
     });
 
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["conversation", "c1"],
+      refetchType: "none",
+    });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
     // The lists are patched from the event, never re-paged.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["conversations"] });
@@ -456,6 +459,115 @@ describe("desktop session events", () => {
     }
     expect(invalidate.mock.calls).toEqual([[{ queryKey: ["desktop-sessions"] }]]);
     expect(heard).toEqual([{ ticketId: "t1" }]);
+  });
+});
+
+describe("a turn's message events", () => {
+  it("refetch the open chat once per burst, and mark it stale at once", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient();
+    const fetches = vi.fn(async () => "detail");
+    function OpenChat() {
+      useSync();
+      useQuery({ queryKey: ["conversation", "c1"], queryFn: fetches, staleTime: Infinity });
+      return null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <OpenChat />
+      </QueryClientProvider>,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetches).toHaveBeenCalledTimes(1);
+    const source = FakeEventSource.instances.at(-1)!;
+    source.emit("sync", { type: "message.created", conversationId: "c1", messageId: "u" });
+    source.emit("sync", { type: "message.created", conversationId: "c1", messageId: "a" });
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "a",
+      status: "streaming",
+    });
+    expect(client.getQueryState(["conversation", "c1"])?.isInvalidated).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetches).toHaveBeenCalledTimes(2);
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "a",
+      status: "complete",
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetches).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("a feed the app route opened before its loaders read", () => {
+  // Fresh modules: the feed is handed over once per document.
+  const load = async () => {
+    vi.resetModules();
+    const [feed, sync] = await Promise.all([import("./feed.ts"), import("./use-sync.ts")]);
+    return { ...feed, ...sync };
+  };
+
+  const mount = (useFreshSync: typeof useSync, reconcile: () => Promise<boolean>) => {
+    const client = new QueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    function FreshProbe() {
+      useFreshSync(reconcile);
+      return null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <FreshProbe />
+      </QueryClientProvider>,
+    );
+    return invalidate;
+  };
+
+  it("skips the first refresh and applies what arrived while identity was checked", async () => {
+    const { openSyncFeed, useSync: useFreshSync } = await load();
+    const opening = openSyncFeed();
+    const source = FakeEventSource.instances.at(-1)!;
+    source.emit("open");
+    source.emit("sync", { type: "sync.ready" });
+    await opening;
+
+    let confirm!: (valid: boolean) => void;
+    const reconcile = vi.fn(
+      () =>
+        new Promise<boolean>((done) => {
+          confirm = done;
+        }),
+    );
+    const invalidate = mount(useFreshSync, reconcile);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    source.emit("sync", { type: "memory.changed" });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["memory"] });
+
+    await act(async () => confirm(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["conversations"] });
+
+    // A later reconnect can have missed anything again.
+    source.emit("error");
+    source.emit("open");
+    await act(async () => confirm(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+  });
+
+  it("refreshes on first open when readiness came too late for the loaders", async () => {
+    vi.useFakeTimers();
+    const { openSyncFeed, useSync: useFreshSync } = await load();
+    const opening = openSyncFeed();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    const source = FakeEventSource.instances.at(-1)!;
+    const invalidate = mount(useFreshSync, () => Promise.resolve(true));
+    source.emit("open");
+    source.emit("sync", { type: "sync.ready" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
   });
 });
 

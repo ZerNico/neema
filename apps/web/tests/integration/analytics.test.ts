@@ -593,6 +593,52 @@ describe("usage aggregates", () => {
     });
   });
 
+  it("counts the people with usage in the window, across the instance or for one", async () => {
+    // A window of its own, so other tests' rows stay out of the unscoped count.
+    const from = new Date("2025-03-01T00:00:00.000Z");
+    const to = new Date("2025-03-02T00:00:00.000Z");
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const analytics = yield* AnalyticsRepo;
+        const [first, second, outside] = [yield* makeUser(), yield* makeUser(), yield* makeUser()];
+        const row = (userId: string, createdAt: Date) => ({
+          id: uuidv7(),
+          userId,
+          modelId: null,
+          kind: "chat" as const,
+          modelName: "People",
+          status: "complete" as const,
+          inputTokens: 1,
+          outputTokens: 1,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          cost: 0,
+          costSource: "provider" as const,
+          createdAt,
+        });
+        const inside = new Date(from.getTime() + 1000);
+        yield* db
+          .insert(usageEvents)
+          .values([
+            row(first, inside),
+            row(first, inside),
+            row(second, inside),
+            row(outside, to),
+            row(outside, new Date(from.getTime() - 1)),
+          ]);
+        return {
+          everyone: yield* analytics.summary({ from, to }),
+          one: yield* analytics.summary({ from, to, userId: first }),
+          absent: yield* analytics.summary({ from, to, userId: outside }),
+        };
+      }),
+    );
+    expect(result.everyone).toMatchObject({ activeUsers: 2, attempts: 3 });
+    expect(result.one).toMatchObject({ activeUsers: 1, attempts: 2 });
+    expect(result.absent).toMatchObject({ activeUsers: 0, attempts: 0 });
+  });
+
   it("includes an event exactly on `from` and excludes one exactly on `to`", async () => {
     const result = await run(
       Effect.gen(function* () {

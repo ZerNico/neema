@@ -21,6 +21,10 @@ export class FakeEventSource {
     this.listeners.set(type, set);
   }
 
+  removeEventListener(type: string, listener: (event: MessageEvent) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
   emit(type: string, data?: unknown) {
     for (const listener of this.listeners.get(type) ?? []) {
       listener({ data: data === undefined ? "" : JSON.stringify(data) } as MessageEvent);

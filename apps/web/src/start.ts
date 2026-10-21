@@ -1,6 +1,7 @@
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { reportUnexpectedFailures } from "~/server/unexpected-failure.ts";
 import { oversizedBody } from "~/server/body-limit.ts";
+import { compressedReply } from "~/server/compress.ts";
 import { refusalsReject } from "~/refusals.ts";
 
 // Server functions are same-origin RPC: a request must say it came from this
@@ -22,7 +23,21 @@ const bodyLimitMiddleware = createMiddleware().server(({ next, request, handlerT
   handlerType === "serverFn" ? (oversizedBody(request) ?? next()) : next(),
 );
 
+// The reverse proxy in front is the operator's, and nginx and Caddy leave JSON
+// uncompressed by default. A chat's detail is over 100 KB of it.
+const compressionMiddleware = createMiddleware().server(async ({ next, request, handlerType }) => {
+  const result = await next();
+  if (handlerType !== "serverFn") return result;
+  const response = await compressedReply(request, result.response);
+  return response ? { ...result, response } : result;
+});
+
 export const startInstance = createStart(() => ({
-  requestMiddleware: [csrfMiddleware, bodyLimitMiddleware, cspNonceMiddleware],
+  requestMiddleware: [
+    csrfMiddleware,
+    bodyLimitMiddleware,
+    cspNonceMiddleware,
+    compressionMiddleware,
+  ],
   functionMiddleware: [reportUnexpectedFailures, refusalsReject],
 }));

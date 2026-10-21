@@ -22,7 +22,7 @@ export function DesktopChromeFrame() {
   return (
     // The canvas colour only while an inset page sits below it; before the app
     // shell mounts, the titlebar matches the page it is loading over.
-    <div className="desktop-titlebar bg-background [html:has([data-variant=inset])_&]:bg-sidebar">
+    <div className="desktop-titlebar bg-background [html[data-sidebar-variant=inset]_&]:bg-sidebar">
       <div id={TITLEBAR_TARGET} className="desktop-titlebar-content" />
       <div id={PANEL_TARGET} className="desktop-titlebar-panel border-l" />
       <div id={CORNER_TARGET} className="desktop-titlebar-corner" />

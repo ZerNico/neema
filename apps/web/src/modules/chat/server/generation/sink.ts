@@ -86,6 +86,7 @@ export const makeGenerationSink = (input: {
     // resumed answer already holds, so a files-only answer is not empty.
     let deliveredFiles = input.start.deliveredFiles;
     let buffer: Array<{ seq: number; kind: ChunkKind; delta: string }> = [];
+    let wroteWords = false;
 
     // Persist first, then publish: a subscriber's one-shot DB replay must
     // never miss a chunk already announced live. Uninterruptible from the
@@ -105,6 +106,8 @@ export const makeGenerationSink = (input: {
             return fence
               ? repo.renewGenerationLease(input.messageId, fence.generationId)
               : Effect.void;
+          if (batch.some((chunk) => chunk.kind === "text" || chunk.kind === "reasoning"))
+            wroteWords = true;
           return repo.appendChunks(input.messageId, batch).pipe(
             Effect.flatMap(() =>
               Effect.forEach(
@@ -323,6 +326,11 @@ export const makeGenerationSink = (input: {
       text: () => assembled,
       /** Chunks pushed but not yet written. */
       buffered: () => buffer.length,
+      /**
+       * No text or reasoning written yet. The first words are flushed at once
+       * rather than at the next periodic flush, which is most of the wait for them.
+       */
+      awaitingFirstWords: () => !wroteWords,
       deliveredFiles: () => deliveredFiles,
       countDeliveredFile: () => {
         deliveredFiles += 1;

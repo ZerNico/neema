@@ -397,7 +397,7 @@ export const observePart = (
           if (imageResolver) yield* imageResolver.observe(sink.text());
           if (mapResolver) yield* mapResolver.observe(sink.text());
         }
-        if (sink.buffered() >= 16) yield* sink.flush;
+        if (sink.buffered() >= 16 || sink.awaitingFirstWords()) yield* sink.flush;
         return;
       }
       case "reasoning-delta": {
@@ -405,7 +405,7 @@ export const observePart = (
         // "[REDACTED]"; the encrypted part still rides the
         // replay, so the reader gets the bare thinking marker.
         sink.push("reasoning", part.delta === "[REDACTED]" ? "" : part.delta);
-        if (sink.buffered() >= 16) yield* sink.flush;
+        if (sink.buffered() >= 16 || sink.awaitingFirstWords()) yield* sink.flush;
         return;
       }
       case "reasoning-start": {

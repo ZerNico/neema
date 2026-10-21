@@ -124,7 +124,8 @@ async function setup(instance, seed) {
     });
     await sourceClient.end();
   }
-  await run("docker", [...compose, "up", "--detach", "--wait"]);
+  // Quiet: the spinner redraws a line per frame, burying what setup prints after it.
+  await run("docker", [...compose, "--progress", "quiet", "up", "--detach", "--wait"]);
   const role = `chat_dev_${instance.id}`;
   await run(
     "docker",
@@ -138,6 +139,7 @@ async function setup(instance, seed) {
       "chat_dev_admin",
       "-d",
       "postgres",
+      "--quiet",
       "-v",
       "ON_ERROR_STOP=1",
     ],
@@ -148,6 +150,7 @@ SELECT 'CREATE DATABASE ${instance.database} OWNER ${role}'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${instance.database}')\\gexec
 REVOKE ALL ON DATABASE ${instance.database} FROM PUBLIC;
 \\connect ${instance.database}
+SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS vector;
 `,
     },
@@ -167,8 +170,9 @@ CREATE EXTENSION IF NOT EXISTS vector;
       importSnapshot(current, source, runImportCommand),
     );
   }
+  // drizzle-kit leaves its last line open.
   console.log(
-    `Ready: ${instance.database}\nState: ${instance.directory}\nRun pnpm dev or pnpm dev:web.\nIn a worktree, copy the primary checkout with pnpm dev:setup --seed or pnpm dev:import.`,
+    `\nReady: ${instance.database}\nState: ${instance.directory}\nRun pnpm dev or pnpm dev:web.\nIn a worktree, copy the primary checkout with pnpm dev:setup --seed or pnpm dev:import.`,
   );
 }
 
@@ -392,10 +396,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  // On a line of its own: a child's spinner may have left the cursor mid-line.
   console.error(
-    importing && !error.safe
-      ? "Snapshot import failed; current state retained. Check source configuration and database availability; connection details suppressed."
-      : error.message,
+    "\n" +
+      (importing && !error.safe
+        ? "Snapshot import failed; current state retained. Check source configuration and database availability; connection details suppressed."
+        : error.message),
   );
   process.exitCode = 1;
 });

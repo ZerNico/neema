@@ -74,16 +74,31 @@ class Connections {
     };
   };
   #scheduled = false;
+  #shown: ReadonlyArray<unknown> = [];
   /**
    * Coalesced onto a later task. An editor change can land while React is
    * still committing, and a store change delivered then nests another
-   * synchronous render inside it.
+   * synchronous render inside it. A connection reports every step, typed or
+   * streamed in, but the panel re-renders only when what it shows moved.
    */
   #changed = () => {
     if (this.#scheduled) return;
     this.#scheduled = true;
     setTimeout(() => {
       this.#scheduled = false;
+      const open = this.current;
+      // Whether edits are unsent is read during render too, to tell a deleted document.
+      const shown = [
+        open,
+        open?.editor,
+        open?.status,
+        open?.error,
+        open?.recovered,
+        open?.comments,
+        open?.pending(),
+      ];
+      if (shown.every((value, index) => value === this.#shown[index])) return;
+      this.#shown = shown;
       this.version++;
       for (const listener of this.#listeners) listener();
     }, 0);

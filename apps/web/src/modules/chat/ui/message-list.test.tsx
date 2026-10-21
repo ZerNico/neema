@@ -995,7 +995,7 @@ describe("MessageBubble attachments", () => {
     expect(container.querySelector("img")).toHaveAttribute("src", "/api/files/a-img");
   });
 
-  it("opens an in-app preview on a plain click instead of navigating", () => {
+  it("opens an in-app preview on a plain click instead of navigating", async () => {
     render(
       <MessageBubble
         message={userMessage("", [
@@ -1006,7 +1006,8 @@ describe("MessageBubble attachments", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /shot\.png/ }));
 
-    const dialog = screen.getByRole("dialog");
+    // The dialog's code loads on first open.
+    const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByAltText("shot.png")).toHaveAttribute("src", "/api/files/a-img");
     expect(within(dialog).getByRole("link", { name: "Open original" })).toHaveAttribute(
       "href",

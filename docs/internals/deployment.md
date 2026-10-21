@@ -15,6 +15,13 @@ serves authentication, server functions, API routes and SSE. `pnpm build` checks
 with database access disabled, serving a copy of `.output` from outside the repository,
 so a module missing from the build cannot quietly resolve from `node_modules`.
 
+On SIGTERM or SIGINT, Nitro stops taking requests, waits up to five seconds for open
+ones (an SSE feed never finishes, so it is cut), then runs its `close` hook, where
+`server/shutdown-plugin.ts` disposes the Effect runtime. Anything else that holds a
+socket or timer keeps the process alive past `docker stop`'s grace period, so a client
+outside the runtime must let go on its own: Better Auth's pool sets `allowExitOnIdle`.
+Without the dispose the process never exited and was killed with nothing shut down.
+
 The image build passes the version and commit into the web build, and the admin nav
 shows them. They are declared after dependencies install, so a new version never
 invalidates the dependency layers.
