@@ -25,12 +25,33 @@ export function countWords(text: string) {
 
 const counted = new WeakMap<PmNode, { words: number; characters: number }>();
 
-/** The document's words and characters, block breaks not counted as characters. */
+const blockCounts = (block: PmNode) => {
+  let known = counted.get(block);
+  if (!known) {
+    // A leaf block (a rule, an image) is one space, as textBetween reads it in the document.
+    const text = block.isLeaf ? " " : block.textBetween(0, block.content.size, "\n", " ");
+    known = { words: countWords(text), characters: text.replaceAll("\n", "").length };
+    counted.set(block, known);
+  }
+  return known;
+};
+
+/**
+ * The document's words and characters, block breaks not counted as characters.
+ * Summed per top-level block: a step leaves the other blocks the same objects,
+ * so a model streaming into a long document recounts only what it wrote.
+ */
 export function documentCounts(doc: PmNode) {
   let known = counted.get(doc);
   if (!known) {
-    const text = doc.textBetween(0, doc.content.size, "\n", " ");
-    known = { words: countWords(text), characters: text.replaceAll("\n", "").length };
+    let wordTotal = 0;
+    let characters = 0;
+    doc.forEach((block) => {
+      const counts = blockCounts(block);
+      wordTotal += counts.words;
+      characters += counts.characters;
+    });
+    known = { words: wordTotal, characters };
     counted.set(doc, known);
   }
   return known;
