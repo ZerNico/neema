@@ -1249,9 +1249,7 @@ export class ChatRepo extends Context.Service<
             total: sql<number>`count(*) over ()`.mapWith(Number).as("history_total"),
           })
           .from(messages)
-          .where(
-            and(eq(messages.conversationId, conversationId), historyMessage(exceptMessageId)),
-          )
+          .where(and(eq(messages.conversationId, conversationId), historyMessage(exceptMessageId)))
           .as("numbered");
 
       return ChatRepo.of({
@@ -1415,10 +1413,7 @@ export class ChatRepo extends Context.Service<
             })
             .from(numbered)
             .where(
-              and(
-                gte(numbered.number, input.from),
-                lt(numbered.number, input.from + input.count),
-              ),
+              and(gte(numbered.number, input.from), lt(numbered.number, input.from + input.count)),
             )
             .orderBy(asc(numbered.number))
             .pipe(Effect.orDie);

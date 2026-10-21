@@ -27,8 +27,7 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
   /** A temporary chat neither reads nor saves memory. */
   memoryDisabled?: boolean;
 }) {
-  if (input.memoryDisabled)
-    return { memoryTools: undefined, messages: () => [], pastChats: false };
+  if (input.memoryDisabled) return { memoryTools: undefined, messages: () => [], pastChats: false };
   const settings = yield* input.memory.getSettings(input.userId);
   const referenceable = settings.effectiveReferenceEnabled
     ? yield* input.memory.listReferenceable(input.userId)

@@ -152,7 +152,9 @@ export const fitPage = (
 };
 
 const query = (value: unknown) =>
-  typeof value === "string" && value.trim() ? value.trim().slice(0, HISTORY_LIMITS.queryChars) : null;
+  typeof value === "string" && value.trim()
+    ? value.trim().slice(0, HISTORY_LIMITS.queryChars)
+    : null;
 
 type HistoryRepo = Pick<
   ChatRepo["Service"],

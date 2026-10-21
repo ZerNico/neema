@@ -116,8 +116,7 @@ export function MemoryPage() {
     setEditing(memory);
   };
   const settingsMutation = useMutation({
-    mutationFn: (patch: UpdateMemorySettingsInput) =>
-      updateMemorySettings({ data: patch }),
+    mutationFn: (patch: UpdateMemorySettingsInput) => updateMemorySettings({ data: patch }),
     onSuccess: (next) => {
       queryClient.setQueryData(memorySettingsQuery.queryKey, next);
     },

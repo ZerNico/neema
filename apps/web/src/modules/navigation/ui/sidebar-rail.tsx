@@ -46,10 +46,7 @@ export function SidebarNavRail({ account }: { account: ReactNode }) {
   const pinMotion = collapseMotion(useAppReducedMotion());
 
   return (
-    <nav
-      aria-label="Main"
-      className="flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 p-2"
-    >
+    <nav aria-label="Main" className="flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 p-2">
       <SidebarMenu>
         <RailToggle />
         <SidebarMenuItem>

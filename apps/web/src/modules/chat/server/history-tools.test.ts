@@ -51,9 +51,7 @@ describe("the history tools", () => {
     },
     searchHistory: () =>
       Effect.succeed({
-        hits: [
-          { ...message(2, ""), snippet: { text: "Hi there", highlights: [] } },
-        ] as never,
+        hits: [{ ...message(2, ""), snippet: { text: "Hi there", highlights: [] } }] as never,
         matches: 3,
       }),
     searchConversations: () => Effect.succeed([]),

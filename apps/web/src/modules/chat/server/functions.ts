@@ -664,7 +664,10 @@ export const listChatModels = createServerFn({ method: "GET" })
             return {
               ...model,
               limitedUntil: reached.length
-                ? reached.map((limit) => limit.resetsAt).toSorted().at(-1)!
+                ? reached
+                    .map((limit) => limit.resetsAt)
+                    .toSorted()
+                    .at(-1)!
                 : null,
             };
           }),

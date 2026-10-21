@@ -65,9 +65,7 @@ export function AppearancePage() {
               selected={option.value === mode}
               onSelect={() => setTheme(option.value)}
             >
-              {option.value === "dark" ? null : (
-                <SchemePreview scheme={scheme} className="paper" />
-              )}
+              {option.value === "dark" ? null : <SchemePreview scheme={scheme} className="paper" />}
               {option.value === "light" ? null : <SchemePreview scheme={scheme} className="dark" />}
             </OptionCard>
           ))}
@@ -125,7 +123,10 @@ function OptionCard({
 /** Carries the scheme itself, so it draws from the same tokens as the app. */
 function SchemePreview({ scheme, className }: { scheme: ColorScheme; className: string }) {
   return (
-    <span data-scheme={scheme} className={cn("bg-sidebar flex flex-1 py-1.5 pr-1.5 pl-3", className)}>
+    <span
+      data-scheme={scheme}
+      className={cn("bg-sidebar flex flex-1 py-1.5 pr-1.5 pl-3", className)}
+    >
       <span className="bg-background ring-sidebar-border flex flex-1 flex-col justify-between rounded-md p-1.5 ring-1">
         <span className="bg-primary/12 h-2 w-3/5 self-end rounded-full" />
         <span className="bg-muted-foreground/40 h-1 w-4/5 rounded-full" />
