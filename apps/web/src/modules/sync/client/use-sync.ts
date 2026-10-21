@@ -10,6 +10,9 @@ import { takeSyncFeed } from "./feed.ts";
 
 type DomainEvent = Exclude<SyncEvent, { type: "sync.ready" }>;
 
+/** How long the message events of one turn are gathered into one chat refetch. */
+const CONVERSATION_BURST_MS = 120;
+
 /**
  * Events after which a person may store more or less: an answer's files, a file taken out, a
  * purge, project files, skills. Indexing and document edits are left out: they come in bursts
@@ -110,6 +113,25 @@ export function useSync(
     // Reconcile it on first open too; reconnects refresh every feed-backed cache.
     let opened = false;
     let authorized = !reconcileIdentity;
+    // A turn announces both of its rows and the answer's status within a few
+    // milliseconds, and each refetch is the chat's whole visible window. The chat
+    // goes stale at once and refetches once per burst.
+    const conversationRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+    const refreshConversation = (conversationId: string) => {
+      const queryKey = ["conversation", conversationId];
+      void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+      if (conversationRefreshes.has(conversationId)) return;
+      conversationRefreshes.set(
+        conversationId,
+        setTimeout(() => {
+          conversationRefreshes.delete(conversationId);
+          // Not only if still stale: a fetch that started before these events
+          // would clear the mark when it lands. Refetching replaces that fetch.
+          void queryClient.refetchQueries({ queryKey, type: "active" });
+        }, CONVERSATION_BURST_MS),
+      );
+    };
+
     // Events that arrive while identity is being checked, applied once it holds.
     let held: DomainEvent[] = [];
     let connection = 0;
@@ -268,9 +290,7 @@ export function useSync(
         case "message.created":
         case "message.status":
           refreshWork();
-          void queryClient.invalidateQueries({
-            queryKey: ["conversation", event.conversationId],
-          });
+          refreshConversation(event.conversationId);
           // The event carries what the lists show, so they are patched, not re-paged.
           if (event.type === "message.created") bringToTop(queryClient, event.conversationId);
           else markGenerating(queryClient, event.conversationId, event.status === "streaming");
@@ -352,6 +372,7 @@ export function useSync(
 
     return () => {
       disposed = true;
+      for (const timer of conversationRefreshes.values()) clearTimeout(timer);
       clearTimeout(identityRetry);
       clearKnowledgeTimer();
       source.close();

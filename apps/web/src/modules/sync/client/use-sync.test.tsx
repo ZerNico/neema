@@ -391,7 +391,10 @@ describe("useSync", () => {
       status: "complete",
     });
 
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["conversation", "c1"],
+      refetchType: "none",
+    });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
     // The lists are patched from the event, never re-paged.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["conversations"] });
@@ -456,6 +459,46 @@ describe("desktop session events", () => {
     }
     expect(invalidate.mock.calls).toEqual([[{ queryKey: ["desktop-sessions"] }]]);
     expect(heard).toEqual([{ ticketId: "t1" }]);
+  });
+});
+
+describe("a turn's message events", () => {
+  it("refetch the open chat once per burst, and mark it stale at once", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient();
+    const fetches = vi.fn(async () => "detail");
+    function OpenChat() {
+      useSync();
+      useQuery({ queryKey: ["conversation", "c1"], queryFn: fetches, staleTime: Infinity });
+      return null;
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <OpenChat />
+      </QueryClientProvider>,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetches).toHaveBeenCalledTimes(1);
+    const source = FakeEventSource.instances.at(-1)!;
+    source.emit("sync", { type: "message.created", conversationId: "c1", messageId: "u" });
+    source.emit("sync", { type: "message.created", conversationId: "c1", messageId: "a" });
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "a",
+      status: "streaming",
+    });
+    expect(client.getQueryState(["conversation", "c1"])?.isInvalidated).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetches).toHaveBeenCalledTimes(2);
+    source.emit("sync", {
+      type: "message.status",
+      conversationId: "c1",
+      messageId: "a",
+      status: "complete",
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(fetches).toHaveBeenCalledTimes(3);
   });
 });
 
