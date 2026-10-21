@@ -30,7 +30,10 @@ const decorate = (
     decorations.push(
       Decoration.inline(compose.from, compose.to, { class: "comment-anchor is-active" }),
     );
-  for (const [thread, anchor] of commentAnchors(state.doc)) {
+  // The anchors are a walk over the whole document, redone on every change;
+  // a document with no open thread has nothing to draw from it.
+  const anchors = open.size ? commentAnchors(state.doc) : [];
+  for (const [thread, anchor] of anchors) {
     if (!open.has(thread)) continue;
     // Each text node under the mark, so an anchor across formatting stays one highlight.
     state.doc.nodesBetween(anchor.from, anchor.to, (node, position) => {
