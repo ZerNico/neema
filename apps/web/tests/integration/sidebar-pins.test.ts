@@ -48,13 +48,13 @@ const get = (userId: string) =>
   run(Effect.flatMap(SidebarPinsService, (service) => service.get(userId)));
 
 it("gives the defaults until a person changes them, and only to that person afterwards", async () => {
-  expect(await get("pins-a")).toEqual({ pinned: ["projects", "agents", "schedules"] });
+  expect(await get("pins-a")).toEqual({ pinned: ["projects", "agents", "knowledge", "schedules"] });
 
   await run(
     Effect.flatMap(SidebarPinsService, (service) => service.set("pins-a", ["skills", "projects"])),
   );
   expect(await get("pins-a")).toEqual({ pinned: ["projects", "skills"] });
-  expect(await get("pins-b")).toEqual({ pinned: ["projects", "agents", "schedules"] });
+  expect(await get("pins-b")).toEqual({ pinned: ["projects", "agents", "knowledge", "schedules"] });
   expect(published).toEqual([{ userId: "pins-a", event: { type: "sidebar.changed" } }]);
 
   // Unpinning everything is a choice, not a return to the defaults.

@@ -13,7 +13,12 @@ export const DestinationId = Schema.Literals(DESTINATION_IDS);
 export type DestinationId = typeof DestinationId.Type;
 
 /** What the rail shows for someone who never pinned or unpinned anything. */
-export const DEFAULT_PINS: ReadonlyArray<DestinationId> = ["projects", "agents", "schedules"];
+export const DEFAULT_PINS: ReadonlyArray<DestinationId> = [
+  "projects",
+  "agents",
+  "knowledge",
+  "schedules",
+];
 
 export const SidebarPins = Schema.Struct({ pinned: Schema.Array(DestinationId) });
 export type SidebarPins = typeof SidebarPins.Type;
