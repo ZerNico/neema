@@ -11,7 +11,6 @@ vi.mock("~/modules/limits/client/queries.ts", () => ({
   myLibraryQuery: { queryKey: ["test-library"], queryFn: () => null },
 }));
 vi.mock("~/modules/limits/server/functions.ts", () => ({
-  emptyDeletedChats: vi.fn(),
   removeChatFile: vi.fn(),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({ deleteAttachment: vi.fn() }));
@@ -29,7 +28,6 @@ const renderPage = () => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(["test-storage"], { used: 30 * MB, quota: 100 * MB });
   client.setQueryData(["test-library"], {
-    deletedChats: 2,
     files: [
       {
         blobId: "a",
@@ -76,10 +74,9 @@ const renderPage = () => {
 };
 
 describe("Settings › Storage", () => {
-  it("shows what is used, what deleted chats hold, and where each file is", () => {
+  it("shows what is used and where each file is", () => {
     renderPage();
     expect(screen.getByRole("progressbar", { name: "30 MB of 100 MB used" })).toBeVisible();
-    expect(screen.getByText("2 deleted chats are kept for Undo.")).toBeVisible();
     expect(screen.getByText("20 MB · In “Quarterly”")).toBeVisible();
     expect(screen.getByText("10 MB · Project “Launch” · 3 versions")).toBeVisible();
   });

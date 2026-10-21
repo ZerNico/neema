@@ -82,7 +82,7 @@ export interface LibraryFile {
 export class StorageLibrary extends Context.Service<
   StorageLibrary,
   {
-    list(userId: string): Effect.Effect<{ files: LibraryFile[]; deletedChats: number }>;
+    list(userId: string): Effect.Effect<{ files: LibraryFile[] }>;
   }
 >()("chat/limits/StorageLibrary") {
   static readonly layer = Layer.effect(
@@ -266,11 +266,6 @@ export class StorageLibrary extends Context.Service<
                 skillName: row.skillName,
               });
           }
-          const [held] = yield* db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(conversations)
-            .where(and(eq(conversations.userId, userId), isNotNull(conversations.deletedAt)))
-            .pipe(Effect.orDie);
           return {
             files: blobs.map((blob) => ({
               blobId: blob.id,
@@ -279,7 +274,6 @@ export class StorageLibrary extends Context.Service<
               createdAt: blob.createdAt.toISOString(),
               places: places.get(blob.id) ?? [],
             })),
-            deletedChats: held?.count ?? 0,
           };
         }),
       });

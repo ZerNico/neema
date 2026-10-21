@@ -85,5 +85,4 @@ that zone), never the server's, like every other due-ness check here.
   place it is used (`StorageLibrary`). Only files the person sent and unsent uploads are
   deleted there, and only when every place a file is in is one of those. Otherwise it links
   to where the file is managed. A file in several places is taken out of each in turn, so a
-  refusal partway leaves the places before it cleared. "Empty now" purges
-  the person's deleted chats through the sweep's own purge, giving up their Undo.
+  refusal partway leaves the places before it cleared.

@@ -247,24 +247,4 @@ describe("the storage library", () => {
     );
     expect(refused).toMatchObject({ _tag: "Failure", failure: { _tag: "AttachmentNotAvailable" } });
   }, 60_000);
-
-  it("empties deleted chats now, freeing their files", async () => {
-    const person = await makeUser();
-    const sent = await upload(person, "y".repeat(100));
-    const turn = await sendWith(person, [sent.id]);
-    await run(
-      Effect.flatMap(ChatService, (chat) =>
-        chat.deleteConversation({ userId: person, conversationId: turn.conversationId }),
-      ),
-    );
-    const held = await list(person);
-    expect(held.deletedChats).toBe(1);
-    expect(held.files[0]!.places).toEqual([
-      expect.objectContaining({ kind: "chat", deleted: true, removable: false }),
-    ]);
-    await run(Effect.flatMap(ChatService, (chat) => chat.emptyDeleted({ userId: person })));
-    const after = await list(person);
-    expect(after).toEqual({ files: [], deletedChats: 0 });
-    expect(await blobsOf(person)).toEqual([]);
-  }, 60_000);
 });

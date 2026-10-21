@@ -14,7 +14,6 @@ import { UsageLimits } from "./service.ts";
 import { StorageQuota } from "./storage.ts";
 import { StorageLibrary } from "./library.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { ChatService } from "~/modules/chat/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 
 const standard = Schema.toStandardSchemaV1;
@@ -105,11 +104,4 @@ export const removeChatFile = createServerFn({ method: "POST" })
         );
       }),
     ),
-  );
-
-/** Purges the person's deleted chats now, rather than when their Undo runs out. */
-export const emptyDeletedChats = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .handler(({ context }) =>
-    runServerFn(ChatService.use((chat) => chat.emptyDeleted({ userId: context.session.user.id }))),
   );

@@ -753,13 +753,6 @@ export class ChatRepo extends Context.Service<
      * period and temporary ones past their lifetime with no live answer.
      */
     listExpired(limit: number): Effect.Effect<ReadonlyArray<{ id: string }>>;
-    /** Up to a hundred of the person's deleted chats still held for Undo. */
-    listDeleted(userId: string): Effect.Effect<ReadonlyArray<{ id: string }>>;
-    /** Purges one of the person's deleted chats before its grace ends, when they ask. */
-    purgeDeleted(
-      conversationId: string,
-      userId: string,
-    ): Effect.Effect<{ userId: string; keys: ReadonlyArray<string> } | null>;
     /**
      * Purges the chat only if it is still due under the row lock, so a Keep,
      * an Undo or a new message landing after the listing wins. Null when it no
@@ -1714,21 +1707,6 @@ export class ChatRepo extends Context.Service<
         }),
 
         purgeExpired: (conversationId) => deleteLocked(conversationId, expired),
-
-        listDeleted: Effect.fn("ChatRepo.listDeleted")(function* (userId) {
-          return yield* db
-            .select({ id: conversations.id })
-            .from(conversations)
-            .where(and(eq(conversations.userId, userId), isNotNull(conversations.deletedAt)))
-            .limit(100)
-            .pipe(Effect.orDie);
-        }),
-
-        purgeDeleted: (conversationId, userId) =>
-          deleteLocked(
-            conversationId,
-            and(eq(conversations.userId, userId), isNotNull(conversations.deletedAt)),
-          ),
 
         listMessages: Effect.fn("ChatRepo.listMessages")(function* (conversationId) {
           return yield* db

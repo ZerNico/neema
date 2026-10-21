@@ -5,7 +5,7 @@ import { deleteAttachment } from "~/modules/attachments/server/functions.ts";
 import { myLibraryQuery, myStorageQuery } from "~/modules/limits/client/queries.ts";
 import { formatBytes, LIBRARY_LISTED } from "~/modules/limits/rules.ts";
 import type { LibraryFile, LibraryPlace } from "~/modules/limits/server/library.ts";
-import { emptyDeletedChats, removeChatFile } from "~/modules/limits/server/functions.ts";
+import { removeChatFile } from "~/modules/limits/server/functions.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -75,11 +75,6 @@ export function StoragePage() {
   const [sort, setSort] = useState<(typeof SORTS)[number]["value"]>("size");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["my-storage"] });
 
-  const empty = useMutation({
-    mutationFn: () => emptyDeletedChats(),
-    onSuccess: refresh,
-    onError: (error) => toastError("Could not empty deleted chats.", error),
-  });
   const remove = useMutation({
     mutationFn: async (file: LibraryFile) => {
       for (const place of file.places) {
@@ -120,32 +115,6 @@ export function StoragePage() {
               />
             )}
           </ListRow>
-          {library && library.deletedChats > 0 ? (
-            <ListRow className="justify-between">
-              <span className="text-sm">
-                {library.deletedChats === 1
-                  ? "1 deleted chat is kept for Undo."
-                  : `${library.deletedChats} deleted chats are kept for Undo.`}
-              </span>
-              <PendingButton
-                size="sm"
-                variant="outline"
-                pending={empty.isPending}
-                onClick={async () => {
-                  if (
-                    await confirm({
-                      title: "Empty deleted chats?",
-                      description: "They can no longer be brought back.",
-                      confirmLabel: "Empty now",
-                    })
-                  )
-                    empty.mutate();
-                }}
-              >
-                Empty now
-              </PendingButton>
-            </ListRow>
-          ) : null}
         </ListCard>
       </Section>
       <Section title="Files">
@@ -247,7 +216,7 @@ function FileRow({
   const first = file.places[0];
   const more = file.places.length - 1;
   // Where to go about it: the place that keeps it from being deleted here. A deleted chat
-  // has nowhere to open, and goes with Empty now.
+  // has nowhere to open, and is gone with its files once its Undo runs out.
   const managed =
     file.places.find(
       (place) =>
