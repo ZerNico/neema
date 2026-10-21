@@ -34,7 +34,8 @@ export default defineConfig({
     // Server-owned state lives here: blobs, and custom tool builds, which
     // install node_modules and write a tsconfig.json. Vite force-reloads every
     // client on any tsconfig.json it sees change, so a Check would reload the page.
-    watch: { ignored: ["**/.data/**"] },
+    // A production build beside dev writes .output, whose shell reloaded every tab.
+    watch: { ignored: ["**/.data/**", "**/.output/**"] },
   },
   resolve: {
     tsconfigPaths: true,
