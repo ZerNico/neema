@@ -855,7 +855,9 @@ export class DocumentService extends Context.Service<
             );
             if (outcome.stored) {
               yield* settle(entry, outcome.stored);
-              yield* documentChanged(userId, outcome.stored.document);
+              // Only text moves here, as when a person types. A streamed edit stores
+              // dozens of steps a second, and each event reloaded the chat's detail.
+              yield* documentChangedSoon(userId, documentId, entry);
             }
             return outcome.result;
           }),

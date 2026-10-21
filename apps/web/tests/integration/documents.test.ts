@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { conversations, documents, documentSteps, messages, user } from "~/db/schema/index.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import {
@@ -855,7 +855,7 @@ describe("ownership, limits and sync", () => {
     expect(await markdownOf(owner, created)).toBe("small");
   });
 
-  it("publishes exactly one event per successful write and survives a bus failure", async () => {
+  it("announces a creation at once and the model's edits as text, gathered, surviving a bus failure", async () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
     const created = await create(owner, conversationId);
@@ -867,11 +867,20 @@ describe("ownership, limits and sync", () => {
     ]);
     await edit(owner, created, { old: "nothing", new: "x" });
     expect(changedEvents(owner)).toHaveLength(1);
+    // A streamed edit stores many steps a second; they reach the client as one
+    // text-only event, which leaves the chat's detail alone.
+    await edit(owner, created, { old: "ship", new: "ship it" });
+    await edit(owner, created, { old: "ship it", new: "ship it now" });
+    await vi.waitFor(() => expect(changedEvents(owner)).toHaveLength(2), { timeout: 5_000 });
+    expect(changedEvents(owner)[1]).toEqual({
+      userId: owner,
+      event: { type: "document.changed", conversationId, documentId: created.id, textOnly: true },
+    });
     publishingFails = true;
-    const edited = await edit(owner, created, { old: "ship", new: "ship it" });
-    expect(edited.outcome).toBe("updated");
-    expect(await get(owner, created)).toEqual(edited.document);
-    expect(changedEvents(owner)).toHaveLength(1);
+    const second = await create(owner, conversationId);
+    publishingFails = false;
+    expect(await get(owner, second)).toEqual(second);
+    expect(changedEvents(owner)).toHaveLength(2);
   });
 
   it("removes a document with the answer that created it", async () => {
