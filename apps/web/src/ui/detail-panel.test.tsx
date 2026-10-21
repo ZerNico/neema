@@ -696,6 +696,36 @@ describe("tabs", () => {
     );
   });
 
+  it("scrolls a tab past the strip's edge into view by scrolling the strip alone", () => {
+    // On a phone the rail slides in from off-screen, where scrollIntoView would
+    // scroll the clipped app around it too.
+    environment.mobile = true;
+    environment.reducedMotion = false;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const scrollBy = vi.fn();
+    Element.prototype.scrollBy = scrollBy;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      return this.getAttribute("role") === "tablist"
+        ? new DOMRect(400, 0, 200, 48)
+        : new DOMRect(650, 0, 80, 48);
+    });
+    try {
+      render(<Harness />);
+      act(() => panel.open({ id: "one", title: "First", body: <p>First body</p> }));
+      expect(scrollBy).toHaveBeenCalledWith({ left: 130, behavior: "smooth" });
+      expect(scrollBy.mock.contexts.at(-1)).toBe(screen.getByRole("tablist"));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      // @ts-expect-error jsdom has neither; the test added both.
+      delete Element.prototype.scrollIntoView;
+      // @ts-expect-error As above.
+      delete Element.prototype.scrollBy;
+    }
+  });
+
   it("moves between tabs with the arrow keys, Home and End", () => {
     render(<Harness />);
     for (const id of ["a", "b", "c"]) act(() => panel.open({ id, title: id, body: <p>{id}</p> }));

@@ -72,15 +72,24 @@ export function DetailPanelTabStrip({
     buttons.current.get(target.id)?.focus();
   };
   const reducedMotion = useAppReducedMotion();
-  // A tab opened or selected past the strip's edge is scrolled into view, as a
-  // browser does; the strip only scrolls sideways, so nothing else moves.
+  const strip = useRef<HTMLDivElement>(null);
+  // A tab opened or selected past the strip's edge is scrolled into view by
+  // scrolling the strip alone. scrollIntoView also scrolls every clipped
+  // ancestor: on a phone the rail slides in from off-screen, so the whole app
+  // slid left to meet it and snapped back as it arrived.
   useEffect(() => {
-    if (!visible || activeId === null) return;
-    buttons.current.get(activeId)?.parentElement?.scrollIntoView?.({
-      block: "nearest",
-      inline: "nearest",
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
+    const list = strip.current;
+    const item = activeId === null ? null : buttons.current.get(activeId)?.parentElement;
+    if (!visible || !list || !item) return;
+    const bounds = list.getBoundingClientRect();
+    const rect = item.getBoundingClientRect();
+    const by =
+      rect.left < bounds.left
+        ? rect.left - bounds.left
+        : rect.right > bounds.right
+          ? rect.right - bounds.right
+          : 0;
+    if (by) list.scrollBy?.({ left: by, behavior: reducedMotion ? "auto" : "smooth" });
   }, [activeId, visible, reducedMotion]);
   const register = useCallback((id: string, element: HTMLButtonElement | null) => {
     if (element) buttons.current.set(id, element);
@@ -103,6 +112,7 @@ export function DetailPanelTabStrip({
             the strip's visible size, transparent to clicks (styles/app.css). */}
         <div className="relative flex min-w-0">
           <div
+            ref={strip}
             role="tablist"
             aria-label="Panel tabs"
             // The sidebar's soft edge, sideways: padding keeps the first and last tabs
