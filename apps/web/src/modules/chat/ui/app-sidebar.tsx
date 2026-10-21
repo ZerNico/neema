@@ -7,9 +7,10 @@ import * as m from "motion/react-m";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
 import { conversationQuery, conversationsInfiniteQuery } from "../client/queries.ts";
+import type { listConversations } from "../server/functions.ts";
 import { ConversationMenu } from "./conversation-actions.tsx";
 import { useConversationActions } from "./use-conversation-actions.tsx";
-import { createTitleRevealRegistry } from "./title-reveal-registry.ts";
+import { createTitleRevealRegistry, type TitleRevealRegistry } from "./title-reveal-registry.ts";
 import { ConversationStatusTitle } from "./conversation-status-title.tsx";
 import { useBrowsingChats } from "~/modules/browser/client/use-browsing-chats.ts";
 import { InfiniteSentinel } from "./infinite-sentinel.tsx";
@@ -159,49 +160,16 @@ function ConversationList() {
             <SidebarMenu>
               <AnimatePresence initial={false}>
                 {group.conversations.map((conversation) => (
-                  <SidebarMenuItem key={conversation.id}>
-                    <m.div
-                      {...rowMotion}
-                      // Only a chat created since the list mounted grows in; one
-                      // arriving from a later page or another group just appears.
-                      {...(new Date(conversation.createdAt).getTime() > mountedAt
-                        ? {}
-                        : { initial: false })}
-                    >
-                      <SidebarMenuButton
-                        isActive={conversation.id === activeId}
-                        // The "…" takes the status icon's place wherever it shows on
-                        // hover, and the title ends where it did; on touch both stay.
-                        // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between title and status icon
-                        className="gap-0 [&_[data-status-slot]]:ml-auto [&_[data-status-slot][data-filled]]:-mr-1 [&_[data-status-slot]]:[display:var(--menu-action-covered,flex)]"
-                        render={
-                          <Link
-                            to="/chat/$conversationId"
-                            params={{ conversationId: conversation.id }}
-                          />
-                        }
-                      >
-                        <ConversationStatusTitle
-                          generating={conversation.generating}
-                          browsing={browsing.has(conversation.id)}
-                          branched={!!conversation.branchedFrom}
-                          scheduled={conversation.scheduled}
-                          unread={conversation.unread}
-                          conversationId={conversation.id}
-                          title={conversation.title}
-                          registry={revealRegistry}
-                          createdAt={conversation.createdAt}
-                        />
-                      </SidebarMenuButton>
-                      <ConversationMenu
-                        conversation={conversation}
-                        actions={actions}
-                        trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
-                      >
-                        <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-                      </ConversationMenu>
-                    </m.div>
-                  </SidebarMenuItem>
+                  <ConversationRow
+                    key={conversation.id}
+                    conversation={conversation}
+                    active={conversation.id === activeId}
+                    browsing={browsing.has(conversation.id)}
+                    grows={new Date(conversation.createdAt).getTime() > mountedAt}
+                    registry={revealRegistry}
+                    actions={actions}
+                    motion={rowMotion}
+                  />
                 ))}
               </AnimatePresence>
             </SidebarMenu>
@@ -223,5 +191,66 @@ function ConversationList() {
       )}
       {actions.renameDialog}
     </>
+  );
+}
+
+type SidebarConversation = Awaited<ReturnType<typeof listConversations>>["conversations"][number];
+
+// Its own component, so a row whose chat did not change skips rendering when
+// another page of the list arrives, instead of every row rendering per page.
+function ConversationRow({
+  conversation,
+  active,
+  browsing,
+  grows,
+  registry,
+  actions,
+  motion,
+}: {
+  conversation: SidebarConversation;
+  active: boolean;
+  browsing: boolean;
+  grows: boolean;
+  registry: TitleRevealRegistry;
+  actions: ReturnType<typeof useConversationActions>;
+  motion: ReturnType<typeof collapseMotion>;
+}) {
+  return (
+    <SidebarMenuItem>
+      <m.div
+        {...motion}
+        // Only a chat created since the list mounted grows in; one
+        // arriving from a later page or another group just appears.
+        {...(grows ? {} : { initial: false })}
+      >
+        <SidebarMenuButton
+          isActive={active}
+          // The "…" takes the status icon's place wherever it shows on
+          // hover, and the title ends where it did; on touch both stay.
+          // oxlint-disable-next-line shadcn/no-restyle -- ConversationStatusTitle brings its own spacing between title and status icon
+          className="gap-0 [&_[data-status-slot]]:ml-auto [&_[data-status-slot][data-filled]]:-mr-1 [&_[data-status-slot]]:[display:var(--menu-action-covered,flex)]"
+          render={<Link to="/chat/$conversationId" params={{ conversationId: conversation.id }} />}
+        >
+          <ConversationStatusTitle
+            generating={conversation.generating}
+            browsing={browsing}
+            branched={!!conversation.branchedFrom}
+            scheduled={conversation.scheduled}
+            unread={conversation.unread}
+            conversationId={conversation.id}
+            title={conversation.title}
+            registry={registry}
+            createdAt={conversation.createdAt}
+          />
+        </SidebarMenuButton>
+        <ConversationMenu
+          conversation={conversation}
+          actions={actions}
+          trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
+        >
+          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+        </ConversationMenu>
+      </m.div>
+    </SidebarMenuItem>
   );
 }
