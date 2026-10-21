@@ -560,7 +560,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   const { width: kept, expanded: wide, resize, reset } = useDetailPanelWidth();
   const [dragging, setDragging] = useState(false);
   const root = useRef<HTMLElement>(null);
-  const opener = useRef<HTMLElement | null>(null);
+  // Weak: the opener is often a field of the page beside the rail, and a strong
+  // reference kept that whole page alive after leaving it.
+  const opener = useRef<WeakRef<HTMLElement> | null>(null);
   const ids = useTabIds();
   // A panel already open when the page appears was restored, not opened: it is
   // simply there, as leaving a page simply removes it. Only opening animates.
@@ -619,16 +621,16 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
       if (action.type === "open") {
         const active = document.activeElement;
         if (active instanceof HTMLElement && !root.current?.contains(active)) {
-          opener.current = active;
+          opener.current = new WeakRef(active);
         }
         if (selectedId !== action.id && root.current) {
-          restorePanelFocus(root.current, opener.current);
+          restorePanelFocus(root.current, opener.current?.deref() ?? null);
         }
       } else if (
         selectedId !== undefined &&
         (action.id === undefined || action.id === selectedId)
       ) {
-        if (root.current) restorePanelFocus(root.current, opener.current);
+        if (root.current) restorePanelFocus(root.current, opener.current?.deref() ?? null);
       }
     };
     return registerBeforeAction(handleAction);
