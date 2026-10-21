@@ -12,6 +12,8 @@ export function getPool() {
   pool ??= new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 10,
+    // Idle connections would hold a stopping server up to the idle timeout.
+    allowExitOnIdle: true,
   });
   return pool;
 }
