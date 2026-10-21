@@ -265,6 +265,10 @@ export interface TurnState {
   readonly integrationSummaries: Map<string, string | null>;
   /** Snapshots asked to show their screenshot to the user, by provider call id. */
   readonly sharedSnapshots: Set<string>;
+  /** Tool name by row id, for the settled list. */
+  readonly callNames: Map<string, string>;
+  /** Every call this round settled, with its error when it failed, for the repeat guard. */
+  readonly settled: Array<{ readonly name: string; readonly failure: string | null }>;
 }
 
 /**
@@ -280,7 +284,26 @@ export const observePart = (
 ) =>
   Effect.gen(function* () {
     const { deps, input, ctx, sink, usage, tools, promptDeps, attemptPrompt } = env;
-    const { repo, external, imageAttachments, keptFiles } = deps;
+    const { external, imageAttachments, keptFiles } = deps;
+    // Every call settles through one of these two, so each is noted for the
+    // round's repeat guard without each family having to remember it.
+    const noteSettled = (call: {
+      id: string;
+      status: "complete" | "error";
+      error?: { message: string } | undefined;
+    }) =>
+      Effect.sync(() => {
+        turnState.settled.push({
+          name: turnState.callNames.get(call.id) ?? "",
+          failure: call.status === "error" ? (call.error?.message ?? "") : null,
+        });
+      });
+    const repo: typeof deps.repo = {
+      ...deps.repo,
+      completeToolCall: (call) =>
+        deps.repo.completeToolCall(call).pipe(Effect.tap(noteSettled(call))),
+      settleToolCall: (call) => deps.repo.settleToolCall(call).pipe(Effect.tap(noteSettled(call))),
+    };
     const { fence, config, model, imageOutput } = ctx;
     const {
       documents,
@@ -425,6 +448,7 @@ export const observePart = (
         if (!family) return;
         const rowId = uuidv7();
         callRowIds.set(part.id, rowId);
+        turnState.callNames.set(rowId, part.name);
         const askArgs = family === "ask" ? Schema.decodeUnknownOption(AskUserParams)(args) : null;
         const textOffset = sink.text().length;
         callTextOffsets.set(part.id, textOffset);

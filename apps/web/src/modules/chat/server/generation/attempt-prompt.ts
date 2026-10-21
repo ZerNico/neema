@@ -49,7 +49,14 @@ export interface RoundProgress {
   currentRound: number;
   /** The round whose results a steer followed; its next call alone is told how to read it. */
   steeredAfter: number | null;
+  /** Failures in a row, by tool and the error it gave, for the repeat guard. */
+  readonly repeatedFailures: Map<string, number>;
+  /** The tool that failed the same way too often; from then on no tools are offered. */
+  stuckOn: string | null;
 }
+
+/** Identical failures of one tool in a row after which an answer is offered no more tools. */
+export const REPEATED_FAILURE_LIMIT = 3;
 
 /** What the rounds change as the answer goes: its compacted history and active rounds. */
 export interface RoundState {
@@ -358,7 +365,12 @@ export const prepareAttemptPrompt = (env: {
     // but not the tool, and read its absence as never having had it.
     const notifiedBefore =
       !notifyTools && priorToolCalls.some((call) => call.toolName === "notify_user");
-    const progress: RoundProgress = { currentRound: 0, steeredAfter: null };
+    const progress: RoundProgress = {
+      currentRound: 0,
+      steeredAfter: null,
+      repeatedFailures: new Map(),
+      stuckOn: null,
+    };
     // Unfinished drafts by reference; a name is file data, so it is quoted.
     const draftList = () =>
       workingFiles
@@ -395,6 +407,9 @@ export const prepareAttemptPrompt = (env: {
           ? `Skill operations remaining: ${skillTools.remaining()} of ${SKILL_LIMITS.operations}.`
           : null,
         planReminder(),
+        progress.stuckOn
+          ? `${progress.stuckOn} failed the same way ${REPEATED_FAILURE_LIMIT} times in a row, so no tools are offered for the rest of this answer. Answer with what you have and say plainly what you could not do.`
+          : null,
       ].filter(Boolean);
       const updates = contextUpdates();
       // Context data rides as assistant messages (documents), and a request

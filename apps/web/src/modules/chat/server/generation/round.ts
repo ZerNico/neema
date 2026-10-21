@@ -22,7 +22,7 @@ import { buildHistoryMessages, inlineTextCharsFor, type PromptDeps } from "../pr
 import { isAdvertised } from "~/modules/tools/server/tool-load.ts";
 import { promptMessages } from "./json.ts";
 import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
-import type { AttemptPrompt } from "./attempt-prompt.ts";
+import { REPEATED_FAILURE_LIMIT, type AttemptPrompt } from "./attempt-prompt.ts";
 import type { GenerationDeps } from "./deps.ts";
 import type { AttemptUsage, GenerationSink } from "./sink.ts";
 import type { GenerationTools } from "./tools.ts";
@@ -127,6 +127,8 @@ export const runRound = (env: RoundEnv, round: number) =>
     // continues; budgets and first-call logic count this attempt's rounds.
     const turn = firstTurn + round;
     progress.currentRound = round;
+    // A tool stuck failing the same way ends the answer early, without tools.
+    const lastRound = round >= roundLimit || progress.stuckOn !== null;
     if (round > 0) yield* keepChanges(workingFiles);
     yield* authoring.refresh();
     yield* scheduleAuthoring.refresh();
@@ -141,9 +143,9 @@ export const runRound = (env: RoundEnv, round: number) =>
             estimatedFirstInputTokens: usage.estimatedFirstInputTokens,
           })
         : calibrationFactor(priorUsage);
-    const schemaReserve = round < roundLimit ? (schemaTokensWith(unlockedFamilies) ?? 0) : 0;
+    const schemaReserve = !lastRound ? (schemaTokensWith(unlockedFamilies) ?? 0) : 0;
     while (true) {
-      const trailing = reminderPrompt(round >= roundLimit);
+      const trailing = reminderPrompt(lastRound);
       const reduced: ActiveRoundCompactionDecision = yield* prepareCompactedActiveRounds(
         { gateway, repo, providers, analytics },
         {
@@ -178,7 +180,7 @@ export const runRound = (env: RoundEnv, round: number) =>
       webToolsEnabled: webTools !== undefined,
       toolSchemaTokens: schemaReserve,
     }).input;
-    while (Math.ceil(estimateRequestPrompt(round >= roundLimit) * factor) > requestBudget) {
+    while (Math.ceil(estimateRequestPrompt(lastRound) * factor) > requestBudget) {
       const active = compileActivePrompt({
         basePrompt: Prompt.empty,
         summary: state.activeSummary,
@@ -191,14 +193,14 @@ export const runRound = (env: RoundEnv, round: number) =>
         renderedMessages: historyMessages,
         renderedMessageGroups: historyGroups,
         fixedPrefix: [...fixedPrefix, ...(active.content as ReadonlyArray<Prompt.MessageEncoded>)],
-        trailingMessages: historyBudgetTail(round >= roundLimit),
+        trailingMessages: historyBudgetTail(lastRound),
         historyReadable: tools.historyTools !== null,
         calibrationFactor: factor,
       });
       if (!shrunk)
         return yield* new ContextTooLarge({
           conversationId: input.conversationId,
-          estimatedInputTokens: Math.ceil(estimateRequestPrompt(round >= roundLimit) * factor),
+          estimatedInputTokens: Math.ceil(estimateRequestPrompt(lastRound) * factor),
           inputBudget: requestBudget,
         });
       state.compaction = { ...state.compaction, ...shrunk, mode: "truncated" };
@@ -210,7 +212,7 @@ export const runRound = (env: RoundEnv, round: number) =>
     if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
     else if (knowledgeSession) yield* knowledgeSession.authorize();
-    const toolRoundsLeft = round < roundLimit;
+    const toolRoundsLeft = !lastRound;
     const turnParts: Response.AnyPart[] = [];
     // Bytes a local read produced for the model this turn. A tool
     // result is text on the wire, so an image or PDF rides as a user
@@ -229,6 +231,8 @@ export const runRound = (env: RoundEnv, round: number) =>
       callTextOffsets: new Map(),
       integrationSummaries: new Map(),
       sharedSnapshots: new Set(),
+      callNames: new Map(),
+      settled: [],
     };
     tools.clearCallRows();
     let providerOutputStarted = false;
@@ -421,11 +425,24 @@ export const runRound = (env: RoundEnv, round: number) =>
     // queued, first in line, and goes out as the next turn. It is never
     // bolted onto an answer that already finished.
     if (turnState.finishReason !== "tool-calls") return "stop";
+    // A model that cannot take a correction repeats the call that earned it;
+    // a success of the same tool clears its count.
+    for (const { name, failure } of turnState.settled) {
+      const key = `${name}\n${failure}`;
+      if (failure === null) {
+        for (const counted of progress.repeatedFailures.keys())
+          if (counted.startsWith(`${name}\n`)) progress.repeatedFailures.delete(counted);
+        continue;
+      }
+      const count = (progress.repeatedFailures.get(key) ?? 0) + 1;
+      progress.repeatedFailures.set(key, count);
+      if (count >= REPEATED_FAILURE_LIMIT) progress.stuckOn ??= name;
+    }
     // The only safe point: every tool result of this round is terminal
     // and the model is about to be called again anyway, so nothing in
     // flight is cut short. The last round has no call after it.
     const { steered, held } =
-      fence && round < roundLimit
+      fence && !lastRound
         ? yield* repo.claimSteeredEntries({
             conversationId: input.conversationId,
             messageId: input.messageId,

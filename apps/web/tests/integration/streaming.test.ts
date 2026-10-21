@@ -2084,6 +2084,39 @@ describe("conversation documents", () => {
     return match[1]!;
   };
 
+  it("offers no more tools once one fails the same way three times in a row", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const requests: GatewayInput[] = [];
+    authoringScript = (input) => {
+      requests.push(input);
+      // No title: refused with the same correction every time.
+      return input.toolkit
+        ? authoringTool(input, "create_document", { content: "- [ ] ship" })
+        : reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      expect(requests.map((request) => request.toolkit !== undefined)).toEqual([
+        true,
+        true,
+        true,
+        false,
+      ]);
+      expect(JSON.stringify(requests[3]!.prompt.content)).toContain(
+        "create_document failed the same way 3 times in a row",
+      );
+      expect(JSON.stringify(requests[2]!.prompt.content)).not.toContain("failed the same way");
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.toolCalls.map((call) => call.status)).toEqual(["error", "error", "error"]);
+      expect(detail.messages.at(-1)).toMatchObject({ status: "complete" });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it.each([false, true])(
     "creates and patches a document without content in the transcript (Hermes: %s)",
     async (hermes) => {
