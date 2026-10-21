@@ -47,6 +47,9 @@ export default defineConfig({
     customToolRuntimeWorker(),
     tanstackStart({ spa: { enabled: true } }),
     nitro({
+      // Brotli and gzip copies written at build and served by content negotiation:
+      // the app's JavaScript is a third of its size compressed, at no request cost.
+      compressPublicAssets: { gzip: true, brotli: true },
       rollupConfig: { external: [/^@npmcli\/arborist(?:\/|$)/] },
       // The custom tool builder resolves these from disk at runtime: tsc, and
       // the effect and Node declarations it checks tool modules against. A full
