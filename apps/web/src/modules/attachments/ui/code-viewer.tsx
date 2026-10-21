@@ -1,4 +1,4 @@
-import { code } from "@streamdown/code";
+import { workerCode as code } from "~/ui/code-highlight.ts";
 import { useMemo, useState, type CSSProperties } from "react";
 import { cn } from "~/ui/utils";
 

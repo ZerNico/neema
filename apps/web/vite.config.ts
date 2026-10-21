@@ -39,6 +39,9 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  // The code highlight Worker loads each grammar with a dynamic import, which
+  // only an ES module Worker bundle can split out. Every Worker here is a module.
+  worker: { format: "es" },
   plugins: [
     apiRoutesAreNeverAssets(),
     customToolRuntimeWorker(),

@@ -1,5 +1,5 @@
 import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
+import { workerCode as code } from "~/ui/code-highlight.ts";
 import { math } from "@streamdown/math";
 import type { ComponentProps } from "react";
 import type { DiagramPlugin, Streamdown } from "streamdown";
