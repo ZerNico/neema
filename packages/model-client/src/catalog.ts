@@ -34,6 +34,19 @@ export interface CatalogPricing {
   readonly cacheWrite?: number;
 }
 
+/**
+ * An image model's prices as the catalog states them: USD per 1M tokens, and a
+ * flat USD fee per reference image where the model charges one.
+ */
+export interface CatalogImagePricing {
+  readonly tokens: {
+    readonly textInput: number;
+    readonly imageInput: number;
+    readonly output: number;
+  };
+  readonly perReference?: number;
+}
+
 export interface CatalogModel {
   readonly id: string;
   readonly name: string;
@@ -43,6 +56,7 @@ export interface CatalogModel {
   readonly pricing: CatalogPricing | null;
   /** The image family an `image` entry is called with. */
   readonly imageFamily?: ImageFamily;
+  readonly imagePricing?: CatalogImagePricing | null;
 }
 
 const NO_CAPABILITIES: CatalogCapabilities = {
@@ -53,15 +67,21 @@ const NO_CAPABILITIES: CatalogCapabilities = {
   imageOutput: false,
 };
 
-const imageEntry = (id: string, name: string, family: ImageFamily): CatalogModel => ({
+const imageEntry = (
+  id: string,
+  name: string,
+  family: ImageFamily,
+  imagePricing: CatalogImagePricing | null = null,
+): CatalogModel => ({
   id,
   name,
   type: "image",
   contextLength: null,
   capabilities: NO_CAPABILITIES,
-  // Catalog prices are per token; image models are priced per image by the admin.
+  // Chat token prices; an image model's own go in `imagePricing`.
   pricing: null,
   imageFamily: family,
+  imagePricing,
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -96,6 +116,34 @@ export const catalogPricing = (pricing: unknown): CatalogPricing | null => {
     output: Number.isFinite(output) ? output * 1_000_000 : null,
     ...(Number.isFinite(cacheRead) ? { cacheRead: cacheRead * 1_000_000 } : {}),
     ...(Number.isFinite(cacheWrite) ? { cacheWrite: cacheWrite * 1_000_000 } : {}),
+  };
+};
+
+/**
+ * OpenRouter's image prices: `prompt` per text token, `image_output` per image
+ * token drawn. `image` is ambiguous. Beside `image_token` (FLUX, Grok, Qwen) it
+ * is a flat fee per reference image; without it (Gemini) it is the per-token
+ * price of an image read, the same scale as `prompt`.
+ */
+export const catalogImagePricing = (pricing: unknown): CatalogImagePricing | null => {
+  if (!isRecord(pricing)) return null;
+  const perMillion = (key: string) => {
+    const value = perToken(pricing[key]);
+    return Number.isFinite(value) && value >= 0 ? value * 1_000_000 : undefined;
+  };
+  const output = perMillion("image_output") ?? perMillion("completion");
+  if (output === undefined) return null;
+  const textInput = perMillion("prompt") ?? 0;
+  const perImageToken = perMillion("image_token");
+  const image = perToken(pricing["image"]);
+  const fee = Number.isFinite(image) && image > 0 ? image : undefined;
+  return {
+    tokens: {
+      textInput,
+      imageInput: perImageToken ?? (fee === undefined ? textInput : fee * 1_000_000),
+      output,
+    },
+    ...(perImageToken !== undefined && fee !== undefined ? { perReference: fee } : {}),
   };
 };
 
@@ -282,7 +330,16 @@ const bedrockImage = (raw: unknown): CatalogModel | null => {
 const withOpenRouterImages = (
   listed: ReadonlyArray<CatalogModel>,
   images: ReadonlyArray<unknown>,
+  priced: ReadonlyArray<unknown>,
 ): ReadonlyArray<CatalogModel> => {
+  // The image listing carries no prices; the main one, asked for image output, does.
+  const prices = new Map(
+    priced.flatMap((raw) =>
+      isRecord(raw) && typeof raw["id"] === "string"
+        ? [[raw["id"], catalogImagePricing(raw["pricing"])] as const]
+        : [],
+    ),
+  );
   const names = new Map(
     images.flatMap((raw) =>
       isRecord(raw) && typeof raw["id"] === "string"
@@ -295,12 +352,12 @@ const withOpenRouterImages = (
     ...listed.flatMap((model) => {
       const name = names.get(model.id);
       return name !== undefined && model.type === "chat"
-        ? [model, imageEntry(model.id, name, "openrouter-image")]
+        ? [model, imageEntry(model.id, name, "openrouter-image", prices.get(model.id) ?? null)]
         : [model];
     }),
     ...Array.from(names)
       .filter(([id]) => !known.has(id))
-      .map(([id, name]) => imageEntry(id, name, "openrouter-image")),
+      .map(([id, name]) => imageEntry(id, name, "openrouter-image", prices.get(id) ?? null)),
   ];
 };
 
@@ -379,12 +436,20 @@ export const fetchCatalog = (connection: Connection) =>
           )
           .filter((model) => !seen.has(model.id) && Boolean(seen.add(model.id)));
         if (connection.preset.catalog !== "openrouter") return listed;
-        // A listing of its own; without it the chat models still show.
-        const images = yield* getJson(connection, endpoint(connection, "/images/models")).pipe(
-          Effect.map(listing),
-          Effect.orElseSucceed((): unknown[] => []),
+        // Listings of their own; without them the chat models still show.
+        const [images, priced] = yield* Effect.all(
+          [
+            endpoint(connection, "/images/models"),
+            endpoint(connection, "/models?output_modalities=image"),
+          ].map((url) =>
+            getJson(connection, url).pipe(
+              Effect.map(listing),
+              Effect.orElseSucceed((): unknown[] => []),
+            ),
+          ),
+          { concurrency: 2 },
         );
-        return withOpenRouterImages(listed, images);
+        return withOpenRouterImages(listed, images ?? [], priced ?? []);
       }
     }
   });

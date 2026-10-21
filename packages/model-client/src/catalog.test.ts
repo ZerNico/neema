@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { describe, expect, it } from "vitest";
-import { fetchCatalog } from "./catalog.ts";
+import { catalogImagePricing, fetchCatalog } from "./catalog.ts";
 import { makeConnection } from "./connection.ts";
 
 const bedrock = (profiles: Response, images?: Response) => {
@@ -84,6 +84,7 @@ const catalogOf = (
           id: model.id,
           type: model.type,
           ...(model.imageFamily ? { imageFamily: model.imageFamily } : {}),
+          ...(model.imagePricing ? { imagePricing: model.imagePricing } : {}),
         })),
       ),
       Effect.provide(
@@ -92,6 +93,62 @@ const catalogOf = (
     ),
   );
 };
+
+describe("OpenRouter image prices", () => {
+  it("reads a flat fee per reference only beside a price per image token", () => {
+    expect(
+      catalogImagePricing({
+        prompt: "0",
+        image: "0.01",
+        image_token: "0.00000958",
+        image_output: "0.00000958",
+      }),
+    ).toEqual({ tokens: { textInput: 0, imageInput: 9.58, output: 9.58 }, perReference: 0.01 });
+    // Gemini's `image` is the per-token price of an image read, like `prompt`.
+    expect(
+      catalogImagePricing({
+        prompt: "0.000002",
+        completion: "0.000012",
+        image: "0.000002",
+        image_output: "0.00012",
+      }),
+    ).toEqual({ tokens: { textInput: 2, imageInput: 2, output: 120 } });
+    expect(catalogImagePricing({ prompt: "0.000008", image_output: "0.00003" })).toEqual({
+      tokens: { textInput: 8, imageInput: 8, output: 30 },
+    });
+    expect(catalogImagePricing({ prompt: "-1" })).toBeNull();
+  });
+
+  it("reach the image entries from the listing asked for image output", async () => {
+    const models = await catalogOf("openrouter", {
+      "/models": { data: [] },
+      "/models?output_modalities=embeddings": { data: [] },
+      "/models?output_modalities=image": {
+        data: [
+          {
+            id: "x-ai/grok-imagine-image-2.0",
+            pricing: { image: "0.01", image_token: "0.00001", image_output: "0.00001" },
+          },
+        ],
+      },
+      "/images/models": {
+        data: [
+          { id: "x-ai/grok-imagine-image-2.0", name: "Grok Imagine" },
+          { id: "black-forest-labs/flux.2-pro", name: "FLUX.2 Pro" },
+        ],
+      },
+    });
+    expect(models).toEqual([
+      {
+        id: "x-ai/grok-imagine-image-2.0",
+        type: "image",
+        imageFamily: "openrouter-image",
+        imagePricing: { tokens: { textInput: 0, imageInput: 10, output: 10 }, perReference: 0.01 },
+      },
+      { id: "black-forest-labs/flux.2-pro", type: "image", imageFamily: "openrouter-image" },
+    ]);
+  });
+});
 
 describe("image models in catalogs", () => {
   it("types OpenAI's image models as image by id", async () => {

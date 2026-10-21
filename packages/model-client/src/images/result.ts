@@ -24,6 +24,8 @@ interface Billing {
    * `usage` and `cost` cover only the ones that did.
    */
   readonly incomplete?: true;
+  /** How many calls answered, when a batch was made one image per call. */
+  readonly requests?: number;
 }
 
 export type ImageResult =
@@ -184,6 +186,8 @@ export const repeated = <E, R>(
     const billing = {
       ...optional("usage", usage),
       ...optional("cost", cost),
+      // Each call sent the references again, and a fee per reference is charged per call.
+      requests: results.length,
       ...(failed.length > 0 ||
       results.some((result) => result.incomplete) ||
       partly(usages.length) ||

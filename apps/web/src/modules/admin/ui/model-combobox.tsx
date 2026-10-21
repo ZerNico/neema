@@ -6,6 +6,7 @@ import { fetchProviderCatalog } from "../server/functions.ts";
 import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
 import type { ImageFamily } from "@chat/model-client/image-families";
 import type {
+  ImagePricing,
   ModelCapabilities,
   ModelPricing,
   ModelType,
@@ -31,6 +32,8 @@ export interface CatalogPick {
   custom?: boolean;
   /** The family an image entry is called with. */
   imageFamily?: ImageFamily;
+  /** An image entry's prices, when the catalog stated them. */
+  imagePricing?: ImagePricing | null;
 }
 
 /**

@@ -50,9 +50,9 @@ export type ModelPricing = ({ input: number; output: number } | { input: number;
 };
 
 /**
- * USD for an image model. `tokens` prices an operation whose usage the API
- * reports (per 1M tokens; image input is a subset of input). `perImage` prices
- * one image by quality, `default` for any quality without its own price.
+ * USD for an image model, any part optional. `tokens` prices reported usage (per 1M tokens;
+ * image input is a subset of input), else `perImage` prices each image by quality, `default`
+ * for any quality without its own. `perReference` is added to either.
  */
 export interface ImagePricing {
   readonly tokens?: {
@@ -61,6 +61,8 @@ export interface ImagePricing {
     readonly output: number;
   };
   readonly perImage?: Readonly<Partial<Record<"default" | "low" | "medium" | "high", number>>>;
+  /** A flat fee per reference image, per call. */
+  readonly perReference?: number;
 }
 
 /** The APIs a model can be called on, where its preset lets models differ (Azure). */

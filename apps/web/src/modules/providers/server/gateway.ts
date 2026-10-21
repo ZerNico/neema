@@ -32,8 +32,10 @@ import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
 import type { ScanModelConnection } from "~/modules/tools/schema.ts";
 import { ModelNotFound } from "~/modules/chat/errors.ts";
 import { decodeAwsKeys } from "../aws-keys.ts";
+import type { ImageFamily } from "@chat/model-client/image-families";
 import {
   EMPTY_CAPABILITIES,
+  type ImagePricing,
   type ModelCapabilities,
   type ModelFormat,
   type ModelPricing,
@@ -161,6 +163,9 @@ export interface CatalogModel {
   readonly capabilities: ModelCapabilities;
   /** USD per 1M tokens, when the catalog carries prices (OpenRouter does). */
   readonly pricing: ModelPricing | null;
+  readonly imageFamily?: ImageFamily;
+  /** An image entry's prices, when the catalog carries them. */
+  readonly imagePricing?: ImagePricing | null;
 }
 
 /**

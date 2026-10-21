@@ -39,7 +39,7 @@ export interface ModelSettingsDraft {
   /** Image models: the request shape it is called with, and what it may do. */
   imageFamily: ImageFamily | null;
   imageCapabilities: ImageCapabilities | null;
-  /** USD as typed: per image (`default`, by quality) and per 1M tokens. */
+  /** USD as typed: per image (`default`, by quality), per 1M tokens and per reference. */
   imagePrices: Record<ImagePriceKey, string>;
 }
 
@@ -51,6 +51,7 @@ export const IMAGE_PRICE_KEYS = [
   "textInput",
   "imageInput",
   "output",
+  "reference",
 ] as const;
 export type ImagePriceKey = (typeof IMAGE_PRICE_KEYS)[number];
 
@@ -62,31 +63,37 @@ const emptyImagePrices = (): Record<ImagePriceKey, string> => ({
   textInput: "",
   imageInput: "",
   output: "",
+  reference: "",
 });
 
-/** The families whose APIs report the token usage that token prices apply to. */
-export const takesTokenPrices = (family: ImageFamily | null) =>
-  family === "gpt-image" || family === "gemini-image";
+const IMAGE_QUALITY_KEYS = new Set<string>(["low", "medium", "high"]);
 
 /**
- * Clears the prices the form no longer shows, after a family or quality change:
+ * Clears the prices the form no longer shows, after a quality or edit change:
  * a hidden half-typed price would otherwise block Save with nothing to fix.
  */
 export const shownImagePrices = (
   prices: Record<ImagePriceKey, string>,
-  family: ImageFamily | null,
   qualities: ReadonlyArray<ImageQuality>,
+  edits: boolean,
 ): Record<ImagePriceKey, string> =>
   Object.fromEntries(
     IMAGE_PRICE_KEYS.map((key) => {
       const shown =
-        key === "default" ||
-        (qualities as ReadonlyArray<string>).includes(key) ||
-        (takesTokenPrices(family) &&
-          (key === "textInput" || key === "imageInput" || key === "output"));
+        key === "reference"
+          ? edits
+          : !IMAGE_QUALITY_KEYS.has(key) || (qualities as ReadonlyArray<string>).includes(key);
       return [key, shown ? prices[key] : ""];
     }),
   ) as Record<ImagePriceKey, string>;
+
+/** The draft fields a catalog's image prices fill in; blank where it states none. */
+export const imagePricesFromCatalog = (
+  pricing: ImagePricing | null | undefined,
+): Record<ImagePriceKey, string> => ({
+  ...emptyImagePrices(),
+  ...(pricing ? imagePricesOf(pricing) : {}),
+});
 
 const priceText = (value: number | undefined) => (value === undefined ? "" : String(value));
 
@@ -100,10 +107,11 @@ export const imagePricesOf = (pricing: ImagePricing | null): Record<ImagePriceKe
     textInput: priceText(pricing?.tokens?.textInput),
     imageInput: priceText(pricing?.tokens?.imageInput),
     output: priceText(pricing?.tokens?.output),
+    reference: priceText(pricing?.perReference),
   };
 };
 
-/** Token prices go together or not at all; per-image ones each stand alone. */
+/** Token prices go together or not at all; the others each stand alone. */
 const imagePricingOf = (prices: Record<ImagePriceKey, string>): ImagePricing | null | undefined => {
   const parsed = Object.fromEntries(
     IMAGE_PRICE_KEYS.map((key) => [key, parsePrice(prices[key])]),
@@ -128,8 +136,9 @@ const imagePricingOf = (prices: Record<ImagePriceKey, string>): ImagePricing | n
         }
       : {}),
     ...(Object.keys(perImage).length ? { perImage } : {}),
+    ...(parsed.reference !== null ? { perReference: parsed.reference! } : {}),
   };
-  return pricing.tokens || pricing.perImage ? pricing : null;
+  return Object.keys(pricing).length ? pricing : null;
 };
 
 export const emptyModelSettingsDraft = (): ModelSettingsDraft => ({

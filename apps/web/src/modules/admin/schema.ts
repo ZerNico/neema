@@ -145,6 +145,7 @@ const ImagePricingSchema = Schema.Struct({
       high: Schema.optionalKey(NonNegativePrice),
     }),
   ),
+  perReference: Schema.optionalKey(NonNegativePrice),
 });
 
 const ImageModelSettings = {

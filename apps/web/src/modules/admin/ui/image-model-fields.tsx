@@ -30,7 +30,6 @@ import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import {
   parsePrice,
   shownImagePrices,
-  takesTokenPrices,
   type ImagePriceKey,
   type ModelSettingsDraft,
 } from "./model-settings-draft.ts";
@@ -61,10 +60,10 @@ export function ImageModelFields({
     const merged = { ...caps, ...next };
     patch({
       imageCapabilities: merged,
-      imagePrices: shownImagePrices(draft.imagePrices, draft.imageFamily, merged.qualities),
+      imagePrices: shownImagePrices(draft.imagePrices, merged.qualities, merged.edit !== null),
     });
   };
-  const price = (key: ImagePriceKey, label: string, placeholder = "Unknown") => {
+  const price = (key: ImagePriceKey, label: string, placeholder = "Not set") => {
     const invalid =
       draft.imagePrices[key].trim() !== "" && parsePrice(draft.imagePrices[key]) === undefined;
     return (
@@ -98,7 +97,11 @@ export function ImageModelFields({
               patch({
                 imageFamily: next.id,
                 imageCapabilities: next.defaults,
-                imagePrices: shownImagePrices(draft.imagePrices, next.id, next.defaults.qualities),
+                imagePrices: shownImagePrices(
+                  draft.imagePrices,
+                  next.defaults.qualities,
+                  next.defaults.edit !== null,
+                ),
               });
             }}
             items={families.map((item) => ({ value: item.id, label: item.label }))}
@@ -265,26 +268,19 @@ export function ImageModelFields({
         <FieldLegend variant="label">
           Pricing <OptionalMark />
         </FieldLegend>
-        <FieldDescription>
-          USD, used when the provider doesn’t report a cost. A quality without its own price uses
-          the one per image and counts as an estimate.
-        </FieldDescription>
-        <div className="grid grid-cols-2 gap-3">
-          {price("default", "Per image $")}
-          {caps?.qualities.map((quality) =>
-            price(quality, `${QUALITY_LABELS[quality]} $/image`, "Per image"),
-          )}
+        <FieldDescription>USD, used when the provider doesn’t report a cost.</FieldDescription>
+        <div className="grid grid-cols-3 gap-3">
+          {price("textInput", "Text input $/1M")}
+          {price("imageInput", "Image input $/1M")}
+          {price("output", "Output $/1M")}
         </div>
-        {takesTokenPrices(draft.imageFamily) ? (
-          <>
-            <FieldDescription>Or USD per 1M tokens, which this family reports.</FieldDescription>
-            <div className="grid grid-cols-3 gap-3">
-              {price("textInput", "Text in $/1M")}
-              {price("imageInput", "Image in $/1M")}
-              {price("output", "Output $/1M")}
-            </div>
-          </>
-        ) : null}
+        <div className="grid grid-cols-2 gap-3">
+          {price("default", "Default $/image")}
+          {caps?.qualities.map((quality) =>
+            price(quality, `${QUALITY_LABELS[quality]} $/image`, "Default price"),
+          )}
+          {caps?.edit ? price("reference", "Edit fee $/image", "None") : null}
+        </div>
       </FieldSet>
     </>
   );

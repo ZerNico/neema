@@ -1415,6 +1415,8 @@ describe("provider catalog", () => {
         "https://provider.test/v1/images/models",
         "https://provider.test/v1/models",
         "https://provider.test/v1/models?output_modalities=embeddings",
+        // Image prices: the image listing itself carries none.
+        "https://provider.test/v1/models?output_modalities=image",
       ]);
       expect(catalog.map((model) => [model.id, model.type])).toEqual([
         ["vendor/model", "chat"],

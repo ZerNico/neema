@@ -125,6 +125,8 @@ describe("OpenRouter Images API", () => {
       ],
       usage: { inputTokens: 20, outputTokens: 2000 },
       cost: 0.08,
+      // Each call sent the reference, which a fee per reference charges twice.
+      requests: 2,
     });
   });
 
@@ -160,6 +162,7 @@ describe("OpenRouter Images API", () => {
       cost: 0.04,
       // The failed call may have been billed too, so the totals are not the whole cost.
       incomplete: true,
+      requests: 1,
       shortfall: expect.stringMatching(/^1 of 2 images were not made: /),
     });
   });

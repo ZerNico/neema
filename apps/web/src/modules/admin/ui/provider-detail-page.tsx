@@ -33,6 +33,7 @@ import {
 import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
 import {
   emptyModelSettingsDraft,
+  imagePricesFromCatalog,
   type ModelSettingsDraft,
   modelSettingsFromDraft,
 } from "./model-settings-draft.ts";
@@ -456,6 +457,7 @@ export function AddModelDialog({
                       picked.pricing?.cacheWrite === undefined
                         ? ""
                         : String(picked.pricing.cacheWrite),
+                    imagePrices: imagePricesFromCatalog(picked.imagePricing),
                   }));
                 }}
                 onInput={(value) => {

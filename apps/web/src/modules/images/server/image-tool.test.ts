@@ -17,7 +17,7 @@ describe("imageCost", () => {
     expect(
       imageCost(
         { perImage: { default: 1 } },
-        { quality: "high", qualities: ["high"] },
+        { quality: "high", qualities: ["high"], references: 0 },
         { cost: 0.07, images: 2 },
       ),
     ).toEqual({ cost: 0.07, costSource: "provider" });
@@ -27,7 +27,7 @@ describe("imageCost", () => {
     expect(
       imageCost(
         { tokens: { textInput: 5, imageInput: 10, output: 40 } },
-        { quality: "high", qualities: ["high"] },
+        { quality: "high", qualities: ["high"], references: 0 },
         {
           images: 1,
           usage: { inputTokens: 300, imageInputTokens: 100, outputTokens: 1000 },
@@ -39,42 +39,98 @@ describe("imageCost", () => {
   it("uses the quality's price, and the default one only as an estimate", () => {
     const pricing = { perImage: { default: 0.04, high: 0.17 } };
     expect(
-      imageCost(pricing, { quality: "high", qualities: ["low", "high"] }, { images: 2 }),
+      imageCost(
+        pricing,
+        { quality: "high", qualities: ["low", "high"], references: 0 },
+        { images: 2 },
+      ),
     ).toEqual({
       cost: 0.34,
       costSource: "pricing",
     });
     expect(
-      imageCost(pricing, { quality: "low", qualities: ["low", "high"] }, { images: 2 }),
+      imageCost(
+        pricing,
+        { quality: "low", qualities: ["low", "high"], references: 0 },
+        { images: 2 },
+      ),
     ).toEqual({
       cost: 0.08,
       costSource: "estimate",
     });
     // A model without a quality knob has one price, which is exact.
-    expect(imageCost(pricing, { quality: null, qualities: [] }, { images: 1 })).toEqual({
+    expect(
+      imageCost(pricing, { quality: null, qualities: [], references: 0 }, { images: 1 }),
+    ).toEqual({
       cost: 0.04,
       costSource: "pricing",
     });
     // One that has them but was not told one: the provider picked, so it is a guess.
     expect(
-      imageCost(pricing, { quality: null, qualities: ["low", "high"] }, { images: 1 }),
+      imageCost(
+        pricing,
+        { quality: null, qualities: ["low", "high"], references: 0 },
+        { images: 1 },
+      ),
     ).toEqual({
       cost: 0.04,
       costSource: "estimate",
     });
   });
 
-  it("leaves the cost unknown without prices or images", () => {
-    expect(imageCost(null, { quality: null, qualities: [] }, { images: 1 })).toEqual({
-      cost: null,
-      costSource: null,
-    });
+  it("adds the fee per reference to either price, once per call that sent them", () => {
+    const tokens = { textInput: 5, imageInput: 5, output: 40 };
     expect(
-      imageCost({ perImage: { default: 1 } }, { quality: null, qualities: [] }, { images: 0 }),
+      imageCost(
+        { tokens, perReference: 0.01 },
+        { quality: null, qualities: [], references: 2 },
+        { images: 3, requests: 3, usage: { inputTokens: 0, outputTokens: 1_000_000 } },
+      ),
+    ).toEqual({ cost: 40 + 0.06, costSource: "pricing" });
+    expect(
+      imageCost(
+        { perImage: { default: 0.03 }, perReference: 0.01 },
+        { quality: null, qualities: [], references: 1 },
+        { images: 1 },
+      ),
+    ).toEqual({ cost: 0.04, costSource: "pricing" });
+  });
+
+  it("falls back to the price per image when tokens are priced but none were reported", () => {
+    expect(
+      imageCost(
+        { tokens: { textInput: 5, imageInput: 5, output: 40 }, perImage: { default: 0.03 } },
+        { quality: null, qualities: [], references: 0 },
+        { images: 2 },
+      ),
+    ).toEqual({ cost: 0.06, costSource: "pricing" });
+  });
+
+  it("leaves the cost unknown without prices or images", () => {
+    expect(imageCost(null, { quality: null, qualities: [], references: 0 }, { images: 1 })).toEqual(
+      {
+        cost: null,
+        costSource: null,
+      },
+    );
+    expect(
+      imageCost(
+        { perImage: { default: 1 } },
+        { quality: null, qualities: [], references: 0 },
+        { images: 0 },
+      ),
     ).toEqual({
       cost: null,
       costSource: null,
     });
+    // A fee alone is only part of what the call cost.
+    expect(
+      imageCost(
+        { perReference: 0.01 },
+        { quality: null, qualities: [], references: 1 },
+        { images: 1 },
+      ),
+    ).toEqual({ cost: null, costSource: null });
   });
 });
 

@@ -16,11 +16,17 @@ still does, beside the tool.
   whose family its preset no longer hosts is never offered.
 - `image_capabilities` is what an admin allows, always clipped to the family's limits where it is
   read (`effectiveImageCapabilities`), so it can narrow a family and never widen it.
-- `image_pricing` is its own column, so no token-pricing reader ever sees an image row. Cost per
-  call is the provider's own figure, else token prices when the API reported usage, else the
-  quality's price per image, else the `default` one marked `estimate`. A quality the provider
-  picked itself (none was sent, on a family that has them) is an estimate too. Token prices are
-  offered for the families whose APIs report usage (GPT Image, Gemini).
+- `image_pricing` is its own column, so no token-pricing reader ever sees an image row. Every
+  family takes any mix of token prices, prices per image by quality, and a fee per reference
+  image. Cost per call is the provider's own figure, else token prices when the API reported
+  usage, else the quality's price per image, else the `default` one marked `estimate`. A quality
+  the provider picked itself (none was sent, on a family that has them) is an estimate too. The
+  reference fee is added to either, once per call, since a batch made one image per call sends
+  the references with each. A fee alone is not a cost, so the cost stays unknown.
+- OpenRouter's prices fill the form when a model is picked. They are per token, from its
+  listing asked for image output, since its image listing has none. Its `image` field means
+  two things: a fee per reference where `image_token` is listed too, else (Gemini) the price per
+  token of reading an image.
 
 ## Which model draws
 

@@ -170,18 +170,19 @@ const oneOf = <T extends string>(values: ReadonlyArray<T>, value: unknown): T | 
 
 /**
  * Cost of one operation: the provider's own figure, else token prices when the
- * API reported usage, else the per-image price. A quality without its own
- * price falls back to `default` and is marked an estimate, and so is one the
- * provider picked itself (`quality` null on a family that has `qualities`).
+ * API reported usage, else the per-image price, either plus the fees per reference
+ * each call sent. A fee alone is not the cost, so that stays unknown.
  */
 export const imageCost = (
   pricing: ImagePricing | null,
   request: Pick<NormalizedImageRequest, "quality"> & {
     readonly qualities: ReadonlyArray<string>;
+    readonly references: number;
   },
-  result: Pick<ImageResult, "cost" | "usage"> & { readonly images: number },
+  result: Pick<ImageResult, "cost" | "usage" | "requests"> & { readonly images: number },
 ): { cost: number | null; costSource: CostSource | null } => {
   if (result.cost !== undefined) return { cost: result.cost, costSource: "provider" };
+  const fees = (pricing?.perReference ?? 0) * request.references * (result.requests ?? 1);
   if (pricing?.tokens && result.usage) {
     const image = result.usage.imageInputTokens ?? 0;
     const text = result.usage.textInputTokens ?? result.usage.inputTokens - image;
@@ -190,15 +191,17 @@ export const imageCost = (
         (text * pricing.tokens.textInput +
           image * pricing.tokens.imageInput +
           result.usage.outputTokens * pricing.tokens.output) /
-        1_000_000,
+          1_000_000 +
+        fees,
       costSource: "pricing",
     };
   }
+  // A quality without its own price, or one the provider picked itself, is an estimate.
   const exact = request.quality ? pricing?.perImage?.[request.quality] : undefined;
   const price = exact ?? pricing?.perImage?.default;
   if (price === undefined || result.images === 0) return { cost: null, costSource: null };
   return {
-    cost: price * result.images,
+    cost: price * result.images + fees,
     costSource:
       exact !== undefined || (request.quality === null && request.qualities.length === 0)
         ? "pricing"
@@ -321,7 +324,11 @@ export function prepareImageTool(input: {
                 input.model.pricing,
                 // The family's, not the admin's: with every quality hidden the
                 // provider still picks one.
-                { quality: request.quality, qualities: family.limits.qualities },
+                {
+                  quality: request.quality,
+                  qualities: family.limits.qualities,
+                  references: request.references.length,
+                },
                 { ...done, images },
               )
             : { cost: null, costSource: null };
