@@ -130,14 +130,19 @@ const FIELD_ALIASES: Record<string, string> = {
   character: "fromCharacter",
 };
 
-// Models write "no value" as null and small integers as strings. Both mean the
-// key is absent or the number itself; refusing them only burns a round trip.
+/** The one field where empty text is a value: an empty document, or a block emptied. */
+const absentWhenEmpty = (key: string) => key !== "content";
+
+// Models write "no value" as null, or as "" when they fill every key offered, and
+// small integers as strings. All mean the key is absent or the number itself;
+// refusing them only burns a round trip, and a model that fills keys does it again.
 const lenient = (raw: unknown): unknown => {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
   const out: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(raw as Record<string, unknown>)) {
     const key = FIELD_ALIASES[rawKey] ?? rawKey;
     if (value === null || value === undefined) continue;
+    if (value === "" && absentWhenEmpty(key)) continue;
     if (key === "fromCharacter" && typeof value === "string" && /^\d+$/.test(value))
       out[key] = Number(value);
     else out[key] = value;
@@ -519,6 +524,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       const title = fields.get("title");
       if (!title?.complete) return;
       // A document from a file is made by the call, once the file has been read.
+      if (fields.get("fromFile")?.complete === false) return;
       if (keys.includes("fromFile")) {
         state.failed = true;
         return;
@@ -627,7 +633,12 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       if (!state || state.failed || !input.liveGuard) return;
       state.raw += delta;
       const fields = fieldsOf(state.raw);
-      const keys = keysOf(state.raw);
+      // An empty field is absent, as the decoded call will read it.
+      const empty = [...fields]
+        .filter(([key, field]) => field.complete && field.value === "" && absentWhenEmpty(key))
+        .map(([key]) => key);
+      for (const key of empty) fields.delete(key);
+      const keys = keysOf(state.raw).filter((key) => !empty.includes(key));
       if (state.name === "edit_document") yield* liveEdit(state, fields, keys);
       else yield* liveCreate(state, fields, keys);
     }).pipe((effect) => {

@@ -41,6 +41,8 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
     const nodes: Node[] = [];
     parsed.forEach((child) => nodes.push(child));
     for (const intent of outline) nodes.push(documentSchema.nodes.pending!.create({ intent }));
+    // As the service does: an empty document still holds one empty paragraph.
+    if (!nodes.length) nodes.push(documentSchema.nodes.paragraph!.create());
     return ensureIds(new Transform(documentSchema.node("doc", null, nodes)), mint).doc;
   };
   for (const row of initial)
@@ -241,6 +243,50 @@ describe("document tools", () => {
     );
     expect(view).toContain('<h1 id="b1">Brief</h1>');
     expect(view).toContain(`<pending id="${(created.blocks as string[])[0]}" intent="Goals"/>`);
+  });
+
+  it("reads an empty field as absent, as a model filling every offered key sends it", async () => {
+    const { service } = fakeService();
+    const tools = await prepare(service);
+    const created = await call(tools, "create_document", {
+      title: "Brief",
+      scope: "",
+      fromFile: "",
+      content: "# Brief\n\nOne line.",
+      outline: ["Goals"],
+    });
+    expect(created).toMatchObject({ outcome: "created", documentId: "doc-1" });
+    send(tools);
+    const filled = await call(tools, "edit_document", {
+      documentId: "",
+      target: (created.blocks as string[])[0],
+      through: "",
+      position: "",
+      find: "",
+      pending: "",
+      content: "## Goals\n\nShip it.",
+    });
+    expect(filled).toMatchObject({ outcome: "updated", revision: 1 });
+  });
+
+  it("streams a creation whose fromFile arrives empty, once that field has closed", async () => {
+    const { service, rows } = fakeService();
+    const tools = await Effect.runPromise(
+      prepareDocumentTools({
+        service,
+        userId: "user",
+        conversationId: CONVERSATION,
+        messageId: "message-1",
+        writeGuard: () => Effect.void,
+        liveGuard: () => Effect.void,
+      }),
+    );
+    tools.live.start("call-1", "create_document");
+    await Effect.runPromise(tools.live.delta("call-1", '{"title":"Brief","fromFile":"'));
+    expect(rows.size).toBe(0);
+    await Effect.runPromise(tools.live.delta("call-1", '","content":"One'));
+    expect([...rows.values()].map((row) => row.document.title)).toEqual(["Brief"]);
+    await Effect.runPromise(tools.live.abandon);
   });
 
   it("fills a planned section by its id and shows only what changed after", async () => {
