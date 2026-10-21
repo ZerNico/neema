@@ -131,7 +131,7 @@ function SourceRow({ source, excerpt }: { source: ToolSource; excerpt: boolean }
       </span>
       <span className="block text-sm leading-snug font-medium wrap-anywhere">{label}</span>
       {excerpt && source.snippet?.trim() ? (
-        <span className="text-muted-foreground mt-1.5 line-clamp-3 block text-xs leading-relaxed wrap-anywhere">
+        <span className="text-muted-foreground mt-1.5 line-clamp-3 text-xs leading-relaxed wrap-anywhere">
           {source.snippet}
         </span>
       ) : null}
