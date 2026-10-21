@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
+  getMyLibrary,
   getMyLimits,
   getMyStorage,
   getStorageQuotas,
@@ -26,4 +27,9 @@ export const myStorageQuery = queryOptions({
 export const storageQuotasQuery = queryOptions({
   queryKey: ["admin", "storage-quotas"],
   queryFn: () => getStorageQuotas(),
+});
+
+export const myLibraryQuery = queryOptions({
+  queryKey: ["my-storage", "library"],
+  queryFn: () => getMyLibrary(),
 });

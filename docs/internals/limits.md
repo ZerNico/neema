@@ -81,3 +81,9 @@ that zone), never the server's, like every other due-ness check here.
   document's owner. A refusal fails the import with its reason rather than dropping pictures.
 - It is soft by up to one batch: uploads at the same moment each see the same total, and
   holding a lock across storing bytes is not worth that.
+- Settings › Storage lists the person's 500 largest files, as one row per blob with every
+  place it is used (`StorageLibrary`). Only files the person sent and unsent uploads are
+  deleted there, and only when every place a file is in is one of those. Otherwise it links
+  to where the file is managed. A file in several places is taken out of each in turn, so a
+  refusal partway leaves the places before it cleared. "Empty now" purges
+  the person's deleted chats through the sweep's own purge, giving up their Undo.

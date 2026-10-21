@@ -386,6 +386,8 @@ export class ChatService extends Context.Service<
     }): Effect.Effect<ReadonlyArray<{ id: string; title: string | null; archivedAt: Date }>>;
     /** One pass of the expired-chat sweep; exposed so tests need not wait for it. */
     sweepExpired(): Effect.Effect<void>;
+    /** Purges the person's deleted chats now, instead of after their grace period. */
+    emptyDeleted(input: { userId: string }): Effect.Effect<void>;
     /**
      * Fires one schedule into a fresh conversation or an existing one.
      * Internal: no composer concerns (attachments, desktop, clarifications)
@@ -1466,6 +1468,7 @@ function makeChatService() {
       archiveAll: lifecycle.archiveAll,
       listArchived: lifecycle.listArchived,
       sweepExpired: lifecycle.sweepExpired,
+      emptyDeleted: lifecycle.emptyDeleted,
       runScheduledTurn,
     });
   });

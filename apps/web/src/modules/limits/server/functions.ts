@@ -6,11 +6,16 @@ import {
   EveryoneStorageInput,
   GroupStorageInput,
   LimitIdInput,
+  LibraryFileInput,
   SaveLimitInput,
   TimeZoneInput,
 } from "../schema.ts";
 import { UsageLimits } from "./service.ts";
 import { StorageQuota } from "./storage.ts";
+import { StorageLibrary } from "./library.ts";
+import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { ChatService } from "~/modules/chat/server/service.ts";
+import { SyncBus } from "~/modules/sync/server/bus.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -74,4 +79,37 @@ export const setGroupStorage = createServerFn({ method: "POST" })
         quota.setGroup(data.groupId, "bytes" in data ? data.bytes : undefined),
       ),
     ),
+  );
+
+/** Every file the signed-in person stores, largest first, with where each is used. */
+export const getMyLibrary = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(StorageLibrary.use((library) => library.list(context.session.user.id))),
+  );
+
+/** Takes a file out of a sent message in the person's own chat, freeing its room. */
+export const removeChatFile = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(LibraryFileInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.gen(function* () {
+        const userId = context.session.user.id;
+        const { conversationId } = yield* AttachmentService.use((service) =>
+          service.removeFromChat({ userId, attachmentId: data.attachmentId }),
+        );
+        // A tab with the chat open drops the file instead of offering a dead link.
+        yield* SyncBus.use((bus) =>
+          bus.publish(userId, { type: "conversation.updated", conversationId }),
+        );
+      }),
+    ),
+  );
+
+/** Purges the person's deleted chats now, rather than when their Undo runs out. */
+export const emptyDeletedChats = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(ChatService.use((chat) => chat.emptyDeleted({ userId: context.session.user.id }))),
   );

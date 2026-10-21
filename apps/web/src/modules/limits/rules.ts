@@ -127,3 +127,6 @@ export const formatBytes = (bytes: number) => {
     ? `${value} bytes`
     : `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 };
+
+/** The largest files Settings › Storage lists; past it the list says it is cut. */
+export const LIBRARY_LISTED = 500;

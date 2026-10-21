@@ -25,3 +25,7 @@ export const GroupStorageInput = Schema.Struct({
   /** Absent hands the group back to everyone's quota; null lifts it. */
   bytes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 });
+
+export const LibraryFileInput = Schema.Struct({
+  attachmentId: Schema.String.check(Schema.isMaxLength(64)),
+});

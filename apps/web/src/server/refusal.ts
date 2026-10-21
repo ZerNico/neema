@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { AgentNotAvailable, AgentRejected } from "~/modules/agents/errors.ts";
 import type {
+  AttachmentBusy,
   AttachmentNotAvailable,
   AttachmentRejected,
   AttachmentUnsupported,
@@ -130,6 +131,7 @@ export type Refusable =
   | ToolUnavailable
   | UnhostedImageFamily
   | WorkDesktopRequired
+  | AttachmentBusy
   | UsageLimitReached
   | LimitRejected
   | StorageFull;
@@ -154,6 +156,7 @@ const refusals: RefusalTable = {
   AgentNotAvailable: notFound,
   AgentRejected: because(400),
   AttachmentNotAvailable: notFound,
+  AttachmentBusy: () => ({ status: 409, body: "Stop the answer in that chat first." }),
   AttachmentRejected: (error) => ({
     status: error.cause === "size" ? 413 : 415,
     body: error.reason,

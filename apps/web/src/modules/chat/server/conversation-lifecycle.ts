@@ -203,6 +203,17 @@ export const makeConversationLifecycle = Effect.gen(function* () {
     }
   });
 
+  // "Empty now" for the person's own deleted chats: the same purge as the sweep, without its wait.
+  const emptyDeleted = Effect.fn("ChatService.emptyDeleted")(function* (input: { userId: string }) {
+    // A hundred at a time keeps one request short; the sweep takes any left.
+    for (const { id } of yield* repo.listDeleted(input.userId)) {
+      const purged = yield* repo.purgeDeleted(id, input.userId);
+      if (!purged) continue;
+      yield* attachmentService.deleteBlobs(purged.keys);
+      yield* sync.publish(purged.userId, { type: "conversation.purged", conversationId: id });
+    }
+  });
+
   const startSweeper = (interval: Duration.Duration) =>
     sweepExpired().pipe(
       Effect.catchCause((cause) => Effect.logError("expired chat sweep failed", cause)),
@@ -239,6 +250,7 @@ export const makeConversationLifecycle = Effect.gen(function* () {
     archiveAll,
     listArchived,
     sweepExpired,
+    emptyDeleted,
     startSweeper,
   };
 });

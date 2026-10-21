@@ -47,19 +47,23 @@ what a failed one left.
 ## Grace, the toast and the purge
 
 - `DELETED_CHAT_GRACE_SECONDS` (two minutes) is much longer than the eight-second toast, which
-  also pauses on hover. Undo never races the purge in practice. When it does lose,
-  `restoreConversation` returns false and the toast says the chat is already gone.
+  also pauses on hover, so the sweep practically never races Undo. "Empty now" in Settings ›
+  Storage can: it purges the person's deleted chats at once, to free their files, and gives up
+  their Undo, perhaps from another tab while a toast is still up. Either way a losing Undo has
+  `restoreConversation` return false, and the toast says the chat is already gone.
 - The delete returns its mark (`deleteMark`: `deleted_at` in UTC to the microsecond), and Undo
   must name it. An Undo held from an earlier delete therefore cannot reverse a later one.
 - The purge is the [temporary-chat](temporary-chats.md) sweep, generalised:
   `ChatService.sweepExpired` every `ConversationSweepInterval` (a minute) purges deleted chats
-  past their grace and expired temporary chats alike, through `deleteLocked`. Research is
+  past their grace and expired temporary chats alike, through `deleteLocked`. "Empty now"
+  (`ChatService.emptyDeleted`) goes through the same `deleteLocked`, a hundred chats a request. Research is
   settled, attachments and queued files are released into `blob_cleanup_intents`, all under the
   row lock with the condition checked again, so an Undo landing after the listing wins.
   Grace is judged by the database clock, like every other expiry here.
 - A deleted chat is purged on its grace alone. The temporary-chat expiry ignores deleted chats,
   or an idle temporary chat would be purged under its own Undo. A streaming row inside its
-  lease does not hold the purge back either, since the delete already stopped it.
+  lease does not hold the purge back either: the delete stopped it, and an answer still dying
+  when "Empty now" lands finds its row gone, its research settled under the purge's lock.
 
 ## Events and the desktop workspace
 
