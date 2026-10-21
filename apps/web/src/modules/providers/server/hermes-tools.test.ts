@@ -182,6 +182,29 @@ describe("hermesToolCalls", () => {
     }),
   );
 
+  it.effect("drops an empty optional the tool cannot take, as native calls do", () =>
+    Effect.gen(function* () {
+      const search = Tool.make("web_search", {
+        parameters: Schema.Struct({
+          queries: Schema.Array(Schema.String),
+          range: Schema.optionalKey(Schema.Literals(["day", "week"])),
+        }),
+      });
+      const out = Array.from(
+        yield* Stream.runCollect(
+          hermesToolCalls(
+            Stream.fromIterable([
+              text(call("web_search", { queries: ["x"], range: "" })),
+              finish(),
+            ]),
+            { tools: [search], nextId: Effect.succeed("call_empty") },
+          ),
+        ),
+      );
+      expect(calls(out)).toEqual([{ name: "web_search", params: { queries: ["x"] } }]);
+    }),
+  );
+
   it.effect("handles tags and JSON split across chunk boundaries", () =>
     Effect.gen(function* () {
       const whole = `Looking it up. ${call("read_url", { urls: ["https://a.test"] })}`;

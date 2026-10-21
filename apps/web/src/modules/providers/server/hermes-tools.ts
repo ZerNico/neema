@@ -1,3 +1,4 @@
+import { emptyOptionalsDropper } from "@chat/model-client";
 import { Context, Effect, Layer, Schema, Stream } from "effect";
 import {
   type AiError,
@@ -188,6 +189,8 @@ const createHermesParser = (input: {
   readonly nextId: Effect.Effect<string>;
 }) => {
   const known = new Set([...input.tools.map((tool) => tool.name), ...(input.callable ?? [])]);
+  // As the model client does for native calls.
+  const dropEmpty = emptyOptionalsDropper(input.tools);
   let pending = "";
   let inCall = false;
   let inFence = false;
@@ -214,7 +217,7 @@ const createHermesParser = (input: {
       }
     }
     if (typeof params !== "object" || params === null || Array.isArray(params)) return null;
-    return { name, params };
+    return { name, params: dropEmpty(name, params) };
   };
 
   const emitCall = (out: Array<Part>, call: ParsedCall, id: string) => {

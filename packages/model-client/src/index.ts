@@ -12,6 +12,7 @@ export {
 export { parseErrorBody, retryAfter, type ModelClientError } from "./errors.ts";
 export * from "./images/index.ts";
 export { foldParts, layer, make } from "./language-model.ts";
+export { dropEmptyOptionals, emptyOptionalsDropper } from "./tool-params.ts";
 export {
   AUTH_KINDS,
   bedrockRuntimeOrigin,

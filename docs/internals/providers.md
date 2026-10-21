@@ -56,6 +56,14 @@ Hermes polyfill and tests are unchanged. Adding a service is a preset, not a bra
   and a transport chunk containing several bounded events is not capped as one event.
 - **Calls run against the whole toolkit.** A `oneOf` choice narrows what is advertised; a call
   to any toolkit tool still runs, which deferred tools rely on.
+- **An empty optional is absent.** Some models fill every key they are offered and write the
+  ones they mean to leave out as `""`. A key the advertised schema cannot take empty (a minimum
+  length, an enum, a format, a non-string type) is dropped before the toolkit decodes the call,
+  in the client for native calls and in the Hermes parser for text ones. Without that, a strict
+  schema fails the whole generation, and a handler that decodes leniently answers with a
+  correction the model repeats. A required key, or one where `""` is a value, stays as written.
+  Tools advertised through `advertisedAs` with a looser schema than they decode still own their
+  own rule (the document tools do).
 - **Refusals are text**, tagged `modelClient.refusal` in part metadata.
 - **Inline reasoning is split only where it opens the answer.** Models that write their
   reasoning as a leading `<think>` block get it on the reasoning track, on every service; a

@@ -8,6 +8,7 @@ import { MODULE } from "./errors.ts";
 import { streamMessages } from "./messages.ts";
 import { formatFor } from "./preset.ts";
 import { streamResponses } from "./responses.ts";
+import { emptyOptionalsDropper } from "./tool-params.ts";
 
 const isModelNotSupported = (error: AiError.AiError) =>
   error.reason._tag === "InvalidRequestError" && /model not supported/i.test(error.message);
@@ -105,8 +106,15 @@ export const make = (connection: Connection, call: ModelCall) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
     const base = streamFor(connection, call);
-    const stream = (options: LanguageModel.ProviderOptions) =>
-      base(options).pipe(Stream.provideService(HttpClient.HttpClient, http));
+    const stream = (options: LanguageModel.ProviderOptions) => {
+      const drop = emptyOptionalsDropper(options.tools);
+      return base(options).pipe(
+        Stream.provideService(HttpClient.HttpClient, http),
+        Stream.map((part) =>
+          part.type === "tool-call" ? { ...part, params: drop(part.name, part.params) } : part,
+        ),
+      );
+    };
     return yield* LanguageModel.make({
       streamText: stream,
       generateText: (options) =>
