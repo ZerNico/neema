@@ -34,7 +34,7 @@ export const Route = createFileRoute("/api/documents/$documentId/images/$attachm
         // anything shared may keep a copy past this response.
         return fileResponse(
           { bytes: file.bytes, name: file.fileName, mediaType: file.mediaType },
-          { inline: true, cache: "revocable" },
+          { inline: true, cache: "never" },
         );
       },
     },

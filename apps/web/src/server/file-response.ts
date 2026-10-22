@@ -12,10 +12,12 @@ export function fileResponse(
     /** Images and PDFs open in the browser; everything else downloads regardless. */
     readonly inline?: boolean;
     /**
-     * `immutable` only for content addressed by an id nobody's access to can
-     * change; anything whose access can be taken away is `revocable`.
+     * Who may read stored bytes can always change, so nothing is reused
+     * unchecked. An `etag` lets the browser keep bytes that never change under
+     * it, reusing them only after the route has checked access again and
+     * answered `notModified`. `never` stores nothing.
      */
-    readonly cache: "immutable" | "revocable";
+    readonly cache: "never" | { readonly etag: string };
   },
 ): Response {
   const kind = attachmentKind(file.mediaType);
@@ -34,11 +36,28 @@ export function fileResponse(
       // ever drift, the response must not be malformed.
       "Content-Length": String(file.bytes.byteLength),
       "Content-Disposition": `${mode}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
-      "Cache-Control":
-        options.cache === "immutable"
-          ? "private, max-age=31536000, immutable"
-          : "private, no-store",
+      ...cacheHeaders(options.cache),
       "X-Content-Type-Options": "nosniff",
     },
   });
 }
+
+const cacheHeaders = (cache: "never" | { readonly etag: string }): Record<string, string> =>
+  cache === "never"
+    ? { "Cache-Control": "private, no-store" }
+    : { "Cache-Control": "private, no-cache", ETag: cache.etag };
+
+/** True when the browser already holds the bytes tagged `etag` (RFC 9110 weak comparison). */
+export const holdsCurrent = (request: Request, etag: string) => {
+  const header = request.headers.get("If-None-Match");
+  if (!header) return false;
+  const bare = etag.replace(/^W\//, "");
+  return header
+    .split(",")
+    .map((tag) => tag.trim())
+    .some((tag) => tag === "*" || tag.replace(/^W\//, "") === bare);
+};
+
+/** The answer to a browser whose copy is current, sent only after access was checked again. */
+export const notModified = (etag: string) =>
+  new Response(null, { status: 304, headers: cacheHeaders({ etag }) });

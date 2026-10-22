@@ -26,9 +26,12 @@ declared type, and only the kinds we understand are shown or handed to a model.
   versions, knowledge versions, skill files) answers through `fileResponse`
   (`server/file-response.ts`): `nosniff`, a `file` sent as `application/octet-stream` whatever
   its stored type says, and only images and PDFs ever inline. HTML and SVG are active content
-  on this origin and must never render there. Only `/api/files` caches, because who may read an
-  attachment there never changes while it exists. A route whose access can be revoked caches
-  nothing, a document's images included.
+  on this origin and must never render there. Who may read stored bytes can always change (a
+  ban, a deleted chat, a file taken out for room), so no route lets a browser reuse bytes
+  unchecked. `/api/files` tags an attachment's bytes, which never change, with its id: the browser
+  keeps them and asks again each time, and the route checks access before answering `304`
+  without reading the store. Every other route stores nothing, a document's images included.
+  Signing out sends `Clear-Site-Data: "cache"`, so the kept bytes leave a shared computer too.
   Office files may also be previewed through separate read-only endpoints; the original
   remains a download. See [presentations](presentations.md).
 

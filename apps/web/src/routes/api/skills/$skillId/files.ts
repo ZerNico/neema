@@ -31,7 +31,7 @@ export const Route = createFileRoute("/api/skills/$skillId/files")({
             name: file.path.slice(file.path.lastIndexOf("/") + 1),
             mediaType: file.mediaType,
           },
-          { cache: "revocable" },
+          { cache: "never" },
         );
       },
     },

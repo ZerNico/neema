@@ -25,7 +25,7 @@ export const Route = createFileRoute("/api/knowledge/$collectionId/$documentId/$
         // immutable permission decision in the browser or a shared cache.
         return fileResponse(
           { bytes: file.bytes, name: file.fileName, mediaType: file.mediaType },
-          { cache: "revocable" },
+          { cache: "never" },
         );
       },
     },

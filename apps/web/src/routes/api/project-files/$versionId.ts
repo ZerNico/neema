@@ -22,7 +22,7 @@ export const Route = createFileRoute("/api/project-files/$versionId")({
         );
         if (!file) return new Response("Not found", { status: 404 });
         // Access can be taken away, so nothing is cached.
-        return fileResponse(file, { cache: "revocable" });
+        return fileResponse(file, { cache: "never" });
       },
     },
   },
