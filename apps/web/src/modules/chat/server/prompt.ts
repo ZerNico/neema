@@ -4,6 +4,7 @@ import type { AssistantFile } from "../assistant-output.ts";
 import { isEmptyUnit, METADATA_KEY, type ReplayUnit } from "@chat/model-client";
 import type { ProviderReplay } from "./provider-replay.ts";
 import type { ChatRepo, ToolCallRow } from "./repo.ts";
+import { replayedArguments } from "./stored-arguments.ts";
 import { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { Effect } from "effect";
 import type { Prompt } from "effect/unstable/ai";
@@ -419,7 +420,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
             type: "tool-call",
             id: call.providerCallId,
             name: call.toolName,
-            params: call.arguments,
+            params: replayedArguments(call.arguments),
           });
         messages.push({
           role: "assistant",
@@ -644,11 +645,10 @@ const applicationRow = (call: ResumedCall) =>
   call.providerCallId.startsWith("skill-context:");
 
 const recordLine = (call: ResumedCall) => {
+  const shown = replayedArguments(call.arguments);
   const args =
-    call.arguments !== null &&
-    typeof call.arguments === "object" &&
-    Object.keys(call.arguments).length > 0
-      ? ` with ${clipJson(call.arguments, 500)}`
+    shown !== null && typeof shown === "object" && Object.keys(shown).length > 0
+      ? ` with ${clipJson(shown, 500)}`
       : "";
   if (call.status === "complete")
     return `- ${call.toolName}${args}: completed. Result summary: ${clipJson(call.result ?? null, 2000)}`;

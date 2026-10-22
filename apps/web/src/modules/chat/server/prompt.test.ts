@@ -1142,6 +1142,24 @@ describe("resumedRounds", () => {
     ).toBe(content);
   });
 
+  it("records a call's arguments without the placeholders for what was left out", () => {
+    const [round] = resumedRounds({
+      content: "",
+      calls: [
+        call({
+          turnIndex: 0,
+          toolName: "create_file",
+          arguments: { name: "a.csv", content: { $omitted: "text", chars: 900, sha256: "ab" } },
+        }),
+      ],
+      files: [],
+      steers: [],
+    });
+    const record = round!.messages[0]!.content;
+    expect(record).toContain('create_file with {"name":"a.csv"}');
+    expect(record).not.toContain("$omitted");
+  });
+
   it("tells an interrupted call from one that failed on its own", () => {
     const [round] = resumedRounds({
       content: "",

@@ -7,6 +7,29 @@ const ARRAY_ITEMS = 40;
 const DEPTH = 8;
 /** The whole stored copy; past it only the argument names are kept. */
 const STORED_CHARS = 4096;
+const isOmitted = (value: unknown) =>
+  value !== null && typeof value === "object" && "$omitted" in value;
+
+function withoutOmitted(value: JsonValue): JsonValue {
+  if (Array.isArray(value))
+    return value.filter((item) => !isOmitted(item)).map((item) => withoutOmitted(item));
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, item]) => !isOmitted(item))
+      .map(([key, item]) => [key, withoutOmitted(item)]),
+  );
+}
+
+/**
+ * A stored call's arguments as history replays them to the model: what was
+ * left out is absent, not its placeholder. Models copy earlier calls, and a
+ * copied placeholder went through as the content itself (an image prompt reading
+ * `{"$omitted": …}`); a copied absence meets the handler's own "missing" answer.
+ */
+export const replayedArguments = (stored: JsonValue): JsonValue =>
+  isOmitted(stored) ? {} : withoutOmitted(stored);
+
 /** A failed call's full arguments, kept a week for debugging. */
 const DEBUG_CHARS = 64 * 1024;
 

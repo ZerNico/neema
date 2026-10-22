@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { debugArguments, storedArguments } from "./stored-arguments.ts";
+import { debugArguments, replayedArguments, storedArguments } from "./stored-arguments.ts";
 
 describe("a stored call's arguments", () => {
   it("keeps what was done and replaces written content with its size and hash", () => {
@@ -55,5 +55,20 @@ describe("a stored call's arguments", () => {
     expect(debugArguments({ content: "z".repeat(70_000) })).toEqual({
       content: { $omitted: "text", chars: 70_000, sha256: expect.any(String) },
     });
+  });
+
+  it("replays what was left out as absent, never as a placeholder a model could copy", () => {
+    const stored = storedArguments({
+      name: "girly-skin",
+      prompt: "p".repeat(800),
+      references: ["01a1"],
+      operations: Array.from({ length: 45 }, (_, i) => ({ slideId: i, text: "t".repeat(500) })),
+    });
+    const replayed = replayedArguments(stored);
+    expect(JSON.stringify(replayed)).not.toContain("$omitted");
+    expect(replayed).toMatchObject({ name: "girly-skin", references: ["01a1"] });
+    expect(replayed).not.toHaveProperty("prompt");
+    expect((replayed as { operations: unknown[] }).operations).toHaveLength(40);
+    expect(replayedArguments({ $omitted: "arguments", chars: 9000, keys: ["a"] })).toEqual({});
   });
 });

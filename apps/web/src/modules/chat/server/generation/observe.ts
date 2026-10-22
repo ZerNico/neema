@@ -99,7 +99,8 @@ const STORED_ARGUMENTS = {
   word: "trimmed",
   research: "trimmed",
   integration: "trimmed",
-  image: "trimmed",
+  // The prompt is kept nowhere else, and refining an image starts from it.
+  image: "shown",
   ask: "ask",
   web: "shown",
   knowledge: "shown",
