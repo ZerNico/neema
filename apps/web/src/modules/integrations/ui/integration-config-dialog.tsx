@@ -24,6 +24,7 @@ import type { AdminIntegration } from "../schema.ts";
 import { saveIntegrationConfig } from "../server/functions.ts";
 import { IntegrationFieldControl } from "./integration-field.tsx";
 import { OAuthClientFields } from "./oauth-setup-guide.tsx";
+import { findKnownMcpServer } from "../mcp/known-servers.ts";
 
 type AdminRow = AdminIntegration & { redirectUri: string | null };
 
@@ -57,7 +58,9 @@ export function IntegrationConfigDialog({
   const showSharedKey = Boolean(
     manifest.sharedCredential && fieldShown(manifest.sharedCredential, config, fields),
   );
-  const optionalClient = Boolean(manifest.oauth?.optionalClient);
+  // A known server that lets in only registered apps needs the admin's, so it is not optional.
+  const appRequired = Boolean(findKnownMcpServer(row.server)?.ownApp);
+  const optionalClient = Boolean(manifest.oauth?.optionalClient) && !appRequired;
   const [ownClient, setOwnClient] = useState(!optionalClient || Boolean(row.oauthClientId));
   const [enabled, setEnabled] = useState(row.enabled);
   const [clientId, setClientId] = useState(row.oauthClientId ?? "");
@@ -121,6 +124,7 @@ export function IntegrationConfigDialog({
       secret={secret}
       onSecretChange={setSecret}
       secretStored={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
+      optional={!appRequired}
       disabled={save.isPending}
     />
   ) : null;

@@ -25,6 +25,11 @@ describe("known MCP servers", () => {
     expect(knownMcpServerAt("not a url")).toBeNull();
     expect(knownMcpServerAt(undefined)).toBeNull();
     expect(findKnownMcpServer("linear")?.name).toBe("Linear");
+    // Asana's retired V1 address is the same service, which now wants a registered app.
+    expect(knownMcpServerAt("https://mcp.asana.com/sse")).toMatchObject({
+      id: "asana",
+      ownApp: true,
+    });
     expect(findKnownMcpServer(null)).toBeNull();
   });
 });

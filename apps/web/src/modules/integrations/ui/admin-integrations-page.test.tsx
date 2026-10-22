@@ -114,4 +114,24 @@ describe("admin integrations", () => {
       search: {},
     });
   });
+
+  it("opens a known server that lets in only registered apps on its settings, for the app", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createIntegration).mockResolvedValueOnce({ ok: true, id: "asana" } as never);
+    mount([]);
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    await user.type(within(directory).getByRole("searchbox", { name: "Search services" }), "asana");
+    await user.click(within(directory).getByRole("button", { name: /^Asana/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Add Asana" });
+    expect(dialog).toHaveTextContent(/client ID and secret of an app registered with Asana next/);
+    await user.click(within(dialog).getByRole("button", { name: "Add" }));
+    await waitFor(() =>
+      expect(navigate).toHaveBeenLastCalledWith({
+        to: "/admin/integrations/$integrationId",
+        params: { integrationId: "asana" },
+        search: { setup: true },
+      }),
+    );
+  });
 });

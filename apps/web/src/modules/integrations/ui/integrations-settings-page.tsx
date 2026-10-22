@@ -408,7 +408,7 @@ function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () 
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onEdit}>
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-          {known ? "Rename" : "Edit server"}
+          {known && !known.ownApp ? "Rename" : "Edit server"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* A menu item cannot hold a spinner; disabled is its pending state. */}

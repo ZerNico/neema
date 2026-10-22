@@ -124,8 +124,8 @@ export function PersonalServerDialog({
   // A server at a known address: its address and sign-in stay as they came.
   const known = server ? knownMcpServerWithUrl(server.config.url) : null;
   const shown = FIELDS.filter((field) => fieldShown(field, config, FIELDS));
-  // An app of one's own only matters to signing in, and a known server's sign-in needs none.
-  const ownApp = !known && fieldValues(config.ways).includes("oauth");
+  // An app of one's own only matters to signing in, which most known servers need none for.
+  const ownApp = (!known || known.ownApp === true) && fieldValues(config.ways).includes("oauth");
 
   const refresh = () =>
     Promise.all([
@@ -225,7 +225,9 @@ export function PersonalServerDialog({
       ) : (
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{known ? `Rename ${server.name}` : `Set up ${server.name}`}</DialogTitle>
+            <DialogTitle>
+              {known && !known.ownApp ? `Rename ${server.name}` : `Set up ${server.name}`}
+            </DialogTitle>
             <DialogDescription>Only you use it. Chats get the tools it lists.</DialogDescription>
           </DialogHeader>
           <form

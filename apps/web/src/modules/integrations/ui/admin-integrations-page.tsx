@@ -27,6 +27,7 @@ import {
   IntegrationDirectory,
 } from "./integration-directory.tsx";
 import { IntegrationLogo } from "./integration-logo.tsx";
+import { findKnownMcpServer } from "../mcp/known-servers.ts";
 
 export function AdminIntegrationsPage() {
   const { data } = useSuspenseQuery(adminIntegrationsQuery);
@@ -150,11 +151,12 @@ function AddIntegrationDialog({
       }
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
       onOpenChange(false);
-      // A known server is ready as it is; anything else opens on its settings.
+      // A known server is ready as it is, unless it needs an app registered there;
+      // anything else opens on its settings.
       void navigate({
         to: "/admin/integrations/$integrationId",
         params: { integrationId: result.id },
-        search: entry.server ? {} : { setup: true },
+        search: entry.server && !findKnownMcpServer(entry.server)?.ownApp ? {} : { setup: true },
       });
     },
     onError: () => setError("Could not add the integration."),
@@ -194,11 +196,13 @@ function AddIntegrationDialog({
               <Field>
                 <DirectoryEntryHeader entry={picked} />
                 <FieldDescription>
-                  {picked.server
-                    ? "Everyone can connect their own account once it’s added."
-                    : picked.kind === "mcp"
-                      ? "You enter its address next."
-                      : "You fill in its settings next."}
+                  {findKnownMcpServer(picked.server)?.ownApp
+                    ? `You enter the client ID and secret of an app registered with ${picked.name} next.`
+                    : picked.server
+                      ? "Everyone can connect their own account once it’s added."
+                      : picked.kind === "mcp"
+                        ? "You enter its address next."
+                        : "You fill in its settings next."}
                 </FieldDescription>
               </Field>
               {picked.server ? null : (

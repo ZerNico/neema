@@ -1045,13 +1045,14 @@ export class IntegrationService extends Context.Service<
           if (!id)
             return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
           // A known server needs nothing more: on at once, at its address, people signing in.
+          // One that lets in only registered apps waits off for the admin's.
           if (known) {
             const normalized = adapter.normalizeConfig({ url: known.url, ways: "oauth" });
             if ("error" in normalized) return yield* unknownIntegration();
             yield* repo.saveConfig({
               id,
               name,
-              enabled: true,
+              enabled: !known.ownApp,
               config: normalized.config,
               fingerprint: normalized.fingerprint,
               oauthClientId: null,
@@ -1130,6 +1131,12 @@ export class IntegrationService extends Context.Service<
             normalized.config,
             willHaveShared,
           );
+          // A known server whose sign-in lets in only registered apps cannot be signed into without one.
+          const preset = stored.kind === "mcp" ? knownMcpServerAt(normalized.config.url) : null;
+          if (input.enabled && preset?.ownApp && mcpWaysOf(normalized.config).oauth && !clientId)
+            return yield* new IntegrationRejected({
+              reason: `Enter the client ID of the app registered with ${preset.name} first.`,
+            });
           if (input.enabled && !methods.oauth && !methods.apiKey && methods.open === null)
             return yield* new IntegrationRejected({
               reason: adapter.connectMethods

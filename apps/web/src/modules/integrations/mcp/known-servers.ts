@@ -2,6 +2,7 @@ import type { ComponentProps, ComponentType } from "react";
 import type { IntegrationCategory } from "../manifest.ts";
 import {
   AirtableLogo,
+  AsanaLogo,
   AtlassianLogo,
   CanvaLogo,
   CloudflareLogo,
@@ -32,12 +33,17 @@ export interface KnownMcpServer {
    * given this app's address. Shown before the sign-in, which would only fail.
    */
   readonly setup?: (origin: string) => string;
+  /**
+   * Its sign-in lets in only apps registered there, so an admin brings one: it is
+   * added off, opens on the client ID and secret, and stays off without them.
+   */
+  readonly ownApp?: boolean;
 }
 
 /**
  * Each one checked to sign in without registering an app first (dynamic
  * client registration or a client metadata document), so the preset needs
- * nothing from the admin but a sign-in.
+ * nothing from the admin but a sign-in, except where `ownApp` says otherwise.
  */
 export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
@@ -58,6 +64,18 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
     // Atlassian lets in only domains its organization admin allowed, beside its own partners.
     setup: (origin) =>
       `An Atlassian organization admin must first allow ${origin}/** under Rovo MCP server, Allowed domains.`,
+  },
+  {
+    id: "asana",
+    name: "Asana",
+    description: "Tasks, projects and goals in Asana.",
+    url: "https://mcp.asana.com/v2/mcp",
+    category: "projects",
+    logo: AsanaLogo,
+    // Its V2 server registers no apps itself; V1, which did, is shut down.
+    ownApp: true,
+    setup: () =>
+      "Asana only lets in apps registered with it: create one in its developer console with this integration’s redirect URI, then enter its client ID and secret. An Asana admin may also have to allow the app for your workspace.",
   },
   {
     id: "linear",

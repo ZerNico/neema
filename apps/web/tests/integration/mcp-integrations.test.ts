@@ -1947,3 +1947,35 @@ describe("an MCP server a person adds for themselves", () => {
     expect(names.get("moves.example.test")!.requests).toBe(0);
   });
 });
+
+describe("a known server whose sign-in lets in only registered apps", () => {
+  it("is added off, and turns on only with the admin's app", async () => {
+    const service = <A, E>(f: (s: IntegrationService["Service"]) => Effect.Effect<A, E>) =>
+      run(Effect.flatMap(IntegrationService, f));
+    const added = await service((s) =>
+      s.createIntegration({ kind: "mcp", name: "Asana", server: "asana" }),
+    );
+    expect(added).toMatchObject({ enabled: false, server: "asana" });
+    const turnOn = (client: { oauthClientId: string; oauthClientSecret?: string }) =>
+      service((s) =>
+        s
+          .saveConfig({
+            id: added.id,
+            name: "Asana",
+            description: "",
+            enabled: true,
+            config: { url: "https://mcp.asana.com/v2/mcp", ways: "oauth" },
+            allowApiKeys: false,
+            ...client,
+          })
+          .pipe(Effect.result),
+      );
+    expect(JSON.stringify(await turnOn({ oauthClientId: "" }))).toMatch(
+      /client ID of the app registered with Asana/,
+    );
+    expect(await turnOn({ oauthClientId: "app-1", oauthClientSecret: "secret-1" })).toMatchObject({
+      _tag: "Success",
+      success: { enabled: true, oauthClientId: "app-1", oauthSecretConfigured: true },
+    });
+  });
+});
