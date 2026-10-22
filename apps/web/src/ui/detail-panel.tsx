@@ -583,6 +583,17 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   }, [mounted]);
   const expanded = wide && !overlay;
   const width = expanded && room > 0 ? room : kept;
+  // Full width is a layer over the row: a spacer keeps the page's width, so its
+  // transcript never reflows through the animation. The page hides once covered
+  // and shows as soon as the rail starts back; the layer lasts until it lands.
+  const [layered, setLayered] = useState(false);
+  const [covered, setCovered] = useState(false);
+  // A drag or reduced motion moves the rail at once, with no animation to wait for.
+  const instant = dragging || reducedMotion;
+  if (expanded && !layered) setLayered(true);
+  if (expanded && !covered && instant) setCovered(true);
+  if (!expanded && covered) setCovered(false);
+  if (!expanded && layered && instant) setLayered(false);
   // Closing the rail, or leaving the page it was opened on, gives the page back, so a rail
   // never reopens or arrives on another page over a hidden page.
   useEffect(() => {
@@ -590,13 +601,13 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   }, [open]);
   useEffect(() => () => setDetailPanelExpanded(false), []);
   useEffect(() => {
-    if (!expanded || !open) return;
+    if (!covered || !open) return;
     const html = document.documentElement;
     html.dataset.panelExpanded = "";
     return () => {
       delete html.dataset.panelExpanded;
     };
-  }, [expanded, open]);
+  }, [covered, open]);
 
   // A drag leaves the 8px handle almost immediately, so hold the cursor on the
   // document and stop text selection while it lasts. Embedded pages ignore the
@@ -670,90 +681,98 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   const duration = reducedMotion ? 0 : 0.2;
   const shape = overlay ? { x: open ? "0%" : "100%" } : { width: open ? width : 0 };
   return (
-    <m.aside
-      ref={root}
-      // Things laid over the rail from outside it follow its animation by this.
-      data-panel-rail=""
-      // Web links clicked here open as panel tabs (`browser/ui/browser-host.tsx`).
-      data-web-links="panel"
-      aria-label={request.title}
-      aria-hidden={!open || undefined}
-      inert={!open || undefined}
-      className={cn(
-        "flex shrink-0 flex-col overflow-hidden",
-        // Below the header in a browser; a desktop shell's header is in its
-        // titlebar, above this row altogether.
-        overlay &&
-          "bg-background absolute inset-x-0 top-12 bottom-0 z-20 [html[data-desktop-chrome]_&]:top-0",
-        !open && "pointer-events-none",
-        className,
-      )}
-      initial={overlay ? { x: still ? "0%" : "100%" } : { width: still ? width : 0 }}
-      animate={target}
-      variants={{ [target]: shape }}
-      // A drag must track the pointer, not ease toward it; the open and close
-      // animation keeps its own duration.
-      transition={dragging ? { duration: 0 } : { duration, ease: "easeInOut" }}
-      onAnimationComplete={(definition) => {
-        if (!open && definition === target) finishExit(generation);
-      }}
-    >
-      {overlay ? (
-        <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
-          <TabStrip ids={ids} />
-        </div>
-      ) : (
-        <PanelTitlebar>
-          <TabStrip ids={ids} />
-          <PanelExpandButton expanded={expanded} />
-          <PanelToggleSpace />
-        </PanelTitlebar>
-      )}
-      {/* Not keyed by tab: switching tabs swaps the content below at once, and
-          only opening the panel runs this entrance. */}
-      <m.div
-        style={{ width: overlay ? "100%" : width }}
-        className={cn("relative flex min-h-0 flex-1 flex-col", !overlay && "border-l")}
-        initial={{ opacity: still ? 1 : 0, x: still ? 0 : 8 }}
-        animate={target}
-        variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
-        transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
-      >
-        {overlay ? null : (
-          <DetailPanelResizer
-            width={width}
-            expanded={expanded}
-            dragging={dragging}
-            onResize={resize}
-            onReset={reset}
-            onDraggingChange={setDragging}
-          />
+    <>
+      {/* Closing gives the page its room at once, so the rail leaves over it. */}
+      {layered && open ? <div aria-hidden className="shrink-0" style={{ width: kept }} /> : null}
+      <m.aside
+        ref={root}
+        // Things laid over the rail from outside it follow its animation by this.
+        data-panel-rail=""
+        // Web links clicked here open as panel tabs (`browser/ui/browser-host.tsx`).
+        data-web-links="panel"
+        aria-label={request.title}
+        aria-hidden={!open || undefined}
+        inert={!open || undefined}
+        className={cn(
+          "flex shrink-0 flex-col overflow-hidden",
+          // Below the header in a browser; a desktop shell's header is in its
+          // titlebar, above this row altogether.
+          overlay &&
+            "bg-background absolute inset-x-0 top-12 bottom-0 z-20 [html[data-desktop-chrome]_&]:top-0",
+          !open && "pointer-events-none",
+          layered && "bg-background absolute inset-y-0 right-0 z-10",
+          className,
         )}
-        <Fragment key={request.id}>
-          <PanelInfo request={request} className="px-4 py-3" />
-          <div
-            role="tabpanel"
-            id={ids.panel}
-            {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
-            className={cn(
-              // Its own stacking context: a body's layers (a sheet's sticky headers) stay
-              // beneath the resize handle, which they would otherwise cover.
-              "isolate min-h-0 flex-1",
-              // A filling body (a web page, drawn above the panel) leaves the
-              // resize handle's strip uncovered, or nothing could grab it.
-              request.fill ? cn("flex flex-col", !overlay && "pl-1.5") : "overflow-y-auto px-4",
-            )}
-          >
-            {request.fill ? (
-              request.body
-            ) : (
-              // A column at least as tall as the scroller, so a body that wants
-              // the whole height (an editor) can grow into it with flex-1.
-              <div className="flex min-h-full flex-col py-4">{request.body}</div>
-            )}
+        initial={overlay ? { x: still ? "0%" : "100%" } : { width: still ? width : 0 }}
+        animate={target}
+        variants={{ [target]: shape }}
+        // A drag must track the pointer, not ease toward it; the open and close
+        // animation keeps its own duration.
+        transition={dragging ? { duration: 0 } : { duration, ease: "easeInOut" }}
+        onAnimationComplete={(definition) => {
+          if (definition !== target) return;
+          if (!open) finishExit(generation);
+          if (expanded) setCovered(true);
+          else setLayered(false);
+        }}
+      >
+        {overlay ? (
+          <div className="flex h-12 shrink-0 items-center gap-1 border-b px-2">
+            <TabStrip ids={ids} />
           </div>
-        </Fragment>
-      </m.div>
-    </m.aside>
+        ) : (
+          <PanelTitlebar>
+            <TabStrip ids={ids} />
+            <PanelExpandButton expanded={expanded} />
+            <PanelToggleSpace />
+          </PanelTitlebar>
+        )}
+        {/* Not keyed by tab: switching tabs swaps the content below at once, and
+          only opening the panel runs this entrance. */}
+        <m.div
+          style={{ width: overlay ? "100%" : width }}
+          className={cn("relative flex min-h-0 flex-1 flex-col", !overlay && "border-l")}
+          initial={{ opacity: still ? 1 : 0, x: still ? 0 : 8 }}
+          animate={target}
+          variants={{ [target]: { opacity: open ? 1 : 0, x: reducedMotion || open ? 0 : 8 } }}
+          transition={{ duration: reducedMotion ? 0 : 0.14, ease: "easeOut" }}
+        >
+          {overlay ? null : (
+            <DetailPanelResizer
+              width={width}
+              expanded={expanded}
+              dragging={dragging}
+              onResize={resize}
+              onReset={reset}
+              onDraggingChange={setDragging}
+            />
+          )}
+          <Fragment key={request.id}>
+            <PanelInfo request={request} className="px-4 py-3" />
+            <div
+              role="tabpanel"
+              id={ids.panel}
+              {...(ids.activeTab ? { "aria-labelledby": ids.activeTab } : {})}
+              className={cn(
+                // Its own stacking context: a body's layers (a sheet's sticky headers) stay
+                // beneath the resize handle, which they would otherwise cover.
+                "isolate min-h-0 flex-1",
+                // A filling body (a web page, drawn above the panel) leaves the
+                // resize handle's strip uncovered, or nothing could grab it.
+                request.fill ? cn("flex flex-col", !overlay && "pl-1.5") : "overflow-y-auto px-4",
+              )}
+            >
+              {request.fill ? (
+                request.body
+              ) : (
+                // A column at least as tall as the scroller, so a body that wants
+                // the whole height (an editor) can grow into it with flex-1.
+                <div className="flex min-h-full flex-col py-4">{request.body}</div>
+              )}
+            </div>
+          </Fragment>
+        </m.div>
+      </m.aside>
+    </>
   );
 }

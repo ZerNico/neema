@@ -353,6 +353,30 @@ it("takes the whole row at full width, and gives the page back", async () => {
   unmount();
 });
 
+it("lays full width over the page, which keeps its width and hides only once covered", () => {
+  environment.reducedMotion = false;
+  environment.holdMotion = true;
+  render(<Harness />);
+  act(() => panel.open({ id: "one", title: "Details", body: <p>Panel content</p> }));
+  const rail = screen.getByRole("complementary");
+  const html = document.documentElement;
+  const finish = () => act(() => animations.at(-1)!.complete(animations.at(-1)!.target));
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  // A spacer holds the rail's own width in the row, so the page never narrows.
+  expect(rail).toHaveClass("absolute");
+  expect((rail.previousElementSibling as HTMLElement).style.width).toBe(initial);
+  expect(html).not.toHaveAttribute("data-panel-expanded");
+  finish();
+  expect(html).toHaveAttribute("data-panel-expanded");
+  // Leaving shows the page at once, under the rail as it narrows back.
+  fireEvent.click(screen.getByRole("button", { name: "Exit full width" }));
+  expect(html).not.toHaveAttribute("data-panel-expanded");
+  expect(rail).toHaveClass("absolute");
+  finish();
+  expect(rail).not.toHaveClass("absolute");
+  expect(rail.previousElementSibling).toBe(screen.getByRole("main"));
+});
+
 it("gives the next page its room when that page's rail arrives open", async () => {
   // The next page left its own tab open, so its rail is open the moment it is shown.
   const view = render(<Harness userId="u1" />);
