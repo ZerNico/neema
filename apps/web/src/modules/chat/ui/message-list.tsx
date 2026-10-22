@@ -503,7 +503,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {/* An attachment-only turn has no text bubble to draw. */}
           {comment ? (
             // Sent from a comment in a document: shown as that comment, as it reads there.
-            <div className="bg-card text-card-foreground flex max-w-[80%] flex-col gap-1.5 rounded-2xl border px-4 py-3 text-sm">
+            <div className="bg-card text-card-foreground flex max-w-[80%] flex-col gap-1.5 rounded-2xl border px-4 py-3 text-base md:text-sm">
               <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                 <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} className="size-3.5" />
                 <span className="truncate">
@@ -515,7 +515,7 @@ function UserBubble({ message }: { message: DisplayMessage }) {
               </span>
             </div>
           ) : text ? (
-            <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+            <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-base leading-relaxed md:text-sm">
               <MessageTagText text={text} />
             </div>
           ) : null}
@@ -709,7 +709,7 @@ function SteerBubble({ steer }: { steer: AssistantSteer }) {
         </AttachmentChipRow>
       ) : null}
       {steer.content ? (
-        <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-sm leading-relaxed">
+        <div className="bg-primary/12 text-foreground max-w-[80%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-4 py-2.5 text-base leading-relaxed md:text-sm">
           {steer.content}
         </div>
       ) : null}
@@ -1201,7 +1201,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
 
   return (
     <div className="flex w-full justify-start">
-      <div className="text-foreground w-full max-w-full text-sm leading-relaxed">
+      <div className="text-foreground w-full max-w-full text-base leading-relaxed md:text-sm">
         {sources.length > 0 && (!streaming || message.content.length > 0) ? (
           <AssistantSourcePanel messageId={message.id} sources={sources} bind={bindSourcePanel} />
         ) : null}
