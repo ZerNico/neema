@@ -11,8 +11,6 @@ export const PROJECT_FILE_LIMITS = {
   /** Unpinned versions kept per file, the current one included. */
   historyVersions: 25,
   pinsPerFile: 10,
-  /** A later save by the same writer inside this window replaces their last version. */
-  coalesceMinutes: 10,
   /** How much of a file's text one read hands the model. */
   readChars: 60_000,
 } as const;
