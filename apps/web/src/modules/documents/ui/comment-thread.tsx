@@ -210,7 +210,7 @@ function Comment({
             {relativeAgeLabel(comment.createdAt)}
           </span>
           {own && actions ? (
-            <span className="ml-auto opacity-0 transition-opacity group-hover/comment:opacity-100 focus-within:opacity-100">
+            <span className="ml-auto opacity-0 transition-opacity group-hover/comment:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
               <IconAction
                 label={isRoot ? "Delete thread" : "Delete reply"}
                 icon={Delete02Icon}

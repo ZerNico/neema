@@ -240,7 +240,8 @@ function PanelTab({
         data-tab-close=""
         className={cn(
           "text-muted-foreground",
-          !selected && "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100",
+          !selected &&
+            "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100",
         )}
       >
         <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />

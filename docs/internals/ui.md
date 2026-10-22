@@ -65,6 +65,12 @@ className={buttonVariants({...})}>`.
   `--radius-composer-inner` the concentric radius for anything sitting `inset-1` within it.
 - `Button` already has an `xs` size (24px tall). Reach for it before writing `h-6` and a padding
   override; five call sites in the folder strip had hand-rolled it while the size went unused.
+- Touch sizing follows the input, not the width: on `pointer-coarse:` the `Button` and `Toggle` sizes
+  from `sm` up and the icon sizes become 40px with an invisible `::after` taking the tap target to
+  44px, and sidebar rows become 44px with 16px text: Apple's 44pt, and WCAG's 2.5.5. Anything revealed on
+  hover is shown on `pointer-coarse:`, never by width. A laptop with a touch screen keeps the dense
+  layout, its primary pointer being the trackpad. Text size follows the width: chat text is `text-base md:text-sm`,
+  like the inputs. A call site that pins its own height opts out of both, so pick the variant instead.
 
 ## React Compiler
 
