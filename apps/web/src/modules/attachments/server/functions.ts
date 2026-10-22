@@ -4,6 +4,7 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MAX_ATTACHMENT_BYTES } from "../constants.ts";
+import { withoutImageMetadata } from "../image-metadata.ts";
 import { AttachmentIdInput } from "../schema.ts";
 import { AttachmentService } from "./service.ts";
 import { DocumentParser } from "./document-parser.ts";
@@ -35,7 +36,8 @@ export const uploadAttachment = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ data, context }) => {
     const file = readUpload(data);
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    // What a person sends keeps the picture, not where and when it was taken.
+    const bytes = withoutImageMetadata(new Uint8Array(await file.arrayBuffer()));
     return runServerFn(
       Effect.gen(function* () {
         // The feature governs what a person uploads; files a tool or the model

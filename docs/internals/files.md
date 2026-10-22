@@ -69,6 +69,13 @@ declared type, and only the kinds we understand are shown or handed to a model.
   nothing below it moves. A blob stored before that gains its size the next time its bytes are
   read. An answer's output keeps its own copy of each file, which never changes, so the
   conversation loader puts the current size on it from the attachment rows.
+- An image a person sends (an upload, a project file, a file from a connected app) loses what
+  describes it before it is hashed: location, time, camera, comments, text chunks, anything past
+  its end (`withoutImageMetadata`). What draws it stays, its colour profile and a turned photo's
+  orientation included, and nothing is decoded. A model reads only the pixels, and the metadata
+  would reach every provider and everyone who downloads it. Files a tool or a model produces are
+  stored as they came, so a generated image keeps its content credentials. Bytes stored before
+  this are left alone.
 
 ## What the model sees
 

@@ -1,3 +1,4 @@
+import { withoutImageMetadata } from "~/modules/attachments/image-metadata.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
@@ -208,7 +209,8 @@ export const uploadProjectFile = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ context, data }) => {
     const upload = readFileUpload(data);
-    const bytes = new Uint8Array(await upload.file.arrayBuffer());
+    // What a person sends keeps the picture, not where and when it was taken.
+    const bytes = withoutImageMetadata(new Uint8Array(await upload.file.arrayBuffer()));
     return runFiles((service) =>
       service.write(
         { origin: "user", userId: context.session.user.id },

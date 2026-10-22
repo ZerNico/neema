@@ -5,6 +5,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
 } from "~/modules/attachments/constants.ts";
 import { AttachmentRejected } from "~/modules/attachments/errors.ts";
+import { withoutImageMetadata } from "~/modules/attachments/image-metadata.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
@@ -64,20 +65,25 @@ export const uploadFiles = Effect.fn("mcp.uploadFiles")(function* (
   if (!(yield* FeaturePolicy.use((policy) => policy.can(userId, "attachments"))))
     return yield* new AttachmentRejected({ cause: "type", reason: "files are unavailable" });
   const attachments = yield* AttachmentService;
+  // What a person sends keeps the picture, not where and when it was taken.
+  const sent = files.map((file) => ({
+    file,
+    bytes: withoutImageMetadata(Buffer.from(file.data, "base64")),
+  }));
   yield* StorageQuota.use((quota) =>
     quota.admit(
       userId,
-      files.map((file) => Buffer.from(file.data, "base64")),
+      sent.map(({ bytes }) => bytes),
     ),
   );
   const ids: string[] = [];
-  const upload = Effect.forEach(files, (file) =>
+  const upload = Effect.forEach(sent, ({ file, bytes }) =>
     attachments
       .upload({
         userId,
         fileName: file.name,
         declaredMediaType: file.mediaType ?? GENERIC_MEDIA_TYPE,
-        bytes: Buffer.from(file.data, "base64"),
+        bytes,
       })
       .pipe(Effect.tap((stored) => Effect.sync(() => ids.push(stored.id)))),
   );

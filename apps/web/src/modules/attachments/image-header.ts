@@ -13,10 +13,10 @@ export interface ImageSize {
   readonly height: number;
 }
 
-const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
+export const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u16le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8);
 const u24le = (b: Uint8Array, at: number) => b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16);
-const u32be = (b: Uint8Array, at: number) =>
+export const u32be = (b: Uint8Array, at: number) =>
   ((b[at]! << 24) >>> 0) + ((b[at + 1]! << 16) | (b[at + 2]! << 8) | b[at + 3]!);
 
 function png(b: Uint8Array): ImageSize | null {
@@ -31,7 +31,7 @@ function gif(b: Uint8Array): ImageSize | null {
 }
 
 /** The EXIF orientation (1 to 8) in the TIFF data from `tiff` to `end`, or null. */
-function tiffOrientation(b: Uint8Array, tiff: number, end: number): number | null {
+export function tiffOrientation(b: Uint8Array, tiff: number, end: number): number | null {
   if (tiff + 8 > end) return null;
   const little = b[tiff] === 0x49;
   const u16 = (i: number) => (little ? u16le(b, i) : u16be(b, i));
@@ -44,7 +44,7 @@ function tiffOrientation(b: Uint8Array, tiff: number, end: number): number | nul
 }
 
 /** The orientation an APP1 segment from `at` to `end` carries, when it is EXIF. */
-function exifOrientation(b: Uint8Array, at: number, end: number) {
+export function exifOrientation(b: Uint8Array, at: number, end: number) {
   if (at + 10 > end || String.fromCharCode(...b.subarray(at + 4, at + 10)) !== "Exif\0\0")
     return null;
   return tiffOrientation(b, at + 10, end);
