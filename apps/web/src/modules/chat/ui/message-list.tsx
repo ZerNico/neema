@@ -617,6 +617,22 @@ function useDeliveredFilePanel(attachment: Attachment, fresh: boolean) {
   }, [fresh, available, attachment.kind, id, panel, request]);
 }
 
+/**
+ * The box an image will fill, held before its bytes arrive so nothing below
+ * it moves: its own shape, no wider than the column or itself, no taller than
+ * `max-h-144` (36rem).
+ */
+const reservedImageBox = (dimensions: Attachment["dimensions"]) =>
+  dimensions
+    ? {
+        width: dimensions.width,
+        height: dimensions.height,
+        style: {
+          width: `min(100%, ${dimensions.width}px, ${(36 * dimensions.width) / dimensions.height}rem)`,
+        },
+      }
+    : {};
+
 function AssistantFileAttachment({
   file,
   fresh = false,
@@ -627,14 +643,6 @@ function AssistantFileAttachment({
   useDeliveredFilePanel(file.attachment, fresh);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-  // The virtual list remounts rows on scroll; an image already in the cache is
-  // shown at once, so only a first network load fades in.
-  const [cached, setCached] = useState(false);
-  const imageRef = useRef<HTMLImageElement>(null);
-  useLayoutEffect(() => {
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) setCached(true);
-  }, []);
   const url = attachmentUrl(file.attachment.id);
   const { attachment } = file;
   if (attachment.kind !== "image")
@@ -646,12 +654,7 @@ function AssistantFileAttachment({
       </AttachmentChipRow>
     );
   return (
-    <figure className="my-3 max-w-full space-y-2">
-      {state === "loading" && (
-        <p role="status" className="text-muted-foreground text-sm">
-          Loading image…
-        </p>
-      )}
+    <figure className="my-3 max-w-full">
       {state === "error" ? (
         <p role="alert" className="text-muted-foreground text-sm">
           This image could not be loaded.
@@ -669,15 +672,14 @@ function AssistantFileAttachment({
           }}
         >
           <img
-            ref={imageRef}
             src={url}
             alt={file.origin ? attachment.fileName : "Generated image"}
+            {...reservedImageBox(attachment.dimensions)}
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
             className={cn(
-              "max-h-144 max-w-full rounded-2xl object-contain",
-              !cached && "transition-opacity duration-300 motion-reduce:transition-none",
-              !cached && state !== "ready" && "opacity-0",
+              "h-auto max-h-144 max-w-full rounded-2xl object-contain",
+              state === "loading" && "bg-muted",
             )}
           />
         </a>

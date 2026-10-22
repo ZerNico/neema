@@ -29,6 +29,7 @@ import {
 import { projectCan } from "../schema.ts";
 import { projectAudience, projectRole } from "./access.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
+import { readImageSize } from "~/modules/attachments/image-header.ts";
 import { fileText } from "~/modules/attachments/server/file-text.ts";
 import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
@@ -372,6 +373,7 @@ export class ProjectFileService extends Context.Service<
                 storageKey: stored.storageKey,
                 size: input.bytes.length,
                 mediaType: kind.mediaType,
+                ...readImageSize(input.bytes, kind.mediaType),
               })
               .onConflictDoUpdate({
                 target: [attachmentBlobs.userId, attachmentBlobs.sha256],

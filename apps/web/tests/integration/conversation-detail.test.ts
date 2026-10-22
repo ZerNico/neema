@@ -359,6 +359,72 @@ describe("loadConversationDetail", () => {
     expect(detail.pendingChunks).toEqual([]);
   });
 
+  it("gives an answer's saved file copy the image size recorded since", async () => {
+    const userId = await run(makeUser());
+    const thread = await run(seedThread(userId, "Drawn thread"));
+    const attachmentId = uuidv7();
+    await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const blobId = uuidv7();
+        yield* db.insert(attachmentBlobs).values({
+          id: blobId,
+          userId,
+          sha256: blobId,
+          storageKey: `private/${blobId}`,
+          size: 4,
+          mediaType: "image/png",
+          width: 1536,
+          height: 1024,
+        });
+        yield* db.insert(attachments).values({
+          id: attachmentId,
+          userId,
+          blobId,
+          fileName: "drawn.png",
+          mediaType: "image/png",
+        });
+        yield* db
+          .insert(messageAttachments)
+          .values({ messageId: thread.assistantId, attachmentId, position: 0 });
+        // A copy taken before sizes were recorded.
+        yield* db
+          .update(messages)
+          .set({
+            assistantOutput: {
+              v: 1,
+              files: [
+                {
+                  v: 1,
+                  attachment: {
+                    id: attachmentId,
+                    fileName: "drawn.png",
+                    size: 4,
+                    mediaType: "image/png",
+                    kind: "image",
+                  },
+                  textOffset: 0,
+                  turnIndex: 0,
+                  eventIndex: 0,
+                  callIndex: 0,
+                  source: "native",
+                },
+              ],
+            },
+          })
+          .where(eq(messages.id, thread.assistantId));
+      }),
+    );
+
+    const detail = await run(loadConversationDetail(userId, thread.conversationId));
+
+    const answer = detail.messages.find((message) => message.id === thread.assistantId);
+    expect(answer?.assistantOutput?.files[0]?.attachment.dimensions).toEqual({
+      width: 1536,
+      height: 1024,
+    });
+  });
+
   it("keeps ordinary chat compaction summaries displayable", async () => {
     const userId = await run(makeUser());
     const thread = await run(seedThread(userId, "Compacted thread"));

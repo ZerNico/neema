@@ -32,6 +32,8 @@ const row = (overrides: Partial<Row> & { mediaType: string; messageId: string })
     storageKey: `blobs/user-1/aa/bb/${n}`,
     sha256: `${n}`.padStart(64, "0"),
     size: 10,
+    width: null,
+    height: null,
     parsedText: null,
     parsedWith: null,
     position: 0,

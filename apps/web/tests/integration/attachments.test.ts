@@ -284,6 +284,37 @@ describe("attachment storage", () => {
     expect(dto.fileName).toBe("passwd");
     expect(JSON.stringify(dto)).not.toContain("blobs/");
   });
+
+  it("records an image's size, and fills it in for one stored before on its next read", async () => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAALSURBVAiZY2DABQAAGgABpDd59gAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const service = yield* AttachmentService;
+        const dto = yield* service.upload({
+          userId,
+          fileName: "dot.png",
+          declaredMediaType: "image/png",
+          bytes: png,
+        });
+        const db = yield* Db;
+        yield* db
+          .update(attachmentBlobs)
+          .set({ width: null, height: null })
+          .where(eq(attachmentBlobs.userId, userId));
+        const [unsized] = yield* blobsOf(userId);
+        yield* service.read({ userId, attachmentId: dto.id });
+        const [filled] = yield* blobsOf(userId);
+        return { dto, unsized, filled };
+      }),
+    );
+    expect(result.dto.dimensions).toEqual({ width: 3, height: 2 });
+    expect(result.unsized).toMatchObject({ width: null, height: null });
+    expect(result.filled).toMatchObject({ width: 3, height: 2 });
+  });
 });
 
 describe("durable blob cleanup", () => {

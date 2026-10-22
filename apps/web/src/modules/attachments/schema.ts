@@ -11,6 +11,8 @@ export const Attachment = Schema.Struct({
   size: Schema.Int,
   mediaType: Schema.String,
   kind: Schema.Literals(["image", "pdf", "text", "file"]),
+  /** An image's pixel size, when known, so its box is reserved before it loads. */
+  dimensions: Schema.optional(Schema.Struct({ width: Schema.Int, height: Schema.Int })),
 });
 export type Attachment = typeof Attachment.Type;
 

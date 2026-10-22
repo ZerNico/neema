@@ -20,6 +20,7 @@ import {
   ownedConversationById,
 } from "~/modules/chat/server/owned-conversation.ts";
 import { attachmentKind } from "../constants.ts";
+import type { ImageSize } from "../image-header.ts";
 import type { Attachment, MessageAttachment, QueuedAttachment } from "../schema.ts";
 import { AttachmentBusy, AttachmentNotAvailable, AttachmentRejected } from "../errors.ts";
 import { collectOrphanedBlobs, lockBlobs } from "./blob-references.ts";
@@ -43,6 +44,8 @@ export interface AttachmentWithBlob {
   sha256: string;
   size: number;
   mediaType: string;
+  width: number | null;
+  height: number | null;
   parsedText: string | null;
   parsedWith: string | null;
 }
@@ -52,12 +55,15 @@ export const toAttachmentDto = (row: {
   fileName: string;
   size: number;
   mediaType: string;
+  width?: number | null;
+  height?: number | null;
 }): Attachment => ({
   id: row.id,
   fileName: row.fileName,
   size: row.size,
   mediaType: row.mediaType,
   kind: attachmentKind(row.mediaType),
+  ...(row.width && row.height ? { dimensions: { width: row.width, height: row.height } } : {}),
 });
 
 const withBlobColumns = {
@@ -69,6 +75,8 @@ const withBlobColumns = {
   sha256: attachmentBlobs.sha256,
   size: attachmentBlobs.size,
   mediaType: attachments.mediaType,
+  width: attachmentBlobs.width,
+  height: attachmentBlobs.height,
   parsedText: attachmentBlobs.parsedText,
   parsedWith: attachmentBlobs.parsedWith,
 };
@@ -197,6 +205,8 @@ export class AttachmentRepo extends Context.Service<
       storageKey: string;
       size: number;
       mediaType: string;
+      /** An image's size from its header; null for anything else. */
+      dimensions?: ImageSize | null;
       fileName: string;
     }): Effect.Effect<
       {
@@ -311,6 +321,8 @@ export class AttachmentRepo extends Context.Service<
       text: string;
       parsedWith: string;
     }): Effect.Effect<void>;
+    /** Records the size of an image stored before sizes were. */
+    cacheDimensions(input: { blobId: string; dimensions: ImageSize }): Effect.Effect<void>;
     /** The blob's scanned pages already read by `engine`, by page number. */
     scannedPages(input: { blobId: string; engine: string }): Effect.Effect<Record<number, string>>;
     /** Adds pages `engine` read; pages another engine read are dropped. */
@@ -390,6 +402,7 @@ export class AttachmentRepo extends Context.Service<
         storageKey: string;
         size: number;
         mediaType: string;
+        dimensions?: ImageSize | null;
         fileName: string;
       }) {
         return yield* db
@@ -408,10 +421,16 @@ export class AttachmentRepo extends Context.Service<
                   storageKey: input.storageKey,
                   size: input.size,
                   mediaType: input.mediaType,
+                  width: input.dimensions?.width ?? null,
+                  height: input.dimensions?.height ?? null,
                 })
                 .onConflictDoUpdate({
                   target: [attachmentBlobs.userId, attachmentBlobs.sha256],
-                  set: { id: sql`${attachmentBlobs.id}` },
+                  // A blob stored before sizes were recorded gains one here.
+                  set: {
+                    width: sql`coalesce(${attachmentBlobs.width}, excluded.width)`,
+                    height: sql`coalesce(${attachmentBlobs.height}, excluded.height)`,
+                  },
                 })
                 .returning();
               if (!blob) return yield* Effect.die("blob upsert returned no row");
@@ -427,22 +446,9 @@ export class AttachmentRepo extends Context.Service<
                 .returning();
               const row = rows[0]!;
               if (input.association)
-                yield* input.association.after(
-                  tx,
-                  toAttachmentDto({
-                    id: row.id,
-                    fileName: row.fileName,
-                    size: blob.size,
-                    mediaType: input.mediaType,
-                  }),
-                );
+                yield* input.association.after(tx, toAttachmentDto({ ...blob, ...row }));
               return {
-                attachment: toAttachmentDto({
-                  id: row.id,
-                  fileName: row.fileName,
-                  size: blob.size,
-                  mediaType: input.mediaType,
-                }),
+                attachment: toAttachmentDto({ ...blob, ...row }),
                 deduped: blob.id !== id,
                 unusedStorageKey: blob.storageKey === input.storageKey ? null : input.storageKey,
               };
@@ -721,6 +727,8 @@ export class AttachmentRepo extends Context.Service<
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
             mediaType: attachments.mediaType,
+            width: attachmentBlobs.width,
+            height: attachmentBlobs.height,
             queueEntryId: conversationQueueEntryAttachments.queueEntryId,
             position: conversationQueueEntryAttachments.position,
           })
@@ -863,6 +871,8 @@ export class AttachmentRepo extends Context.Service<
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
             mediaType: attachments.mediaType,
+            width: attachmentBlobs.width,
+            height: attachmentBlobs.height,
             messageId: messageAttachments.messageId,
             position: messageAttachments.position,
           })
@@ -894,6 +904,8 @@ export class AttachmentRepo extends Context.Service<
             fileName: attachments.fileName,
             size: attachmentBlobs.size,
             mediaType: attachments.mediaType,
+            width: attachmentBlobs.width,
+            height: attachmentBlobs.height,
           })
           .from(messageAttachments)
           .innerJoin(messages, eq(messages.id, messageAttachments.messageId))
@@ -961,6 +973,17 @@ export class AttachmentRepo extends Context.Service<
         yield* db
           .update(attachmentBlobs)
           .set({ parsedText: input.text, parsedWith: input.parsedWith })
+          .where(eq(attachmentBlobs.id, input.blobId))
+          .pipe(Effect.orDie);
+      });
+
+      const cacheDimensions = Effect.fn("AttachmentRepo.cacheDimensions")(function* (input: {
+        blobId: string;
+        dimensions: ImageSize;
+      }) {
+        yield* db
+          .update(attachmentBlobs)
+          .set(input.dimensions)
           .where(eq(attachmentBlobs.id, input.blobId))
           .pipe(Effect.orDie);
       });
@@ -1219,6 +1242,7 @@ export class AttachmentRepo extends Context.Service<
         listWithBlobsForMessages,
         listWithBlobsByIds,
         cacheParsedText,
+        cacheDimensions,
         scannedPages,
         saveScannedPages,
         claimForDocument,

@@ -31,6 +31,11 @@ export const attachmentBlobs = pgTable(
     size: integer().notNull(),
     // First writer's validated type. Resource rows keep their own classification.
     mediaType: text("media_type").notNull(),
+    // An image's size from its header, so a reader reserves its box before the
+    // bytes arrive. Null for anything else, and for images stored before it
+    // was recorded until they are next served.
+    width: integer(),
+    height: integer(),
     // Lazy cache of a PDF's or an Office file's text as a chat prompt inlines
     // it, so a long conversation does not re-read the same file on every generation.
     // `parsedWith` records what produced it; changing the limits does not invalidate it.

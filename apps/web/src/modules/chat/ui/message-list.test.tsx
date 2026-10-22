@@ -2321,9 +2321,10 @@ describe("generated image replies", () => {
     expect(screen.queryByRole("link", { name: "Download image" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
     expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
-    expect(screen.getByText("Loading image…")).toBeInTheDocument();
+    // A muted placeholder holds the place until the bytes arrive.
+    expect(img).toHaveClass("bg-muted");
     fireEvent.load(img);
-    expect(screen.queryByText("Loading image…")).not.toBeInTheDocument();
+    expect(img).not.toHaveClass("bg-muted");
     fireEvent.click(screen.getByRole("link", { name: "Preview generated.png" }));
     const dialog = screen.getByRole("dialog", { name: "generated.png" });
     expect(within(dialog).getByRole("img", { name: "generated.png" })).toHaveAttribute(
@@ -2344,7 +2345,7 @@ describe("generated image replies", () => {
       "src",
       "/api/files/edited-private",
     );
-    expect(screen.getByText("Loading image…")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Generated image" })).toHaveClass("bg-muted");
     fireEvent.click(screen.getByRole("link", { name: "Preview generated.png" }));
     const dialog = screen.getByRole("dialog", { name: "generated.png" });
     expect(within(dialog).getByRole("img", { name: "generated.png" })).toHaveAttribute(
@@ -2355,6 +2356,17 @@ describe("generated image replies", () => {
       "href",
       "/api/files/edited-private",
     );
+  });
+  it("holds a sized image's box before it loads, no wider than itself or taller than the cap", () => {
+    const sized = {
+      ...image,
+      attachment: { ...image.attachment, dimensions: { width: 1024, height: 1536 } },
+    };
+    render(<MessageBubble message={{ ...message, files: [sized] }} />);
+    const img = screen.getByRole("img", { name: "Generated image" });
+    expect(img).toHaveAttribute("width", "1024");
+    expect(img).toHaveAttribute("height", "1536");
+    expect(img.style.width).toBe("min(100%, 1024px, 24rem)");
   });
   it("reports an unavailable authenticated image without exposing storage details", () => {
     render(<MessageBubble message={message} />);

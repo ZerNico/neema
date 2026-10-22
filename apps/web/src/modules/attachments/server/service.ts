@@ -5,7 +5,8 @@ import {
   AttachmentRejected,
   BlobStoreError,
 } from "../errors.ts";
-import type { AttachmentKind } from "../constants.ts";
+import { attachmentKind, type AttachmentKind } from "../constants.ts";
+import { readImageSize } from "../image-header.ts";
 import type { Attachment } from "../schema.ts";
 import { BlobStore, blobStorageKey, userBlobPrefix } from "./blob-store.ts";
 import { canAccessAttachment } from "./policy.ts";
@@ -146,16 +147,26 @@ export class AttachmentService extends Context.Service<
         if (!record || !canAccessAttachment(input.userId, record)) {
           return yield* new AttachmentNotAvailable({ attachmentId: input.attachmentId });
         }
+        const { attachment } = record;
+        // An image stored before sizes were recorded gets one for its next reader.
+        const unsized =
+          attachmentKind(attachment.mediaType) === "image" && attachment.width === null;
         return {
-          fileName: record.attachment.fileName,
-          mediaType: record.attachment.mediaType,
-          size: record.attachment.size,
-          sha256: record.attachment.sha256,
-          bytes: store.get(record.attachment.storageKey).pipe(
+          fileName: attachment.fileName,
+          mediaType: attachment.mediaType,
+          size: attachment.size,
+          sha256: attachment.sha256,
+          bytes: store.get(attachment.storageKey).pipe(
             // Rows without bytes mean the store and the database drifted; that is
             // a server fault, not a "not found" for the caller to interpret.
             Effect.tapError((error) => Effect.logError("attachment bytes missing", error)),
             Effect.orDie,
+            Effect.tap((bytes) => {
+              const dimensions = unsized ? readImageSize(bytes, attachment.mediaType) : null;
+              return dimensions
+                ? repo.cacheDimensions({ blobId: attachment.blobId, dimensions })
+                : Effect.void;
+            }),
           ),
         };
       });
@@ -325,6 +336,8 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
       storageKey,
       size: input.bytes.length,
       mediaType: validated.mediaType,
+      dimensions:
+        validated.kind === "image" ? readImageSize(input.bytes, validated.mediaType) : null,
       fileName: validated.fileName,
     });
     yield* settleBlobs([storageKey], unusedStorageKey ? [unusedStorageKey] : []);

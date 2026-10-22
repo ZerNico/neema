@@ -61,6 +61,11 @@ declared type, and only the kinds we understand are shown or handed to a model.
   for `generate_image`, `tool` for everything else a tool delivers. Generated images and other
   files are bounded apart, one byte ceiling over both, and `assistantFileSource` reads a file
   stored before the field from its origin. See [images](images.md).
+- An image's pixel size is read from its header when its blob is registered and travels on the
+  attachment as `dimensions`, so a reader holds the image's box before the bytes arrive and
+  nothing below it moves. A blob stored before that gains its size the next time its bytes are
+  read. An answer's output keeps its own copy of each file, which never changes, so the
+  conversation loader puts the current size on it from the attachment rows.
 
 ## What the model sees
 

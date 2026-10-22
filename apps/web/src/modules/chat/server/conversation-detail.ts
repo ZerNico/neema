@@ -1,5 +1,6 @@
 import { Effect, Option } from "effect";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
+import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo, type QueueGate, type WindowMessageRow } from "./repo.ts";
@@ -67,6 +68,32 @@ export const HEAD_TURNS = 30;
 export const OLDER_TURNS = 30;
 
 /**
+ * An answer keeps a copy of each file it made, taken before older images had
+ * a recorded size; the current one comes from the attachment rows.
+ */
+const withCurrentDimensions = (
+  messages: ReadonlyArray<WindowMessageRow>,
+  attachments: ReadonlyArray<Attachment>,
+) => {
+  const sized = new Map(attachments.map((a) => [a.id, a.dimensions]));
+  return messages.map((message) => {
+    const output = message.assistantOutput;
+    if (!output?.files.some((file) => !file.attachment.dimensions && sized.get(file.attachment.id)))
+      return message;
+    return {
+      ...message,
+      assistantOutput: {
+        ...output,
+        files: output.files.map((file) => {
+          const dimensions = file.attachment.dimensions ?? sized.get(file.attachment.id);
+          return dimensions ? { ...file, attachment: { ...file.attachment, dimensions } } : file;
+        }),
+      },
+    };
+  });
+};
+
+/**
  * The rows that hang off one run of messages: tool calls, compactions,
  * attachments and generation display, and the earlier sources its answers
  * cite. Citation numbers are conversation-scoped, so an answer may cite a
@@ -111,8 +138,8 @@ const loadMessageRows = Effect.fn("chat.loadMessageRows")(function* (
     { concurrency: "unbounded" },
   );
   return {
-    messages,
     ...rows,
+    messages: withCurrentDimensions(messages, rows.attachments),
     compactionEvents: rows.compactionEvents.map((event) =>
       event.researchRunId ? { ...event, summary: null } : event,
     ),

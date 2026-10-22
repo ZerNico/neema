@@ -1,6 +1,6 @@
 import { AiImageIcon, Download01Icon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { use, useLayoutEffect, useRef, useState } from "react";
+import { use, useState } from "react";
 import type { AssistantFile } from "~/modules/chat/assistant-output.ts";
 import { serverNow, type ImageToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { tagMarkup } from "~/modules/chat/tags.ts";
@@ -165,19 +165,13 @@ const useEditImage = (file: AssistantFile) => {
 
 function GeneratedImage({ file, model }: { file: AssistantFile; model: string }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-  // The virtual list remounts rows; an image already decoded shows at once.
-  const [cached, setCached] = useState(false);
-  const imageRef = useRef<HTMLImageElement>(null);
-  useLayoutEffect(() => {
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) setCached(true);
-  }, []);
+  const [failed, setFailed] = useState(false);
   const { attachment } = file;
+  const size = attachment.dimensions;
   const url = attachmentUrl(attachment.id);
   const edit = useEditImage(file);
 
-  if (state === "error")
+  if (failed)
     return (
       <p role="alert" className="text-muted-foreground bg-muted rounded-2xl p-4 text-sm">
         This image could not be loaded.
@@ -199,16 +193,13 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
         }}
       >
         <img
-          ref={imageRef}
           src={url}
           alt={model ? `Image made with ${model}` : "Generated image"}
-          onLoad={() => setState("ready")}
-          onError={() => setState("error")}
-          className={cn(
-            "bg-muted block max-h-144 w-full object-contain",
-            !cached && "transition-opacity duration-300 motion-reduce:transition-none",
-            !cached && state !== "ready" && "opacity-0",
-          )}
+          // Its box is held from the stored size, so the grid does not jump when it arrives.
+          width={size?.width}
+          height={size?.height}
+          onError={() => setFailed(true)}
+          className="bg-muted block h-auto max-h-144 w-full object-contain"
         />
       </a>
       <div className="pointer-events-none absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within/image:pointer-events-auto group-focus-within/image:opacity-100 group-hover/image:pointer-events-auto group-hover/image:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 motion-reduce:transition-none">

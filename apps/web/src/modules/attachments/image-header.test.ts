@@ -8,6 +8,7 @@ const bytes = (...parts: Array<number[] | string>) =>
     ),
   );
 const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+const be16 = (n: number) => [(n >>> 8) & 255, n & 255];
 const le16 = (n: number) => [n & 255, (n >>> 8) & 255];
 const le24 = (n: number) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255];
 
@@ -28,6 +29,17 @@ const jpeg = (w: number, h: number) =>
     [0xff, 0xe0, 0x00, 0x04, 0x00, 0x00],
     [0xff, 0xc0, 0x00, 0x11, 0x08, (h >> 8) & 255, h & 255, (w >> 8) & 255, w & 255, 0x03],
   );
+// A camera's JPEG: an EXIF segment whose IFD0 carries only the orientation tag.
+const photo = (w: number, h: number, orientation: number, order: "II" | "MM" = "II") => {
+  const u16 = (n: number) => (order === "II" ? le16(n) : be16(n));
+  const u32 = (n: number) => (order === "II" ? [...le16(n), 0, 0] : be32(n));
+  const tiff = [...order].map((c) => c.charCodeAt(0));
+  const exif = [...tiff, ...u16(42), ...u32(8), ...u16(1)];
+  const entry = [...u16(0x0112), ...u16(3), ...u32(1), ...u16(orientation), 0, 0];
+  const body = [...exif, ...entry, ...u32(0)];
+  const frame = jpeg(w, h).subarray(2);
+  return bytes([0xff, 0xd8, 0xff, 0xe1, ...be16(8 + body.length)], "Exif\0\0", body, [...frame]);
+};
 const riff = (chunk: string, body: number[]) =>
   bytes(
     "RIFF",
@@ -62,6 +74,27 @@ describe("readImageSize", () => {
     ["image/webp", vp8l(640, 480)],
   ])("reads %s dimensions from the header", (mediaType, data) => {
     expect(readImageSize(data, mediaType)).toEqual({ width: 640, height: 480 });
+  });
+
+  it.each([
+    [6, "II"],
+    [8, "MM"],
+  ] as const)(
+    "gives a photo turned by orientation %i (%s) its shown size",
+    (orientation, order) => {
+      const data = photo(4000, 3000, orientation, order);
+      expect(readImageSize(data, "image/jpeg")).toEqual({ width: 3000, height: 4000 });
+      // Office files and canvases lay out the stored pixels.
+      expect(imageHeader(data)).toEqual({ mediaType: "image/jpeg", width: 4000, height: 3000 });
+    },
+  );
+
+  it("keeps the stored size for orientations that do not turn a quarter", () => {
+    for (const orientation of [1, 3])
+      expect(readImageSize(photo(40, 30, orientation), "image/jpeg")).toEqual({
+        width: 40,
+        height: 30,
+      });
   });
 
   it("refuses truncated or malformed headers", () => {

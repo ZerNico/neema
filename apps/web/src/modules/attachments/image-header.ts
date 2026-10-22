@@ -30,7 +30,28 @@ function gif(b: Uint8Array): ImageSize | null {
   return { width: u16le(b, 6), height: u16le(b, 8) };
 }
 
-function jpeg(b: Uint8Array): ImageSize | null {
+/** The EXIF orientation (1 to 8) in the TIFF data from `tiff` to `end`, or null. */
+function tiffOrientation(b: Uint8Array, tiff: number, end: number): number | null {
+  if (tiff + 8 > end) return null;
+  const little = b[tiff] === 0x49;
+  const u16 = (i: number) => (little ? u16le(b, i) : u16be(b, i));
+  const u32 = (i: number) => (little ? u16le(b, i) + u16le(b, i + 2) * 65536 : u32be(b, i));
+  const ifd = tiff + u32(tiff + 4);
+  if (u16(tiff + 2) !== 42 || ifd + 2 > end) return null;
+  for (let entry = ifd + 2, n = u16(ifd); n > 0 && entry + 12 <= end; n--, entry += 12)
+    if (u16(entry) === 0x0112) return u16(entry + 8);
+  return null;
+}
+
+/** The orientation an APP1 segment from `at` to `end` carries, when it is EXIF. */
+function exifOrientation(b: Uint8Array, at: number, end: number) {
+  if (at + 10 > end || String.fromCharCode(...b.subarray(at + 4, at + 10)) !== "Exif\0\0")
+    return null;
+  return tiffOrientation(b, at + 10, end);
+}
+
+function jpeg(b: Uint8Array, oriented: boolean): ImageSize | null {
+  let turned = false;
   let at = 2;
   while (at + 4 <= b.length) {
     if (b[at] !== 0xff) return null;
@@ -50,9 +71,16 @@ function jpeg(b: Uint8Array): ImageSize | null {
     // Start of frame: every SOFn except DHT (c4), JPG (c8) and DAC (cc).
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
       if (at + 9 > b.length) return null;
-      return { width: u16be(b, at + 7), height: u16be(b, at + 5) };
+      const [width, height] = [u16be(b, at + 7), u16be(b, at + 5)];
+      return turned ? { width: height, height: width } : { width, height };
     }
     if (marker === 0xda || marker === 0xd9) return null;
+    // Orientations 5 to 8 turn the picture a quarter, so a browser shows it
+    // with its stored sides swapped.
+    if (oriented && marker === 0xe1 && !turned) {
+      const orientation = exifOrientation(b, at, Math.min(at + 2 + length, b.length));
+      turned = orientation !== null && orientation >= 5 && orientation <= 8;
+    }
     at += 2 + length;
   }
   return null;
@@ -75,20 +103,28 @@ function webp(b: Uint8Array): ImageSize | null {
   return null;
 }
 
-/** Width and height from the header of an already sniffed image, or null when unreadable. */
-export function readImageSize(bytes: Uint8Array, mediaType: string): ImageSize | null {
+/**
+ * Width and height from the header of an already sniffed image, or null when
+ * unreadable. `oriented` gives the size a browser shows, after a JPEG's EXIF
+ * rotation; Office files and canvases lay out the stored pixels.
+ */
+function headerSize(bytes: Uint8Array, mediaType: string, oriented: boolean): ImageSize | null {
   const size =
     mediaType === "image/png"
       ? png(bytes)
       : mediaType === "image/gif"
         ? gif(bytes)
         : mediaType === "image/jpeg"
-          ? jpeg(bytes)
+          ? jpeg(bytes, oriented)
           : mediaType === "image/webp"
             ? webp(bytes)
             : null;
   return size && size.width > 0 && size.height > 0 ? size : null;
 }
+
+/** The size a browser shows an already sniffed image at, or null when unreadable. */
+export const readImageSize = (bytes: Uint8Array, mediaType: string) =>
+  headerSize(bytes, mediaType, true);
 
 /** True when the browser may be handed the image: readable and within the limits. */
 export function acceptableImageSize(size: ImageSize | null): size is ImageSize {
@@ -119,6 +155,6 @@ function sniff(b: Uint8Array): string | null {
 /** Type and size as the bytes themselves give them, or null for anything else or unreadable. */
 export function imageHeader(bytes: Uint8Array): (ImageSize & { mediaType: string }) | null {
   const mediaType = sniff(bytes);
-  const size = mediaType ? readImageSize(bytes, mediaType) : null;
+  const size = mediaType ? headerSize(bytes, mediaType, false) : null;
   return mediaType && size ? { mediaType, ...size } : null;
 }
