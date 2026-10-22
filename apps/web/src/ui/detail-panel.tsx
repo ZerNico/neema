@@ -518,32 +518,42 @@ function PanelExpandButton({ expanded }: { expanded: boolean }) {
 }
 
 /**
- * Publishes the rail's live width for the desktop titlebar, which sits outside
- * this tree: the header ends and the tab strip starts at the rail's edge, and
- * both have to follow it through the open and close animation, not jump to it.
+ * Publishes the rail's live edge for the desktop titlebar, which sits outside
+ * this tree: the tab strip starts at the rail's edge and has to follow it through
+ * every animation, not jump to it. The header ends at the rail's footprint, which
+ * is the same edge except at full width, where the rail covers the page and the
+ * strip covers the header instead of squeezing it.
  */
-function useTitlebarInset(root: RefObject<HTMLElement | null>, mounted: boolean) {
+function useTitlebarInset(
+  root: RefObject<HTMLElement | null>,
+  footprint: HTMLElement | null,
+  mounted: boolean,
+) {
   useLayoutEffect(() => {
     const element = root.current;
     if (!mounted || !element) return;
+    const held = footprint ?? element;
     const html = document.documentElement;
+    // Measured from the window's edge, so an inset page's margin is included.
+    const fromRight = (rect: DOMRect) => `${html.clientWidth - rect.left}px`;
     const apply = () => {
       const rect = element.getBoundingClientRect();
-      const width = rect.width;
-      // Measured from the window's edge, so an inset page's margin is included.
-      html.style.setProperty("--detail-panel-inset", `${html.clientWidth - rect.left}px`);
-      if (width > 0) html.dataset.detailPanel = "";
+      html.style.setProperty("--detail-panel-inset", fromRight(rect));
+      html.style.setProperty("--detail-panel-footprint", fromRight(held.getBoundingClientRect()));
+      if (rect.width > 0) html.dataset.detailPanel = "";
       else delete html.dataset.detailPanel;
     };
     apply();
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(apply) : null;
     observer?.observe(element);
+    if (held !== element) observer?.observe(held);
     return () => {
       observer?.disconnect();
       html.style.removeProperty("--detail-panel-inset");
+      html.style.removeProperty("--detail-panel-footprint");
       delete html.dataset.detailPanel;
     };
-  }, [root, mounted]);
+  }, [root, footprint, mounted]);
 }
 
 /**
@@ -570,7 +580,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   if (arrived && !open) setArrived(false);
   const still = reducedMotion || arrived;
   // An overlay leaves the header where it is, so it publishes no inset.
-  useTitlebarInset(root, request !== null && !overlay);
+  // The spacer that holds the page's width while the rail is a layer over it.
+  const [spacer, setSpacer] = useState<HTMLDivElement | null>(null);
+  useTitlebarInset(root, spacer, request !== null && !overlay);
   // At full width the rail is as wide as its row, which the page beside it leaves.
   const [room, setRoom] = useState(0);
   const mounted = request !== null;
@@ -594,6 +606,8 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   if (expanded && !covered && instant) setCovered(true);
   if (!expanded && covered) setCovered(false);
   if (!expanded && layered && instant) setLayered(false);
+  // Pinned to the row while it covers it open; closing slides it out as usual.
+  const pinned = covered && open;
   // Closing the rail, or leaving the page it was opened on, gives the page back, so a rail
   // never reopens or arrives on another page over a hidden page.
   useEffect(() => {
@@ -683,7 +697,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
   return (
     <>
       {/* Closing gives the page its room at once, so the rail leaves over it. */}
-      {layered && open ? <div aria-hidden className="shrink-0" style={{ width: kept }} /> : null}
+      {layered && open ? (
+        <div ref={setSpacer} aria-hidden className="shrink-0" style={{ width: kept }} />
+      ) : null}
       <m.aside
         ref={root}
         // Things laid over the rail from outside it follow its animation by this.
@@ -701,6 +717,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
             "bg-background absolute inset-x-0 top-12 bottom-0 z-20 [html[data-desktop-chrome]_&]:top-0",
           !open && "pointer-events-none",
           layered && "bg-background absolute inset-y-0 right-0 z-10",
+          // Once it covers the row it is pinned to the row, so a sidebar opening or
+          // closing beside it moves its edge in step instead of animating after it.
+          pinned && "left-0 w-auto!",
           className,
         )}
         initial={overlay ? { x: still ? "0%" : "100%" } : { width: still ? width : 0 }}
@@ -708,7 +727,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
         variants={{ [target]: shape }}
         // A drag must track the pointer, not ease toward it; the open and close
         // animation keeps its own duration.
-        transition={dragging ? { duration: 0 } : { duration, ease: "easeInOut" }}
+        // A covering rail keeps its width current without animating: the class above
+        // positions it, and the way back starts from the width it has then.
+        transition={dragging || pinned ? { duration: 0 } : { duration, ease: "easeInOut" }}
         onAnimationComplete={(definition) => {
           if (definition !== target) return;
           if (!open) finishExit(generation);
@@ -730,7 +751,9 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
         {/* Not keyed by tab: switching tabs swaps the content below at once, and
           only opening the panel runs this entrance. */}
         <m.div
-          style={{ width: overlay ? "100%" : width }}
+          // Full width or on its way there, the body follows the rail, so what it
+          // centres glides with it; opening and closing slide it at its own width.
+          style={{ width: overlay || layered ? "100%" : width }}
           className={cn("relative flex min-h-0 flex-1 flex-col", !overlay && "border-l")}
           initial={{ opacity: still ? 1 : 0, x: still ? 0 : 8 }}
           animate={target}

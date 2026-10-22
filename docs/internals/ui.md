@@ -172,20 +172,26 @@ false`), so a page body is written against data already there. This includes loc
   rather than rising as a bottom sheet, so the corner toggle and its right-panel icon mean the same
   thing at every width. Until someone drags the rail's edge its width is a share of the window; a
   dragged width is kept. It stops where the sidebar and a readable page would no longer fit, and
-  dragged well past that it takes the whole row: the page beside it turns invisible, keeping its
-  state, until the edge is dragged back, the strip's full-width button is pressed again, or the
-  rail closes. That state is never stored, so a reload brings the page back.
+  dragged well past that it takes the whole row, until the edge is dragged back, the strip's
+  full-width button is pressed again, or the rail closes. That state is never stored, so a reload
+  brings the page back. Full width is a layer over the row, never a wider rail: a spacer holds the
+  rail's own width so the page never reflows, the page is hidden with `content-visibility` only
+  once covered (keeping its state and scroll), and while covering, the layer is pinned to the row
+  so a sidebar moving beside it moves its edge in step.
 - A `restorable` request's tab outlives navigation and restarts: its id and title, never its body,
   are stored per account in `localStorage` (`detail-panel-tabs.ts`). A restored tab shows a pending
   body until the owner of its kind refreshes it, and owners refresh every tab of their kind, not
   just the selected one. `release` (an owner unmounting) leaves a restorable tab pending; only the
   page that owns a kind can prove an item gone, through `useDetailPanelReconciler`. A phone never
   opens a restored panel by itself.
-- On a shell drawing its own titlebar the rail's tab strip portals into a second titlebar target,
-  and the rail publishes its live width as `--detail-panel-inset`, so the header ends and the strip
-  begins at the rail's edge through the open and close animation. The strip ends where
-  `env(titlebar-area-*)` ends, which on Windows and Linux leaves the window controls overlay its
-  corner above the rail.
+- On a shell drawing its own titlebar the rail's tab strip portals into a second titlebar target.
+  The rail publishes its live edge as `--detail-panel-inset`, where the strip begins, and its
+  footprint as `--detail-panel-footprint`, where the header ends; they differ only at full width,
+  where the strip slides over the header in the titlebar's colour and pads its tabs clear of
+  macOS's traffic lights. The header's app controls (`data-header-controls`: history, search)
+  stay while the open sidebar leaves them room and fade when it is collapsed. The strip ends
+  where `env(titlebar-area-*)` ends, which on Windows and Linux leaves the window controls overlay
+  its corner above the rail.
 - `DetailPanelRequest` has an `actions` slot the shell renders pinned under the tab strip, outside
   the scroller, and a `body` it renders inside. A body must never pin itself to the scroll edge: the
   shell owns the scroller's padding, and the agent draft spent two rounds of negative margins

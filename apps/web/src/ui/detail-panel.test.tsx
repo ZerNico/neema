@@ -366,15 +366,27 @@ it("lays full width over the page, which keeps its width and hides only once cov
   expect(rail).toHaveClass("absolute");
   expect((rail.previousElementSibling as HTMLElement).style.width).toBe(initial);
   expect(html).not.toHaveAttribute("data-panel-expanded");
+  // The body follows the rail on its way, so what it centres glides with it.
+  expect((rail.lastElementChild as HTMLElement).style.width).toBe("100%");
   finish();
   expect(html).toHaveAttribute("data-panel-expanded");
+  // Covering, it is pinned to the row, so a sidebar moving beside it moves its edge in step.
+  expect(rail).toHaveClass("left-0");
   // Leaving shows the page at once, under the rail as it narrows back.
   fireEvent.click(screen.getByRole("button", { name: "Exit full width" }));
   expect(html).not.toHaveAttribute("data-panel-expanded");
   expect(rail).toHaveClass("absolute");
+  expect(rail).not.toHaveClass("left-0");
   finish();
   expect(rail).not.toHaveClass("absolute");
   expect(rail.previousElementSibling).toBe(screen.getByRole("main"));
+  expect((rail.lastElementChild as HTMLElement).style.width).toBe(initial);
+  // Closed from full width, it slides out over the page rather than vanishing.
+  fireEvent.click(screen.getByRole("button", { name: "Full width" }));
+  finish();
+  act(() => panel.hide());
+  expect(rail).not.toHaveClass("left-0");
+  expect(screen.getByText("Panel content")).toBeInTheDocument();
 });
 
 it("gives the next page its room when that page's rail arrives open", async () => {

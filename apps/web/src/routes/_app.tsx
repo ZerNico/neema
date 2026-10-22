@@ -128,13 +128,17 @@ function AuthenticatedLayout({
                           included, so it runs the full height and opening it
                           shrinks the chat instead of covering it. */}
                       <div className="relative flex min-h-0 flex-1">
-                        {/* A full-width rail leaves the page no room: hidden, it keeps its state. */}
-                        <div className="flex min-w-0 flex-1 flex-col [html[data-panel-expanded]_&]:invisible [html[data-panel-expanded]_&]:overflow-hidden">
+                        {/* Covered by a full-width rail, the page is hidden and skips layout, so a
+                            sidebar moving beside the rail never re-lays out the chat. It keeps its state. */}
+                        <div className="flex min-w-0 flex-1 flex-col [html[data-panel-expanded]_&]:invisible [html[data-panel-expanded]_&]:overflow-hidden [html[data-panel-expanded]_&]:[content-visibility:hidden]">
                           <AppHeader>
                             {/* On a wide screen the toggle heads the rail. */}
                             <SidebarTrigger className="md:hidden" />
-                            <HistoryButtons />
-                            <SearchButton />
+                            {/* The app's own controls, kept beside a full-width rail (app.css). */}
+                            <div data-header-controls="" className="contents">
+                              <HistoryButtons />
+                              <SearchButton />
+                            </div>
                             <HeaderSlot />
                             <WorkAttention />
                             <PanelToggleSpace inHeader />

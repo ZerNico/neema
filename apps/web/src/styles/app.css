@@ -609,6 +609,9 @@
 /* Window chrome is optional and independent of authenticated route lifetime. */
 html[data-desktop-chrome] {
   --desktop-titlebar-height: max(48px, env(titlebar-area-height, 0px));
+  /* Where the titlebar's own content may start: after macOS's traffic lights,
+     which full screen hides. Windows and Linux keep their controls at the right. */
+  --desktop-titlebar-start: env(titlebar-area-x, 0px);
   --desktop-content-height: calc(100svh - var(--desktop-titlebar-height));
   --dialog-viewport-height: var(--desktop-content-height);
 }
@@ -671,17 +674,25 @@ html[data-sidebar-variant="inset"] .desktop-titlebar {
   --accent: var(--sidebar-accent);
 }
 
+html[data-desktop-chrome="darwin"] {
+  --desktop-titlebar-start: env(titlebar-area-x, 96px);
+}
+
+html[data-desktop-fullscreen="true"] {
+  --desktop-titlebar-start: 0px;
+}
+
 .desktop-titlebar-content {
   position: absolute;
   top: 0;
   height: 100%;
-  left: env(titlebar-area-x, 0px);
+  left: var(--desktop-titlebar-start);
   width: env(titlebar-area-width, calc(100% - 160px));
   max-width: 100%;
+  transition: opacity 150ms ease-out;
 }
 
 html[data-desktop-chrome="darwin"] .desktop-titlebar-content {
-  left: env(titlebar-area-x, 96px);
   width: env(titlebar-area-width, calc(100% - 96px));
 }
 
@@ -690,7 +701,6 @@ html[data-desktop-chrome="darwin"]:not([data-desktop-fullscreen="true"]) .deskto
 }
 
 html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
-  left: 0;
   width: 100%;
 }
 
@@ -710,10 +720,12 @@ html[data-desktop-chrome][data-sidebar-variant="inset"][data-sidebar-state="expa
 }
 
 /* The open detail rail owns the titlebar above it (`--detail-panel-inset` is how
-   far its left edge sits from the window's right), so the header ends at the
-   rail's edge and the rail's tab strip takes the rest. The strip ends where the
-   content area does: on Windows and Linux the window controls overlay sits past
-   it, over the rail's top right corner. */
+   far its left edge sits from the window's right), so the rail's tab strip starts
+   at the rail's edge and the header ends at its footprint, the same edge except at
+   full width: there the strip slides over the header in the titlebar's colour, as
+   the rail does over the page, and pads its tabs clear of the traffic lights. The
+   strip ends where the content area does: on Windows and Linux the window controls
+   overlay sits past it, over the rail's top right corner. */
 .desktop-titlebar-panel {
   display: none;
 }
@@ -725,12 +737,17 @@ html[data-detail-panel] .desktop-titlebar-panel {
   height: 100%;
   left: calc(100% - var(--detail-panel-inset, 0px));
   right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100% - 160px)));
+  padding-left: max(
+    0px,
+    calc(var(--desktop-titlebar-start) - 100% + var(--detail-panel-inset, 0px))
+  );
+  background-color: inherit;
 }
 
 html[data-detail-panel] .desktop-titlebar-content {
   width: min(
     env(titlebar-area-width, calc(100% - 160px)),
-    calc(100% - var(--detail-panel-inset, 0px) - env(titlebar-area-x, 0px))
+    calc(100% - var(--detail-panel-footprint, 0px) - env(titlebar-area-x, 0px))
   );
 }
 
@@ -742,17 +759,34 @@ html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-panel 
 html[data-desktop-chrome="darwin"][data-detail-panel] .desktop-titlebar-content {
   width: min(
     env(titlebar-area-width, calc(100% - 96px)),
-    calc(100% - var(--detail-panel-inset, 0px) - env(titlebar-area-x, 96px))
+    calc(100% - var(--detail-panel-footprint, 0px) - env(titlebar-area-x, 96px))
   );
 }
 
 html[data-desktop-fullscreen="true"][data-detail-panel] .desktop-titlebar-content {
-  width: calc(100% - var(--detail-panel-inset, 0px));
+  width: calc(100% - var(--detail-panel-footprint, 0px));
 }
 
-/* A full-width rail hides the page, header included. */
-html[data-panel-expanded] .desktop-titlebar-content {
+/* A full-width rail hides the page and what the header shows of it. The app's own
+   controls stay where they are while the sidebar leaves them room before the rail,
+   and fade as the strip slides over them when it does not. */
+html[data-panel-expanded] .desktop-header > :not([data-header-controls]) {
   visibility: hidden;
+}
+
+html[data-panel-expanded][data-sidebar-state="collapsed"] .desktop-titlebar-content {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 150ms ease-out,
+    visibility 0s 150ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-titlebar-content,
+  html[data-panel-expanded][data-sidebar-state="collapsed"] .desktop-titlebar-content {
+    transition: none;
+  }
 }
 
 /* Sits above the header or the open panel's strip, whichever reaches the corner,
