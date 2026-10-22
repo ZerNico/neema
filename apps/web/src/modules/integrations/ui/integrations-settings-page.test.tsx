@@ -176,6 +176,9 @@ describe("integration account row", () => {
         id: "outline",
         name: "Mine",
         config: { url: "https://mcp.example.com/mcp", ways: "anonymous" },
+        oauthClientId: null,
+        oauthSecretConfigured: false,
+        redirectUri: null,
         listing: { server: null, checkedAt: null, checkError: null, count: 3 },
       },
     ]);

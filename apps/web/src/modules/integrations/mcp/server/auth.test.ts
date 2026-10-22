@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Cause, Duration, Effect, Exit } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveredServer, StoredOAuthClient } from "../../server/repo.ts";
-import { mcpOAuth } from "./auth.ts";
+import { mcpOAuth, offersSignIn } from "./auth.ts";
 
 /** What the authorization server saw, to check what this app sent it. */
 const log = {
@@ -238,6 +238,19 @@ describe("signing in to an MCP server", () => {
     );
     expect(log.registrations).toEqual([]);
     expect(saved).toEqual([]);
+  });
+
+  it("says, before anyone signs in, whether the server lets this app in by itself", async () => {
+    const probe = () => Effect.runPromise(offersSignIn({ url: `${base}/mcp`, ways: "oauth" }));
+    expect(await probe()).toEqual({ signIn: true, registers: true, metadataDocuments: false });
+    // Like Asana's: registered apps only, so the person brings one of their own.
+    metadataExtras = { registration_endpoint: undefined };
+    expect(await probe()).toEqual({ signIn: true, registers: false, metadataDocuments: false });
+    metadataExtras = {
+      registration_endpoint: undefined,
+      client_id_metadata_document_supported: true,
+    };
+    expect(await probe()).toEqual({ signIn: true, registers: false, metadataDocuments: true });
   });
 
   it("refuses a sign-in page or token endpoint elsewhere without HTTPS", async () => {

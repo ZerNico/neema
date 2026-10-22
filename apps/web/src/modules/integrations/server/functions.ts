@@ -90,6 +90,10 @@ export const savePersonalServer = createServerFn({ method: "POST" })
           integrationId: data.integrationId,
           name: data.name,
           config: data.config,
+          ...(data.oauthClientId === undefined ? {} : { oauthClientId: data.oauthClientId }),
+          ...(data.oauthClientSecret === undefined
+            ? {}
+            : { oauthClientSecret: data.oauthClientSecret }),
         }),
       ).pipe(
         Effect.map((server) => ({ ok: true as const, server })),

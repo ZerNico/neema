@@ -28,7 +28,7 @@ const signInOutdated = () =>
  * that cannot reach the document fails the whole sign-in. Without one, the
  * app registers itself instead.
  */
-const metadataDocumentOrigin = () => {
+export const metadataDocumentOrigin = () => {
   const declared = publicUrl();
   if (!declared?.startsWith("https://")) return null;
   const host = new URL(declared).hostname;

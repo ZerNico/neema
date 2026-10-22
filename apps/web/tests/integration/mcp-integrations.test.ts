@@ -1720,6 +1720,45 @@ describe("an MCP server a person adds for themselves", () => {
     expect(admins.id).toBe("tasks");
   });
 
+  it("keeps an app of its owner's own for signing in, its secret never sent back", async () => {
+    names.set("mcp.own-app.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    await allowServers(true);
+    const owner = await activeUser();
+    const saveAs = (
+      input: Partial<{ ways: string; oauthClientId: string; oauthClientSecret: string }>,
+      integrationId: string | null,
+    ) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.savePersonalServer(owner, {
+            integrationId,
+            name: "Own app",
+            config: { url: "https://mcp.own-app.test/keyed", ways: input.ways ?? "oauth" },
+            ...(input.oauthClientId === undefined ? {} : { oauthClientId: input.oauthClientId }),
+            ...(input.oauthClientSecret === undefined
+              ? {}
+              : { oauthClientSecret: input.oauthClientSecret }),
+          }),
+        ),
+      );
+    const stored = (id: string) =>
+      run(Effect.flatMap(IntegrationRepo, (repo) => repo.getConfig(id)));
+    const added = await saveAs({ oauthClientId: " app-1 ", oauthClientSecret: "secret-1" }, null);
+    expect(added).toMatchObject({ oauthClientId: "app-1", oauthSecretConfigured: true });
+    expect(JSON.stringify(added)).not.toContain("secret-1");
+    expect((await stored(added.id))?.oauthClientSecretCiphertext).not.toContain("secret-1");
+    // Saving without the fields keeps them; another way in than signing in drops both.
+    expect(await saveAs({}, added.id)).toMatchObject({
+      oauthClientId: "app-1",
+      oauthSecretConfigured: true,
+    });
+    expect(await saveAs({ ways: "token" }, added.id)).toMatchObject({
+      oauthClientId: null,
+      oauthSecretConfigured: false,
+    });
+    expect((await stored(added.id))?.oauthClientSecretCiphertext).toBeNull();
+  });
+
   it("is listed and used by its owner alone, with no approval step, while they may add servers", async () => {
     names.set("mcp.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
     const owner = await activeUser();

@@ -124,6 +124,10 @@ Names are unique among what one person sees (the admin's and their own), not acr
 Ids are one space with the admin's, so a person's server takes its name plus a tag of its
 owner: a bare name would take an id an admin's integration wants (and its tool names and
 redirect URI with it) and, taken, tell the admin that someone has a server by that name.
+A server whose sign-in neither registers apps nor reads metadata documents (Asana's) takes an
+app the person registered there: the probe says so, the row is saved first so its redirect URI
+exists, and its client ID and secret are asked for before the sign-in, which would only fail.
+The secret is encrypted like the admin's and never sent back, and goes when signing in does.
 
 A person gives only the address. The server is asked how it is reached rather than the person:
 answering as nobody makes it open; refusing, and naming an authorization server with PKCE,
@@ -152,9 +156,9 @@ functions:
   protected resource metadata, else the well-known paths. That metadata names the
   authorization server, whose metadata is RFC 8414 with an OIDC fallback. A server without
   S256 PKCE is refused. A resource that names another origin is refused.
-- **Client, in the spec's order.** The admin's pre-registered client, else one registered
-  before with this issuer, else a Client ID Metadata Document, else dynamic registration
-  (`application_type: web`). Registrations are stored per issuer
+- **Client, in the spec's order.** The integration's own pre-registered client (the admin's,
+  or a person's on a server of their own), else one registered before with this issuer, else
+  a Client ID Metadata Document, else dynamic registration (`application_type: web`). Registrations are stored per issuer
   (`integration_oauth_clients`) and never shown to another. The admin's client is pinned to
   the issuer it was first used with, on the integration row and in one statement, so two
   first sign-ins cannot pin two issuers and no registration is overwritten. A server that

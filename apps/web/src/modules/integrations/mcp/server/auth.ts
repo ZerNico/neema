@@ -105,7 +105,8 @@ const challenge = (url: URL, publicOnly: boolean) =>
 /**
  * Whether a server that refused a request without an account says where to sign
  * in, safely enough to use: an authorization server with PKCE. Otherwise it
- * takes a token pasted from the person's account there.
+ * takes a token pasted from the person's account there. Signing in, it says
+ * how a client may come to exist there without someone registering an app.
  */
 export const offersSignIn = (config: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
@@ -120,9 +121,12 @@ export const offersSignIn = (config: Readonly<Record<string, string>>) =>
         }),
       catch: () => null,
     }).pipe(Effect.catch(() => Effect.succeed(null)));
-    return Boolean(
-      info?.authorizationServerMetadata?.code_challenge_methods_supported?.includes("S256"),
-    );
+    const metadata = info?.authorizationServerMetadata;
+    return {
+      signIn: Boolean(metadata?.code_challenge_methods_supported?.includes("S256")),
+      registers: Boolean(metadata?.registration_endpoint),
+      metadataDocuments: metadata?.client_id_metadata_document_supported === true,
+    };
   });
 
 export const mcpOAuth: DiscoveredOAuth = {

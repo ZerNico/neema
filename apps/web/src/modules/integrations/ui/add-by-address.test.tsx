@@ -106,6 +106,47 @@ describe("adding a server by its address", () => {
     expect(screen.getByLabelText("Server address")).toBeInTheDocument();
   });
 
+  it("asks for an app of one's own where the server registers none, before signing in", async () => {
+    const user = userEvent.setup();
+    vi.mocked(probeServer).mockResolvedValueOnce({
+      ok: true,
+      ways: "oauth",
+      name: "asana.com",
+      needsClient: true,
+    } as never);
+    const server = {
+      id: "mcp-9",
+      name: "asana.com",
+      config: { url: "https://mcp.asana.com/v2/mcp", ways: "oauth" },
+      oauthClientId: null,
+      oauthSecretConfigured: false,
+      redirectUri: "https://chat.example.com/api/integrations/mcp-9/callback",
+      listing: null,
+    };
+    vi.mocked(savePersonalServer).mockResolvedValue({ ok: true, server } as never);
+    vi.mocked(getServerSetup).mockResolvedValue({ ok: true, integration: docs([]) } as never);
+    mount();
+    await user.type(screen.getByLabelText("Server address"), "https://mcp.asana.com/v2/mcp");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    // Its redirect URI, to register the app with, and no sign-in until the app is in.
+    expect(await screen.findByLabelText("Redirect URI")).toHaveValue(server.redirectUri);
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await user.type(screen.getByLabelText(/OAuth client ID/), "app-1");
+    await user.type(screen.getByLabelText(/OAuth client secret/), "secret-1");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(savePersonalServer).toHaveBeenLastCalledWith({
+      data: {
+        integrationId: "mcp-9",
+        name: "asana.com",
+        config: server.config,
+        oauthClientId: "app-1",
+        oauthClientSecret: "secret-1",
+      },
+    });
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+
   it("says why an address will not do, and saves nothing", async () => {
     const user = userEvent.setup();
     vi.mocked(savePersonalServer).mockClear();

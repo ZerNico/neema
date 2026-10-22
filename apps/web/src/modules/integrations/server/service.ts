@@ -51,7 +51,9 @@ import {
   wayOpen,
   type ConnectedSession,
 } from "./credentials.ts";
-import { makeOAuthFlow } from "./oauth-flow.ts";
+import { makeOAuthFlow, metadataDocumentOrigin } from "./oauth-flow.ts";
+import { callbackPath } from "./oauth.ts";
+import { publicUrl } from "~/server/public-url.ts";
 import { offersSignIn } from "../mcp/server/auth.ts";
 import { listingOwner, makeToolListings, toListingView } from "./tool-listings.ts";
 
@@ -157,6 +159,10 @@ export class IntegrationService extends Context.Service<
         integrationId: string | null;
         name: string;
         config: Readonly<Record<string, string>>;
+        /** Their own app's client: absent keeps it, empty removes it. */
+        oauthClientId?: string;
+        /** Absent keeps the stored secret. */
+        oauthClientSecret?: string;
       },
     ): Effect.Effect<PersonalServer, IntegrationRejected>;
     deletePersonalServer(
@@ -170,7 +176,10 @@ export class IntegrationService extends Context.Service<
     probeServer(
       userId: string,
       url: string,
-    ): Effect.Effect<{ ways: "anonymous" | "oauth" | "token"; name: string }, IntegrationRejected>;
+    ): Effect.Effect<
+      { ways: "anonymous" | "oauth" | "token"; name: string; needsClient: boolean },
+      IntegrationRejected
+    >;
     /** A server of one's own being added, as connecting it needs it. */
     serverSetup(
       userId: string,
@@ -457,6 +466,9 @@ export class IntegrationService extends Context.Service<
               row.config[key] === undefined ? [] : [[key, row.config[key]!]],
             ),
           ),
+          oauthClientId: row.oauthClientId,
+          oauthSecretConfigured: Boolean(row.oauthClientSecretCiphertext),
+          redirectUri: publicUrl() ? `${publicUrl()}${callbackPath(row.id)}` : null,
           listing: toListingView(yield* repo.toolListing(row.id, own?.id ?? null)),
         } satisfies PersonalServer;
       });
@@ -834,13 +846,26 @@ export class IntegrationService extends Context.Service<
               }));
             if (!id)
               return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            // Their own app, for a server whose sign-in registers none: only while it is signed into.
+            const signsIn = mcpWaysOf(normalized.config).oauth;
+            const clientId = signsIn
+              ? input.oauthClientId === undefined
+                ? (stored?.oauthClientId ?? null)
+                : input.oauthClientId.trim() || null
+              : null;
             const row = yield* repo.saveConfig({
               id,
               name,
               enabled: true,
               config: normalized.config,
               fingerprint: normalized.fingerprint,
-              oauthClientId: null,
+              oauthClientId: clientId,
+              // Without a client its secret goes too; with one, a typed secret replaces it.
+              ...(clientId === null
+                ? { oauthClientSecret: "" }
+                : input.oauthClientSecret?.trim()
+                  ? { oauthClientSecret: input.oauthClientSecret.trim() }
+                  : {}),
               allowApiKeys: true,
               listsTools: true,
             });
@@ -910,7 +935,8 @@ export class IntegrationService extends Context.Service<
           const asNobody = yield* adapter
             .verify(probe(normalized.config, { kind: "none" }))
             .pipe(Effect.result);
-          if (asNobody._tag === "Success") return { ways: "anonymous" as const, name };
+          if (asNobody._tag === "Success")
+            return { ways: "anonymous" as const, name, needsClient: false };
           if (asNobody.failure._tag !== "IntegrationAuthFailed")
             return yield* new IntegrationRejected({
               reason:
@@ -919,7 +945,11 @@ export class IntegrationService extends Context.Service<
                   : "Could not reach the server.",
             });
           const signIn = yield* offersSignIn(normalized.config);
-          return { ways: signIn ? ("oauth" as const) : ("token" as const), name };
+          if (!signIn.signIn) return { ways: "token" as const, name, needsClient: false };
+          // Nothing lets this app in by itself, so the person brings an app they registered there.
+          const needsClient =
+            !signIn.registers && !(signIn.metadataDocuments && metadataDocumentOrigin() !== null);
+          return { ways: "oauth" as const, name, needsClient };
         }),
 
         serverSetup: Effect.fn("IntegrationService.serverSetup")(function* (userId, integrationId) {

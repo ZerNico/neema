@@ -161,6 +161,11 @@ export interface PersonalServer {
   name: string;
   /** The MCP admin fields a person may set: address, way in, header. */
   config: Record<string, string>;
+  /** Their own app at a server that does not register this one; the secret is never sent back. */
+  oauthClientId: string | null;
+  oauthSecretConfigured: boolean;
+  /** Where its sign-in returns, for registering that app; null without a public address. */
+  redirectUri: string | null;
   /** The last check of what it lists, to their account or without one. */
   listing: ToolListingView | null;
 }
@@ -181,6 +186,10 @@ export const SavePersonalServerInput = Schema.Struct({
   config: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(2_000))).check(
     Schema.isMaxProperties(10),
   ),
+  /** Their own app's client, for signing in; absent keeps it, empty removes it. */
+  oauthClientId: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(500))),
+  /** Absent keeps the stored secret; the form never round-trips it. */
+  oauthClientSecret: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2_000))),
 });
 
 /** The service checks the id's stricter shape and that the type ships. */

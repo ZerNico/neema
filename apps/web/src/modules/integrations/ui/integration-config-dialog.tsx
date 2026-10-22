@@ -23,7 +23,7 @@ import type { IntegrationField } from "../manifest.ts";
 import type { AdminIntegration } from "../schema.ts";
 import { saveIntegrationConfig } from "../server/functions.ts";
 import { IntegrationFieldControl } from "./integration-field.tsx";
-import { OAuthSetupGuide } from "./oauth-setup-guide.tsx";
+import { OAuthClientFields } from "./oauth-setup-guide.tsx";
 
 type AdminRow = AdminIntegration & { redirectUri: string | null };
 
@@ -111,43 +111,18 @@ export function IntegrationConfigDialog({
     />
   );
   const oauthFields = manifest.oauth ? (
-    <>
-      <OAuthSetupGuide
-        id={`${fieldId}-redirect`}
-        setup={manifest.oauth.setup}
-        redirectUri={redirectUri}
-        config={config}
-        configured={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
-      />
-      <Field>
-        <FieldLabel htmlFor={`${fieldId}-client`}>
-          OAuth client ID <OptionalMark />
-        </FieldLabel>
-        <Input
-          id={`${fieldId}-client`}
-          value={clientId}
-          onChange={(event) => setClientId(event.target.value)}
-          disabled={save.isPending}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${fieldId}-secret`}>
-          OAuth client secret <OptionalMark />
-        </FieldLabel>
-        <Input
-          id={`${fieldId}-secret`}
-          type="password"
-          autoComplete="off"
-          placeholder={row.oauthSecretConfigured ? "Unchanged" : undefined}
-          value={secret}
-          onChange={(event) => setSecret(event.target.value)}
-          disabled={save.isPending}
-        />
-        {row.oauthSecretConfigured ? (
-          <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
-        ) : null}
-      </Field>
-    </>
+    <OAuthClientFields
+      id={fieldId}
+      setup={manifest.oauth.setup}
+      redirectUri={redirectUri}
+      config={config}
+      clientId={clientId}
+      onClientIdChange={setClientId}
+      secret={secret}
+      onSecretChange={setSecret}
+      secretStored={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
+      disabled={save.isPending}
+    />
   ) : null;
 
   return (

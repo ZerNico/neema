@@ -8,7 +8,9 @@ import {
   disclosureTriggerClassName,
 } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
+import { Input } from "~/ui/primitives/input";
 import {
   InputGroup,
   InputGroupAddon,
@@ -115,5 +117,78 @@ export function OAuthSetupGuide({
         </Disclosure>
       )}
     </Field>
+  );
+}
+
+/**
+ * The guide, then the client ID and secret it asks for: an admin's for an
+ * integration, or a person's own app for a server of theirs. A stored secret is
+ * never shown back, so an empty field keeps it.
+ */
+export function OAuthClientFields({
+  id,
+  setup,
+  redirectUri,
+  config,
+  clientId,
+  onClientIdChange,
+  secret,
+  onSecretChange,
+  secretStored,
+  optional = true,
+  disabled,
+}: {
+  id: string;
+  setup: OAuthSetup;
+  redirectUri: string;
+  config: Readonly<Record<string, string>>;
+  clientId: string;
+  onClientIdChange: (value: string) => void;
+  secret: string;
+  onSecretChange: (value: string) => void;
+  /** Whether a client is saved already, which closes the guide. */
+  secretStored: boolean;
+  /** Whether the client ID may be left empty; a public client has no secret either way. */
+  optional?: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <>
+      <OAuthSetupGuide
+        id={`${id}-redirect`}
+        setup={setup}
+        redirectUri={redirectUri}
+        config={config}
+        configured={secretStored}
+      />
+      <Field>
+        <FieldLabel htmlFor={`${id}-client`}>
+          OAuth client ID {optional ? <OptionalMark /> : null}
+        </FieldLabel>
+        <Input
+          id={`${id}-client`}
+          value={clientId}
+          onChange={(event) => onClientIdChange(event.target.value)}
+          disabled={disabled}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${id}-secret`}>
+          OAuth client secret <OptionalMark />
+        </FieldLabel>
+        <Input
+          id={`${id}-secret`}
+          type="password"
+          autoComplete="off"
+          placeholder={secretStored ? "Unchanged" : undefined}
+          value={secret}
+          onChange={(event) => onSecretChange(event.target.value)}
+          disabled={disabled}
+        />
+        {secretStored ? (
+          <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
+        ) : null}
+      </Field>
+    </>
   );
 }

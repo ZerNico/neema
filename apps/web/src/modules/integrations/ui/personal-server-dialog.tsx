@@ -31,6 +31,7 @@ import { byName, integrationEntry } from "./directory-entries.ts";
 import { AddByAddress } from "./add-by-address.tsx";
 import { ConnectFlow } from "./connect-flow.tsx";
 import { IntegrationFieldControl } from "./integration-field.tsx";
+import { OAuthClientFields } from "./oauth-setup-guide.tsx";
 
 const MCP_FIELDS: ReadonlyArray<IntegrationField> = mcpManifest.adminFields;
 
@@ -79,6 +80,16 @@ const NONE: ReadonlyArray<never> = [];
 /** A known server's address and sign-in come with it, so renaming asks only the name. */
 const KNOWN_KEYS = new Set(["url", "ways"]);
 
+/** Most servers let this app register itself; the few that do not take an app of one's own. */
+const OWN_APP_SETUP = {
+  console: null,
+  steps: [
+    {
+      text: "Only for a server that lets in just the apps registered with it: register one there with this redirect URI, then paste its client ID and secret.",
+    },
+  ],
+};
+
 /**
  * Adds an integration, or edits a server of one's own. Adding starts from one
  * directory: what an admin set up, and any address for someone allowed to add
@@ -105,12 +116,16 @@ export function PersonalServerDialog({
   const [config, setConfig] = useState<Record<string, string>>(() =>
     initialConfig(server?.config ?? {}),
   );
+  const [clientId, setClientId] = useState(server?.oauthClientId ?? "");
+  const [secret, setSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   // A new server starts in the directory, until its address is asked for.
   const [byAddress, setByAddress] = useState(server !== null);
   // A server at a known address: its address and sign-in stay as they came.
   const known = server ? knownMcpServerWithUrl(server.config.url) : null;
   const shown = FIELDS.filter((field) => fieldShown(field, config, FIELDS));
+  // An app of one's own only matters to signing in, and a known server's sign-in needs none.
+  const ownApp = !known && fieldValues(config.ways).includes("oauth");
 
   const refresh = () =>
     Promise.all([
@@ -120,7 +135,17 @@ export function PersonalServerDialog({
   const save = useMutation({
     mutationFn: (input: { name: string; config: Record<string, string> }) =>
       savePersonalServer({
-        data: { integrationId: server?.id ?? null, name: input.name.trim(), config: input.config },
+        data: {
+          integrationId: server?.id ?? null,
+          name: input.name.trim(),
+          config: input.config,
+          ...(ownApp
+            ? {
+                oauthClientId: clientId.trim(),
+                ...(secret.trim() ? { oauthClientSecret: secret.trim() } : {}),
+              }
+            : {}),
+        },
       }),
     onSuccess: async (result) => {
       if (!result.ok) {
@@ -236,6 +261,23 @@ export function PersonalServerDialog({
                     disabled={busy}
                   />
                 ))}
+              {ownApp ? (
+                <OAuthClientFields
+                  id={fieldId}
+                  setup={OWN_APP_SETUP}
+                  redirectUri={
+                    server.redirectUri ??
+                    `${window.location.origin}/api/integrations/${server.id}/callback`
+                  }
+                  config={config}
+                  clientId={clientId}
+                  onClientIdChange={setClientId}
+                  secret={secret}
+                  onSecretChange={setSecret}
+                  secretStored={Boolean(server.oauthClientId && server.oauthSecretConfigured)}
+                  disabled={busy}
+                />
+              ) : null}
             </FieldGroup>
             {error ? <FieldError>{error}</FieldError> : null}
             <DialogFooter>
