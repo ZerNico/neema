@@ -13,8 +13,6 @@ export const PROJECT_FILE_LIMITS = {
   pinsPerFile: 10,
   /** A later save by the same writer inside this window replaces their last version. */
   coalesceMinutes: 10,
-  /** The admin's per-project total starts here. */
-  defaultProjectBytes: 500 * 1024 * 1024,
   /** How much of a file's text one read hands the model. */
   readChars: 60_000,
 } as const;
@@ -34,11 +32,6 @@ export const SaveAttachmentToProjectInput = Schema.Struct({
   projectId: EntityId,
   attachmentId: EntityId,
 });
-export const ProjectFileSettingsInput = Schema.Struct({
-  maxProjectBytes: Schema.Int.check(
-    Schema.isBetween({ minimum: 10 * 1024 * 1024, maximum: 1024 * 1024 * 1024 * 1024 }),
-  ),
-});
 
 export interface ProjectFileSummary {
   id: string;
@@ -56,7 +49,6 @@ export interface ProjectFileSummary {
 export interface ProjectFileList {
   files: ReadonlyArray<ProjectFileSummary>;
   usedBytes: number;
-  maxBytes: number;
 }
 export interface ProjectFileVersion {
   id: string;

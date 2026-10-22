@@ -7,7 +7,6 @@ import { KnowledgeAdminPage } from "./knowledge-admin-page.tsx";
 import { getScanReading, updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
 import type { PublicTool } from "~/modules/tools/server/repo.ts";
 import { configureEmbeddings, rebuildAllKnowledgeIndexes } from "../server/functions.ts";
-import { updateProjectFileSettings } from "~/modules/projects/server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { scanReadingQuery } from "~/modules/tools/client/queries.ts";
 import { toast } from "sonner";
@@ -37,10 +36,6 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
   updateWebSearchTool: vi.fn(),
   updateUrlReaderTool: vi.fn(),
   updateDocumentParserTool: vi.fn(),
-}));
-vi.mock("~/modules/projects/server/functions.ts", () => ({
-  getProjectFileSettings: vi.fn(),
-  updateProjectFileSettings: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
@@ -123,7 +118,6 @@ const renderPage = (config = embeddings()) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["admin", "tools", "embeddings"], config);
   client.setQueryData(["admin", "tools", "document-parser"], parserTool);
-  client.setQueryData(["admin", "project-files"], { maxProjectBytes: 500 * 1024 * 1024 });
   client.setQueryData(scanReadingQuery.queryKey, scanSettings);
   return render(
     <QueryClientProvider client={client}>
@@ -293,20 +287,5 @@ describe("KnowledgeAdminPage", () => {
     expect(save).toHaveTextContent("Save");
     pending.resolve(undefined);
     await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
-  });
-
-  it("saves the project file limit in bytes from megabytes", async () => {
-    vi.mocked(updateProjectFileSettings).mockResolvedValue(undefined as never);
-    renderPage();
-    const field = screen.getByLabelText("Storage per project (MB)");
-    expect(field).toHaveValue(500);
-    await userEvent.clear(field);
-    await userEvent.type(field, "2048");
-    await userEvent.click(within(field.closest("form")!).getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(updateProjectFileSettings).toHaveBeenCalledWith({
-        data: { maxProjectBytes: 2048 * 1024 * 1024 },
-      }),
-    );
   });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { Client } from "pg";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Option, Redacted, Stream } from "effect";
 import { strToU8, zipSync } from "fflate";
 import { uuidv7 } from "uuidv7";
@@ -379,6 +379,10 @@ describe("project files", () => {
     ).rejects.toMatchObject({ _tag: "ProjectRejected" });
     const restored = await files((s) => s.restore(owner, draft!.id, 2));
     expect(restored.version).toBe(3);
+    // The restore reuses draft one's bytes, so usage counts them once, as the owner's storage does.
+    expect(await files((s) => s.list(owner, projectId))).toMatchObject({
+      usedBytes: text("draft one").length + text("draft two").length,
+    });
     await expect(files((s) => s.restore(owner, draft!.id, 2))).rejects.toMatchObject({
       _tag: "ProjectRejected",
     });
@@ -552,40 +556,6 @@ describe("project files", () => {
     expect((await versionRows(file.id)).map((row) => row.number)).toEqual([1, 31]);
   });
 
-  it("drops the oldest history to stay under the cap, and refuses what cannot fit", async () => {
-    const { owner, editor, projectId } = await setup();
-    await files((s) => s.updateSettings(3_000));
-    try {
-      const file = await files((s) =>
-        s.write(person(owner), { projectId, name: "big.txt", bytes: text("a".repeat(1_000)) }),
-      );
-      await files((s) =>
-        s.write(person(editor), {
-          projectId,
-          fileId: file.id,
-          name: "big.txt",
-          bytes: text("b".repeat(1_000)),
-        }),
-      );
-      await files((s) =>
-        s.write(person(owner), {
-          projectId,
-          fileId: file.id,
-          name: "big.txt",
-          bytes: text("c".repeat(1_500)),
-        }),
-      );
-      expect((await versionRows(file.id)).map((row) => row.number)).toEqual([2, 3]);
-      await expect(
-        files((s) =>
-          s.write(person(owner), { projectId, name: "huge.txt", bytes: text("d".repeat(2_000)) }),
-        ),
-      ).rejects.toMatchObject({ reason: expect.stringContaining("storage is full") });
-    } finally {
-      await files((s) => s.updateSettings(PROJECT_FILE_LIMITS.defaultProjectBytes));
-    }
-  });
-
   it("takes account foreign-key locks before an editor waits on the project", async () => {
     const { owner, editor, projectId } = await setup();
     const held = await heldRow("projects", projectId);
@@ -641,75 +611,51 @@ describe("project files", () => {
       );
     }
     const [lower, higher] = entries.toSorted((a, b) => a.blobId.localeCompare(b.blobId));
-    await files((s) => s.updateSettings(1));
+    // Aged out, so each write prunes the version it replaces and locks that blob too.
+    await db((d) =>
+      d
+        .update(projectFileVersions)
+        .set({
+          createdAt: sql`now() - make_interval(days => ${PROJECT_FILE_LIMITS.historyDays + 1})`,
+        })
+        .where(inArray(projectFileVersions.fileId, [lower!.fileId, higher!.fileId])),
+    );
+    const held = await heldRow("attachment_blobs", lower!.blobId);
+    const first = Promise.allSettled([
+      files((s) =>
+        s.write(person(owner), {
+          projectId: higher!.projectId,
+          fileId: higher!.fileId,
+          name: "data.txt",
+          bytes: text(lower!.content),
+          basedOnVersion: 1,
+        }),
+      ),
+    ]);
+    let second: typeof first | undefined;
     try {
-      const held = await heldRow("attachment_blobs", lower!.blobId);
-      const first = Promise.allSettled([
+      await held.wait(1);
+      second = Promise.allSettled([
         files((s) =>
           s.write(person(owner), {
-            projectId: higher!.projectId,
-            fileId: higher!.fileId,
+            projectId: lower!.projectId,
+            fileId: lower!.fileId,
             name: "data.txt",
-            bytes: text(lower!.content),
+            bytes: text(higher!.content),
             basedOnVersion: 1,
           }),
         ),
       ]);
-      let second: typeof first | undefined;
-      try {
-        await held.wait(1);
-        second = Promise.allSettled([
-          files((s) =>
-            s.write(person(owner), {
-              projectId: lower!.projectId,
-              fileId: lower!.fileId,
-              name: "data.txt",
-              bytes: text(higher!.content),
-              basedOnVersion: 1,
-            }),
-          ),
-        ]);
-        await held.wait(2);
-      } finally {
-        await held.release();
-        await first;
-        await second;
-      }
-      expect(await first).toMatchObject([{ status: "fulfilled" }]);
-      expect(await second).toMatchObject([{ status: "fulfilled" }]);
-      expect(await files((s) => s.list(owner, lower!.projectId))).toMatchObject({ usedBytes: 1 });
-      expect(await files((s) => s.list(owner, higher!.projectId))).toMatchObject({ usedBytes: 1 });
+      await held.wait(2);
     } finally {
-      await files((s) => s.updateSettings(PROJECT_FILE_LIMITS.defaultProjectBytes));
+      await held.release();
+      await first;
+      await second;
     }
-  });
-
-  it("serializes distinct writers at the project byte quota", async () => {
-    const { owner, editor, projectId } = await setup();
-    await files((s) => s.updateSettings(150));
-    try {
-      const held = await heldRow("projects", projectId);
-      const pending = Promise.allSettled([
-        files((s) =>
-          s.write(person(owner), { projectId, name: "a.txt", bytes: text("a".repeat(100)) }),
-        ),
-        files((s) =>
-          s.write(person(editor), { projectId, name: "b.txt", bytes: text("b".repeat(100)) }),
-        ),
-      ]);
-      try {
-        await held.wait(2);
-      } finally {
-        await held.release();
-        await pending;
-      }
-      const results = await pending;
-      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-      expect(await files((s) => s.list(owner, projectId))).toMatchObject({ usedBytes: 100 });
-    } finally {
-      await files((s) => s.updateSettings(PROJECT_FILE_LIMITS.defaultProjectBytes));
-    }
+    expect(await first).toMatchObject([{ status: "fulfilled" }]);
+    expect(await second).toMatchObject([{ status: "fulfilled" }]);
+    expect(await files((s) => s.list(owner, lower!.projectId))).toMatchObject({ usedBytes: 1 });
+    expect(await files((s) => s.list(owner, higher!.projectId))).toMatchObject({ usedBytes: 1 });
   });
 
   it("serializes distinct creates at the project file-count quota", async () => {

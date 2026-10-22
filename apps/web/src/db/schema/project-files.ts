@@ -1,5 +1,4 @@
 import {
-  bigint,
   boolean,
   index,
   integer,
@@ -64,11 +63,3 @@ export const projectFileVersions = pgTable(
     index("project_file_versions_blob_id_idx").on(t.blobId),
   ],
 );
-
-/** Instance-wide limits an admin sets for project files; one row, id 1. */
-export const projectFileSettings = pgTable("project_file_settings", {
-  id: integer().primaryKey(),
-  /** Every version of every file in one project, together. */
-  maxProjectBytes: bigint("max_project_bytes", { mode: "number" }).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});

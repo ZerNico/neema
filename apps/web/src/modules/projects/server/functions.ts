@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
+import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
@@ -22,7 +22,6 @@ import {
   PinProjectFileVersionInput,
   PROJECT_FILE_LIMITS,
   ProjectFileIdInput,
-  ProjectFileSettingsInput,
   RestoreProjectFileInput,
   SaveAttachmentToProjectInput,
 } from "../files.ts";
@@ -260,10 +259,3 @@ export const saveAttachmentToProject = createServerFn({ method: "POST" })
       ),
     ),
   );
-export const getProjectFileSettings = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runFiles((service) => service.settings()));
-export const updateProjectFileSettings = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(ProjectFileSettingsInput))
-  .handler(({ data }) => runFiles((service) => service.updateSettings(data.maxProjectBytes)));

@@ -7,7 +7,6 @@ import {
   conversations,
   messageAttachments,
   messages,
-  projectFileSettings,
   projectFileVersions,
   projectFiles,
   projects,
@@ -75,17 +74,15 @@ const summaryOf = (row: {
 }): ProjectFileSummary => ({ ...row, updatedAt: row.updatedAt.toISOString() });
 
 /**
- * Drops what retention no longer keeps, then, over the cap, the oldest
- * unpinned history until it fits. The current version of every file
+ * Drops what retention no longer keeps. The current version of every file
  * and every pinned one always stay. Returns storage keys to delete.
  */
-const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
+const prune = (tx: DbTx, projectId: string) =>
   Effect.gen(function* () {
     const ranked = yield* tx
       .select({
         id: projectFileVersions.id,
         blobId: projectFileVersions.blobId,
-        size: projectFileVersions.size,
         pinned: projectFileVersions.pinned,
         rank: sql<number>`row_number() over (partition by ${projectFileVersions.fileId} order by ${projectFileVersions.number} desc)::int`,
         expired: sql<boolean>`${projectFileVersions.createdAt} < now() - make_interval(days => ${PROJECT_FILE_LIMITS.historyDays})`,
@@ -93,7 +90,6 @@ const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
       .from(projectFileVersions)
       .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
       .where(eq(projectFiles.projectId, projectId))
-      .orderBy(asc(projectFileVersions.createdAt))
       .pipe(Effect.orDie);
     const prunable = (row: (typeof ranked)[number]) => row.rank > 1 && !row.pinned;
     const drop = new Set(
@@ -103,17 +99,6 @@ const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
         )
         .map((row) => row.id),
     );
-    let total = ranked.filter((row) => !drop.has(row.id)).reduce((sum, row) => sum + row.size, 0);
-    for (const row of ranked) {
-      if (total <= maxBytes) break;
-      if (!prunable(row) || drop.has(row.id)) continue;
-      drop.add(row.id);
-      total -= row.size;
-    }
-    if (total > maxBytes)
-      return yield* new ProjectRejected({
-        reason: "this project's file storage is full; delete a file or ask an admin for more room",
-      });
     if (!drop.size) return [];
     const blobIds = ranked.filter((row) => drop.has(row.id)).map((row) => row.blobId);
     yield* lockBlobs(tx, blobIds).pipe(Effect.orDie);
@@ -127,9 +112,9 @@ const prune = (tx: DbTx, projectId: string, maxBytes: number) =>
 /**
  * Working files shared in a project. Each write is a whole new version; the
  * current one is the highest number and is never pruned. Older unpinned
- * versions go after 30 days or past 25 per file, and the oldest of them go
- * first when the project reaches its storage cap. Bytes are registered under
- * the project owner, so they share the project's lifetime.
+ * versions go after 30 days or past 25 per file. Bytes are registered under
+ * the project owner, so they count to the owner's storage and share the
+ * project's lifetime.
  */
 export class ProjectFileService extends Context.Service<
   ProjectFileService,
@@ -213,8 +198,6 @@ export class ProjectFileService extends Context.Service<
       { file: ProjectFileSummary; bytes: Uint8Array; blobId: string },
       ProjectFileError
     >;
-    settings(): Effect.Effect<{ maxProjectBytes: number }>;
-    updateSettings(maxProjectBytes: number): Effect.Effect<void>;
   }
 >()("chat/projects/ProjectFileService") {
   static readonly layer = Layer.effect(
@@ -229,10 +212,6 @@ export class ProjectFileService extends Context.Service<
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
 
-      const settings = Effect.fn("ProjectFileService.settings")(function* () {
-        const [row] = yield* db.select().from(projectFileSettings).pipe(Effect.orDie);
-        return { maxProjectBytes: row?.maxProjectBytes ?? PROJECT_FILE_LIMITS.defaultProjectBytes };
-      });
       const changed = (projectId: string) =>
         projectAudience(db, projectId).pipe(
           Effect.flatMap((members) =>
@@ -345,7 +324,6 @@ export class ProjectFileService extends Context.Service<
               ),
             );
         const stored = yield* attachmentService.storeBlob(project.ownerId, input.bytes);
-        const { maxProjectBytes } = yield* settings();
         const result = yield* transaction((tx) =>
           Effect.gen(function* () {
             // Blob ownership and version authorship take these FK locks on insert.
@@ -359,7 +337,7 @@ export class ProjectFileService extends Context.Service<
               .pipe(Effect.orDie);
             // Conversation before project, the order every attempt takes them in.
             if (writer.origin === "model") yield* writer.guard(tx);
-            // Serialize the whole project's quota before registering any blobs.
+            // Serialize the project's versions and retention before registering any blobs.
             const [locked] = yield* lockProject(tx, input.projectId);
             if (!locked) return yield* new ProjectNotAvailable({ projectId: input.projectId });
             yield* requireRole(tx, writer.userId, input.projectId, true);
@@ -478,7 +456,7 @@ export class ProjectFileService extends Context.Service<
               .set({ name, updatedAt: new Date() })
               .where(eq(projectFiles.id, fileId))
               .pipe(Effect.orDie);
-            const pruned = yield* prune(tx, input.projectId, maxProjectBytes);
+            const pruned = yield* prune(tx, input.projectId);
             const [summary] = yield* summaries(tx, input.projectId, [fileId]);
             return { summary: summary!, discard: [...unused, ...pruned] };
           }),
@@ -519,7 +497,6 @@ export class ProjectFileService extends Context.Service<
       // Writes apply retention to their own project; this catches the ones
       // nobody writes to any more.
       yield* Effect.gen(function* () {
-        const { maxProjectBytes } = yield* settings();
         const due = yield* db
           .selectDistinct({ projectId: projectFiles.projectId })
           .from(projectFileVersions)
@@ -530,10 +507,7 @@ export class ProjectFileService extends Context.Service<
           .pipe(Effect.orDie);
         for (const { projectId } of due) {
           const discard = yield* transaction((tx) =>
-            lockProject(tx, projectId).pipe(Effect.andThen(prune(tx, projectId, maxProjectBytes))),
-          ).pipe(
-            // Over its cap already: the sweep only drops history, never refuses.
-            Effect.catchTag("ProjectRejected", () => Effect.succeed([] as string[])),
+            lockProject(tx, projectId).pipe(Effect.andThen(prune(tx, projectId))),
           );
           yield* attachmentService.deleteBlobs(discard);
         }
@@ -580,30 +554,27 @@ export class ProjectFileService extends Context.Service<
         return { file, bytes, blobId: row.version.blobId };
       });
       return ProjectFileService.of({
-        settings,
-        updateSettings: Effect.fn("ProjectFileService.updateSettings")(function* (maxProjectBytes) {
-          yield* db
-            .insert(projectFileSettings)
-            .values({ id: 1, maxProjectBytes })
-            .onConflictDoUpdate({
-              target: projectFileSettings.id,
-              set: { maxProjectBytes, updatedAt: new Date() },
-            })
-            .pipe(Effect.orDie);
-        }),
         list: Effect.fn("ProjectFileService.list")(function* (userId, projectId) {
           yield* requireRole(db, userId, projectId, false).pipe(
             Effect.catchTag("ProjectRejected", () => Effect.void),
           );
           const files = yield* summaries(db, projectId);
+          // Each stored file once, as the owner's storage counts it: a restore reuses its bytes.
           const [used] = yield* db
-            .select({ value: sql<number>`coalesce(sum(${projectFileVersions.size}), 0)::bigint` })
-            .from(projectFileVersions)
-            .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
-            .where(eq(projectFiles.projectId, projectId))
+            .select({ value: sql<number>`coalesce(sum(${attachmentBlobs.size}), 0)::bigint` })
+            .from(attachmentBlobs)
+            .where(
+              inArray(
+                attachmentBlobs.id,
+                db
+                  .select({ id: projectFileVersions.blobId })
+                  .from(projectFileVersions)
+                  .innerJoin(projectFiles, eq(projectFiles.id, projectFileVersions.fileId))
+                  .where(eq(projectFiles.projectId, projectId)),
+              ),
+            )
             .pipe(Effect.orDie);
-          const { maxProjectBytes } = yield* settings();
-          return { files, usedBytes: Number(used?.value ?? 0), maxBytes: maxProjectBytes };
+          return { files, usedBytes: Number(used?.value ?? 0) };
         }),
         versions: Effect.fn("ProjectFileService.versions")(function* (userId, fileId) {
           const file = yield* fileProject(db, fileId);

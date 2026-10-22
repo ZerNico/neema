@@ -23,7 +23,6 @@ import { useInvalidateTools } from "~/modules/tools/client/use-invalidate-tools.
 import { integerBetween } from "~/modules/tools/ui/integer-between.ts";
 import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { ScanReadingRow } from "~/modules/pdf/ui/scan-reading-row.tsx";
-import { ProjectFileSettingsSection } from "~/modules/projects/ui/project-file-settings-section.tsx";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
@@ -49,7 +48,6 @@ export function KnowledgeAdminPage() {
     <Page title="Documents">
       <SemanticSearchSection />
       <DocumentParserSection />
-      <ProjectFileSettingsSection />
     </Page>
   );
 }

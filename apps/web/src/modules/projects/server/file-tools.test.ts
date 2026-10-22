@@ -22,7 +22,7 @@ function setup(canEdit = true) {
   const writes: Array<{ basedOnVersion: number | undefined; fileId: string | undefined }> = [];
   const tools = prepareProjectFileTools({
     service: {
-      list: () => Effect.succeed({ files: [deck], usedBytes: 1000, maxBytes: 10_000 }),
+      list: () => Effect.succeed({ files: [deck], usedBytes: 1000 }),
       read: () =>
         Effect.succeed({
           file: deck,

@@ -66,10 +66,12 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   that number, even repeated saves by one person or one answer. A kept version ID always
   addresses the same bytes.
 - Retention: older unpinned versions go after 30 days or past 25 per file; up to 10 pins
-  per file are kept until unpinned. Past the admin's per-project cap the oldest unpinned
-  history goes first, and a save that still does not fit is refused. The current version
-  of every file is never pruned. Writes, pins, removals and retention take the same exclusive
-  project lock before reading quotas or changing versions, after any generation's conversation
+  per file are kept until unpinned. The current version of every file is never pruned. A
+  project has no size of its own: its bytes count to the owner's
+  [storage quota](limits.md#storage), which decides what a person may add. The model's saves
+  are counted there but never refused, like every file an answer makes, so file count, file
+  size and retention are what bound them. Writes, pins, removals and retention take the same
+  exclusive project lock before counting files or changing versions, after any generation's conversation
   lock and before blob locks. A write takes account key-share locks for the owner and author
   before those locks, since registering blobs and versions would otherwise take them later.
   Each write prunes in its own transaction. An hourly sweep

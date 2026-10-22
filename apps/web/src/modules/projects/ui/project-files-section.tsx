@@ -157,8 +157,7 @@ export function ProjectFilesSection({
             ))}
           </ListCard>
           <p className="text-muted-foreground text-xs">
-            {formatFileSize(list.usedBytes)} of {formatFileSize(list.maxBytes)} used, history
-            included
+            {formatFileSize(list.usedBytes)} used, history included
           </p>
         </>
       )}
