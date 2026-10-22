@@ -1,7 +1,7 @@
 # Prompt caching
 
 A chat prompt is laid out so everything up to the end of retained history is byte-identical
-from one turn to the next, and only what follows is rebuilt per request. Providers cache a
+from one turn to the next, and within an answer each request extends the previous one exactly. Providers cache a
 prompt by its prefix, in the order tools, system, messages, so one changed byte early on
 makes everything after it uncached. The model sees the same prompt either way; the cost is
 the whole input again on every turn.
@@ -17,12 +17,18 @@ the whole input again on every turn.
   runtime clock, as the answer's first request saw them. Then the answer's rounds. The image
   tool's schema stays the same whichever model it uses, so picking another never uncaches the
   tool list ([images](images.md)).
-- After the rounds, rebuilt per request: whatever in that trailing data changed during the
-  answer (an edited draft, a skill loaded mid-answer), then the reminder. A document keeps its
-  first view as it was and sends only its changes since, cumulatively, so a long document is not
-  resent uncached after every edit ([documents](documents.md)). The
-  data policies say a later snapshot replaces an earlier one. Rewriting the data ahead of the
-  rounds instead uncached every round each time a tool touched a draft.
+- Each request ends on what changed during the answer (an edited draft, a skill loaded
+  mid-answer) and then the reminder, and that tail stays where it was sent, ahead of the round it
+  produced. The next request adds only what changed since: new sources, a changed checklist or
+  draft. OpenAI from GPT-5.6 writes its cache at the end of the latest message, and reads only
+  where an earlier request wrote: a tail rebuilt per request was never read again, so every
+  round of a search loop paid to write its whole prompt. Append-only works the same for any
+  provider that caches by prefix, with no list of models. A changed section is sent whole and
+  the newest reads as current; the data policies say a later snapshot replaces an earlier one. A
+  document keeps its first view as it was and sends its changes since, cumulatively
+  ([documents](documents.md)). Compaction drops kept tails with their rounds, so the next tail
+  says everything again. Rewriting the data ahead of the rounds instead uncached every round each
+  time a tool touched a draft.
 - History renders the same whatever the attempt is offered: citation markers stay in
   earlier answers even with search off, and an attempt with nothing to cite gets a line in
   the trailing reminder instead. Stripping them per toggle rewrote every earlier answer.

@@ -42,7 +42,7 @@ const WEB_TOOLS_HINT_BODY =
   "and several together (`[^1][^4]`) when it draws on more than one. Do not repeat a source " +
   "that the surrounding sentences or list items already cite; a list resting on one source " +
   "cites it once, after the list's lead-in or last item. Sources consulted earlier in the conversation " +
-  "are listed in the trailing `<system-reminder>` block and stay citable by index; search " +
+  "are listed in `<system-reminder>` blocks and stay citable by index; search " +
   "again when the question needs information they don't cover. Cite only indexes that " +
   "exist. Never write the `[^n]: url` definition lines yourself; the application renders " +
   "those.";
@@ -104,15 +104,3 @@ export const systemReminderMessage = (text: string): Prompt.MessageEncoded => ({
   role: "user",
   content: `<system-reminder>\n${text}\n</system-reminder>`,
 });
-
-/**
- * Appends the reminder to a transcript. Call it per model turn against the
- * transcript *without* a previous reminder: the block must stay last, behind
- * the tool results it competes with, and the stable prefix in front of it must
- * stay byte-identical so provider prompt caches keep matching as the loop grows.
- */
-export const withSearchReminder = (
-  transcript: Prompt.Prompt,
-  input: { sources: ReadonlyArray<CitableSource>; lastCycle: boolean },
-): Prompt.Prompt =>
-  Prompt.concat(transcript, Prompt.make([systemReminderMessage(buildSearchReminder(input))]));

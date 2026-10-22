@@ -956,13 +956,15 @@ describe("conversational agent authoring", () => {
     }
   });
 
-  it("keeps an answer's prompt prefix byte-stable across its rounds", async () => {
+  it("opens each request of an answer with the whole previous one, its tail included", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     const prompts: GatewayInput[] = [];
     authoringScript = (input) => {
       prompts.push(input);
       if (prompts.length === 1)
         return authoringTool(input, "draft_agent", { changes: { name: "Helper" } });
+      if (prompts.length === 2)
+        return authoringTool(input, "draft_agent", { changes: { name: "Second" } });
       return Stream.make(
         AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
         authoringFinish(),
@@ -975,7 +977,7 @@ describe("conversational agent authoring", () => {
             userId: seed.userId,
             conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
-            content: "Make me an agent.",
+            content: "Make me two agents.",
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
@@ -983,21 +985,24 @@ describe("conversational agent authoring", () => {
         ),
       );
       await collectDraftTurn(assistantMessageId);
-      expect(prompts).toHaveLength(2);
+      expect(prompts).toHaveLength(3);
       const serialized = (input: GatewayInput) =>
-        input.prompt.content.map((message) => JSON.stringify(message));
-      const first = serialized(prompts[0]!);
-      const second = serialized(prompts[1]!);
-      // The first request's prompt, minus its per-request tail, opens the second.
-      const tail = first.findIndex((message) => message.includes("<system-reminder>"));
-      const stable = tail === -1 ? first : first.slice(0, tail);
-      expect(second.slice(0, stable.length)).toEqual(stable);
-      // The draft the round created arrives after the round, not ahead of it.
-      const round = second.findIndex((message) => message.includes('"role":"tool"'));
-      const draft = second.findLastIndex((message) => message.includes('\\"name\\":\\"Helper\\"'));
+        input.prompt.content.map((message) =>
+          JSON.stringify({ role: message.role, content: message.content }),
+        );
+      const [first, second, third] = prompts.map(serialized);
+      // A provider that caches at the end of a request reads all of it next time.
+      expect(second!.slice(0, first!.length)).toEqual(first);
+      expect(third!.slice(0, second!.length)).toEqual(second);
+      // The draft the first round created arrives after that round, and stays there.
+      const round = second!.findIndex((message) => message.includes('"role":"tool"'));
+      const draft = second!.findLastIndex((message) => message.includes('\\"name\\":\\"Helper\\"'));
       expect(round).toBeGreaterThan(-1);
       expect(draft).toBeGreaterThan(round);
-      // At most four cache points, the last on the completed round.
+      // Only what changed comes after the second round: the new draft, not Helper again.
+      const added = third!.slice(second!.length);
+      expect(added.some((message) => message.includes('\\"name\\":\\"Second\\"'))).toBe(true);
+      // At most four cache points, the last on the latest completed round.
       const anchors = prompts[1]!.prompt.content.flatMap((message, index) =>
         (message.options["cache"] as { anchor?: boolean } | undefined)?.anchor ? [index] : [],
       );
@@ -1859,8 +1864,8 @@ describe("conversational agent authoring", () => {
   it("names both drafts when an update omits the id, and patches the right one when given it", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;
-    // The id comes from the trailing draft data in the prompt, which is how a
-    // real model learns it.
+    // The id comes from the latest draft data in the prompt, which is how a
+    // real model learns it: earlier snapshots stay where they were sent.
     const idOf = (input: GatewayInput, name: string) => {
       const block = input.prompt.content
         .flatMap((message) => {
@@ -1869,7 +1874,7 @@ describe("conversational agent authoring", () => {
             ? [content]
             : (content as Array<{ text?: string }>).map((part) => part.text ?? "");
         })
-        .find((text) => text.startsWith("Application-provided agent draft"));
+        .findLast((text) => text.startsWith("Application-provided agent draft"));
       const data = JSON.parse(block!.slice(block!.indexOf("\n") + 1)) as {
         draft: { draftId: string; name: string } | null;
         otherDrafts: ReadonlyArray<{ draftId: string; name: string }>;

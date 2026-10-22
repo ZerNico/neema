@@ -109,6 +109,8 @@ export const runRound = (env: RoundEnv, round: number) =>
       estimateRequestPrompt,
       historyBudgetTail,
       reminderPrompt,
+      keepReminder,
+      forgetReminders,
       sourceManifest,
       recordHardTruncation,
       nextPassIndex,
@@ -173,6 +175,7 @@ export const runRound = (env: RoundEnv, round: number) =>
       if (!reduced.compacted) break;
       state.activeSummary = reduced.summary;
       state.activeRounds = reduced.rounds;
+      forgetReminders();
       state.transcript = buildTranscript();
     }
     const requestBudget = computeBudget({
@@ -237,10 +240,9 @@ export const runRound = (env: RoundEnv, round: number) =>
     tools.clearCallRows();
     let providerOutputStarted = false;
     const currentReminderPrompt = () => reminderPrompt(!toolRoundsLeft);
-    const requestPrompt = () => {
-      const trailing = currentReminderPrompt();
-      return trailing ? Prompt.concat(state.transcript, trailing) : state.transcript;
-    };
+    // What the request that produced this round ended on; it stays ahead of
+    // the round, so the next request extends this one exactly.
+    let sentReminder: Prompt.Prompt | null = null;
 
     // Suspended so an overflow retry re-reads the shrunken transcript
     // rather than the one the provider just rejected.
@@ -258,7 +260,10 @@ export const runRound = (env: RoundEnv, round: number) =>
           )
         : [];
       usage.modelCallOpen = true;
-      const prompt = requestPrompt();
+      sentReminder = currentReminderPrompt();
+      const prompt = sentReminder
+        ? Prompt.concat(state.transcript, sentReminder)
+        : state.transcript;
       // Only what this request carries counts as what the model saw of a document.
       documents.sent(prompt);
       return gateway
@@ -359,6 +364,7 @@ export const runRound = (env: RoundEnv, round: number) =>
               if (reduced.compacted && reduced.estimatedInputTokens < beforeEstimate) {
                 state.activeSummary = reduced.summary;
                 state.activeRounds = reduced.rounds;
+                forgetReminders();
                 state.transcript = buildTranscript();
                 yield* Effect.logInfo("context overflow, retrying after compacting tool rounds", {
                   messageId: input.messageId,
@@ -461,14 +467,16 @@ export const runRound = (env: RoundEnv, round: number) =>
     // Files keep their place among the text, and the round's replay
     // unit rides on the assistant message.
     const roundMessages = roundPrompt(turnParts);
+    if (sentReminder) keepReminder(sentReminder);
+    const answered = sentReminder ? Prompt.concat(sentReminder, roundMessages) : roundMessages;
     state.activeRounds = [
       ...state.activeRounds,
       {
         turnIndex: turn,
         prompt:
           turnFiles.length === 0
-            ? roundMessages
-            : Prompt.concat(roundMessages, Prompt.make([{ role: "user", content: turnFiles }])),
+            ? answered
+            : Prompt.concat(answered, Prompt.make([{ role: "user", content: turnFiles }])),
       },
     ];
     if (steered.length > 0) {

@@ -1669,6 +1669,42 @@ describe("knowledge-backed generations", () => {
     expect(outer).not.toContain("SUPPORTING_DETAIL");
   });
 
+  it("says a checklist again when it goes back to an earlier state", async () => {
+    const owner = await createUser();
+    const planner = await run(
+      Effect.flatMap(AgentService, (agents) =>
+        agents.create(owner, {
+          name: "Planner",
+          description: "",
+          icon: "robot",
+          instructions: "Answer questions.",
+          modelId: null,
+          searchEnabled: false,
+          planEnabled: true,
+          starters: [],
+          collectionIds: [],
+        }),
+      ),
+    );
+    const first = { steps: [{ step: "Draft", status: "in_progress" as const }] };
+    const second = { steps: [{ step: "Draft", status: "completed" as const }] };
+    script = (input, calls) =>
+      calls === 1
+        ? tool(input, "update_plan", first)
+        : calls === 2
+          ? tool(input, "update_plan", second)
+          : calls === 3
+            ? tool(input, "update_plan", first)
+            : Stream.make(text("done"), finish());
+    const sent = await send({ userId: owner, agentId: planner, content: "Plan this." });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    // Each copy stays where it was sent; the newest, back at the first state, comes last.
+    const lists = promptText(requests.at(-1)!.prompt).split("Current checklist").slice(1);
+    expect(lists).toHaveLength(3);
+    expect(lists[1]).toContain("[x] Draft");
+    expect(lists[2]).toContain("[~] Draft");
+  });
+
   it("offers the checklist only when the agent enables it, keeps the latest list, and starts fresh on retry", async () => {
     const owner = await createUser();
     const plain = await run(
@@ -1710,12 +1746,14 @@ describe("knowledge-backed generations", () => {
         { step: "Review", status: "in_progress" },
       ],
     });
-    // The reminder carries the current list only, never a history of revisions.
+    // Each revision stays where it was sent, so the prompt only grows; the newest comes last.
     const last = promptText(requests.at(-1)!.prompt);
-    expect(last).toContain("[x] Draft");
-    expect(last).toContain("[~] Review");
+    const lists = last.split("Current checklist").slice(1);
+    expect(lists).toHaveLength(2);
+    expect(lists[0]).toContain("[~] Draft");
+    expect(lists[1]).toContain("[x] Draft");
+    expect(lists[1]).toContain("[~] Review");
     expect(last).toContain("not evidence of completed work");
-    expect(last.match(/Current checklist/g)).toHaveLength(1);
     expect(last).not.toContain('"steps"');
     expect(promptText(requests[0]!.prompt)).not.toContain("Current checklist");
 

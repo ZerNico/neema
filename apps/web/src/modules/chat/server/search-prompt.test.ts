@@ -1,11 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Prompt } from "effect/unstable/ai";
 import {
   buildSearchReminder,
   type CitableSource,
   webToolsSystemHint,
   systemReminderMessage,
-  withSearchReminder,
 } from "./search-prompt.ts";
 
 const source = (
@@ -19,13 +17,6 @@ const source = (
   snippet: `Snippet ${index}`,
   ...overrides,
 });
-
-const textOf = (message: Prompt.Message): string =>
-  typeof message.content === "string"
-    ? message.content
-    : message.content
-        .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
-        .join("");
 
 describe("webToolsSystemHint", () => {
   it("does not direct search-only requests to an unavailable reader", () => {
@@ -87,39 +78,5 @@ describe("systemReminderMessage", () => {
     const message = systemReminderMessage("stay on topic");
     expect(message.role).toBe("user");
     expect(message.content).toBe("<system-reminder>\nstay on topic\n</system-reminder>");
-  });
-});
-
-describe("withSearchReminder", () => {
-  const transcript = Prompt.make([
-    { role: "system" as const, content: webToolsSystemHint({ search: true, reader: false }) },
-    { role: "user" as const, content: "what changed last week?" },
-  ]);
-
-  it("appends the reminder last, behind the whole transcript", () => {
-    const prompt = withSearchReminder(transcript, { sources: [source(1)], lastCycle: false });
-    expect(prompt.content).toHaveLength(transcript.content.length + 1);
-    expect(textOf(prompt.content.at(-1)!)).toContain("<system-reminder>");
-    expect(prompt.content.at(-1)!.role).toBe("user");
-  });
-
-  it("leaves the prefix byte-identical as the transcript grows, so caches keep matching", () => {
-    const first = withSearchReminder(transcript, { sources: [], lastCycle: false });
-    // A tool round later: results appended, reminder rebuilt against the
-    // transcript that never carried the previous one.
-    const grown = Prompt.concat(
-      transcript,
-      Prompt.make([{ role: "assistant" as const, content: "searching…" }]),
-    );
-    const second = withSearchReminder(grown, { sources: [source(1)], lastCycle: true });
-
-    expect(second.content.slice(0, transcript.content.length)).toEqual(
-      first.content.slice(0, transcript.content.length),
-    );
-    // The stale reminder is gone, not buried mid-transcript.
-    // startsWith, not includes: the system hint mentions the tag by name.
-    const reminders = second.content.filter((m) => textOf(m).startsWith("<system-reminder>"));
-    expect(reminders).toHaveLength(1);
-    expect(reminders[0]).toBe(second.content.at(-1));
   });
 });

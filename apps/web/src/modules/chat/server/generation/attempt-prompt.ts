@@ -346,8 +346,8 @@ export const prepareAttemptPrompt = (env: {
       knowledgeTools && offerState.retrievalEnabled
         ? `Knowledge operations remaining: ${knowledgeTools.remaining()} of ${KNOWLEDGE_TOOL_LIMITS.operations}. Only returned excerpts are evidence; disclose unread or unavailable material.`
         : null;
-    // The current checklist replaces the previous one here too: the prompt
-    // never accumulates old revisions.
+    // A changed checklist is sent whole, after the earlier ones still in the
+    // transcript; the newest reads as the current one.
     const planReminder = () => {
       const snapshot = planTools?.current();
       return snapshot ? renderPlanReminder(snapshot) : null;
@@ -386,32 +386,73 @@ export const prepareAttemptPrompt = (env: {
         ? `No tool rounds remain. Unpublished working files (${drafts || "none"}) cannot be delivered in this response; edited drafts stay in this chat for a later answer. Do not claim they are attached.`
         : `Tool rounds remaining: ${roundsRemaining}. ${drafts ? `Publish unfinished working files before tools become unavailable: ${drafts}.` : "Finish the response when ready."}`;
     };
+    // A sent reminder stays ahead of the round it produced (`keepReminder`),
+    // so the next request extends this one exactly and a provider that caches
+    // at the end of a request reads it all. A later reminder says only what
+    // changed, so the newest of each kind is current.
+    const told = {
+      sections: new Map<string, string>(),
+      sources: new Set<number>(),
+      // The latest copy of each changed data block, by its header line.
+      updates: new Map<string, string>(),
+      // A source this answer found is in its tool results, until compaction clears
+      // them; a resumed answer's earlier rounds come back as summaries only.
+      ownSourcesShown: !resuming,
+    };
+    const earlierSources = new Set(priorSources.map((source) => source.index));
+    const telling = new WeakMap<Prompt.Prompt, () => void>();
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- key is a one-line comparison read where it is used
+    const key = (message: Prompt.MessageEncoded) => JSON.stringify(message.content);
     const reminderPrompt = (lastCycle: boolean) => {
-      const sections = [
-        resuming && progress.currentRound === 0 ? RESUME_REMINDER : null,
-        draftReminder(lastCycle),
-        webTools ? buildSearchReminder({ sources: recapSources(), lastCycle }) : null,
-        citesNothing
+      const fresh = recapSources().filter(
+        (source) =>
+          !told.sources.has(source.index) &&
+          (earlierSources.has(source.index) || !told.ownSourcesShown),
+      );
+      // Named, so a section is compared with its own last copy: a state that
+      // comes back after another is said again, and a note that stopped
+      // applying is said again when it next applies.
+      const slots: Record<string, string | null> = {
+        resume: resuming && progress.currentRound === 0 ? RESUME_REMINDER : null,
+        drafts: draftReminder(lastCycle),
+        search: webTools ? buildSearchReminder({ sources: fresh, lastCycle }) || null : null,
+        citations: citesNothing
           ? "Citation markers like [^1] in earlier answers point at sources from earlier turns. This answer has no sources to cite, so write no citation markers."
           : null,
         // Arriving after tool results, a bare user message reads like a new
         // turn, and models answered a progress question then stopped.
-        progress.steeredAfter === progress.currentRound - 1
-          ? "The user sent the message above while you were working. Address it briefly, then continue the task unless it asks you to stop or change course."
-          : null,
-        knowledgeReminder(),
-        notifiedBefore
+        steer:
+          progress.steeredAfter === progress.currentRound - 1
+            ? "The user sent the message above while you were working. Address it briefly, then continue the task unless it asks you to stop or change course."
+            : null,
+        knowledge: knowledgeReminder(),
+        notified: notifiedBefore
           ? "Earlier answers here that called notify_user were scheduled runs, and those notifications were sent. Only a run can notify; this reply is not one, so you cannot notify now. The next run can."
           : null,
-        skillTools && skillTools.remaining() < SKILL_LIMITS.operations
-          ? `Skill operations remaining: ${skillTools.remaining()} of ${SKILL_LIMITS.operations}.`
-          : null,
-        planReminder(),
-        progress.stuckOn
+        skills:
+          skillTools && skillTools.remaining() < SKILL_LIMITS.operations
+            ? `Skill operations remaining: ${skillTools.remaining()} of ${SKILL_LIMITS.operations}.`
+            : null,
+        plan: planReminder(),
+        stuck: progress.stuckOn
           ? `${progress.stuckOn} failed the same way ${REPEATED_FAILURE_LIMIT} times in a row, so no tools are offered for the rest of this answer. Answer with what you have and say plainly what you could not do.`
           : null,
-      ].filter(Boolean);
-      const updates = contextUpdates();
+      };
+      const sections = Object.entries(slots).flatMap(([slot, text]) =>
+        text && told.sections.get(slot) !== text ? [text] : [],
+      );
+      const changed = contextUpdates();
+      const changedHeaders = new Set(changed.map(headerOf));
+      // A block that went back to how the answer first saw it is no longer an
+      // update, but the model last saw it changed: show the first view again.
+      const reverted = (answerContext ?? []).filter((message) => {
+        const header = headerOf(message);
+        return header && told.updates.has(header) && !changedHeaders.has(header);
+      });
+      const updates = [
+        ...changed.filter((message) => told.updates.get(headerOf(message)) !== key(message)),
+        ...reverted,
+      ];
       // Context data rides as assistant messages (documents), and a request
       // that ends on one is a prefill, which some models refuse outright.
       if (sections.length === 0 && updates.at(-1)?.role === "assistant")
@@ -420,7 +461,26 @@ export const prepareAttemptPrompt = (env: {
         ...updates,
         ...(sections.length > 0 ? [systemReminderMessage(sections.join("\n\n"))] : []),
       ];
-      return messages.length > 0 ? Prompt.make(messages) : null;
+      if (messages.length === 0) return null;
+      const prompt = Prompt.make(messages);
+      telling.set(prompt, () => {
+        for (const [slot, text] of Object.entries(slots))
+          if (text) told.sections.set(slot, text);
+          else told.sections.delete(slot);
+        for (const source of fresh) told.sources.add(source.index);
+        for (const message of reverted) told.updates.delete(headerOf(message));
+        for (const message of changed) told.updates.set(headerOf(message), key(message));
+      });
+      return prompt;
+    };
+    /** The reminder a request was sent with is now part of the transcript. */
+    const keepReminder = (reminder: Prompt.Prompt) => telling.get(reminder)?.();
+    /** Compaction dropped kept reminders with their rounds: say it all again. */
+    const forgetReminders = () => {
+      told.sections.clear();
+      told.sources.clear();
+      told.updates.clear();
+      told.ownSourcesShown = false;
     };
     // Everything after retained history, in order. It is the one list both
     // the transcript and the compaction budget read, so anything added
@@ -447,8 +507,6 @@ export const prepareAttemptPrompt = (env: {
     const contextUpdates = (): Prompt.MessageEncoded[] => {
       if (!answerContext) return [];
       const now = trailingContext();
-      // oxlint-disable-next-line unicorn/consistent-function-scoping -- key is a one-line comparison read where it is used
-      const key = (message: Prompt.MessageEncoded) => JSON.stringify(message.content);
       const before = new Set(answerContext.map(key));
       const headers = new Set(now.map(headerOf));
       // A block that vanished (a cleared draft, a removed document) says
@@ -870,6 +928,8 @@ export const prepareAttemptPrompt = (env: {
       estimateRequestPrompt,
       historyBudgetTail,
       reminderPrompt,
+      keepReminder,
+      forgetReminders,
       sourceManifest,
       recordHardTruncation,
       nextPassIndex,
