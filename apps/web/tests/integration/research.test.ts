@@ -1330,6 +1330,27 @@ describe("durable deep research", () => {
     },
   );
 
+  it("opens each of a task's requests with the whole previous one", async () => {
+    finishWorkersEarly = true;
+    const input = await runtime.runPromise(seed);
+    const sent = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(sent.assistantMessageId));
+    const serialized = (request: GatewayInput) =>
+      request.prompt.content.map((message) =>
+        JSON.stringify({ role: message.role, content: message.content }),
+      );
+    for (const assignment of ["Investigate evidence", "Independently investigate"]) {
+      const task = requests
+        .filter((request) => ["worker", "report"].includes(phaseOf(request)))
+        .filter((request) => promptText(request).includes(assignment))
+        .map(serialized);
+      // Search, finish, then the report: a cache written at the end of one is read by the next.
+      expect(task).toHaveLength(3);
+      expect(task[1]!.slice(0, task[0]!.length)).toEqual(task[0]);
+      expect(task[2]!.slice(0, task[1]!.length)).toEqual(task[1]);
+    }
+  });
+
   it("captures the stored search cap once and applies admin changes to the next retry", async () => {
     await runtime.runPromise(
       ToolsRepo.use((repo) =>

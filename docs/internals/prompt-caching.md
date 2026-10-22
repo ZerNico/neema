@@ -29,6 +29,10 @@ the whole input again on every turn.
   ([documents](documents.md)). Compaction drops kept tails with their rounds, so the next tail
   says everything again. Rewriting the data ahead of the rounds instead uncached every round each
   time a tool touched a draft.
+- A research worker follows the same rule: each round's budget notice stays ahead of the round,
+  and its source manifest is the one the task started with, since what it finds later is in its
+  tool results. A manifest that grew per round uncached every round after the policy, Claude's
+  included.
 - History renders the same whatever the attempt is offered: citation markers stay in
   earlier answers even with search off, and an attempt with nothing to cite gets a line in
   the trailing reminder instead. Stripping them per toggle rewrote every earlier answer.

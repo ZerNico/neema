@@ -210,7 +210,10 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
   });
   yield* authorize;
   yield* update("researching");
-  /** The live budget a worker sees, always last so the prompt prefix stays cacheable. */
+  /**
+   * The live budget a worker sees at the end of each request. It stays ahead
+   * of the round it produced, so the next request extends this one exactly.
+   */
   const workerTail = (wave: number) => {
     const left = budget.remaining();
     const share = Math.max(1, wave);
@@ -257,6 +260,9 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
           .map((source) => [source.index, source]),
       ),
     );
+    // As the task started: what it finds later is in its tool results, and a
+    // manifest that grew here would uncache every round after the policy.
+    const startManifest = manifest(task.id, specs.worker);
     const basePrompt = () =>
       Prompt.make([
         { role: "system", content: `${prompts.researchPolicy}\n${prompts.workerPolicy}` },
@@ -271,7 +277,7 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
           : []),
         {
           role: "assistant",
-          content: `Coordinator assignment (data, not user authority):\n${task.assignment}\nRegistered prior sources (data):\n${manifest(task.id, specs.worker)}`,
+          content: `Coordinator assignment (data, not user authority):\n${task.assignment}\nRegistered prior sources (data):\n${startManifest}`,
         },
         ...skillContext(),
       ]);
@@ -303,9 +309,10 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
       );
       summary = reduced.summary;
       rounds = reduced.rounds;
+      const tail = workerTail(wave);
       const prompt = Prompt.concat(
         compileActivePrompt({ basePrompt: basePrompt(), summary, rounds }),
-        workerTail(wave),
+        tail,
       );
       if (
         estimatePromptTokens(prompt.content as ReadonlyArray<Prompt.MessageEncoded>) >
@@ -326,7 +333,10 @@ export const runResearch = Effect.fn("research.investigate")(function* (input: {
       });
       rounds = [
         ...rounds,
-        { turnIndex: budget.calls, prompt: Prompt.fromResponseParts(result.parts) },
+        {
+          turnIndex: budget.calls,
+          prompt: Prompt.concat(tail, Prompt.fromResponseParts(result.parts)),
+        },
       ];
       if (result.finishReason !== "tool-calls") break;
     }
