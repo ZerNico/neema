@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Context, Effect, Layer } from "effect";
 import { conversations } from "~/db/schema/index.ts";
 import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
@@ -88,6 +89,18 @@ export interface CallPermissions {
   permissions: Record<string, ToolPermission>;
   allowedInChat: ReadonlyArray<string>;
 }
+
+/**
+ * A person's server takes an id of its own kind: its name and a tag of its owner.
+ * Ids are one space with the admin's, so a bare name would take one an admin's
+ * integration wants and, taken, tell them someone has a server by that name.
+ */
+const personalServerId = (name: string, userId: string) => {
+  const base = idFromName(name, "mcp").slice(0, 22).replace(/-+$/, "");
+  const tag = createHash("sha256").update(userId).digest("hex").slice(0, 6);
+  // Room left for the `-2` a clash among one's own servers adds, inside the 32 an id may have.
+  return `${/^[a-z]/.test(base) ? base : `mcp-${base}`.slice(0, 22)}-${tag}`;
+};
 
 /** The known MCP server an integration points at, read from its address each time. */
 const knownServer = (row: { kind: string; config: Readonly<Record<string, string>> }) =>
@@ -814,7 +827,7 @@ export class IntegrationService extends Context.Service<
               stored?.id ??
               (yield* repo.createConfig({
                 kind: "mcp",
-                idBase: idFromName(name, "mcp"),
+                idBase: personalServerId(name, userId),
                 name,
                 ownerUserId: userId,
                 draft: !opens,

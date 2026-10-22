@@ -121,6 +121,9 @@ the owner where the admin would be: the sweep lists as them, and only they may u
 server everywhere at once without deleting it. Others never see it: not in their lists, the
 directory or the admin's page, and an agent cannot name one that is not the author's own.
 Names are unique among what one person sees (the admin's and their own), not across everyone.
+Ids are one space with the admin's, so a person's server takes its name plus a tag of its
+owner: a bare name would take an id an admin's integration wants (and its tool names and
+redirect URI with it) and, taken, tell the admin that someone has a server by that name.
 
 A person gives only the address. The server is asked how it is reached rather than the person:
 answering as nobody makes it open; refusing, and naming an authorization server with PKCE,

@@ -1697,6 +1697,29 @@ describe("an MCP server a person adds for themselves", () => {
     expect(await listed()).toContain(saved.id);
   });
 
+  it("takes an id no admin's integration wants, and two people's never meet", async () => {
+    names.set("mcp.ids.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
+    await allowServers(true);
+    const [first, second] = [await activeUser(), await activeUser()];
+    const ids = [];
+    for (const owner of [first, second]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- One person's server after the other's.
+      const saved = await save(owner, "Tasks", "https://mcp.ids.test/mcp");
+      if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
+      ids.push(saved.success.id);
+    }
+    expect(ids[0]).toMatch(/^tasks-[0-9a-f]{6}$/);
+    expect(ids[1]).toMatch(/^tasks-[0-9a-f]{6}$/);
+    expect(ids[0]).not.toBe(ids[1]);
+    // The admin's own integration of that name still gets the plain id.
+    const admins = await run(
+      Effect.flatMap(IntegrationService, (s) =>
+        s.createIntegration({ kind: "mcp", name: "Tasks" }),
+      ),
+    );
+    expect(admins.id).toBe("tasks");
+  });
+
   it("is listed and used by its owner alone, with no approval step, while they may add servers", async () => {
     names.set("mcp.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
     const owner = await activeUser();
