@@ -457,7 +457,10 @@ export class ChatRepo extends Context.Service<
       replay: NonNullable<MessageRow["providerReplay"]>,
     ): Effect.Effect<void>;
     /** What the answer's first request carried after its user message. */
-    saveOpening(messageId: string, opening: NonNullable<MessageRow["opening"]>): Effect.Effect<void>;
+    saveOpening(
+      messageId: string,
+      opening: NonNullable<MessageRow["opening"]>,
+    ): Effect.Effect<void>;
     /**
      * One page of a user's conversations, newest activity first. Ordered by
      * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the
