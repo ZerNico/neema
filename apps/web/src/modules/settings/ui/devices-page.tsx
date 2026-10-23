@@ -16,6 +16,8 @@ import { Badge } from "~/ui/primitives/badge";
 import { toastError } from "~/ui/error-toast.ts";
 import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
 import { describeSession } from "./describe-session.ts";
+import { install, useInstallWay, type InstallWay } from "~/ui/install-prompt.ts";
+import { Button } from "~/ui/primitives/button";
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 const when = (value: Date | string) => dateFormat.format(new Date(value));
@@ -119,6 +121,7 @@ export function DevicesPage() {
           })}
         </ListCard>
       </Section>
+      <InstallSection />
       <Section
         title="Add a desktop"
         description="Generate a code and paste it into neema Desktop’s sign-in screen. It works once and only for a few minutes."
@@ -148,5 +151,33 @@ export function DevicesPage() {
         )}
       </Section>
     </Page>
+  );
+}
+
+/** Safari has no install prompt, so it gets the steps instead. */
+const STEPS: Record<Exclude<InstallWay, "prompt" | null>, string> = {
+  ios: "In Safari, tap Share, then Add to Home Screen.",
+  "mac-safari": "In Safari, choose File, then Add to Dock.",
+};
+
+/** Only where this browser can install it now; gone once it is installed. */
+function InstallSection() {
+  const way = useInstallWay();
+  if (!way) return null;
+  return (
+    <Section
+      title="Install on this device"
+      description={
+        way === "prompt" ? "Opens in its own window, from your dock or home screen." : STEPS[way]
+      }
+    >
+      {way === "prompt" ? (
+        <FormActions>
+          <Button variant="outline" onClick={() => void install()}>
+            Install
+          </Button>
+        </FormActions>
+      ) : null}
+    </Section>
   );
 }

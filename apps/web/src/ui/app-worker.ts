@@ -1,5 +1,6 @@
 import { readDesktopChrome } from "@chat/desktop-rpc";
 import { useEffect } from "react";
+import { keepInstallOffer } from "./install-prompt.ts";
 
 /**
  * Whether this page runs `public/sw.js`: a secure origin in a browser. The
@@ -22,6 +23,8 @@ export const registerAppWorker = () => navigator.serviceWorker.register("/sw.js"
 export function useAppWorker() {
   useEffect(() => {
     if (!appWorkerSupported()) return;
+    // Before the worker: an installable page gets its offer once the worker is up.
+    keepInstallOffer();
     registerAppWorker().catch((error: unknown) =>
       console.error("Could not register the service worker", error),
     );

@@ -11,6 +11,7 @@ import {
 } from "~/modules/auth/client.ts";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
+import { keepInstallOffer } from "~/ui/install-prompt.ts";
 import { DevicesPage } from "./devices-page.tsx";
 import { describeSession } from "./describe-session.ts";
 
@@ -67,10 +68,18 @@ const renderPage = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // jsdom has none; a browser tab, not the installed app.
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches: false,
+    media,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
 });
 
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "__chatDesktop");
+  vi.unstubAllGlobals();
 });
 
 describe("describeSession", () => {
@@ -182,5 +191,24 @@ describe("DevicesPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Signed in on the new device.");
     expect(screen.queryByTestId("ticket-code")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate another code" })).toBeInTheDocument();
+  });
+});
+
+describe("installing the app", () => {
+  it("offers the browser's own install prompt once it has one, and only then", async () => {
+    const user = userEvent.setup();
+    keepInstallOffer();
+    renderPage();
+    // jsdom is no Safari and has no offer: nothing to install with.
+    expect(screen.queryByRole("heading", { name: "Install on this device" })).toBeNull();
+
+    const prompt = vi.fn(async () => undefined);
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("beforeinstallprompt"), { prompt }));
+    });
+    await user.click(await screen.findByRole("button", { name: "Install" }));
+    expect(prompt).toHaveBeenCalledOnce();
+    // An offer works once: the section goes until the browser makes another.
+    expect(screen.queryByRole("heading", { name: "Install on this device" })).toBeNull();
   });
 });
