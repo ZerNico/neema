@@ -54,6 +54,11 @@ export default defineConfig({
         allow: callSiteMayDo,
         contracts: [
           { pattern: "^Card(Content|Header|Footer)?$", allow: [...callSiteMayDo, "spacing"] },
+          // Unstyled Base UI triggers: their look is the element the call site renders.
+          {
+            pattern: "^(Popover|Tooltip)Trigger$",
+            allow: [...callSiteMayDo, "color", "spacing", "typography", "shape"],
+          },
         ],
       },
     ],

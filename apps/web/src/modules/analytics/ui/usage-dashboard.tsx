@@ -84,12 +84,14 @@ export function UsageRangePicker({
   onChange: (range: UsageRangeEncoded) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState(false);
+  // When the custom calendar was opened, null while the presets show: its
+  // "today", read at that click rather than on every render.
+  const [custom, setCustom] = useState<Date | null>(null);
   const [draft, setDraft] = useState<DateRange | undefined>();
 
   const close = () => {
     setOpen(false);
-    setCustom(false);
+    setCustom(null);
     setDraft(undefined);
   };
 
@@ -126,7 +128,7 @@ export function UsageRangePicker({
               onSelect={setDraft}
               // Usage cannot exist in the future; offering it invites an
               // empty dashboard with no explanation.
-              disabled={{ after: new Date() }}
+              disabled={{ after: custom }}
               autoFocus
             />
             <div className="flex items-center justify-between gap-3">
@@ -169,7 +171,7 @@ export function UsageRangePicker({
               </button>
             ))}
             <Separator className="my-1" />
-            <button type="button" onClick={() => setCustom(true)} className={PRESET_ROW}>
+            <button type="button" onClick={() => setCustom(new Date())} className={PRESET_ROW}>
               Custom range…
             </button>
           </div>

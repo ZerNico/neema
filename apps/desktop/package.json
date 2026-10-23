@@ -21,14 +21,14 @@
   },
   "devDependencies": {
     "@chat/desktop-rpc": "workspace:*",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.5",
     "diff": "9.0.0",
     "effect": "catalog:",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
-    "ignore": "7.0.10",
-    "tldts": "7.4.16",
+    "ignore": "7.0.13",
+    "tldts": "7.4.19",
     "typescript": "^7.0.2"
   }
 }
