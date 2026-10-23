@@ -1,4 +1,5 @@
-import { Effect, Encoding } from "effect";
+import { Effect } from "effect";
+import { Base64 } from "effect/encoding";
 import {
   AiError,
   type IdGenerator,
@@ -6,7 +7,7 @@ import {
   type Prompt,
   type Response,
   Tool,
-} from "effect/unstable/ai";
+} from "effect/ai";
 import { MODULE } from "./errors.ts";
 import { METADATA_KEY, type ReplayUnit } from "./replay.ts";
 
@@ -23,7 +24,7 @@ export const str = (value: unknown): string | undefined =>
 export const fileUrl = (part: Prompt.FilePart): string =>
   part.data instanceof URL
     ? part.data.toString()
-    : `data:${part.mediaType};base64,${typeof part.data === "string" ? part.data : Encoding.encodeBase64(part.data)}`;
+    : `data:${part.mediaType};base64,${typeof part.data === "string" ? part.data : Base64.encode(part.data)}`;
 
 /** A streamed image (data URL or bare base64) as an encoded file part. */
 export const imagePart = (url: string): StreamPart => {

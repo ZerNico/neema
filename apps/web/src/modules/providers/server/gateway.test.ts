@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Redacted, Schema, Stream } from "effect";
-import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
+import { Prompt, Tool, Toolkit } from "effect/ai";
 import { vi } from "vitest";
 import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import { runtimeContextMessage } from "~/modules/chat/server/runtime-context.ts";

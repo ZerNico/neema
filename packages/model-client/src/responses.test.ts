@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
+import { Prompt, Tool, Toolkit } from "effect/ai";
 import { describe, expect } from "vitest";
 import { roundPrompt } from "./replay.ts";
 import { chatSse, effect, harness, responsesSse, textOf } from "./test-harness.ts";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Stream } from "effect";
-import type { Toolkit } from "effect/unstable/ai";
+import type { AiError, Tool, Toolkit } from "effect/ai";
 import { PageExtractionError, PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchProviders } from "./search-providers/chain.ts";
@@ -104,17 +104,13 @@ const prepared = (
 
 const runTool = (toolkit: Toolkit.WithHandler<any>, name: string, params: object) =>
   Effect.gen(function* () {
+    // An untyped toolkit reports unknown services; its handlers' were provided when merged.
     const stream = yield* toolkit.handle(name as never, params as never) as Effect.Effect<
-      Stream.Stream<{ result: unknown; preliminary?: boolean }, unknown, unknown>,
-      unknown,
+      Stream.Stream<Tool.HandlerResult<Tool.Any>, AiError.AiError, never>,
+      AiError.AiError,
       never
     >;
-    const narrowedStream = stream as Stream.Stream<
-      { result: unknown; preliminary?: boolean },
-      unknown,
-      never
-    >;
-    const parts = yield* Stream.runCollect(narrowedStream);
+    const parts = yield* Stream.runCollect(stream);
     return [...parts].map((part) => part.result as WebToolResult);
   });
 

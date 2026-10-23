@@ -15,7 +15,7 @@ import {
   messages,
   models,
 } from "~/db/schema/index.ts";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";

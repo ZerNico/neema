@@ -1,0 +1,28 @@
+diff --git a/dist/node.d.ts b/dist/node.d.ts
+index 1a2730604b0af4e8d5b6a9ea5752a159edbebf76..fdd71b58737a7dde0d1b3f53252010abd99634e3 100644
+--- a/dist/node.d.ts
++++ b/dist/node.d.ts
+@@ -60,6 +60,11 @@ interface RenderImageOptions {
+    * deterministic.
+    */
+   readonly loadSystemFonts?: boolean;
++  /**
++   * Maps each authored family to the one drawn and measured, as
++   * `RenderSlideOptions.resolveFamily` does. Defaults to `substituteFamily`.
++   */
++  readonly resolveFamily?: (family: string | null) => string;
+ }
+ /** Render one slide to PNG-encoded bytes. */
+ declare const renderSlideToImage: (pres: PresentationData, slide: SlideData, opts?: RenderImageOptions) => Uint8Array;
+diff --git a/dist/node.js b/dist/node.js
+index 2a9a43501976d54c8753601829403f01a89a7fdd..4da070e92c9ec1147800b1de84a51cf96c264e83 100644
+--- a/dist/node.js
++++ b/dist/node.js
+@@ -160,6 +160,7 @@ const rasterize = (pres, slide, opts) => {
+ 	const width = opts.width ?? DEFAULT_WIDTH;
+ 	return new Resvg(renderSlideSvg(pres, slide, {
+ 		measureText: opts.measureText ?? getSharedMeasurer(),
++		resolveFamily: opts.resolveFamily,
+ 		textLayout: "svg"
+ 	}), {
+ 		fitTo: {

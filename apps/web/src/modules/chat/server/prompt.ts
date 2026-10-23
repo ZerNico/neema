@@ -7,7 +7,7 @@ import type { ChatRepo, ToolCallRow } from "./repo.ts";
 import { replayedArguments } from "./stored-arguments.ts";
 import { AttachmentNotAvailable } from "~/modules/attachments/errors.ts";
 import { Effect } from "effect";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import {

@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { scheduleRuns, schedules } from "~/db/schema/index.ts";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import type { Db } from "~/server/db.ts";

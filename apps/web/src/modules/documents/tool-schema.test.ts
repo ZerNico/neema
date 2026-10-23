@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Response } from "effect/unstable/ai";
+import { Response } from "effect/ai";
 import { Schema } from "effect";
 import {
   DocumentToolEnvelope,

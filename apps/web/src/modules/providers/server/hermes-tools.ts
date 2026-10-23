@@ -8,7 +8,7 @@ import {
   Response,
   Tool,
   Toolkit,
-} from "effect/unstable/ai";
+} from "effect/ai";
 
 /**
  * Prompt-based tool calling for models that cannot take a `tools` parameter.

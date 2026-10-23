@@ -9,7 +9,6 @@ import {
 import { renderWorkbookChart, type WorkbookChart } from "./chart-render.ts";
 import type { FontFace } from "./font-file.ts";
 import type { InspectScope } from "./inspection.ts";
-import { resetFonts } from "./render.ts";
 
 /** Everything a presentation worker does; the runtime's request and result types come from here. */
 export const presentationJobs = {
@@ -40,5 +39,4 @@ export const presentationJobs = {
     renderWorkbookChart(request.chart, request.fonts),
 };
 
-// Font registration is module state; no job may inherit another's.
-serveJobs(presentationJobs, { label: "PowerPoint processing", after: resetFonts });
+serveJobs(presentationJobs, { label: "PowerPoint processing" });

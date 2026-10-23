@@ -1,6 +1,6 @@
 import { Duration, Effect } from "effect";
-import type { AiError } from "effect/unstable/ai";
-import type { HttpClient } from "effect/unstable/http";
+import type { AiError } from "effect/ai";
+import type { HttpClient } from "effect/http";
 import type { Connection } from "../connection.ts";
 import { configurationError, networkError } from "../errors.ts";
 import { bedrockImages, isBedrockFamily } from "./bedrock.ts";

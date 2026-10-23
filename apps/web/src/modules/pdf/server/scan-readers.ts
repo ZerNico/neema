@@ -1,5 +1,5 @@
 import { Effect, Option, Redacted, Schema } from "effect";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";

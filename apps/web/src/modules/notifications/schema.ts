@@ -10,7 +10,7 @@ export const AppNotification = Schema.Struct({
   title: Schema.String.check(Schema.isMaxLength(200)),
   body: Schema.String.check(Schema.isMaxLength(400)),
   /** Where a click goes, an app path such as `/chat/…`. */
-  path: Schema.String.check(Schema.isStartsWith("/")),
+  path: Schema.String.check(Schema.isStartingWith("/")),
 });
 export type AppNotification = typeof AppNotification.Type;
 

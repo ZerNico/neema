@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { authenticate, jsonRequest, responseBytes, type Connection } from "../connection.ts";
 import { httpError, invalidOutput, networkError, parseErrorBody } from "../errors.ts";
 import { sseEvents } from "../sse.ts";

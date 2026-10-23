@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { OFFICE_FAMILIES } from "~/modules/office/families.ts";
 import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";

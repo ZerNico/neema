@@ -1,6 +1,6 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
 import { Context, Effect, Layer, Schema, type Scope } from "effect";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import {
   RESEARCH_SEARCH_BUDGET,
   WebSearchParams,

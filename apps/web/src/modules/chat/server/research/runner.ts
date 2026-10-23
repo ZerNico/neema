@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Duration, Effect, Schema } from "effect";
-import { Prompt, Tool, Toolkit } from "effect/unstable/ai";
+import { Prompt, Tool, Toolkit } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import { researchTasks } from "~/db/schema/index.ts";
 import { KNOWLEDGE_SYSTEM_HINT } from "~/modules/knowledge/server/context.ts";

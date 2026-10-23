@@ -5,7 +5,7 @@ import { readPresentationArchive } from "./archive.ts";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { createWorkingFiles } from "~/modules/chat/server/working-files.ts";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { createPresentationRuntime } from "./runtime.ts";
 import {
   editPresentationTool,

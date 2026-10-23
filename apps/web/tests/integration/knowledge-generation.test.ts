@@ -1,5 +1,5 @@
 import { Deferred, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { Response, type Prompt } from "effect/unstable/ai";
+import { Response, type Prompt } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { userApprovals } from "~/db/schema/index.ts";

@@ -9,8 +9,8 @@ import { endpoint, type Connection } from "../connection.ts";
 import { dataUri } from "./bytes.ts";
 import { isRecord, num, post } from "./http.ts";
 import type { NormalizedImageRequest } from "./normalize.ts";
-import type { AiError } from "effect/unstable/ai";
-import type { HttpClient } from "effect/unstable/http";
+import type { AiError } from "effect/ai";
+import type { HttpClient } from "effect/http";
 import {
   decodeDataArray,
   decodedOrUnusable,

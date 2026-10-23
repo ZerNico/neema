@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { fileText, hasFileText } from "~/modules/attachments/server/file-text.ts";

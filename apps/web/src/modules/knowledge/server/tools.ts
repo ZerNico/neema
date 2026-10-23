@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Effect, Schema, Semaphore } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import type { SourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { advertisedAs, decodeToolInput } from "~/modules/tools/server/toolset.ts";

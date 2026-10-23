@@ -1,7 +1,7 @@
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "@effect/vitest";
 import { Duration, Effect, Fiber, Layer, Redacted } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 import { SearchProviders } from "./chain.ts";
 import type { SearchProviderSnapshot } from "./types.ts";
 

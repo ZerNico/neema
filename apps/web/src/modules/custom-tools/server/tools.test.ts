@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { renderHermesSystemBlock } from "~/modules/providers/server/hermes-tools.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { CUSTOM_TOOL_LIMITS, type CustomToolManifest } from "../schema.ts";

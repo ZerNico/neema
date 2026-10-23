@@ -121,7 +121,7 @@ export const indexingJobs = (db: Db["Service"]) => {
     // `skip locked` keeps two workers from fighting over the same row; the
     // lease is what recovers a version whose worker died mid-parse.
     const rows = yield* db
-      .execute(
+      .execute<{ id: string }>(
         sql`
           update knowledge_document_versions
           set status = 'extracting',
@@ -141,12 +141,13 @@ export const indexingJobs = (db: Db["Service"]) => {
           )
           returning id
         `,
+        "objects",
       )
       .pipe(Effect.orDie);
     // Re-read through the typed select rather than mapping the raw result:
     // the update returns snake_case columns, and one shape for version rows
     // is worth the extra round trip on a background job.
-    const claimedId = (rows as { rows: ReadonlyArray<{ id: string }> }).rows[0]?.id;
+    const claimedId = rows[0]?.id;
     if (!claimedId) return null;
     const versions = yield* db
       .select()
@@ -401,7 +402,7 @@ export const indexingJobs = (db: Db["Service"]) => {
   ) {
     const leaseToken = uuidv7();
     const rows = yield* db
-      .execute(
+      .execute<{ version_id: string; attempts: number }>(
         sql`
           update knowledge_embedding_jobs
           set status = 'running',
@@ -424,11 +425,11 @@ export const indexingJobs = (db: Db["Service"]) => {
           )
           returning version_id, attempts
         `,
+        "objects",
       )
       .pipe(Effect.orDie);
-    const claimed = (rows as { rows: ReadonlyArray<{ version_id: string; attempts: number }> })
-      .rows[0];
-    const versionId = (rows as { rows: ReadonlyArray<{ version_id: string }> }).rows[0]?.version_id;
+    const claimed = rows[0];
+    const versionId = claimed?.version_id;
     if (!versionId) return null;
     const [owner] = yield* db
       .select({ ownerUserId: knowledgeCollections.userId })

@@ -1,4 +1,4 @@
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 
 export function runtimeContextMessage(
   now: Date,

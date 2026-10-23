@@ -5,7 +5,7 @@ import {
   type LanguageModel,
   type Prompt,
   type Response,
-} from "effect/unstable/ai";
+} from "effect/ai";
 import {
   carryAssistantFiles,
   fileUrl,
@@ -25,7 +25,7 @@ import {
   type StreamPart,
   claudeHeaders,
 } from "./common.ts";
-import type { HttpClient } from "effect/unstable/http";
+import type { HttpClient } from "effect/http";
 import {
   identityOf,
   postJson,

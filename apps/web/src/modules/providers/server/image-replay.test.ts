@@ -1,8 +1,8 @@
 import { layer as modelLayer, makeConnection, roundPrompt } from "@chat/model-client";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Schema, Stream } from "effect";
-import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient } from "effect/unstable/http";
+import { LanguageModel, Prompt, Tool, Toolkit } from "effect/ai";
+import { FetchHttpClient } from "effect/http";
 
 const connection = makeConnection({
   provider: "p1",

@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { advertisedAs, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ProjectFileActivityResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";

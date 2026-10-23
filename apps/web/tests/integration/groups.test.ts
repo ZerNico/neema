@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import {
   conversations,
   modelGroupAccess,

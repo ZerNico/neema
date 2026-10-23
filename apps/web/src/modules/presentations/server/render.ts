@@ -34,8 +34,9 @@ const fontsKey = (fonts: readonly FontFace[]) =>
 
 /**
  * Uploaded faces keep their family instead of the bundled substitute, for
- * drawing and for measuring. The resolver is module state: it is set here for
- * the task at hand and cleared by `resetFonts` when the task ends.
+ * drawing and for measuring. The renderer asks `resolveFamily` for each family
+ * it draws; the audit measures authored names, so each face is registered with
+ * the measurer under its authored family as well as the one it renders as.
  */
 export async function prepareFonts(fonts: readonly FontFace[]) {
   const loaded = await loadPreview();
@@ -45,31 +46,31 @@ export async function prepareFonts(fonts: readonly FontFace[]) {
       [face.renderFamily.toLowerCase(), face.renderFamily] as const,
     ]),
   );
-  loaded.setFamilyResolver(
-    families.size
-      ? (family) => (family ? families.get(family.trim().toLowerCase()) : undefined)
-      : null,
-  );
+  const resolveFamily = (family: string | null) =>
+    (family ? families.get(family.trim().toLowerCase()) : undefined) ??
+    loaded.substituteFamily(family);
   const key = fontsKey(fonts);
   if (measurer?.key !== key)
     measurer = {
       key,
       measure: loaded.buildFontkitMeasurer({
-        fonts: fonts.map((face) => ({
-          family: face.renderFamily,
-          source: face.path,
-          bold: face.bold,
-          italic: face.italic,
-        })),
+        fonts: fonts.flatMap((face) =>
+          [...new Set([face.renderFamily, face.family])].map((family) => ({
+            family,
+            source: face.path,
+            bold: face.bold,
+            italic: face.italic,
+          })),
+        ),
       }),
     };
   return {
     preview: loaded,
     measureText: measurer.measure,
+    resolveFamily,
     fontFiles: fonts.map((face) => face.path),
   };
 }
-export const resetFonts = () => preview?.setFamilyResolver(null);
 
 // A slide over 40 inches a side is not a slide.
 const slideSideEmu = 40 * 914400;
@@ -106,7 +107,7 @@ export async function renderPresentation(
     fail("limit", "Slide dimensions exceed the safe render limit.");
   const typefaces = deckTypefaces(source.parts);
   const drawn = facesFor(fonts, typefaces);
-  const { preview: loaded, measureText, fontFiles } = await prepareFonts(drawn);
+  const { preview: loaded, measureText, resolveFamily, fontFiles } = await prepareFonts(drawn);
   // Curated families the deck names but no face covers: the caller fetches
   // them for the next preview, as an evicted family would otherwise stay a substitute.
   const covered = new Set(drawn.map((face) => face.family.toLowerCase()));
@@ -124,6 +125,7 @@ export async function renderPresentation(
     const png = loaded.renderSlideToImage(deck, byId.get(id)!, {
       width: PRESENTATION_LIMITS.renderWidth,
       measureText,
+      resolveFamily,
       fontFiles,
     });
     if (png.length > PRESENTATION_LIMITS.imageBytes)

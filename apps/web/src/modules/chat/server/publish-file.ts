@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { TEXT_EXTENSIONS, fileExtension } from "~/modules/attachments/constants.ts";
 import { parseFileRef } from "./file-ref.ts";

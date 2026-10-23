@@ -1,6 +1,6 @@
 import { Clock, Effect, Redacted } from "effect";
 import { parseRetryAfter } from "~/server/retry-after.ts";
-import type { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import type { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import {
   SearchProviderError,
   type SearchFailureReason,

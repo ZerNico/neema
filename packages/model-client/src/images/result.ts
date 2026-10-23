@@ -1,5 +1,5 @@
 import { Effect, Result } from "effect";
-import type { AiError } from "effect/unstable/ai";
+import type { AiError } from "effect/ai";
 import { invalidOutput } from "../errors.ts";
 import { decodeImage } from "./bytes.ts";
 import { isRecord, num, str } from "./http.ts";

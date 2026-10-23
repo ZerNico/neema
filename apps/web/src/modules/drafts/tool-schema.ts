@@ -1,5 +1,5 @@
 import { Option, Schema, Struct } from "effect";
-import type { Response } from "effect/unstable/ai";
+import type { Response } from "effect/ai";
 import { EntityId } from "~/entity-id.ts";
 
 /** Outcomes every draft kind's tools can report; a kind adds its own (agents' "options"). */

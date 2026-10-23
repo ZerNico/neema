@@ -1,4 +1,4 @@
-import type { Response } from "effect/unstable/ai";
+import type { Response } from "effect/ai";
 
 type UsageEncoded = typeof Response.Usage.Encoded;
 

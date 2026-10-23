@@ -21,7 +21,7 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   hour (`MIN_FIRE_GAP_MS`). Each fire is a conversation and a model call.
 - `ScheduleService.tick` runs every 30 seconds (`forkScoped` in the app layer, so HMR disposal
   kills it). The claim is one transaction: due rows by database clock (`next_fire_at <=
-now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its
+  now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is rescheduled to its
   next fire after that same database timestamp **inside the claim**. That is the catch-up-once rule made structural:
   forty missed fires during downtime collapse into one fire and the cadence resumes from now;
   a one-shot whose next fire is past `endAt` comes out with `nextFireAt = null` and never
@@ -113,5 +113,5 @@ now()`), `FOR UPDATE SKIP LOCKED`, batch of 25, and each claimed row is reschedu
   computed from now, and stamps the target/saved receipt in one transaction; `schedule.changed`
   and `draft.changed` publish afterwards. Reload re-snapshots from the live schedule.
 - Sync events: `schedule.changed { scheduleId }` and `schedule.run.changed { scheduleId,
-runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
+  runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
   `["schedule-runs", id]`.

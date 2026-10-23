@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { LanguageModel } from "effect/unstable/ai";
+import type { LanguageModel } from "effect/ai";
 import type { Connection, ModelCall } from "./connection.ts";
 import { configurationError } from "./errors.ts";
 

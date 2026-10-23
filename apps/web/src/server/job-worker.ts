@@ -44,13 +44,9 @@ function movable(value: unknown, found: ArrayBuffer[] = [], depth = 0): ArrayBuf
 
 /**
  * Serves a worker's jobs, one at a time, as a process (production: a timeout
- * kills it even inside native code) or a worker thread (tests). `after` runs
- * once each job settles, for module state no job may inherit.
+ * kills it even inside native code) or a worker thread (tests).
  */
-export function serveJobs(
-  handlers: JobHandlers,
-  options: { readonly label: string; readonly after?: () => void },
-) {
+export function serveJobs(handlers: JobHandlers, options: { readonly label: string }) {
   const send = process.send?.bind(process);
   if (!parentPort && !send)
     throw new Error(`${options.label} requires a worker thread or process.`);
@@ -69,8 +65,6 @@ export function serveJobs(
         code: error instanceof JobError ? error.code : "processing_error",
         message: error instanceof JobError ? error.message : `${options.label} failed.`,
       };
-    } finally {
-      options.after?.();
     }
     if (parentPort)
       // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker ports do not accept target origins.

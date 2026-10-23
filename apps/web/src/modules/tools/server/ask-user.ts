@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { AskUserParams, AskUserResult } from "../ask-user-schema.ts";
 import { advertisedParameter, type ToolGroup } from "./toolset.ts";
 import { extractUserUrls } from "./user-urls.ts";

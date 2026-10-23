@@ -1,4 +1,4 @@
-import { Response } from "effect/unstable/ai";
+import { Response } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import { addFinishUsage, emptyUsageTotals, mergeUsageTotals, resolveCost } from "./usage.ts";
 

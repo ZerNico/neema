@@ -1,11 +1,5 @@
 import { DateTime, Effect, type Schema, Stream } from "effect";
-import {
-  AiError,
-  IdGenerator,
-  type LanguageModel,
-  type Prompt,
-  type Response,
-} from "effect/unstable/ai";
+import { AiError, IdGenerator, type LanguageModel, type Prompt, type Response } from "effect/ai";
 import {
   fileUrl,
   isRecord,
@@ -20,7 +14,7 @@ import {
   type FinishReason,
   type StreamPart,
 } from "./common.ts";
-import type { HttpClient } from "effect/unstable/http";
+import type { HttpClient } from "effect/http";
 import {
   identityOf,
   postJson,

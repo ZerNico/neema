@@ -1,4 +1,4 @@
-import type { Response } from "effect/unstable/ai";
+import type { Response } from "effect/ai";
 import type { ModelPricing } from "~/modules/providers/model-config.ts";
 
 interface TokenCounts {

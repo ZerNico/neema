@@ -6,7 +6,7 @@ import { Transform } from "@tiptap/pm/transform";
 import { adoptIds } from "./block-ids.ts";
 import { footnoteDefinitions, numberFootnotes } from "./blocks.ts";
 import { plainChips } from "./chips.ts";
-import { documentExtensions, fenceFor } from "./extensions.ts";
+import { documentExtensions } from "./extensions.ts";
 import { escapeMathDollars, markMathBeforeDigits } from "./math.ts";
 
 export const documentSchema = getSchema(documentExtensions);
@@ -51,22 +51,6 @@ Reflect.set(
 );
 
 /**
- * Inline code is written verbatim between the mark's one backtick each side,
- * so code holding a backtick would close early. The rest of a longer fence,
- * and a space where the code starts or ends with a backtick, go inside the text.
- */
-const fenceInlineCode = (node: JSONContent): JSONContent => {
-  const text = node.text;
-  if (text !== undefined) {
-    if (!node.marks?.some((mark) => mark.type === "code")) return node;
-    const extra = fenceFor(text, 1).slice(1);
-    const pad = /^`|`$/.test(text) ? " " : "";
-    return extra || pad ? { ...node, text: `${extra}${pad}${text}${pad}${extra}` } : node;
-  }
-  return node.content ? { ...node, content: node.content.map(fenceInlineCode) } : node;
-};
-
-/**
  * An empty paragraph holds no Markdown, and the editor keeps one after the
  * last block to type into; written out, it would change a document just by
  * someone opening it.
@@ -89,9 +73,7 @@ const withoutPending = (node: JSONContent): JSONContent =>
     : node;
 
 const serialize = (json: JSONContent) =>
-  manager.serialize(
-    markMathBeforeDigits(fenceInlineCode(withoutEmptyParagraphs(withoutPending(json)))),
-  );
+  manager.serialize(markMathBeforeDigits(withoutEmptyParagraphs(withoutPending(json))));
 
 /**
  * The Markdown the model reads and writes: chips as shortcodes

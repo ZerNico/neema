@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Effect } from "effect";
 import { strToU8, zipSync } from "fflate";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import type { AttachmentWithBlob } from "~/modules/attachments/server/repo.ts";
 import { DocumentParseError } from "~/modules/attachments/errors.ts";
 import { pdfFingerprint } from "~/modules/attachments/server/document-parser.ts";

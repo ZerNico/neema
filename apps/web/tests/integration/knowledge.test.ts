@@ -2260,12 +2260,13 @@ describe("knowledge ingestion", () => {
     expect(removed).toEqual([]);
     const remaining = await run(
       Effect.flatMap(Db, (db) =>
-        db.execute(
-          `select count(*)::int as total from attachment_blobs where id = '${blobId}'` as never,
+        db.execute<{ total: number }>(
+          `select count(*)::int as total from attachment_blobs where id = '${blobId}'`,
+          "objects",
         ),
       ),
     );
-    expect((remaining as { rows: ReadonlyArray<{ total: number }> }).rows[0]!.total).toBe(1);
+    expect(remaining[0]!.total).toBe(1);
 
     // Deleting the document is the last reference, so now the bytes go.
     const documents = await run(

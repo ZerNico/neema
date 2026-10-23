@@ -125,11 +125,14 @@ try {
   });
   const body = await missingFunction.text();
   // Start's dispatcher rejects an unknown function before our 404 document
-  // fallback. Assert its specific failure, not any arbitrary server error.
+  // fallback. Assert its specific failure, not any arbitrary server error: it
+  // answers with its own serialized error naming the missing function.
+  const diagnostic = "Server function info not found for startup-missing";
   assert.equal(missingFunction.status, 500, body.slice(0, 200));
   assert.match(missingFunction.headers.get("content-type") ?? "", /application\/json/);
-  assert.deepEqual(JSON.parse(body), { status: 500, unhandled: true, message: "HTTPError" });
-  const diagnostic = "Server function info not found for startup-missing";
+  const [rejection] = JSON.parse(body).p.v;
+  assert.equal(rejection.c, "$TSR/Error", body.slice(0, 200));
+  assert.equal(rejection.s.message.s, diagnostic);
   await new Promise((resolve, reject) => {
     const cleanup = () => {
       clearTimeout(deadline);

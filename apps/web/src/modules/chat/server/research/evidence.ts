@@ -1,4 +1,4 @@
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import { sourceTarget } from "~/modules/tools/sources.ts";
 import type { Source } from "~/modules/tools/schema.ts";
 import { estimatePromptTokens } from "../compaction.ts";

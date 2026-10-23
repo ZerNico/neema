@@ -32,15 +32,16 @@ that bug.
 - In-page cards import from `~/ui/card.tsx`, not the generated primitive; floating overlays keep their
   generated elevation instead. `DropdownMenuLabel` is a Base UI `GroupLabel` and throws outside a
   `Group`/`RadioGroup` — for a plain hint line in a menu, render a static `<p>`. Never `<Button
-render={<Link/>} nativeButton={false}>` for navigation — Base UI forces `role="button"`; use `<Link
-className={buttonVariants({...})}>`.
+  render={<Link/>} nativeButton={false}>` for navigation — Base UI forces `role="button"`; use `<Link
+  className={buttonVariants({...})}>`.
 - Radius scale is 2xl/3xl/4xl for app-authored chrome only, not generated primitive density or
   chart/favicon geometry. Semantic colour tokens only — `success`/`warning` exist beside `destructive`.
 - `@shadcn/lint` enforces the rule this file opens with: a call site may lay a component out, tint it to
   a semantic foreground, reveal it and say how its text fills the box, but changing a component's own
   spacing, shape or type scale means the wrong component was chosen or a variant is missing. That list
   is `callSiteMayDo` in `oxlint.config.ts`; `Card` and its parts also take padding, because `card.tsx`
-  is shared by padded cards and unpadded ListCards. `no-restyle` exempts `src/ui/**`, where the
+  is shared by padded cards and unpadded ListCards. `PopoverTrigger` and `TooltipTrigger` take any
+  class: they add no styling, so the element a call site passes as `render` is its own to style. `no-restyle` exempts `src/ui/**`, where the
   design system restates its own primitives, and component tests. Unknown-class checking still runs
   there; only `test-panel-class` in the detail-panel test and the generated Sonner `toaster` class
   are allowed in their respective files. Raw-color checking remains enabled everywhere.
@@ -115,7 +116,7 @@ not catch:
   header included, and portals its tab strip into the titlebar's right end (see the detail panel
   below). Browser sizing is unchanged. Pinned by `page-shell.test.tsx` and the desktop chrome tests.
 - Loading a page's data is the **route loader's** job (`ensureQueryData`, or `prefetchQuery` + `retry:
-false`), so a page body is written against data already there. This includes local Electron folder
+  false`), so a page body is written against data already there. This includes local Electron folder
   state needed for the first Work composer render: client loaders await it in the same QueryClient
   the view consumes. Local failures remain inline and retryable rather than failing the chat route.
   Where a loader can't cover it, `ListSkeleton` (`page-shell.tsx`) is the one pending shape, never a

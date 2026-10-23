@@ -1,5 +1,5 @@
 import { Effect, Schema, Semaphore } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
 import type { SourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";

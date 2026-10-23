@@ -1,6 +1,6 @@
 import { LIMITS, WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { Schema } from "effect";
-import { AiError } from "effect/unstable/ai";
+import { AiError } from "effect/ai";
 import {
   BROWSER_TOOL_NAMES,
   browserApprovalKind,

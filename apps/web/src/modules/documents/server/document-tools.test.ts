@@ -1,7 +1,7 @@
 import { Node } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import { Effect, Schema } from "effect";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import { blockIdOf, ensureIds } from "../editor/block-ids.ts";
 import {

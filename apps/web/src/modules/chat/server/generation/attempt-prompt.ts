@@ -5,7 +5,7 @@ import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { Effect, Option } from "effect";
 import { formatQuestionContext, readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
 import { renderPlanReminder } from "~/modules/tools/plan-schema.ts";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import { formatFileRef } from "../file-ref.ts";
 import { anchorLastMessage, cacheAnchor } from "~/modules/providers/server/gateway.ts";

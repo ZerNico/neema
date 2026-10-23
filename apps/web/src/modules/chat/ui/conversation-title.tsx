@@ -151,7 +151,8 @@ export function ConversationTitle({
     Math.max(TITLE_SCROLL_MIN_MS, (scrollDistance / TITLE_SCROLL_PX_PER_SECOND) * 1_000),
   );
   const mask = scrolling ? BOTH_EDGE_FADE : RIGHT_EDGE_FADE;
-  const relativeAge = relativeAgeLabel(createdAt, previewNow ?? new Date());
+  // Only the tooltip shows it, and opening the tooltip reads the clock.
+  const relativeAge = previewNow ? relativeAgeLabel(createdAt, previewNow) : null;
   const viewportStyle: CSSProperties | undefined = overflowing
     ? { maskImage: mask, WebkitMaskImage: mask }
     : undefined;

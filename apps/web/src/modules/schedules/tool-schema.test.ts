@@ -1,6 +1,6 @@
 import { Schema, Struct } from "effect";
 import { ScheduleDraftSettings } from "./draft-schema.ts";
-import { Response } from "effect/unstable/ai";
+import { Response } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import {
   ScheduleDraftActivityResult,

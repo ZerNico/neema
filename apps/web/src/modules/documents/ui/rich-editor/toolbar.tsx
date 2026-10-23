@@ -234,6 +234,13 @@ const useToolbarState = (editor: Editor) =>
 const insert = (content: Parameters<Chain["insertContent"]>[0]) => (chain: Chain) =>
   chain.insertContent(content);
 
+/** A chip for the day it is clicked: a ribbon left open past midnight inserts the new day. */
+const insertToday = (chain: Chain) =>
+  chain.insertContent([
+    { type: "dateChip", attrs: { value: isoDay(new Date()) } },
+    { type: "text", text: " " },
+  ]);
+
 /**
  * The document's ribbon. Every control is a command on the
  * shared tree, so what it does syncs like typing.
@@ -382,14 +389,7 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
                 onPress={() => pickImages(editor)}
               />
               {action("Divider", MinusSignIcon, (c) => c.setHorizontalRule())}
-              {action(
-                "Date",
-                Calendar03Icon,
-                insert([
-                  { type: "dateChip", attrs: { value: isoDay(new Date()) } },
-                  { type: "text", text: " " },
-                ]),
-              )}
+              {action("Date", Calendar03Icon, insertToday)}
               {action("Mention someone", UserIcon, insert("@"))}
             </>
           ),

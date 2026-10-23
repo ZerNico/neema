@@ -13,7 +13,7 @@ import {
   Stream,
 } from "effect";
 import { uuidv7 } from "uuidv7";
-import { LanguageModel, Response as AiResponse, type Prompt } from "effect/unstable/ai";
+import { LanguageModel, Response as AiResponse, type Prompt } from "effect/ai";
 import { and, eq, or, sql } from "drizzle-orm";
 import {
   conversationDrafts,

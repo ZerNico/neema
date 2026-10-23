@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Duration, Effect, Fiber } from "effect";
 import * as TestClock from "effect/testing/TestClock";
-import type { Prompt, Response } from "effect/unstable/ai";
+import type { Prompt, Response } from "effect/ai";
 import type { ModelRow } from "~/modules/providers/server/repo.ts";
 import {
   buildTitlePrompt,

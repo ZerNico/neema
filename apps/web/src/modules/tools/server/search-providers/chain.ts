@@ -1,5 +1,5 @@
 import { Clock, Context, Duration, Effect, Layer, Result, Schema } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import type { SearchProviderKind } from "../../schema.ts";
 import {
   makeBraveAdapter,

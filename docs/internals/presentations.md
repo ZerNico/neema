@@ -214,11 +214,13 @@ TrueType or OpenType faces in the Office files section of Admin → Tools, whose
 `office_files` tools row, read per attempt) decides whether chats are offered the
 presentation and [spreadsheet](spreadsheets.md) tools at all; previews of existing files work either way;
 `PresentationProcessor` attaches them to every render, so previews and the model's own
-slide images draw them. Office Kit's preview
-package is patched (`patches/@office-kit__pptx-preview@0.11.0.patch`) with
-`setFamilyResolver`, because its substitution is internal and runs on every text path.
-The resolver is module state in a worker that outlives its tasks, so each task sets it for
-its own faces and the worker clears it when the task ends.
+slide images draw them. Each render hands the
+preview a `resolveFamily` that keeps a family with an uploaded face and substitutes the
+rest, so the resolver belongs to the call, never to the worker that outlives it. Office
+Kit's image render takes the option only through a patch
+(`patches/@office-kit__pptx-preview@0.17.0.patch`) that passes it on to the SVG render.
+The text audit measures authored family names, so each face is registered with the
+measurer under its authored family as well as the one it renders as.
 
 A face's bytes live in its `presentation_fonts` row, not the blob store: blobs belong to a
 user, and a shared font must outlive the admin who uploaded it. Renders need file paths,

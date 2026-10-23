@@ -6,7 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { conversations, models } from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { generateConversationTitle, type TitleDeps } from "~/modules/chat/server/title.ts";
 import { Db } from "~/server/db.ts";
 import { purgeConversation } from "./purge.ts";

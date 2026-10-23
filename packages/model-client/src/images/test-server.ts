@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { FetchHttpClient, type HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, type HttpClient } from "effect/http";
 import { makeConnection, type Credentials } from "../connection.ts";
 import type { PresetId } from "../preset.ts";
 import type { ImageReference } from "./normalize.ts";

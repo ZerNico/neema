@@ -2,7 +2,7 @@ import { EmptyWebSearch } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { Prompt, Response as AiResponse } from "effect/unstable/ai";
+import { Prompt, Response as AiResponse } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import {
   conversationCompactionCheckpoints,

@@ -123,7 +123,9 @@ export const IntegrationMention = Node.create<IntegrationMentionOptions>({
           const { mention, name } = match.data as { mention: string; name: string };
           const integration = integrationForName(name, this.options.integrations());
           if (!integration) return null;
-          const from = range.to - mention.length;
+          // From the match's own "@": whether the range ends before or after the
+          // typed space differs between Tiptap versions, so its end cannot place it.
+          const from = range.from + match[0].indexOf(mention);
           state.tr.replaceWith(from, range.to, [
             this.type.create({ integrationId: integration.id, text: mention }),
             state.schema.text(" "),
