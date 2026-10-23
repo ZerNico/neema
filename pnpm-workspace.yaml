@@ -18,16 +18,12 @@ catalog:
 # build we already know is superseded:
 #   - drizzle-orm / drizzle-kit: pre-release `1.0.0-rc.N-<sha>` builds that must
 #     stay a matched pair (see CLAUDE.md).
-#   - rolldown (and its platform bindings): pinned through Vite whenever a build
-#     regression forces a specific version.
 #   - @tanstack/charts: pinned exact; its API moved between every release before 1.0.
 # Add a package here only when its pin is exact and deliberate.
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - drizzle-orm
   - drizzle-kit
-  - rolldown
-  - "@rolldown/*"
   - "@tanstack/charts"
 
 # Install-time scripts, denied by default. esbuild has to fetch/link its

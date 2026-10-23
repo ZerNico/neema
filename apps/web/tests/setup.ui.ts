@@ -6,13 +6,6 @@ import { afterEach } from "vitest";
 // so renders leak into the next test's queries.
 afterEach(cleanup);
 
-// jsdom has no PointerEvent, but Base UI re-dispatches clicks as one (e.g.
-// SwitchRoot's dispatchClickWithModifiers). MouseEvent is shape-compatible
-// for everything the components read.
-if (typeof globalThis.PointerEvent === "undefined") {
-  globalThis.PointerEvent = class PointerEvent extends MouseEvent {} as never;
-}
-
 // jsdom lays nothing out, and has no layout methods on ranges; ProseMirror (the
 // composer, the document editor) measures the selection to keep it in view.
 // An element's empty rect list stands in.

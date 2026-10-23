@@ -398,8 +398,9 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
   check the proxy reaches commands through `networkProxy`, and let the desktop workflow's
   package smoke test prove the trimmed natives still load.
   See [desktop](docs/internals/desktop.md#containment-and-command-isolation).
-- `rolldown` needs no override since 1.2.7. Re-pin only if the production module
-  check fails again.
+- `rolldown` needs no override since 1.2.7 and follows the release cooldown like any other
+  package. Re-pin only if the production module check fails again, and then add it to
+  `minimumReleaseAgeExclude`.
 
 ## Effect 4 notes
 
