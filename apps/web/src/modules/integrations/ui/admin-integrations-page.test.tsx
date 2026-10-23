@@ -5,7 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { adminIntegrationsQuery } from "../client/queries.ts";
 import type { AdminIntegration } from "../schema.ts";
-import { createIntegration } from "../server/functions.ts";
+import {
+  createIntegration,
+  deleteIntegration,
+  listAdminIntegrations,
+  saveIntegrationConfig,
+} from "../server/functions.ts";
 import { AdminIntegrationsPage } from "./admin-integrations-page.tsx";
 
 const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
@@ -17,6 +22,8 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("../server/functions.ts", () => ({
   createIntegration: vi.fn(async () => ({ ok: true, id: "jira-2" })),
+  deleteIntegration: vi.fn(async () => ({ ok: true })),
+  saveIntegrationConfig: vi.fn(async () => ({ ok: true })),
   listAdminIntegrations: vi.fn(),
   listIntegrationDirectory: vi.fn(async () => []),
 }));
@@ -24,7 +31,7 @@ vi.mock("../server/functions.ts", () => ({
 const adminRow = (
   id: string,
   name: string,
-  patch: Partial<AdminIntegration> = {},
+  patch: Partial<AdminIntegration & { redirectUri: string | null }> = {},
 ): AdminIntegration & { redirectUri: string | null } => ({
   id,
   kind: "jira",
@@ -45,8 +52,16 @@ const adminRow = (
   ...patch,
 });
 
-const mount = (integrations: ReturnType<typeof adminRow>[]) => {
+/** `created` is what the list holds once the dialog's create refetches it. */
+const mount = (
+  integrations: ReturnType<typeof adminRow>[],
+  created: ReturnType<typeof adminRow>[] = [],
+) => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+  vi.mocked(listAdminIntegrations).mockResolvedValue({
+    integrations: [...integrations, ...created],
+    origin: null,
+  } as never);
   client.setQueryData(adminIntegrationsQuery.queryKey, { integrations, origin: null });
   render(
     <QueryClientProvider client={client}>
@@ -68,26 +83,67 @@ describe("admin integrations", () => {
     );
   });
 
-  it("adds a type under a free name, then opens its settings", async () => {
+  it("sets a type up in the same dialog and turns it on by saving it", async () => {
     const user = userEvent.setup();
-    mount([adminRow("jira", "Jira")]);
+    mount([adminRow("jira", "Jira")], [adminRow("jira-2", "Jira 2", { enabled: false })]);
     await user.click(screen.getByRole("button", { name: "Add integration" }));
     const directory = await screen.findByRole("dialog", { name: "Add integration" });
     await user.click(within(directory).getByRole("button", { name: /^Jira/ }));
-    const dialog = await screen.findByRole("dialog", { name: "Add Jira" });
     // The type's name is taken, so the next one is numbered.
-    expect(within(dialog).getByLabelText("Name")).toHaveValue("Jira 2");
+    expect(createIntegration).toHaveBeenCalledWith({ data: { kind: "jira", name: "Jira 2" } });
+    const dialog = await screen.findByRole("dialog", { name: "Set up Jira 2" });
     await user.clear(within(dialog).getByLabelText("Name"));
     await user.type(within(dialog).getByLabelText("Name"), "Jira · Ops");
-    await user.click(within(dialog).getByRole("button", { name: "Add" }));
+    await user.click(within(dialog).getByRole("button", { name: "Turn on" }));
     await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith({
-        to: "/admin/integrations/$integrationId",
-        params: { integrationId: "jira-2" },
-        search: { setup: true },
+      expect(saveIntegrationConfig).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          integrationId: "jira-2",
+          name: "Jira · Ops",
+          enabled: true,
+        }),
       }),
     );
-    expect(createIntegration).toHaveBeenCalledWith({ data: { kind: "jira", name: "Jira · Ops" } });
+    expect(navigate).toHaveBeenLastCalledWith({
+      to: "/admin/integrations/$integrationId",
+      params: { integrationId: "jira-2" },
+    });
+    expect(deleteIntegration).not.toHaveBeenCalled();
+  });
+
+  it("asks how people connect, and needs at least one way before it turns on", async () => {
+    const user = userEvent.setup();
+    mount(
+      [adminRow("jira", "Jira")],
+      [adminRow("jira-2", "Jira 2", { enabled: false, allowApiKeys: true })],
+    );
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    await user.click(within(directory).getByRole("button", { name: /^Jira/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Set up Jira 2" });
+    // Keys come on by default, so the app's fields wait until signing in is picked.
+    expect(within(dialog).getByRole("checkbox", { name: "Personal API keys" })).toBeChecked();
+    expect(within(dialog).queryByLabelText(/OAuth client ID/)).toBeNull();
+    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
+    // Picked, its client is required: no optional mark on either half.
+    for (const name of ["OAuth client ID", "OAuth client secret"])
+      expect(within(dialog).getByText(name).closest("label")).not.toHaveTextContent("optional");
+    await user.click(within(dialog).getByRole("checkbox", { name: "Sign in" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: "Personal API keys" }));
+    expect(within(dialog).getByText("Pick at least one.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Turn on" })).toBeDisabled();
+  });
+
+  it("deletes what was picked when setting it up is abandoned", async () => {
+    const user = userEvent.setup();
+    mount([adminRow("jira", "Jira")], [adminRow("jira-2", "Jira 2", { enabled: false })]);
+    await user.click(screen.getByRole("button", { name: "Add integration" }));
+    const directory = await screen.findByRole("dialog", { name: "Add integration" });
+    await user.click(within(directory).getByRole("button", { name: /^Jira/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Set up Jira 2" });
+    await user.click(within(dialog).getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("dialog", { name: "Add integration" })).toBeInTheDocument();
+    expect(deleteIntegration).toHaveBeenCalledWith({ data: { integrationId: "jira-2" } });
   });
 
   it("adds a known server as it is, and offers each one once", async () => {
@@ -111,27 +167,32 @@ describe("admin integrations", () => {
     expect(navigate).toHaveBeenLastCalledWith({
       to: "/admin/integrations/$integrationId",
       params: { integrationId: "mcp" },
-      search: {},
     });
   });
 
-  it("opens a known server that lets in only registered apps on its settings, for the app", async () => {
+  it("asks a known server that lets in only registered apps for the app before it is on", async () => {
     const user = userEvent.setup();
     vi.mocked(createIntegration).mockResolvedValueOnce({ ok: true, id: "asana" } as never);
-    mount([]);
+    mount(
+      [],
+      [
+        adminRow("asana", "Asana", {
+          kind: "mcp",
+          server: "asana",
+          enabled: false,
+          config: { url: "https://mcp.asana.com/sse", ways: "oauth" },
+          redirectUri: "https://chat.example/api/integrations/asana/callback",
+        }),
+      ],
+    );
     await user.click(screen.getByRole("button", { name: "Add integration" }));
     const directory = await screen.findByRole("dialog", { name: "Add integration" });
     await user.type(within(directory).getByRole("searchbox", { name: "Search services" }), "asana");
     await user.click(within(directory).getByRole("button", { name: /^Asana/ }));
-    const dialog = await screen.findByRole("dialog", { name: "Add Asana" });
-    expect(dialog).toHaveTextContent(/client ID and secret of an app registered with Asana next/);
-    await user.click(within(dialog).getByRole("button", { name: "Add" }));
-    await waitFor(() =>
-      expect(navigate).toHaveBeenLastCalledWith({
-        to: "/admin/integrations/$integrationId",
-        params: { integrationId: "asana" },
-        search: { setup: true },
-      }),
+    const dialog = await screen.findByRole("dialog", { name: "Set up Asana" });
+    expect(within(dialog).getByLabelText("Redirect URI")).toHaveValue(
+      "https://chat.example/api/integrations/asana/callback",
     );
+    expect(within(dialog).getByRole("button", { name: "Turn on" })).toBeInTheDocument();
   });
 });

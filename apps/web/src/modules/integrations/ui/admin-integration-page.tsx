@@ -42,6 +42,7 @@ import type { AdminIntegration, AdminTool } from "../schema.ts";
 import {
   checkIntegrationTools,
   deleteIntegration,
+  saveIntegrationConfig,
   setIntegrationTool,
 } from "../server/functions.ts";
 import { IntegrationConfigDialog } from "./integration-config-dialog.tsx";
@@ -59,17 +60,10 @@ const CLAIMS: Record<ToolAccess, string> = {
  * its tools for everyone. A tool's server may say too little of what it does,
  * so its access can be corrected here; nothing a server lists waits on this.
  */
-export function AdminIntegrationPage({
-  integrationId,
-  setup,
-}: {
-  integrationId: string;
-  /** Just added: opens on its settings. */
-  setup: boolean;
-}) {
+export function AdminIntegrationPage({ integrationId }: { integrationId: string }) {
   const { data } = useSuspenseQuery(adminIntegrationsQuery);
   const row = data.integrations.find((entry) => entry.id === integrationId);
-  const [editing, setEditing] = useState(setup);
+  const [editing, setEditing] = useState(false);
   const [sharing, setSharing] = useState(false);
   const look = row ? integrationLook(row) : null;
   if (!row || !look)
@@ -98,6 +92,7 @@ export function AdminIntegrationPage({
       <Section title="Settings">
         <ListCard>
           <ListRow>
+            <EnabledSwitch row={row} />
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="text-sm font-medium">{row.enabled ? "On" : "Off"}</span>
               <span className="text-muted-foreground truncate text-xs">
@@ -140,6 +135,45 @@ export function AdminIntegrationPage({
         />
       ) : null}
     </Page>
+  );
+}
+
+/**
+ * On or off as it is otherwise stored. Off stops chat tools and syncing and
+ * keeps connections; the server refuses on while nobody has a way in.
+ */
+function EnabledSwitch({ row }: { row: AdminIntegration }) {
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) =>
+      saveIntegrationConfig({
+        data: {
+          integrationId: row.id,
+          name: row.name,
+          description: row.description ?? "",
+          enabled,
+          config: { ...row.config },
+          oauthClientId: row.oauthClientId ?? "",
+          allowApiKeys: row.allowApiKeys,
+        },
+      }),
+    onSuccess: async (result, enabled) => {
+      if (!result.ok)
+        toastError(
+          enabled ? "Could not turn it on." : "Could not turn it off.",
+          new Error(result.error),
+        );
+      await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
+    },
+    onError: (error) => toastError("Could not change it.", error),
+  });
+  return (
+    <Switch
+      checked={toggle.isPending ? toggle.variables : row.enabled}
+      disabled={toggle.isPending}
+      onCheckedChange={(enabled) => toggle.mutate(enabled)}
+      aria-label={`${row.name} on`}
+    />
   );
 }
 

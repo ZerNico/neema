@@ -21,23 +21,21 @@ import { cn } from "~/ui/utils";
 import type { OAuthSetup } from "../manifest.ts";
 
 /**
- * The redirect URI to copy, then the manifest's steps for registering the app.
- * Open until the integration has a client, since that is when they are read.
+ * The redirect URI to copy, then the manifest's steps for registering the app,
+ * closed until asked for: they are long, and most admins know the console.
  */
 export function OAuthSetupGuide({
   id,
   setup,
   redirectUri,
   config,
-  configured,
 }: {
   id: string;
   setup: OAuthSetup;
   redirectUri: string;
   config: Readonly<Record<string, string>>;
-  configured: boolean;
 }) {
-  const [open, setOpen] = useState(!configured);
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const consoleUrl = setup.console?.url(config) ?? null;
@@ -136,6 +134,7 @@ export function OAuthClientFields({
   onSecretChange,
   secretStored,
   optional = true,
+  secretRequired = false,
   disabled,
 }: {
   id: string;
@@ -146,10 +145,12 @@ export function OAuthClientFields({
   onClientIdChange: (value: string) => void;
   secret: string;
   onSecretChange: (value: string) => void;
-  /** Whether a client is saved already, which closes the guide. */
+  /** Whether a secret is saved already, which an empty field keeps. */
   secretStored: boolean;
   /** Whether the client ID may be left empty; a public client has no secret either way. */
   optional?: boolean;
+  /** A service's app always has a secret; a server's may be a public client. */
+  secretRequired?: boolean;
   disabled: boolean;
 }) {
   return (
@@ -159,7 +160,6 @@ export function OAuthClientFields({
         setup={setup}
         redirectUri={redirectUri}
         config={config}
-        configured={secretStored}
       />
       <Field>
         <FieldLabel htmlFor={`${id}-client`}>
@@ -174,7 +174,7 @@ export function OAuthClientFields({
       </Field>
       <Field>
         <FieldLabel htmlFor={`${id}-secret`}>
-          OAuth client secret <OptionalMark />
+          OAuth client secret {secretRequired ? null : <OptionalMark />}
         </FieldLabel>
         <Input
           id={`${id}-secret`}

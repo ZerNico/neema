@@ -108,8 +108,10 @@ session or credential is handed out.
 others), each checked to sign in without registering an app first. Adding one is adding an
 ordinary MCP integration at its address with signing in as its way in, on at once: there is
 nothing to fill in. The exception is marked `ownApp`: a sign-in that lets in only apps registered
-there (Asana's V2 server). It is added off and opens on its settings for the admin's client ID and
-secret, and cannot be turned on without them; it is an admin's preset only. Which known server an
+there (Asana's V2 server). Like any other type an admin adds, it is created off when picked, since
+its redirect URI names it, and set up in the same dialog, where saving turns it on; abandoning that
+step deletes it. It cannot be turned on without the client ID and secret, and is an admin's preset
+only. Which known server an
 integration is, for its logo and description, is read from its address each time, not stored.
 Some services need their own admin first, which nothing here can do or detect: Atlassian lets in
 only domains its organization admin allowed, so its `setup` note names this app's origin before

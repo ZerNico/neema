@@ -60,7 +60,7 @@ const server = (
   ...patch,
 });
 
-const mount = (row: ReturnType<typeof server>, setup = false) => {
+const mount = (row: ReturnType<typeof server>) => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(adminIntegrationsQuery.queryKey, {
     integrations: [row],
@@ -69,7 +69,7 @@ const mount = (row: ReturnType<typeof server>, setup = false) => {
   render(
     <QueryClientProvider client={client}>
       <ConfirmProvider>
-        <AdminIntegrationPage integrationId={row.id} setup={setup} />
+        <AdminIntegrationPage integrationId={row.id} />
       </ConfirmProvider>
     </QueryClientProvider>,
   );
@@ -117,10 +117,11 @@ describe("an integration's admin page", () => {
     expect(screen.getByText(/allow https:\/\/chat\.example\/\*\*/)).toBeInTheDocument();
   });
 
-  it("opens on its settings just after it was added, and saves its description", async () => {
+  it("edits its description and keeps it on as it was", async () => {
     const user = userEvent.setup();
-    mount(server(), true);
-    const dialog = await screen.findByRole("dialog", { name: "Set up DeepWiki" });
+    mount(server());
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit DeepWiki" });
     // Empty, it reads as the type's own words.
     expect(within(dialog).getByLabelText(/Description/)).toHaveAttribute(
       "placeholder",
@@ -130,7 +131,26 @@ describe("an integration's admin page", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(saveIntegrationConfig).toHaveBeenCalledWith({
-        data: expect.objectContaining({ description: "Docs for any repo" }),
+        data: expect.objectContaining({ description: "Docs for any repo", enabled: true }),
+      }),
+    );
+  });
+
+  it("turns it off from its page, keeping everything else as stored", async () => {
+    const user = userEvent.setup();
+    mount(server());
+    await user.click(screen.getByRole("switch", { name: "DeepWiki on" }));
+    await waitFor(() =>
+      expect(saveIntegrationConfig).toHaveBeenLastCalledWith({
+        data: {
+          integrationId: "mcp",
+          name: "DeepWiki",
+          description: "",
+          enabled: false,
+          config: { url: "https://mcp.deepwiki.com/mcp", ways: "anonymous", anonymous: "open" },
+          oauthClientId: "",
+          allowApiKeys: false,
+        },
       }),
     );
   });
@@ -139,7 +159,7 @@ describe("an integration's admin page", () => {
     const user = userEvent.setup();
     mount(server());
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set up DeepWiki" });
+    const dialog = await screen.findByRole("dialog", { name: "Edit DeepWiki" });
     expect(within(dialog).getByRole("radio", { name: "No key" })).toBeChecked();
     expect(within(dialog).queryByLabelText("Redirect URI")).not.toBeInTheDocument();
 

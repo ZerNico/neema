@@ -5,7 +5,6 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -26,12 +25,9 @@ import { IntegrationFieldControl } from "./integration-field.tsx";
 import { OAuthClientFields } from "./oauth-setup-guide.tsx";
 import { findKnownMcpServer } from "../mcp/known-servers.ts";
 
-type AdminRow = AdminIntegration & { redirectUri: string | null };
+export type AdminRow = AdminIntegration & { redirectUri: string | null };
 
-/**
- * An integration's settings, as its type's manifest declares them: address,
- * ways in, the admin's own app, a shared key, and its description.
- */
+/** An integration's settings, edited from its page. Leaves it on or off as it is. */
 export function IntegrationConfigDialog({
   row,
   open,
@@ -40,6 +36,61 @@ export function IntegrationConfigDialog({
   row: AdminRow;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && busy) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit {row.name}</DialogTitle>
+          <DialogDescription>
+            Secrets are encrypted at rest and never shown again. People connect their own accounts
+            from Settings.
+          </DialogDescription>
+        </DialogHeader>
+        <IntegrationSettingsForm
+          row={row}
+          enable={row.enabled}
+          submitLabel="Save"
+          onPendingChange={setBusy}
+          onSaved={() => onOpenChange(false)}
+          cancelLabel="Cancel"
+          onCancel={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * An integration's settings, as its type's manifest declares them: name and
+ * description, address, the admin's own app, a shared key, personal keys.
+ * Adding saves them and turns it on in one step; editing keeps it as it was.
+ */
+export function IntegrationSettingsForm({
+  row,
+  enable,
+  submitLabel,
+  onSaved,
+  onPendingChange,
+  cancelLabel,
+  onCancel,
+}: {
+  row: AdminRow;
+  /** Saved as on or off; the server refuses on until people have a way in. */
+  enable: boolean;
+  submitLabel: string;
+  onSaved: () => void;
+  onPendingChange?: (pending: boolean) => void;
+  /** The footer button beside submit: Cancel when editing, Back when adding. */
+  cancelLabel: string;
+  onCancel: () => void;
 }) {
   const fieldId = useId();
   const queryClient = useQueryClient();
@@ -61,12 +112,42 @@ export function IntegrationConfigDialog({
   // A known server that lets in only registered apps needs the admin's, so it is not optional.
   const appRequired = Boolean(findKnownMcpServer(row.server)?.ownApp);
   const optionalClient = Boolean(manifest.oauth?.optionalClient) && !appRequired;
-  const [ownClient, setOwnClient] = useState(!optionalClient || Boolean(row.oauthClientId));
-  const [enabled, setEnabled] = useState(row.enabled);
+  // Signing in through the admin's app and personal keys are two ways in, at least one needed:
+  // asked as a choice, so the app's fields read as required once it is picked.
+  const choosesWays = Boolean(
+    manifest.oauth &&
+    !manifest.oauth.when &&
+    !optionalClient &&
+    manifest.apiKey &&
+    !manifest.apiKey.when,
+  );
+  const [ownClient, setOwnClient] = useState(
+    choosesWays || optionalClient ? Boolean(row.oauthClientId) : true,
+  );
   const [clientId, setClientId] = useState(row.oauthClientId ?? "");
   const [secret, setSecret] = useState("");
   const [allowApiKeys, setAllowApiKeys] = useState(row.allowApiKeys);
   const [error, setError] = useState<string | null>(null);
+  const noWay = choosesWays && !ownClient && !allowApiKeys;
+  const ways: IntegrationField = {
+    key: "ways",
+    label: "How people connect",
+    kind: "choices",
+    required: true,
+    ...(noWay ? { description: "Pick at least one." } : {}),
+    options: [
+      {
+        value: "oauth",
+        label: "Sign in",
+        description: `Through an OAuth app you register with ${manifest.name}.`,
+      },
+      {
+        value: "keys",
+        label: "Personal API keys",
+        description: `People paste a key from their own ${manifest.name} account.`,
+      },
+    ],
+  };
   const redirectUri =
     row.redirectUri ?? `${window.location.origin}/api/integrations/${row.id}/callback`;
 
@@ -77,7 +158,7 @@ export function IntegrationConfigDialog({
           integrationId: row.id,
           name: name.trim(),
           description,
-          enabled,
+          enabled: enable,
           config,
           // Switching the admin's own client off forgets it, secret included.
           ...(ownClient
@@ -93,13 +174,15 @@ export function IntegrationConfigDialog({
             : {}),
         },
       }),
+    onMutate: () => onPendingChange?.(true),
+    onSettled: () => onPendingChange?.(false),
     onSuccess: async (result) => {
       if (!result.ok) {
         setError(result.error);
         return;
       }
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
-      onOpenChange(false);
+      onSaved();
     },
     onError: () => setError("Could not save the integration."),
   });
@@ -124,142 +207,124 @@ export function IntegrationConfigDialog({
       secret={secret}
       onSecretChange={setSecret}
       secretStored={Boolean(row.oauthClientId && row.oauthSecretConfigured)}
-      optional={!appRequired}
+      // A server's own sign-in may take a public client; a service's needs both halves.
+      optional={optionalClient}
+      secretRequired={row.kind !== "mcp"}
       disabled={save.isPending}
     />
   ) : null;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && save.isPending) return;
-        onOpenChange(next);
+    <form
+      className="flex flex-col gap-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError(null);
+        save.mutate();
       }}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Set up {row.name}</DialogTitle>
-          <DialogDescription>
-            Secrets are encrypted at rest and never shown again. People connect their own accounts
-            from Settings.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
-              <Input
-                id={`${fieldId}-name`}
-                value={name}
-                maxLength={60}
-                onChange={(event) => setName(event.target.value)}
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
+          <Input
+            id={`${fieldId}-name`}
+            value={name}
+            maxLength={60}
+            onChange={(event) => setName(event.target.value)}
+            disabled={save.isPending}
+          />
+          <FieldDescription>Shown in chats and @mentions.</FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${fieldId}-description`}>
+            Description <OptionalMark />
+          </FieldLabel>
+          <Input
+            id={`${fieldId}-description`}
+            value={description}
+            maxLength={160}
+            placeholder={ownDescription}
+            onChange={(event) => setDescription(event.target.value)}
+            disabled={save.isPending}
+          />
+          <FieldDescription>What people see when they choose what to connect.</FieldDescription>
+        </Field>
+        {shownFields.map(fieldControl)}
+        {showSharedKey && manifest.sharedCredential
+          ? manifest.sharedCredential.fields.map((field) => (
+              <IntegrationFieldControl
+                key={`shared-${field.key}`}
+                id={`${fieldId}-shared-${field.key}`}
+                field={{
+                  ...field,
+                  ...(row.sharedCredentialConfigured ? { placeholder: "Unchanged" } : {}),
+                }}
+                value={shared[field.key] ?? ""}
+                onChange={(value) => setShared((current) => ({ ...current, [field.key]: value }))}
+                disabled={save.isPending}
+              >
+                <FieldDescription>
+                  Everyone uses it, so chats only ever read with it.
+                </FieldDescription>
+              </IntegrationFieldControl>
+            ))
+          : null}
+        {showOAuth && optionalClient ? (
+          <Field>
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel htmlFor={`${fieldId}-own-client`}>Registered app</FieldLabel>
+              <Switch
+                id={`${fieldId}-own-client`}
+                checked={ownClient}
+                onCheckedChange={setOwnClient}
                 disabled={save.isPending}
               />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-description`}>
-                Description <OptionalMark />
-              </FieldLabel>
-              <Input
-                id={`${fieldId}-description`}
-                value={description}
-                maxLength={160}
-                placeholder={ownDescription}
-                onChange={(event) => setDescription(event.target.value)}
+            </div>
+            <FieldDescription>
+              For a sign-in that only accepts apps registered with it.
+            </FieldDescription>
+          </Field>
+        ) : null}
+        {choosesWays ? (
+          <IntegrationFieldControl
+            id={`${fieldId}-ways`}
+            field={ways}
+            value={[ownClient ? "oauth" : "", allowApiKeys ? "keys" : ""].join(" ").trim()}
+            onChange={(value) => {
+              const picked = value.split(" ");
+              setOwnClient(picked.includes("oauth"));
+              setAllowApiKeys(picked.includes("keys"));
+            }}
+            disabled={save.isPending}
+          />
+        ) : null}
+        {showOAuth && ownClient ? oauthFields : null}
+        {manifest.apiKey && !manifest.apiKey.when && !choosesWays ? (
+          <Field>
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel htmlFor={`${fieldId}-keys`}>Allow personal API keys</FieldLabel>
+              <Switch
+                id={`${fieldId}-keys`}
+                checked={allowApiKeys}
+                onCheckedChange={setAllowApiKeys}
                 disabled={save.isPending}
               />
-              <FieldDescription>What people see when they choose what to connect.</FieldDescription>
-            </Field>
-            <Field>
-              <div className="flex items-center justify-between gap-3">
-                <FieldLabel htmlFor={`${fieldId}-enabled`}>Enabled</FieldLabel>
-                <Switch
-                  id={`${fieldId}-enabled`}
-                  checked={enabled}
-                  onCheckedChange={setEnabled}
-                  disabled={save.isPending}
-                />
-              </div>
-              <FieldDescription>
-                Turning it off stops chat tools and syncing; connections are kept.
-              </FieldDescription>
-            </Field>
-            {shownFields.map(fieldControl)}
-            {showSharedKey && manifest.sharedCredential
-              ? manifest.sharedCredential.fields.map((field) => (
-                  <IntegrationFieldControl
-                    key={`shared-${field.key}`}
-                    id={`${fieldId}-shared-${field.key}`}
-                    field={{
-                      ...field,
-                      ...(row.sharedCredentialConfigured ? { placeholder: "Unchanged" } : {}),
-                    }}
-                    value={shared[field.key] ?? ""}
-                    onChange={(value) =>
-                      setShared((current) => ({ ...current, [field.key]: value }))
-                    }
-                    disabled={save.isPending}
-                  >
-                    <FieldDescription>
-                      Everyone uses it, so chats only ever read with it.
-                    </FieldDescription>
-                  </IntegrationFieldControl>
-                ))
-              : null}
-            {showOAuth && optionalClient ? (
-              <Field>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor={`${fieldId}-own-client`}>Registered app</FieldLabel>
-                  <Switch
-                    id={`${fieldId}-own-client`}
-                    checked={ownClient}
-                    onCheckedChange={setOwnClient}
-                    disabled={save.isPending}
-                  />
-                </div>
-                <FieldDescription>
-                  For a sign-in that only accepts apps registered with it.
-                </FieldDescription>
-              </Field>
-            ) : null}
-            {showOAuth && ownClient ? oauthFields : null}
-            {manifest.apiKey && !manifest.apiKey.when ? (
-              <Field>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor={`${fieldId}-keys`}>Allow personal API keys</FieldLabel>
-                  <Switch
-                    id={`${fieldId}-keys`}
-                    checked={allowApiKeys}
-                    onCheckedChange={setAllowApiKeys}
-                    disabled={save.isPending}
-                  />
-                </div>
-                <FieldDescription>
-                  People can paste a key from their own {manifest.name} account instead of signing
-                  in.
-                </FieldDescription>
-              </Field>
-            ) : null}
-          </FieldGroup>
-          {error ? <FieldError>{error}</FieldError> : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
-            </DialogClose>
-            <PendingButton type="submit" pending={save.isPending}>
-              Save
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+            </div>
+            <FieldDescription>
+              People can paste a key from their own {manifest.name} account instead of signing in.
+            </FieldDescription>
+          </Field>
+        ) : null}
+      </FieldGroup>
+      {error ? <FieldError>{error}</FieldError> : null}
+      <DialogFooter>
+        <Button type="button" variant="outline" disabled={save.isPending} onClick={onCancel}>
+          {cancelLabel}
+        </Button>
+        <PendingButton type="submit" pending={save.isPending} disabled={enable && noWay}>
+          {submitLabel}
+        </PendingButton>
+      </DialogFooter>
+    </form>
   );
 }
