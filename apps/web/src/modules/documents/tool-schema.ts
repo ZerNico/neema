@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect";
-import type { Response } from "effect/unstable/ai";
+import type { Response } from "effect/ai";
 import { EntityId } from "~/entity-id.ts";
 
 export const DocumentToolName = Schema.Literals([

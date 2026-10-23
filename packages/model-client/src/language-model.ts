@@ -1,6 +1,6 @@
 import { Effect, Layer, Stream } from "effect";
-import { AiError, LanguageModel, type Response } from "effect/unstable/ai";
-import { HttpClient } from "effect/unstable/http";
+import { AiError, LanguageModel, type Response } from "effect/ai";
+import { HttpClient } from "effect/http";
 import { streamChat } from "./chat-completions.ts";
 import type { StreamPart } from "./common.ts";
 import type { Connection, ModelCall } from "./connection.ts";

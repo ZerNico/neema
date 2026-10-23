@@ -1,6 +1,7 @@
-import { DateTime, Effect, Encoding, type Schema, Stream } from "effect";
-import { type AiError, IdGenerator, type LanguageModel, type Prompt } from "effect/unstable/ai";
-import type { HttpClient } from "effect/unstable/http";
+import { DateTime, Effect, type Schema, Stream } from "effect";
+import { Base64 } from "effect/encoding";
+import { type AiError, IdGenerator, type LanguageModel, type Prompt } from "effect/ai";
+import type { HttpClient } from "effect/http";
 import {
   carryAssistantFiles,
   isRecord,
@@ -49,7 +50,7 @@ const source = (part: Prompt.FilePart): Json => {
     if (/^https?:\/\//.test(part.data)) return { type: "url", url: part.data };
     return { type: "base64", media_type: part.mediaType, data: part.data };
   }
-  return { type: "base64", media_type: part.mediaType, data: Encoding.encodeBase64(part.data) };
+  return { type: "base64", media_type: part.mediaType, data: Base64.encode(part.data) };
 };
 
 const fileBlock = (part: Prompt.FilePart): Json | null => {

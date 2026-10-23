@@ -1,5 +1,5 @@
 import { Cause, Effect, Exit, Schema } from "effect";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_MEMORY_CONTENT_LENGTH } from "../schema.ts";
 import {

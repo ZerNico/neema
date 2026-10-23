@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { Effect, ManagedRuntime, Stream } from "effect";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import { models, usageEvents, userApprovals } from "~/db/schema/index.ts";

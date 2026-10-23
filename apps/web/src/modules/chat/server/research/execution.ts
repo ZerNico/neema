@@ -5,7 +5,7 @@ import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { eq } from "drizzle-orm";
 import { Cause, Duration, Effect, Schema, Semaphore, Stream } from "effect";
-import { Prompt, Response, Toolkit } from "effect/unstable/ai";
+import { Prompt, Response, Toolkit } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import {
   conversationCompactionCheckpoints,

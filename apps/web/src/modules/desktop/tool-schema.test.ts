@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AiError } from "effect/unstable/ai";
+import { AiError } from "effect/ai";
 import {
   DESKTOP_TIMEOUTS,
   approvalKind,

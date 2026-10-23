@@ -1,6 +1,6 @@
 import { LIMITS } from "@chat/desktop-rpc";
 import { Duration, Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { advertisedParameter } from "~/modules/tools/server/toolset.ts";

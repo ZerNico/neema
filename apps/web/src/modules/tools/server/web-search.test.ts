@@ -11,7 +11,7 @@ import {
   Stream,
   Semaphore,
 } from "effect";
-import type { Toolkit } from "effect/unstable/ai";
+import type { AiError, Tool, Toolkit } from "effect/ai";
 import { PageExtractor } from "./extraction.ts";
 import { ToolsRepo } from "./repo.ts";
 import { SearchFailed, SearchProviders } from "./search-providers/chain.ts";
@@ -87,13 +87,13 @@ const prepared = (indexer: SourceIndexer) =>
 
 const runSearch = (toolkit: Toolkit.WithHandler<any>, queries: string[]) =>
   Effect.gen(function* () {
+    // An untyped toolkit reports unknown services; its handlers' were provided when merged.
     const stream = yield* toolkit.handle("web_search", { queries }) as Effect.Effect<
-      Stream.Stream<{ result: unknown }, unknown, unknown>,
-      unknown,
+      Stream.Stream<Tool.HandlerResult<Tool.Any>, AiError.AiError, never>,
+      AiError.AiError,
       never
     >;
-    const narrowedStream = stream as Stream.Stream<{ result: unknown }, unknown, never>;
-    const parts = yield* Stream.runCollect(narrowedStream);
+    const parts = yield* Stream.runCollect(stream);
     return [...parts].at(-1)!.result as WebToolResult;
   });
 

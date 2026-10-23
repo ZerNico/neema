@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import {
   calibrationFactor,
   COMPACTION_CONFIG,

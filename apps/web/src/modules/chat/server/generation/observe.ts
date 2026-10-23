@@ -42,7 +42,7 @@ import { type ImageQuality, replayOf } from "@chat/model-client";
 import { Deferred, Effect, Option, Schema } from "effect";
 import { AskUserParams, AskUserResult } from "~/modules/tools/ask-user-schema.ts";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
-import { Prompt, type Response } from "effect/unstable/ai";
+import { Prompt, type Response } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import { addFinishUsage, providerCostOf } from "~/modules/analytics/server/usage.ts";
 import { formatFileRef, parseFileRef } from "../file-ref.ts";

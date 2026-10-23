@@ -1,4 +1,4 @@
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 
 type JsonSchema = Record<string, unknown>;
 

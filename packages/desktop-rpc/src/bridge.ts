@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import type { RpcGroup } from "effect/unstable/rpc";
+import type { RpcGroup } from "effect/rpc";
 import { DesktopRpcs } from "./group.ts";
 import {
   DesktopError,

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Clock, Deferred, Duration, Effect, Exit, Fiber, Redacted, Schema } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { invalidResponse, searchFailure, statusFailure } from "./http.ts";
 import {
   SearchProviderError,

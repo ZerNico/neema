@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { Tool, Toolkit } from "effect/unstable/ai";
+import type { Tool, Toolkit } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { estimateToolSchemaTokens } from "~/modules/chat/server/compaction.ts";

@@ -1,5 +1,5 @@
 import { Effect, Result, Schema, Semaphore } from "effect";
-import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
+import { Tool, Toolkit, type Prompt } from "effect/ai";
 import { SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, validateSkillPath } from "../package.ts";
 import { SkillToolResult } from "../tool-schema.ts";

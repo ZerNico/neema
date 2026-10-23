@@ -1,7 +1,7 @@
 import { EmptyWebSearch } from "./unused-services.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import { eq } from "drizzle-orm";
 import {

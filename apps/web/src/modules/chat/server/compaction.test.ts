@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 import { Effect, Schema } from "effect";
-import { Prompt, Tool, Toolkit, type Response } from "effect/unstable/ai";
+import { Prompt, Tool, Toolkit, type Response } from "effect/ai";
 import {
   COMPACTION_CONFIG,
   activeCompactionSummaryMessage,

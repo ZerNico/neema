@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { parseFileRef } from "~/modules/chat/server/file-ref.ts";
 import {

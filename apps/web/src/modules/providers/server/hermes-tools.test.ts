@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect";
-import { AiError, LanguageModel, Prompt, Response, Tool, Toolkit } from "effect/unstable/ai";
+import { AiError, LanguageModel, Prompt, Response, Tool, Toolkit } from "effect/ai";
 import type { ChatStreamPart } from "./gateway.ts";
 import {
   hermesToolCalls,

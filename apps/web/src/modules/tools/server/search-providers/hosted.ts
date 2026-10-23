@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect";
-import { HttpClientRequest, type HttpClient } from "effect/unstable/http";
+import { HttpClientRequest, type HttpClient } from "effect/http";
 import {
   collectHits,
   fetchJson,

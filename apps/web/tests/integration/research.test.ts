@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { Response, type Prompt } from "effect/unstable/ai";
+import { Response, type Prompt } from "effect/ai";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import {

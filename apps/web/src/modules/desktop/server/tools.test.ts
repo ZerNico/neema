@@ -3,7 +3,7 @@ import { Deferred, Effect, Fiber, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { unusableDesktopResult } from "../tool-schema.ts";
 import { prepareDesktopTools, requestNetworkAccessTool, requestPathAccessTool } from "./tools.ts";
 

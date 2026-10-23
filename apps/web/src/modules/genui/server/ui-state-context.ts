@@ -5,7 +5,7 @@
 // putting it in the transcript would change an old answer each time a reader
 // clicked.
 
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import { hashSource, scanUiFences } from "../fences.ts";
 
 export const UI_STATE_LIMITS = {

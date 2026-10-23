@@ -1,4 +1,4 @@
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import type { JsonValue } from "~/db/schema/providers.ts";
 
 // Projected activities are literal structs; one widening at the boundary

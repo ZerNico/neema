@@ -1,4 +1,4 @@
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 
 import { sourceTarget, type SourceReference } from "~/modules/tools/sources.ts";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { chatSse, delta, effect, harness } from "./test-harness.ts";
 import { dropEmptyOptionals } from "./tool-params.ts";
 
@@ -13,7 +13,8 @@ const create = Tool.make("create", {
     scope: Schema.optionalKey(Schema.Literals(["chat", "project"])),
     label: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
     count: Schema.optionalKey(Schema.Int),
-    digits: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^\d+$/))),
+    // `u`: Effect only advertises a pattern with Unicode semantics, as JSON Schema reads it.
+    digits: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^\d+$/u))),
     code: Schema.optionalKey(Id),
   }),
   success: Schema.Struct({ ok: Schema.Boolean }),

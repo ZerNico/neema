@@ -1,6 +1,6 @@
 import { Effect, Exit, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient } from "effect/unstable/http";
+import { Tool, Toolkit } from "effect/ai";
+import { FetchHttpClient } from "effect/http";
 import {
   ASPECT_RATIOS,
   IMAGE_QUALITIES,

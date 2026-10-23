@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { CUSTOM_TOOL_LIMITS, type CustomToolManifest } from "../schema.ts";
 import type { ToolFile, ToolFileSource } from "~/modules/chat/server/tool-files.ts";

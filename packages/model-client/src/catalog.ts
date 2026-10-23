@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { authenticate, endpoint, type Connection } from "./connection.ts";
 import { httpError, invalidOutput, networkError } from "./errors.ts";
 import { inferImageFamily, type ImageFamily } from "./images/families.ts";

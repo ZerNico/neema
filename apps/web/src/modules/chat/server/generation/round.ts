@@ -4,7 +4,7 @@ import { redactScheduleDraftPart } from "~/modules/schedules/tool-schema.ts";
 import { roundPrompt } from "@chat/model-client";
 import { Effect, Exit, Stream, type Scope } from "effect";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
-import { Prompt, type Response } from "effect/unstable/ai";
+import { Prompt, type Response } from "effect/ai";
 import { toAttachmentDto } from "~/modules/attachments/server/repo.ts";
 import { anchorLastMessage, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
 import type { SteerChunkEnvelope } from "../../schema.ts";

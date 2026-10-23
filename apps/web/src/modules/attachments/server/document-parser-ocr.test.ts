@@ -1,5 +1,5 @@
 import { Effect, Fiber, Layer, Redacted } from "effect";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import { beforeEach, describe, expect, it, vi, type TestContext } from "vitest";
 import { buildScannedPdf } from "../../../../tests/fixtures/scanned-pdf.ts";
 import { AnalyticsRepo, type UsageEventInput } from "~/modules/analytics/server/repo.ts";

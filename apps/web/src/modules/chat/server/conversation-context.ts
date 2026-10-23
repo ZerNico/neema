@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
 import {
   memorySystemPolicy,

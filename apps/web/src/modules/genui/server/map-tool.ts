@@ -4,7 +4,7 @@
 // the same stops draws at once and with the numbers the prose quotes.
 
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { UiPlace, UiRoute } from "~/modules/chat/assistant-output.ts";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import {

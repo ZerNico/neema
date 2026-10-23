@@ -1,5 +1,5 @@
 import { Cause, Effect, Predicate, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
 import {
   MAX_MEMORY_CONTENT_LENGTH,

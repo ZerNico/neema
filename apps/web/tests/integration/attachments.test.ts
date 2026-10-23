@@ -390,8 +390,9 @@ describe("durable blob cleanup", () => {
         expect(orphaned).toEqual([key]);
         expect(yield* store.exists(key)).toBe(true);
 
-        const pending = yield* db.execute(
-          `select kind from blob_cleanup_intents where storage_key = '${key}'` as never,
+        const pending = yield* db.execute<{ kind: string }>(
+          `select kind from blob_cleanup_intents where storage_key = '${key}'`,
+          "objects",
         );
         // An orphan is due immediately: the row is already gone.
         const claimed = yield* repo.claimBlobCleanup({
@@ -401,13 +402,14 @@ describe("durable blob cleanup", () => {
         });
         yield* service.deleteBlobs(claimed);
         const remaining = yield* db.execute(
-          `select storage_key from blob_cleanup_intents` as never,
+          `select storage_key from blob_cleanup_intents`,
+          "objects",
         );
         return {
-          pending: (pending as { rows: ReadonlyArray<{ kind: string }> }).rows,
+          pending,
           claimed,
           gone: !(yield* store.exists(key)),
-          remaining: (remaining as { rows: ReadonlyArray<unknown> }).rows,
+          remaining,
         };
       }),
     );
@@ -440,13 +442,14 @@ describe("durable blob cleanup", () => {
           candidateGrace: Duration.zero,
           retryBackoff: Duration.hours(1),
         });
-        const row = yield* db.execute(
-          `select attempts from blob_cleanup_intents where storage_key = '${key}'` as never,
+        const rows = yield* db.execute<{ attempts: number }>(
+          `select attempts from blob_cleanup_intents where storage_key = '${key}'`,
+          "objects",
         );
         return {
           first,
           second,
-          attempts: (row as { rows: ReadonlyArray<{ attempts: number }> }).rows[0],
+          attempts: rows[0],
         };
       }),
     );
@@ -1386,18 +1389,15 @@ describe("owners of stored files", () => {
     const referencing = (table: string) =>
       run(
         Effect.flatMap(Db, (db) =>
-          db.execute(
+          db.execute<{ table: string; column: string }>(
             sql`select c.conrelid::regclass::text as "table", a.attname as "column"
                 from pg_constraint c
                 join pg_attribute a on a.attrelid = c.conrelid and a.attnum = any(c.conkey)
                 where c.contype = 'f' and c.confrelid = ${table}::regclass`,
+            "objects",
           ),
         ),
-      ).then((result) =>
-        (result as { rows: Array<{ table: string; column: string }> }).rows
-          .map((row) => `${row.table}.${row.column}`)
-          .toSorted(),
-      );
+      ).then((rows) => rows.map((row) => `${row.table}.${row.column}`).toSorted());
     const named = (columns: ReadonlyArray<AnyColumn>) =>
       columns.map((column) => `${getTableName(getColumnTable(column))}.${column.name}`).toSorted();
     expect(await referencing("attachments")).toEqual(named(ATTACHMENT_OWNERS));

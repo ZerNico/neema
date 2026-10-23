@@ -1,5 +1,5 @@
 import { Duration, Effect, Schema } from "effect";
-import { Prompt, Tool, type Toolkit } from "effect/unstable/ai";
+import { Prompt, Tool, type Toolkit } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";

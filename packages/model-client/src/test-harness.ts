@@ -1,7 +1,7 @@
 import { Effect, Layer, Stream } from "effect";
 import { it } from "vitest";
-import { LanguageModel, type Prompt, type Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient } from "effect/unstable/http";
+import { LanguageModel, type Prompt, type Toolkit } from "effect/ai";
+import { FetchHttpClient } from "effect/http";
 import { makeConnection, type Credentials, type ModelCall } from "./connection.ts";
 import { layer } from "./language-model.ts";
 import type { PresetId, ProviderSettings } from "./preset.ts";

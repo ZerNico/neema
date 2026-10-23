@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
+import { Tool, Toolkit, type Prompt } from "effect/ai";
 import type { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { SkillRepo } from "~/modules/skills/server/repo.ts";

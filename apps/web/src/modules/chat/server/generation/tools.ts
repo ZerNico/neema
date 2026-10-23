@@ -44,7 +44,7 @@ import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
 import { PlanSnapshot } from "~/modules/tools/plan-schema.ts";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import { makeToolFileResolver } from "../tool-files.ts";
 import { createWorkingFiles, type WorkingFiles } from "../working-files.ts";
 import { formatFileRef } from "../file-ref.ts";

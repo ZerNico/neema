@@ -1,5 +1,5 @@
 import type { Schema } from "effect";
-import { Prompt, type Response } from "effect/unstable/ai";
+import { Prompt, type Response } from "effect/ai";
 import type { WireFormat } from "./preset.ts";
 
 /**

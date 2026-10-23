@@ -1,5 +1,5 @@
 import { Clock, Effect, Redacted, Stream } from "effect";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { configurationError, httpError, invalidOutput, networkError } from "./errors.ts";
 import {
   effectiveSettings,

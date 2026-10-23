@@ -1,6 +1,6 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
 import { Effect, Result as EffectResult, Schema, type Scope } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
 import type { UrlAuthority } from "./url-authority.ts";
 import { urlReaderTool, type UrlReaderExecutor } from "./url-reader.ts";

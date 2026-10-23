@@ -1,4 +1,4 @@
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 
 /**
  * What an answer's first request carried after its user message: the

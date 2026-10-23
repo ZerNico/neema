@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit, type Prompt } from "effect/unstable/ai";
+import { Tool, Toolkit, type Prompt } from "effect/ai";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { makeDraftSession } from "~/modules/drafts/server/authoring-tools.ts";
 import { EntityId } from "~/entity-id.ts";

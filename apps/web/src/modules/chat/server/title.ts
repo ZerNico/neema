@@ -1,7 +1,7 @@
 import { Cause, Duration, Effect } from "effect";
 import { extractReferences } from "../references.ts";
 import { tagWords } from "../tags.ts";
-import { Prompt } from "effect/unstable/ai";
+import { Prompt } from "effect/ai";
 import type { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { addFinishUsage, emptyUsageTotals, resolveCost } from "~/modules/analytics/server/usage.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";

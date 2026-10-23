@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { Effect, ManagedRuntime, Stream } from "effect";
-import { Response as AiResponse } from "effect/unstable/ai";
+import { Response as AiResponse } from "effect/ai";
 import { uuidv7 } from "uuidv7";
 import {
   attachmentBlobs,

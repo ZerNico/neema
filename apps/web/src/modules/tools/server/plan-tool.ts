@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { PLAN_LIMITS, PlanSnapshot, PlanToolResult } from "../plan-schema.ts";
 import { advertisedParameter, type ToolGroup } from "./toolset.ts";
 

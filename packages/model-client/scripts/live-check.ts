@@ -10,8 +10,8 @@
  * continuation, and one repeated long prompt to see cache reads.
  */
 import { Effect, Layer, Schema, Stream } from "effect";
-import { LanguageModel, Prompt, type Response, Tool, Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient } from "effect/unstable/http";
+import { LanguageModel, Prompt, type Response, Tool, Toolkit } from "effect/ai";
+import { FetchHttpClient } from "effect/http";
 import { makeConnection } from "../src/connection.ts";
 import { layer } from "../src/language-model.ts";
 import type { PresetId, ProviderSettings } from "../src/preset.ts";

@@ -1,4 +1,4 @@
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
 import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
 import { desktopToolsSystemHint } from "~/modules/desktop/tool-schema.ts";

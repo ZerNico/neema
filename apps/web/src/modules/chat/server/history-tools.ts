@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { scanUiFences } from "~/modules/genui/fences.ts";
 import { advertisedParameter, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { HISTORY_LIMITS, HistoryActivity } from "../history-tool-schema.ts";

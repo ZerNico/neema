@@ -66,14 +66,18 @@ export const collectOrphanedBlobs = (tx: DbTx, ids: ReadonlyArray<string>) =>
           Effect.tap((keys) =>
             keys.length === 0
               ? Effect.void
-              : tx
-                  .insert(blobCleanupIntents)
-                  .values(keys.map((storageKey) => ({ storageKey, kind: "orphan" as const })))
-                  // A key reincarnated and orphaned again keeps one pending
-                  // decision; the reconciler re-checks ownership regardless.
-                  .onConflictDoUpdate({
-                    target: blobCleanupIntents.storageKey,
-                    set: { kind: "orphan", attempts: 0, notBefore: sql`now()` },
-                  }),
+              : // Wrapped so both branches are plain Effects: Effect cannot infer the
+                // requirements of a union with a drizzle builder, and reads them as unknown.
+                Effect.asVoid(
+                  tx
+                    .insert(blobCleanupIntents)
+                    .values(keys.map((storageKey) => ({ storageKey, kind: "orphan" as const })))
+                    // A key reincarnated and orphaned again keeps one pending
+                    // decision; the reconciler re-checks ownership regardless.
+                    .onConflictDoUpdate({
+                      target: blobCleanupIntents.storageKey,
+                      set: { kind: "orphan", attempts: 0, notBefore: sql`now()` },
+                    }),
+                ),
           ),
         );

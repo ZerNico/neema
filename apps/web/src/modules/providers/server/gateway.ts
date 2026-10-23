@@ -24,8 +24,8 @@ import {
   Semaphore,
   Stream,
 } from "effect";
-import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/unstable/ai";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { AiError, LanguageModel, Prompt, Response, type Toolkit } from "effect/ai";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import type { EmbeddingConnection } from "~/modules/knowledge/schema.ts";
@@ -169,7 +169,7 @@ export interface CatalogModel {
 }
 
 /**
- * Streamed response parts from effect/unstable/ai: text/reasoning deltas,
+ * Streamed response parts from effect/ai: text/reasoning deltas,
  * tool-call + tool-result parts (handlers run by the library), finish, etc.
  */
 export type ChatStreamPart = Response.AnyPart;

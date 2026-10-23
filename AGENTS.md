@@ -2,7 +2,7 @@
 
 A self-hosted chat app for talking to LLMs: conversations, resumable streaming, web
 search, deep research, knowledge collections, saved agents, skills and memory. Single
-tenant, one Node process, Postgres. Stack: TanStack Start, React 19, Effect 4 (rc),
+tenant, one Node process, Postgres. Stack: TanStack Start, React 19, Effect 4,
 Drizzle 1 (rc), Better Auth, Base UI/shadcn, Vitest. `CONTRIBUTING.md` has the layout and
 the commands; this file has what you need before you touch anything.
 
@@ -137,8 +137,9 @@ edit the wrong thing.
    `package.json` is silently ignored, and a patched dependency then simply does
    not apply while the build stays green. Verify a patch by grepping
    `node_modules`, not by a clean install. See Workflow.
-5. **Effect 4 rc versions must match exactly** across `effect` and every
-   `@effect/*` package. `latest` on those is still Effect 3. See Version pins.
+5. **Effect versions must match exactly** across `effect` and every
+   `@effect/*` package, set once in the `catalog:` of `pnpm-workspace.yaml`. The
+   `rc` dist-tag is an older line, never mixed in. See Version pins.
 6. **Never kill by pattern.** `pkill -f vite` takes out your own harness and any
    other dev server. Kill the PID you started, or the port owner after checking it.
 
@@ -340,15 +341,18 @@ skipped one on purpose.
 
 ## Version pins
 
-All release candidates. Pin exactly; never float to `latest`.
+Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
 
-- `effect@4.0.0-rc.x` and every `@effect/*` package share the same rc
-  (`@effect/vitest`, `@effect/sql-pg` are on the `rc` dist-tag). `latest` is
-  Effect 3. `@chat/model-client` implements `effect/unstable/ai`'s `LanguageModel`;
-  on a bump, run its tests and the provider tests in `apps/web` first.
-- `drizzle-orm` / `drizzle-kit` are `1.0.0-rc.5-*` builds, kept as a matched pair.
-  rc.4 crashes at import with effect >= 4.0.0-beta.104.
-- `vitest` is v5 (peer of `@effect/vitest` rc). `katex` stays on 0.16 because
+- `effect` and every `@effect/*` package share one stable 4.0.x version, set in the
+  workspace catalog. The `rc` dist-tag (`4.0.0-rc.x`) is a separate line; never mix
+  it in. `@chat/model-client` implements `effect/ai`'s `LanguageModel`; on a bump,
+  run its tests and the provider tests in `apps/web` first.
+- `drizzle-orm` / `drizzle-kit` are `1.0.0-rc.*` builds, kept as a matched pair.
+  Drizzle's Effect driver imports Effect module paths directly, so an Effect release
+  that moves one crashes drizzle at import, not at typecheck. Before bumping Effect,
+  grep drizzle-orm's dist for the `effect/` paths it imports; rc.5 is the first build
+  on 4.0's graduated paths (`effect/sql`).
+- `vitest` is v5 (peer of `@effect/vitest`). `katex` stays on 0.16 because
   `@streamdown/math` pins `rehype-katex@7`.
 - `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
   instead of the bundled substitutes. On a bump, check the substitution still runs through
@@ -425,6 +429,8 @@ Differs from most Effect 3 material online.
 - `ctx.preliminary(result)` streams progress as `tool-result` parts marked
   `preliminary: true`. UI only; keep them out of the continuation transcript.
 - No-argument tools use `Tool.EmptyParams`, not `Schema.Struct({})`.
+- A `Schema.isPattern` reaches the advertised JSON Schema only when the regex has the
+  `u` flag; without it the model is offered a bare string.
 - A tool whose handler explains malformed input must make **every** parameter
   `Schema.optionalKey`. `streamText` decodes each part against the toolkit, so a
   required key the model omits or renames fails the whole generation with

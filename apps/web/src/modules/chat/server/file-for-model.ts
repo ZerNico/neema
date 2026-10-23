@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { Prompt } from "effect/unstable/ai";
+import type { Prompt } from "effect/ai";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import type { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { opaqueFileText } from "~/modules/attachments/server/file-text.ts";

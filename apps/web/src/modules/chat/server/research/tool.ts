@@ -1,5 +1,5 @@
 import { Duration, Effect, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import type { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import type { KnowledgeSearchSession } from "~/modules/knowledge/server/search.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";

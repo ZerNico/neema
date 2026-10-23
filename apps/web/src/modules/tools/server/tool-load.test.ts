@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import type { LazyToolFamily, LoadableToolFamily } from "../tool-load-schema.ts";
 import { isAdvertised, prepareToolLoad } from "./tool-load.ts";
