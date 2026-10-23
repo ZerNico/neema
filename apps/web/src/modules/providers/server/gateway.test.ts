@@ -293,8 +293,10 @@ describe("prompt cache points", () => {
         prompt_cache_key?: string;
       };
       const results = body.messages.filter((message) => message.role === "tool");
+      // Every result is a text part for a model that takes markers, so one keeps its
+      // shape when the marker moves on.
       expect(results.map((message) => message.content)).toEqual([
-        "one",
+        [{ type: "text", text: "one" }],
         [{ type: "text", text: "two", cache_control: { type: "ephemeral" } }],
       ]);
       expect(body.session_id).toBe("conversation-1");

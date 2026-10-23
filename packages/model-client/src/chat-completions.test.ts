@@ -63,6 +63,62 @@ describe("request shapes per preset", () => {
     }),
   );
 
+  effect("keeps a message's shape when its cache marker moves on", () =>
+    Effect.gen(function* () {
+      const anchor = { cache: { anchor: true } };
+      const tail = (marked: boolean) => [
+        Prompt.makeMessage("user", {
+          content: [Prompt.makePart("text", { text: "First" })],
+          ...(marked ? { options: anchor } : {}),
+        }),
+        Prompt.makeMessage("assistant", {
+          content: [
+            Prompt.makePart("tool-call", {
+              id: "call_1",
+              name: "lookup",
+              params: { query: "x" },
+              providerExecuted: false,
+            }),
+          ],
+        }),
+        Prompt.makeMessage("tool", {
+          content: [
+            Prompt.makePart("tool-result", {
+              id: "call_1",
+              name: "lookup",
+              isFailure: false,
+              providerExecuted: false,
+              result: { found: 3 },
+            }),
+          ],
+          ...(marked ? { options: anchor } : {}),
+        }),
+      ];
+      const sent = (model: string, marked: boolean) =>
+        Effect.gen(function* () {
+          const run = harness({
+            preset: "openrouter",
+            call: { model },
+            answers: [chatSse([usage()])],
+          });
+          yield* run.stream(Prompt.fromMessages(tail(marked)));
+          return run.exchanges[0]!.body["messages"] as Array<Record<string, unknown>>;
+        });
+      // Marked, then the same messages once the anchor sits later: only the marker goes.
+      const strip = (value: unknown) =>
+        JSON.parse(JSON.stringify(value).replaceAll(',"cache_control":{"type":"ephemeral"}', ""));
+      const before = yield* sent("anthropic/claude-test", true);
+      const after = yield* sent("anthropic/claude-test", false);
+      expect(JSON.stringify(before)).toContain("cache_control");
+      expect(after).toEqual(strip(before));
+      expect(after[0]!["content"]).toEqual([{ type: "text", text: "First" }]);
+      // A model without markers keeps plain strings, which some servers require.
+      const plain = yield* sent("openai/gpt-test", false);
+      expect(plain[0]!["content"]).toBe("First");
+      expect(plain.at(-1)!["content"]).toBe('{"found":3}');
+    }),
+  );
+
   effect("leaves out stream_options where a service rejects them", () =>
     Effect.gen(function* () {
       expect(yield* send("custom", null)).toMatchObject({

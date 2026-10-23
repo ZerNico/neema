@@ -56,9 +56,19 @@ const userPart = (part: Prompt.UserMessagePart): Json | null => {
   return null;
 };
 
-/** Message content: a plain string where possible, since some servers take nothing else. */
-const content = (parts: ReadonlyArray<Json>, marked: boolean): string | ReadonlyArray<Json> => {
-  if (!marked && parts.length === 1 && parts[0]!["type"] === "text")
+/**
+ * Message content: a plain string where possible, since some servers take
+ * nothing else. A model that takes cache markers always gets parts, so a
+ * message keeps its shape when its marker moves on: a relay merges a string
+ * and a part into different blocks, and the cached prefix stopped matching
+ * the moment a turn's anchored message became an ordinary one.
+ */
+const content = (
+  parts: ReadonlyArray<Json>,
+  marked: boolean,
+  anchored: boolean,
+): string | ReadonlyArray<Json> => {
+  if (!anchored && parts.length === 1 && parts[0]!["type"] === "text")
     return String(parts[0]!["text"]);
   if (!marked) return parts;
   return parts.map((part, index) =>
@@ -86,10 +96,8 @@ export const buildChatRequest = (
   Effect.gen(function* () {
     const identity = identityOf(connection, call.model);
     const sendReasoning = connection.settings.sendReasoning;
-    const markers =
-      connection.preset.cacheMarkers?.test(call.model) === true
-        ? markerBudget(options.prompt)
-        : new Set<Prompt.Message>();
+    const anchored = connection.preset.cacheMarkers?.test(call.model) === true;
+    const markers = anchored ? markerBudget(options.prompt) : new Set<Prompt.Message>();
 
     const messages: Json[] = [];
     // A unit goes out once per request, however many messages carry it.
@@ -108,7 +116,11 @@ export const buildChatRequest = (
         case "system":
           messages.push({
             role: "system",
-            content: content([{ type: "text", text: message.content }], markers.has(message)),
+            content: content(
+              [{ type: "text", text: message.content }],
+              markers.has(message),
+              anchored,
+            ),
           });
           break;
         case "user":
@@ -117,6 +129,7 @@ export const buildChatRequest = (
             content: content(
               message.content.map(userPart).filter((part) => part !== null),
               markers.has(message),
+              anchored,
             ),
           });
           break;
@@ -171,11 +184,14 @@ export const buildChatRequest = (
             messages.push({
               role: "tool",
               tool_call_id: part.id,
-              // A marked round caches through its last result, which needs a text part.
+              // A marked round caches through its last result, which needs a text part;
+              // with markers at all, every result is one, for the shape reason above.
               content:
                 markers.has(message) && index === results.length - 1
                   ? [{ type: "text", text, cache_control: { type: "ephemeral" } }]
-                  : text,
+                  : anchored
+                    ? [{ type: "text", text }]
+                    : text,
             });
           });
           break;
