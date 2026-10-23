@@ -6575,20 +6575,26 @@ describe("scheduled turns", () => {
             .where(eq(messages.conversationId, seed.conversation.id))
             .pipe(Effect.map((rows) => rows.length));
         const before = yield* count();
+        // Each fire has its pending run, as the scheduler writes one, and binds it.
         const fire = () =>
-          chat.runScheduledTurn({
-            userId: seed.userId,
-            scheduleId,
-            prompt: "Summarize yesterday.",
-            modelId: textModelId,
-            // Ignored for an existing chat: an agent cannot change after creation.
-            agentId: "some-agent",
-            searchEnabled: false,
-            researchEnabled: false,
-            collectionIds: [],
-            skillIds: [],
-            timeZone: "Europe/Berlin",
-            target: { kind: "existing", conversationId: seed.conversation.id },
+          Effect.gen(function* () {
+            const runId = uuidv7();
+            yield* db.insert(scheduleRuns).values({ id: runId, scheduleId, status: "pending" });
+            return yield* chat.runScheduledTurn({
+              userId: seed.userId,
+              scheduleId,
+              scheduleRunId: runId,
+              prompt: "Summarize yesterday.",
+              modelId: textModelId,
+              // Ignored for an existing chat: an agent cannot change after creation.
+              agentId: "some-agent",
+              searchEnabled: false,
+              researchEnabled: false,
+              collectionIds: [],
+              skillIds: [],
+              timeZone: "Europe/Berlin",
+              target: { kind: "existing", conversationId: seed.conversation.id },
+            });
           });
         const first = yield* fire();
         yield* engine.subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
@@ -6600,9 +6606,14 @@ describe("scheduled turns", () => {
           .from(conversations)
           .where(eq(conversations.id, seed.conversation.id));
         const listed = yield* repo.listConversations({ userId: seed.userId, limit: 50 });
+        const runs = yield* db
+          .select({ status: scheduleRuns.status, conversationId: scheduleRuns.conversationId })
+          .from(scheduleRuns)
+          .where(eq(scheduleRuns.scheduleId, scheduleId));
         return {
           first,
           second,
+          runs,
           added: after - before,
           conversation,
           agent: (yield* repo.getConversationDefaults(seed.conversation.id)).agent,
@@ -6612,8 +6623,12 @@ describe("scheduled turns", () => {
     );
     expect(result.first.conversationId).toBe(result.conversation!.id);
     expect(result.second.conversationId).toBe(result.conversation!.id);
-    // Two runs, each a user prompt and an answer, in the one chat.
+    // Two runs, each a user prompt and an answer, in the one chat, both started.
     expect(result.added).toBe(4);
+    expect(result.runs).toEqual([
+      { status: "started", conversationId: result.conversation!.id },
+      { status: "started", conversationId: result.conversation!.id },
+    ]);
     // Not created by the schedule, but marked as the one it runs in.
     expect(result.conversation?.scheduleId).toBeNull();
     expect(result.listed).toMatchObject({ scheduled: true });

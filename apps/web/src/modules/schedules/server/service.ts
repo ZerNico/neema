@@ -127,17 +127,21 @@ export class ScheduleService extends Context.Service<
           // started; its generation lease is responsible for its answer.
           Effect.onExit((exit) =>
             Exit.isFailure(exit)
-              ? repo
-                  .finishRun(
-                    runId,
-                    "error",
-                    "the scheduled fire was interrupted before its turn started",
-                  )
-                  .pipe(
-                    Effect.flatMap((settled) =>
-                      settled ? runChanged(row.userId, row.id, runId) : Effect.void,
+              ? // Logged with its cause: a defect here left nothing but the run's
+                // error to go on, which read as an interruption.
+                Effect.logError("scheduled fire did not start", exit.cause).pipe(
+                  Effect.annotateLogs({ scheduleId: row.id, runId }),
+                  Effect.andThen(
+                    repo.finishRun(
+                      runId,
+                      "error",
+                      "the scheduled fire was interrupted before its turn started",
                     ),
-                  )
+                  ),
+                  Effect.flatMap((settled) =>
+                    settled ? runChanged(row.userId, row.id, runId) : Effect.void,
+                  ),
+                )
               : Effect.void,
           ),
         );
