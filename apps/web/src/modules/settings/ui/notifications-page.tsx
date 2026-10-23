@@ -1,10 +1,12 @@
-import { readDesktopChrome } from "@chat/desktop-rpc";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { notificationPreferencesQuery } from "~/modules/notifications/client/queries.ts";
-import { useNotificationPermission } from "~/modules/notifications/client/use-permission.ts";
+import {
+  permissionMissing,
+  useNotificationPermission,
+} from "~/modules/notifications/client/use-permission.ts";
 import type { NotificationPreferences } from "~/modules/notifications/schema.ts";
 import { updateNotificationPreferences } from "~/modules/notifications/server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
@@ -135,18 +137,13 @@ export function NotificationsPage() {
  */
 function ThisBrowser() {
   const { permission, request } = useNotificationPermission();
-  if (readDesktopChrome() !== null || permission === "granted") return null;
+  const missing = permissionMissing(permission);
+  if (!missing) return null;
   return (
     <ListCard>
       <ListRow>
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-sm font-medium">
-            {permission === "denied"
-              ? "Notifications are blocked in this browser"
-              : permission === "unsupported"
-                ? "This browser can’t show notifications"
-                : "Notifications are off in this browser"}
-          </span>
+          <span className="text-sm font-medium">{missing}</span>
           {permission === "denied" ? (
             <span className="text-muted-foreground text-xs">Allow them in its site settings.</span>
           ) : null}

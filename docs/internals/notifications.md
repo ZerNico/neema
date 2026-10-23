@@ -46,7 +46,9 @@ offered only once an admin sets up a mail server. A schedule only says when.
 
 Push means every device the person is signed in on, so it is one choice rather than one per
 browser: open tabs, the desktop app and Web Push all follow it. What a single browser adds
-is its permission, which the settings page asks for only while push is on and it is missing.
+is its permission, asked for only while push is on and it is missing, and only on a click: on
+the settings page, and under a schedule's notify choice, where the person just asked to be
+told. Never on load, since browsers quiet the prompt for sites whose prompts get dismissed.
 
 - Open tabs and the desktop app get it as the `notification` sync event, the one event that
   carries content rather than ids: it is immutable and capped well under the NOTIFY limit.

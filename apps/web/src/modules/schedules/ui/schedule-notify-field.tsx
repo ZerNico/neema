@@ -1,5 +1,6 @@
 import { useStore } from "@tanstack/react-form";
 import { Link } from "@tanstack/react-router";
+import { NotificationReachHint } from "~/modules/notifications/ui/reach-hint.tsx";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
 import type { ScheduleNotify } from "../schema.ts";
 import { withForm } from "~/ui/form/app-form.ts";
@@ -44,6 +45,7 @@ export const ScheduleNotifyField = withForm({
             ))}
           </SelectContent>
         </Select>
+        {notify === "off" ? null : <NotificationReachHint />}
         <FieldDescription>
           {notify === "conditional"
             ? "Say in the prompt when it’s worth telling you."

@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getNotificationPreferences } from "~/modules/notifications/server/functions.ts";
 import { createSchedule } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { ScheduleCreatePage } from "./schedule-create-page.tsx";
@@ -36,6 +37,11 @@ vi.mock("~/modules/knowledge/server/functions.ts", () => ({
 vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("~/modules/notifications/server/functions.ts", () => ({
+  getNotificationPreferences: vi.fn(),
+  getPushKey: vi.fn(),
+  subscribePush: vi.fn(),
+}));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>
@@ -50,6 +56,19 @@ vi.stubGlobal(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getNotificationPreferences).mockResolvedValue({
+    push: true,
+    email: false,
+    emailAvailable: false,
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  );
 });
 
 const renderPage = () => {
@@ -79,6 +98,39 @@ const submitted = async () => {
 };
 
 describe("ScheduleCreatePage", () => {
+  it("asks this browser for permission where runs would notify through it", async () => {
+    const requestPermission = vi.fn().mockResolvedValue("denied");
+    vi.stubGlobal("Notification", { permission: "default", requestPermission });
+    const user = renderPage();
+    expect(await screen.findByText("Notifications are off in this browser.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    expect(requestPermission).toHaveBeenCalledOnce();
+    expect(await screen.findByText(/blocked in this browser/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Turn on" })).not.toBeInTheDocument();
+    await pick(user, "Notify me", "Never");
+    expect(screen.queryByText(/blocked in this browser/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about this browser once it may show them", async () => {
+    vi.stubGlobal("Notification", { permission: "granted" });
+    renderPage();
+    await waitFor(() => expect(getNotificationPreferences).toHaveBeenCalled());
+    expect(screen.queryByText(/in this browser/)).not.toBeInTheDocument();
+  });
+
+  it("points to settings when every channel is off", async () => {
+    vi.mocked(getNotificationPreferences).mockResolvedValue({
+      push: false,
+      email: false,
+      emailAvailable: true,
+    });
+    renderPage();
+    expect(await screen.findByRole("link", { name: "Turn them on" })).toHaveAttribute(
+      "href",
+      "/settings/notifications",
+    );
+  });
+
   it("moves from Weekdays to Weekly on one day instead of snapping back", async () => {
     const user = renderPage();
     await pick(user, "Frequency", "Weekdays");
