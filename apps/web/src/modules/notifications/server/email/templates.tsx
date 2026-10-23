@@ -1,4 +1,5 @@
-import { Link, Text, plainTextSelectors, render } from "@react-email/components";
+import { plainTextSelectors, render } from "@react-email/render";
+import { Link, Text } from "react-email";
 import type { ReactNode } from "react";
 import { Layout } from "./layout.tsx";
 import { APP_NAME, footerLink, muted, paragraph } from "./styles.ts";

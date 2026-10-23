@@ -11,7 +11,7 @@ import {
   Preview,
   Section,
   Text,
-} from "@react-email/components";
+} from "react-email";
 import type { ReactNode } from "react";
 import { LOGO_CID } from "./logo.ts";
 import { APP_NAME, COLORS, FONT_STACK, muted } from "./styles.ts";
