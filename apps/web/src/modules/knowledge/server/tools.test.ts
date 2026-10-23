@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Schema } from "effect";
+import { Deferred, Effect, Fiber, Schema, Stream } from "effect";
+import { Tool } from "effect/unstable/ai";
+import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { KnowledgeNotAvailable } from "../errors.ts";
 import {
@@ -11,7 +13,7 @@ import {
 import type { ManifestEntry } from "./repo.ts";
 import type { KnowledgeSearchSession } from "./search.ts";
 import { KnowledgeService, type DocumentExcerpt } from "./service.ts";
-import { knowledgeResultTokens, prepareKnowledgeTools } from "./tools.ts";
+import { knowledgeResultTokens, prepareKnowledgeTools, searchKnowledgeTool } from "./tools.ts";
 
 const entry = (number: number): ManifestEntry => ({
   collectionId: "collection",
@@ -217,6 +219,25 @@ describe("selected knowledge tools", () => {
       expect(
         (yield* tools.group.handlers.search_knowledge({ queries: ["same"] })).sources[0]!.index,
       ).toBe(result.sources[0]!.index);
+    }),
+  );
+
+  it.effect("answers a call past its limits with what was wrong, through the toolkit", () =>
+    Effect.gen(function* () {
+      const tools = yield* setup();
+      const toolkit = (yield* mergeToolGroups([tools.group]))!;
+      const stream = yield* toolkit.handle("search_knowledge", {
+        queries: ["one", "two", "three", "four"],
+      }) as Effect.Effect<Stream.Stream<{ result: unknown }, unknown, unknown>, unknown, never>;
+      const narrowed = stream as Stream.Stream<{ result: unknown }, unknown, never>;
+      const result = [...(yield* Stream.runCollect(narrowed))].at(-1)!
+        .result as KnowledgeToolResult;
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/invalid knowledge tool arguments: .*at most 3/);
+      expect(tools.remaining()).toBe(KNOWLEDGE_TOOL_LIMITS.operations);
+      expect(Tool.getJsonSchema(searchKnowledgeTool)).toMatchObject({
+        properties: { queries: { type: "array", maxItems: 3 } },
+      });
     }),
   );
 

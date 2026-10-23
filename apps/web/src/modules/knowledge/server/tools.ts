@@ -3,6 +3,7 @@ import { Effect, Schema, Semaphore } from "effect";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import type { SourceIndexer } from "~/modules/tools/server/source-indexer.ts";
+import { advertisedAs, decodeToolInput } from "~/modules/tools/server/toolset.ts";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
 import {
@@ -19,7 +20,7 @@ import { textEnd, textPrefix } from "./text-range.ts";
 export const listDocumentsTool = Tool.make("list_knowledge_documents", {
   description:
     "List the selected knowledge documents and their fixed version IDs. Use it when the request is about the collection itself (its contents, or comparing every document); for a question, search_knowledge already returns the references you need. Follow nextCursor for more. Pending or failed entries cannot be read; listing is not reading their content.",
-  parameters: ListDocumentsParams,
+  parameters: Schema.Struct({ cursor: advertisedAs(ListDocumentsParams.fields.cursor) }),
   success: KnowledgeToolResult,
   failure: KnowledgeNotAvailable,
   failureMode: "error",
@@ -27,7 +28,7 @@ export const listDocumentsTool = Tool.make("list_knowledge_documents", {
 export const searchKnowledgeTool = Tool.make("search_knowledge", {
   description:
     "Search selected knowledge versions with up to three queries. Returns bounded excerpts, citation indexes and exact character ranges, not whole documents. Use read_knowledge_document to continue. Keyword-only retrieval is reported explicitly.",
-  parameters: SearchKnowledgeParams,
+  parameters: Schema.Struct({ queries: advertisedAs(SearchKnowledgeParams.fields.queries) }),
   success: KnowledgeToolResult,
   failure: KnowledgeNotAvailable,
   failureMode: "error",
@@ -35,7 +36,7 @@ export const searchKnowledgeTool = Tool.make("search_knowledge", {
 export const readDocumentTool = Tool.make("read_knowledge_document", {
   description:
     "Read bounded character ranges from up to four selected document/version IDs supplied by list_knowledge_documents or search_knowledge. Start at zero for a small document; follow nextOffset for more. A range is not proof that the entire collection was reviewed.",
-  parameters: ReadDocumentParams,
+  parameters: Schema.Struct({ documents: advertisedAs(ReadDocumentParams.fields.documents) }),
   success: KnowledgeToolResult,
   failure: KnowledgeNotAvailable,
   failureMode: "error",
@@ -85,21 +86,26 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
             ),
           ),
     );
+  // A call breaking a limit (a fourth query) is answered with what was wrong,
+  // so the model can retry; a strict tool schema would fail the whole answer.
   const execute = <A>(
     schema: Schema.Codec<A, unknown>,
-    raw: A,
-    targets: ReadonlyArray<string>,
-    operations: number,
+    raw: unknown,
+    targetsOf: (value: A) => ReadonlyArray<string>,
+    operationsOf: (value: A) => number,
     work: (
       value: A,
     ) => Effect.Effect<KnowledgeToolResult, KnowledgeNotAvailable | KnowledgeRejected>,
-  ) =>
-    Effect.gen(function* () {
-      const value = yield* Schema.decodeUnknownEffect(schema)(raw).pipe(
-        Effect.mapError(
-          () => new KnowledgeRejected({ reason: "invalid knowledge tool arguments" }),
-        ),
-      );
+  ) => {
+    const decoded = decodeToolInput(schema, raw);
+    const targets = decoded.ok ? targetsOf(decoded.value) : [];
+    return Effect.gen(function* () {
+      if (!decoded.ok)
+        return yield* new KnowledgeRejected({
+          reason: `invalid knowledge tool arguments: ${decoded.issue}`,
+        });
+      const value = decoded.value;
+      const operations = operationsOf(value);
       yield* authorize();
       if (operations > remaining) {
         remaining = 0;
@@ -125,6 +131,7 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
       ),
       Effect.catchTag("KnowledgeRejected", (error) => Effect.succeed(fail(targets, error.reason))),
     );
+  };
 
   // Fit the full encoded result, including citation metadata. Trimming an excerpt
   // changes its exact source range and continuation; never claim the original range.
@@ -187,94 +194,104 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
     };
   };
 
-  const list = (params: typeof ListDocumentsParams.Type) =>
-    execute(ListDocumentsParams, params, [], 1, (value) =>
-      Effect.gen(function* () {
-        let start = 0;
-        if (value.cursor !== undefined) {
-          const prefix = `${cursorPrefix}:`;
-          const suffix = value.cursor.slice(prefix.length);
-          if (!value.cursor.startsWith(prefix) || !/^\d+$/.test(suffix))
-            return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
-          start = Number(suffix);
-          if (!Number.isSafeInteger(start) || start >= input.session.manifest.length)
-            return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
-        }
-        const documents = input.session.manifest.slice(
-          start,
-          start + KNOWLEDGE_TOOL_LIMITS.pageSize,
-        );
-        const page = () => ({
-          ...base([]),
-          documents: [...documents],
-          nextCursor:
-            start + documents.length < input.session.manifest.length
-              ? `${cursorPrefix}:${start + documents.length}`
-              : null,
-        });
-        while (
-          documents.length > 1 &&
-          knowledgeResultTokens(page()) > KNOWLEDGE_TOOL_LIMITS.resultTokens
-        )
-          documents.pop();
-        return page();
-      }),
-    );
-  const search = (params: typeof SearchKnowledgeParams.Type) =>
-    execute(SearchKnowledgeParams, params, params.queries, params.queries.length, (value) =>
-      Effect.gen(function* () {
-        let result = base(value.queries);
-        const results = yield* Effect.forEach(
-          value.queries,
-          (query) =>
-            gate.withPermits(1)(
-              authorize().pipe(Effect.andThen(input.session.search({ query, limit: 4 }))),
-            ),
-          { concurrency: KNOWLEDGE_TOOL_LIMITS.concurrency },
-        );
-        for (const found of results) {
-          result = {
-            ...result,
-            mode: result.mode === "lexical" || found.mode === "lexical" ? "lexical" : "hybrid",
-            ...(found.degradedReason ? { degradedReason: found.degradedReason } : {}),
-          };
-          for (const hit of found.passages) {
-            // A search answers "where is this?", not "what does it say in full":
-            // a hit is a bounded excerpt of its chunk, so a three-query batch
-            // returns every hit instead of spending the response cap on the
-            // first few whole chunks. read_knowledge_document follows the exact range.
-            const content = textPrefix(hit.content, KNOWLEDGE_TOOL_LIMITS.searchExcerptChars);
-            const source: DocumentSource = {
-              collectionId: hit.collectionId,
-              documentId: hit.documentId,
-              versionId: hit.versionId,
-              title: hit.title,
-              headingPath: textPrefix(hit.headingPath, 1000),
-              page: hit.page,
-              startOffset: hit.startOffset,
-              endOffset: hit.startOffset + content.length,
-              kind: "document",
-              index: 0,
-              snippet: "",
-              read: false,
-            };
-            result = append(result, {
-              source,
-              content,
-              totalChars: null,
-              nextOffset: hit.startOffset + content.length,
-            });
+  const list = (params: unknown) =>
+    execute(
+      ListDocumentsParams,
+      params,
+      () => [],
+      () => 1,
+      (value) =>
+        Effect.gen(function* () {
+          let start = 0;
+          if (value.cursor !== undefined) {
+            const prefix = `${cursorPrefix}:`;
+            const suffix = value.cursor.slice(prefix.length);
+            if (!value.cursor.startsWith(prefix) || !/^\d+$/.test(suffix))
+              return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
+            start = Number(suffix);
+            if (!Number.isSafeInteger(start) || start >= input.session.manifest.length)
+              return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
           }
-        }
-        return result;
-      }),
+          const documents = input.session.manifest.slice(
+            start,
+            start + KNOWLEDGE_TOOL_LIMITS.pageSize,
+          );
+          const page = () => ({
+            ...base([]),
+            documents: [...documents],
+            nextCursor:
+              start + documents.length < input.session.manifest.length
+                ? `${cursorPrefix}:${start + documents.length}`
+                : null,
+          });
+          while (
+            documents.length > 1 &&
+            knowledgeResultTokens(page()) > KNOWLEDGE_TOOL_LIMITS.resultTokens
+          )
+            documents.pop();
+          return page();
+        }),
     );
-  const read = (params: typeof ReadDocumentParams.Type) =>
+  const search = (params: unknown) =>
+    execute(
+      SearchKnowledgeParams,
+      params,
+      (value) => value.queries,
+      (value) => value.queries.length,
+      (value) =>
+        Effect.gen(function* () {
+          let result = base(value.queries);
+          const results = yield* Effect.forEach(
+            value.queries,
+            (query) =>
+              gate.withPermits(1)(
+                authorize().pipe(Effect.andThen(input.session.search({ query, limit: 4 }))),
+              ),
+            { concurrency: KNOWLEDGE_TOOL_LIMITS.concurrency },
+          );
+          for (const found of results) {
+            result = {
+              ...result,
+              mode: result.mode === "lexical" || found.mode === "lexical" ? "lexical" : "hybrid",
+              ...(found.degradedReason ? { degradedReason: found.degradedReason } : {}),
+            };
+            for (const hit of found.passages) {
+              // A search answers "where is this?", not "what does it say in full":
+              // a hit is a bounded excerpt of its chunk, so a three-query batch
+              // returns every hit instead of spending the response cap on the
+              // first few whole chunks. read_knowledge_document follows the exact range.
+              const content = textPrefix(hit.content, KNOWLEDGE_TOOL_LIMITS.searchExcerptChars);
+              const source: DocumentSource = {
+                collectionId: hit.collectionId,
+                documentId: hit.documentId,
+                versionId: hit.versionId,
+                title: hit.title,
+                headingPath: textPrefix(hit.headingPath, 1000),
+                page: hit.page,
+                startOffset: hit.startOffset,
+                endOffset: hit.startOffset + content.length,
+                kind: "document",
+                index: 0,
+                snippet: "",
+                read: false,
+              };
+              result = append(result, {
+                source,
+                content,
+                totalChars: null,
+                nextOffset: hit.startOffset + content.length,
+              });
+            }
+          }
+          return result;
+        }),
+    );
+  const read = (params: unknown) =>
     execute(
       ReadDocumentParams,
       params,
-      params.documents.map((document) => document.versionId),
-      params.documents.length,
+      (value) => value.documents.map((document) => document.versionId),
+      (value) => value.documents.length,
       (value) =>
         Effect.gen(function* () {
           // Validate the whole batch before reading any body, including on later calls.
