@@ -1091,3 +1091,171 @@ describe("what blocks may do", () => {
     ).toBeDisabled();
   });
 });
+
+describe("data and small controls", () => {
+  it("formats a table's number columns and sorts by value when the reader asks", async () => {
+    draw(
+      [
+        "```ui",
+        '<table sortable columns={["Who", "Share"]} formats={[null, "currency:EUR"]}',
+        '  rows={[["Ana", 9.5], ["Ben", 30], ["Chloe", null], ["Dan", 12.25]]}/>',
+        "```",
+      ].join("\n"),
+    );
+    const share = await screen.findByRole("button", { name: "Share" });
+    const column = (index: number) =>
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[index]?.textContent);
+    expect(column(0)).toEqual(["Ana", "Ben", "Chloe", "Dan"]);
+    expect(column(1)[0]).toMatch(/9[.,]50\s?€|€\s?9[.,]50/);
+    // A number column sorts largest first, then flips, then returns to the block's order.
+    fireEvent.click(share);
+    expect(column(0)).toEqual(["Ben", "Dan", "Ana", "Chloe"]);
+    expect(screen.getByRole("columnheader", { name: "Share" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    fireEvent.click(share);
+    expect(column(0)).toEqual(["Ana", "Dan", "Ben", "Chloe"]);
+    fireEvent.click(share);
+    expect(column(0)).toEqual(["Ana", "Ben", "Chloe", "Dan"]);
+  });
+
+  it("lists a pie's slices with their share, folding the smallest past four into Other", async () => {
+    draw(
+      [
+        "```ui",
+        '<chart type="donut" label="Budget" format="decimal:0"',
+        '  x={["Rent", "Food", "Car", "Fun", "Phone", "Gym"]}',
+        '  series={[{ name: "EUR", values: [500, 200, 150, 100, 30, 20] }]}/>',
+        '<chart type="scatter" label="Height and weight" xLabel="Height" x={[160, 170, 180]}',
+        '  series={[{ name: "People", values: [55, 65, 80] }]}/>',
+        "```",
+      ].join("\n"),
+    );
+    const legend = await screen.findByRole("list");
+    expect(
+      within(legend)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Rent50050%", "Food20020%", "Car15015%", "Fun10010%", "Other505%"]);
+    // A donut says its total in the middle.
+    expect(screen.getByText("1,000")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Height and weight" })).toBeInTheDocument();
+  });
+
+  it("takes a paragraph in a multiline input, and opens a popover's content on demand", async () => {
+    draw(
+      [
+        "```ui",
+        '<script>let note = $state("");</script>',
+        '<input multiline label="Note" value={note} onchange={(v) => note = v}/>',
+        "<text>Length {note.length}</text>",
+        '<popover label="Why?"><text>Because it rains.</text></popover>',
+        '<text>Pack <icon name="rain" label="rain"/> gear <icon name="leaf"/></text>',
+        "```",
+      ].join("\n"),
+    );
+    const note = await screen.findByRole("textbox", { name: "Note" });
+    expect(note.tagName).toBe("TEXTAREA");
+    await act(async () => {
+      fireEvent.change(note, { target: { value: "two\nlines" } });
+    });
+    expect(await screen.findByText("Length 9")).toBeInTheDocument();
+    expect(screen.queryByText("Because it rains.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Why?" }));
+    expect(await screen.findByText("Because it rains.")).toBeInTheDocument();
+    // An icon with a label is named; one without is decoration.
+    expect(screen.getAllByRole("img", { name: "rain" })).toHaveLength(1);
+  });
+
+  it("picks a calendar day into state as that day, within min and max", async () => {
+    draw(
+      [
+        "```ui",
+        '<script>let day = $state("2026-05-10");</script>',
+        '<datepicker label="Arrival" value={day} min="2026-05-05" max="2026-05-20" onchange={(d) => day = d}/>',
+        "<text>Picked {day}</text>",
+        "```",
+      ].join("\n"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Arrival: May 10, 2026" }));
+    const dialog = await screen.findByRole("dialog");
+    // The calendar loads with the popover; its first import is slow under test.
+    await within(dialog).findAllByRole("button", {}, { timeout: 10_000 });
+    const day = (n: string) =>
+      within(dialog)
+        .getAllByRole("button")
+        .find((button) => button.textContent === n);
+    expect(day("4")).toBeDisabled();
+    await act(async () => {
+      fireEvent.click(day("15")!);
+    });
+    expect(await screen.findByText("Picked 2026-05-15")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Arrival: May 15, 2026" })).toBeInTheDocument();
+  });
+
+  it("throws confetti when a click makes its condition true, never for one already true", async () => {
+    draw(
+      [
+        "```ui",
+        "<script>let done = $state(1);</script>",
+        "<button onclick={() => done = done + 1}>Done {done}</button>",
+        "<celebrate when={done >= 2}/>",
+        "<celebrate when={true}/>",
+        "{#if done >= 3}<celebrate when={true}/>{/if}",
+        "```",
+      ].join("\n"),
+    );
+    const bursts = () => document.querySelectorAll('[data-slot="celebrate"]').length;
+    const button = await screen.findByRole("button", { name: "Done 1" });
+    expect(bursts()).toBe(0);
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    await screen.findByRole("button", { name: "Done 2" });
+    expect(bursts()).toBe(1);
+    // One that appears because of a click is reaching the goal too.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Done 2" }));
+    });
+    await screen.findByRole("button", { name: "Done 3" });
+    expect(bursts()).toBe(2);
+  });
+
+  it("throws no confetti on reload when the goal was reached elsewhere", async () => {
+    const markdown = [
+      "```ui",
+      "<script>let done = $state(1);</script>",
+      "<text>Done {done}</text>",
+      "<celebrate when={done >= 2}/>",
+      "```",
+    ].join("\n");
+    const code = scanUiFences(markdown)[0]!.code;
+    // This device last drew the block before the goal; another tab saved it reached.
+    const drawn = new BlockEngine(quickjs).render({ block: "x", code, saved: null, now: 0 });
+    if (!drawn.ok) throw new Error("no tree");
+    keepTree("m-reload:g1:0", code, drawn);
+    render(
+      <GenuiClientContext value={inProcess(new BlockEngine(quickjs))}>
+        <GenuiMessageContext
+          value={{
+            messageId: "m-reload",
+            createdAt: 0,
+            streaming: false,
+            generationId: "g1",
+            saved: new Map([
+              [0, { sourceHash: hashSource(code), state: '{"done":2}', digest: null }],
+            ]),
+          }}
+        >
+          <AssistantMarkdown content={keyUiFences(markdown, 0)} streaming={false} />
+        </GenuiMessageContext>
+      </GenuiClientContext>,
+    );
+    expect(await screen.findByText("Done 2")).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="celebrate"]')).toHaveLength(0);
+  });
+});

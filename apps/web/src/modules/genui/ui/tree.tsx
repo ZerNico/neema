@@ -3,10 +3,21 @@
 // anything it does not recognise renders nothing rather than guessing.
 
 import katex from "katex";
-import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  createContext,
+  lazy,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
+  Calendar03Icon,
   Cancel01Icon,
   Copy01Icon,
   PauseIcon,
@@ -23,6 +34,7 @@ import { Button } from "~/ui/primitives/button";
 import { Checkbox } from "~/ui/primitives/checkbox";
 import { Input } from "~/ui/primitives/input";
 import { Label } from "~/ui/primitives/label";
+import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
 import { Progress, ProgressLabel } from "~/ui/primitives/progress";
 import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
 import {
@@ -36,6 +48,7 @@ import { Separator } from "~/ui/primitives/separator";
 import { Slider } from "~/ui/primitives/slider";
 import { Switch } from "~/ui/primitives/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
+import { Textarea } from "~/ui/primitives/textarea";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
@@ -43,7 +56,9 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
+import { Celebrate } from "./celebrate.tsx";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
+import { iconOf } from "./icons.ts";
 import { handlerOf, useHandler } from "./handler.ts";
 import { UiLink } from "./link.tsx";
 import { UiMap } from "./map.tsx";
@@ -225,6 +240,22 @@ function TextInputNode({ node, numeric }: { node: ValidNode; numeric: boolean })
   const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: node.tag });
   const initial = numeric ? String(num(p.value) ?? "") : (str(p.value) ?? "");
   const [value, setValue] = useLocal(initial);
+  const label = str(p.label) ?? str(p.placeholder) ?? "Input";
+  if (!numeric && p.multiline === true)
+    return (
+      <Field label={str(p.label)}>
+        <Textarea
+          value={value}
+          placeholder={str(p.placeholder)}
+          readOnly={!fire}
+          aria-label={label}
+          onChange={(event) => {
+            setValue(event.target.value);
+            fire?.([event.target.value]);
+          }}
+        />
+      </Field>
+    );
   return (
     <Field label={str(p.label)}>
       <Input
@@ -235,7 +266,7 @@ function TextInputNode({ node, numeric }: { node: ValidNode; numeric: boolean })
         max={num(p.max)}
         step={num(p.step)}
         readOnly={!fire}
-        aria-label={str(p.label) ?? str(p.placeholder) ?? "Input"}
+        aria-label={label}
         onChange={(event) => {
           const raw = event.target.value;
           setValue(raw);
@@ -244,6 +275,132 @@ function TextInputNode({ node, numeric }: { node: ValidNode; numeric: boolean })
         }}
       />
     </Field>
+  );
+}
+
+const Calendar = lazy(() =>
+  import("~/ui/primitives/calendar").then((module) => ({ default: module.Calendar })),
+);
+
+const dayOf = (date: Date) =>
+  `${String(date.getFullYear()).padStart(4, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+/**
+ * "2026-05-01" as that calendar day at local midnight, so no zone moves it to
+ * the 30th. A day that does not exist ("2026-02-31") is no day, not 3 March.
+ */
+const parseDay = (value: unknown) => {
+  const match = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!match) return undefined;
+  const day = new Date(2000, 0, 1);
+  // setFullYear, since the constructor reads years below 100 as 19xx.
+  day.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return dayOf(day) === value ? day : undefined;
+};
+
+function DatePickerNode({ node }: { node: ValidNode }) {
+  const p = node.props;
+  const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: "datepicker" });
+  const [value, setValue] = useLocal(str(p.value));
+  const [open, setOpen] = useState(false);
+  const day = parseDay(value);
+  const min = parseDay(p.min);
+  const max = parseDay(p.max);
+  const label = str(p.label);
+  const locale = typeof navigator === "undefined" ? undefined : navigator.language;
+  const shown = day
+    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(day)
+    : "Pick a date";
+  return (
+    <Field label={label}>
+      <Popover open={open && !!fire} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant="outline"
+              className="w-fit"
+              disabled={!fire}
+              // Named with its date, so a screen reader hears what is picked.
+              aria-label={`${label ?? "Date"}: ${shown}`}
+            />
+          }
+        >
+          <HugeiconsIcon
+            icon={Calendar03Icon}
+            strokeWidth={2}
+            data-icon="inline-start"
+            aria-hidden
+          />
+          {shown}
+        </PopoverTrigger>
+        <PopoverContent align="start">
+          <Suspense fallback={null}>
+            <Calendar
+              mode="single"
+              selected={day}
+              {...(day ? { defaultMonth: day } : min ? { defaultMonth: min } : {})}
+              {...(min ? { startMonth: min } : {})}
+              {...(max ? { endMonth: max } : {})}
+              disabled={[...(min ? [{ before: min }] : []), ...(max ? [{ after: max }] : [])]}
+              onSelect={(next: Date | undefined) => {
+                if (!next) return;
+                const picked = dayOf(next);
+                setValue(picked);
+                setOpen(false);
+                fire?.([picked]);
+              }}
+            />
+          </Suspense>
+        </PopoverContent>
+      </Popover>
+    </Field>
+  );
+}
+
+/**
+ * The content is portalled out of the block's root, so `reveal(anchor)`, which
+ * looks only inside that root, cannot reach an anchor in it. That fails closed.
+ */
+function PopoverNode({ node }: { node: ValidNode }) {
+  const variant = str(node.props.variant);
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <Button
+            size="sm"
+            className="w-fit"
+            variant={
+              variant === "default" || variant === "secondary" || variant === "ghost"
+                ? variant
+                : "outline"
+            }
+          />
+        }
+      >
+        {str(node.props.label)}
+      </PopoverTrigger>
+      <PopoverContent align="start">
+        <Nodes nodes={node.children} />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function IconNode({ node }: { node: ValidNode }) {
+  const icon = iconOf(node.props.name);
+  if (!icon) return null;
+  const label = str(node.props.label);
+  return (
+    <HugeiconsIcon
+      icon={icon}
+      strokeWidth={2}
+      className={cn(
+        "inline-block size-[1.1em] shrink-0 align-[-0.15em]",
+        TONE[str(node.props.tone) ?? ""],
+      )}
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+    />
   );
 }
 
@@ -1274,6 +1431,8 @@ function Node({ node }: { node: ValidNode }) {
       return <Separator />;
     case "tabs":
       return <TabsNode node={node} />;
+    case "popover":
+      return <PopoverNode node={node} />;
     case "disclosure":
       return (
         <Disclosure defaultOpen={p.open === true}>
@@ -1303,6 +1462,8 @@ function Node({ node }: { node: ValidNode }) {
       );
     case "link":
       return <UiLink href={str(p.href) ?? ""}>{children}</UiLink>;
+    case "icon":
+      return <IconNode node={node} />;
     case "badge":
       return (
         <Badge
@@ -1372,6 +1533,10 @@ function Node({ node }: { node: ValidNode }) {
       return <ToggleNode node={node} />;
     case "stepper":
       return <StepperNode node={node} />;
+    case "datepicker":
+      return <DatePickerNode node={node} />;
+    case "celebrate":
+      return <Celebrate when={p.when === true} />;
     case "table":
       return <UiTable node={node} />;
     case "progress":

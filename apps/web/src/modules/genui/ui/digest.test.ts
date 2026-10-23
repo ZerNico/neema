@@ -23,6 +23,7 @@ describe("digestTree", () => {
         el("switch", { label: "Fixed rate", checked: true }),
         el("stat", { label: "Monthly", value: "€1,043" }),
         el("progress", { label: "Paid off", value: 40 }),
+        el("datepicker", { label: "First payment", value: "2026-11-01" }),
       ]),
       el("tabs", { value: "b" }, [
         el("tab", { label: "First", value: "a" }),
@@ -36,6 +37,7 @@ describe("digestTree", () => {
         "Fixed rate: on",
         "Monthly: €1,043",
         "Paid off: 40%",
+        "First payment: 2026-11-01",
         "Tab open: Second",
       ].join("\n"),
     );

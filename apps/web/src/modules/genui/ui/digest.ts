@@ -83,7 +83,8 @@ function linesOf(node: ValidNode, lookups: UiLookups): string[] {
     case "slider":
     case "number":
     case "stepper":
-    case "input": {
+    case "input":
+    case "datepicker": {
       const value = shown(p.value);
       return value === undefined ? [] : [`${label ?? node.tag}: ${value}`];
     }

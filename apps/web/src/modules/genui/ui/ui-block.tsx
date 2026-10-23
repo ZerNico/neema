@@ -30,6 +30,7 @@ import {
   BlockKeyContext,
   BlockOrdinalContext,
   DispatchContext,
+  ReaderEventContext,
   GenuiActionsContext,
   GenuiClientContext,
   GenuiMessageContext,
@@ -163,6 +164,9 @@ function useBlock({
       null,
   );
   const [live, setLive] = useState(false);
+  // Whether the tree on screen answers the reader's own event, not a render of
+  // the source, the cache or a restart: what may celebrate.
+  const [byEvent, setByEvent] = useState(false);
   // Replies are stamped with the Worker generation that produced them: a
   // restart makes every handler reference in the shown tree stale.
   const [stamp, setStamp] = useState(client.epoch());
@@ -195,10 +199,11 @@ function useBlock({
   }, [block, code, streaming, keep]);
 
   const show = useCallback(
-    (next: RenderReply | Unavailable, at: number, source: string) => {
+    (next: RenderReply | Unavailable, at: number, source: string, fromEvent = false) => {
       if (next.ok || next.reason !== "unavailable") remember(block, source, next);
       if (next.ok && !streaming && keep) keepTree(block, source, next);
       setReply(next);
+      setByEvent(fromEvent);
       setStamp(at);
       setLive(true);
       const click = queuedClicks.get(block);
@@ -247,7 +252,7 @@ function useBlock({
         args: click.args,
       });
       if (result.ok) {
-        show(result.render, at, code);
+        show(result.render, at, code, true);
         if (result.render.ok && result.render.state !== null) onState(result.render.state);
         onActions(result.actions, click.trusted);
       } else if ("stale" in result && result.stale && current.current === code) {
@@ -282,11 +287,11 @@ function useBlock({
     [block, client, live, reply, stamp],
   );
 
-  return { reply, dispatch };
+  return { reply, dispatch, byEvent };
 }
 
 function Block(props: BlockProps & { suggest: ((text: string) => void) | null }) {
-  const { reply, dispatch } = useBlock(props);
+  const { reply, dispatch, byEvent } = useBlock(props);
   const { block, ordinal, code, streaming, suggest, onDigest } = props;
   const lookups = useMessageLookups();
   const digest = useMemo(
@@ -323,7 +328,9 @@ function Block(props: BlockProps & { suggest: ((text: string) => void) | null })
         <SuggestContext value={suggest}>
           <BlockKeyContext value={block}>
             <BlockOrdinalContext value={ordinal}>
-              <Nodes nodes={reply.nodes} />
+              <ReaderEventContext value={byEvent}>
+                <Nodes nodes={reply.nodes} />
+              </ReaderEventContext>
             </BlockOrdinalContext>
           </BlockKeyContext>
         </SuggestContext>

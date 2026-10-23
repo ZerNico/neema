@@ -39,11 +39,15 @@ const oneOf = <const L extends readonly [string, ...string[]]>(values: L) =>
   prop(Schema.Literals(values), values.map((v) => `"${v}"`).join(" | "));
 const matching = (pattern: RegExp, type: string, max = 200) =>
   prop(Schema.String.check(Schema.isMaxLength(max), Schema.isPattern(pattern)), type);
-/** How <num> and charts format numbers; ui/format.ts reads it. */
-const NUMBER_FORMAT = matching(
-  /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/,
-  '"decimal:2" | "percent" | "compact" | "currency:EUR"',
+const NUMBER_FORMAT_PATTERN =
+  /^(?:decimal(?::\d{1,2})?|percent(?::\d{1,2})?|compact|currency:[A-Z]{3})$/;
+const NUMBER_FORMAT_SCHEMA = Schema.String.check(
+  Schema.isMaxLength(20),
+  Schema.isPattern(NUMBER_FORMAT_PATTERN),
 );
+const FORMAT_LEGEND = '"decimal:2" | "percent" | "compact" | "currency:EUR"';
+/** How <num>, tables and charts format numbers; ui/format.ts reads it. */
+const NUMBER_FORMAT = prop(NUMBER_FORMAT_SCHEMA, "format");
 /**
  * A value list used by several tags, printed once in the catalog's legend
  * and by name at each prop, so the reference does not repeat it.
@@ -82,6 +86,67 @@ const SVG_PAINT = [
   "chart-3",
   "chart-4",
 ] as const;
+/** Names `<icon>` takes; ui/icons.ts maps each to a Hugeicons glyph. */
+export const ICON_NAMES = [
+  "check",
+  "close",
+  "plus",
+  "minus",
+  "arrow-right",
+  "arrow-up",
+  "arrow-down",
+  "trend-up",
+  "trend-down",
+  "warning",
+  "info",
+  "idea",
+  "star",
+  "heart",
+  "thumbs-up",
+  "thumbs-down",
+  "trophy",
+  "target",
+  "flag",
+  "gift",
+  "clock",
+  "timer",
+  "calendar",
+  "pin",
+  "globe",
+  "home",
+  "car",
+  "bike",
+  "walk",
+  "run",
+  "plane",
+  "train",
+  "bed",
+  "person",
+  "people",
+  "money",
+  "cart",
+  "food",
+  "coffee",
+  "sun",
+  "moon",
+  "cloud",
+  "rain",
+  "snow",
+  "fire",
+  "water",
+  "leaf",
+  "tree",
+  "book",
+  "work",
+  "medicine",
+  "dumbbell",
+  "music",
+  "camera",
+  "phone",
+  "mail",
+] as const;
+/** A calendar day; read as that day wherever the reader is, never as an instant. */
+const DAY = matching(/^\d{4}-\d{2}-\d{2}$/, '"YYYY-MM-DD"', 10);
 const SPACE = () => int(0, 12);
 const option = Schema.Union([
   Schema.String.check(Schema.isMaxLength(200)),
@@ -114,7 +179,7 @@ interface TagSpec {
   readonly children: Children;
 }
 
-const INLINE_TAGS = new Set(["b", "i", "code", "link", "num", "date", "badge", "math"]);
+const INLINE_TAGS = new Set(["b", "i", "code", "link", "num", "date", "badge", "math", "icon"]);
 
 const SVG_SHAPE = {
   fill: named("paint", SVG_PAINT),
@@ -238,6 +303,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     props: { label: required(text(200)), open: flag() },
     children: "block",
   },
+  popover: {
+    group: "layout",
+    doc: "Button that opens its content in a small panel.",
+    props: { label: required(text(80)), variant: named("variant", VARIANTS) },
+    children: "block",
+  },
 
   title: {
     group: "text",
@@ -265,6 +336,16 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     doc: "Small label.",
     props: { tone: named("tone", TONES) },
     children: "inline",
+  },
+  icon: {
+    group: "text",
+    doc: "Inline icon; give a label when it carries meaning.",
+    props: {
+      name: required(named("icon", ICON_NAMES)),
+      tone: named("tone", TONES),
+      label: text(80),
+    },
+    children: "none",
   },
   stat: {
     group: "text",
@@ -389,8 +470,20 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   input: {
     group: "input",
-    doc: "Text input; onchange(value).",
-    props: { value: text(2000), placeholder: text(200), onchange: handler(), label: text(120) },
+    doc: "Text input, multiline for a paragraph; onchange(value).",
+    props: {
+      value: text(2000),
+      placeholder: text(200),
+      multiline: flag(),
+      onchange: handler(),
+      label: text(120),
+    },
+    children: "none",
+  },
+  datepicker: {
+    group: "input",
+    doc: "Date picker; onchange(day).",
+    props: { value: DAY, min: DAY, max: DAY, onchange: handler(), label: text(120) },
     children: "none",
   },
   number: {
@@ -497,6 +590,12 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
     },
     children: "none",
   },
+  celebrate: {
+    group: "input",
+    doc: "Confetti when `when` turns true as the reader watches, never on reload.",
+    props: { when: required(flag()) },
+    children: "none",
+  },
 
   suggestions: {
     group: "chat",
@@ -513,7 +612,7 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
 
   table: {
     group: "data",
-    doc: "Table.",
+    doc: "Table. Pass numbers as numbers: they align, sort and take their column's format.",
     props: {
       columns: required(
         prop(
@@ -529,6 +628,11 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
           "(string | number | null)[][]",
         ),
       ),
+      sortable: flag(),
+      formats: prop(
+        Schema.Array(Schema.NullOr(NUMBER_FORMAT_SCHEMA)).check(Schema.isMaxLength(20)),
+        "(format | null)[]",
+      ),
     },
     children: "none",
   },
@@ -540,9 +644,9 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
   },
   chart: {
     group: "data",
-    doc: "Bar, line or area chart.",
+    doc: "Chart. pie and donut: one series, x names the slices, past four the smallest fold into Other. scatter: numbers in x.",
     props: {
-      type: required(oneOf(["bar", "line", "area"])),
+      type: required(oneOf(["bar", "line", "area", "pie", "donut", "scatter"])),
       x: required(
         prop(
           Schema.Array(
@@ -582,6 +686,8 @@ export const CATALOG: Readonly<Record<string, TagSpec>> = {
         ).check(Schema.isMaxLength(4)),
         "{x?, y?, label?}[] (dashed reference lines: y for a level such as a mean, x for a category)",
       ),
+      xLabel: text(80),
+      yLabel: text(80),
     },
     children: "none",
   },
@@ -951,6 +1057,8 @@ const LEGEND = [
   `variant: ${quote(VARIANTS)}`,
   `paint: ${quote(SVG_PAINT)}`,
   `mapColor: ${quote(MAP_COLORS)}`,
+  `format: ${FORMAT_LEGEND}`,
+  `icon: ${ICON_NAMES.join(", ")}`,
 ].join("\n");
 
 export function catalogReference(): string {

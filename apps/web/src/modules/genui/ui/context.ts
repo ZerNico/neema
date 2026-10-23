@@ -104,5 +104,8 @@ export const DispatchContext = createContext<Dispatch>(async () => {});
 /** The block a node draws in, for state that must outlive a remount (a running timer). */
 export const BlockKeyContext = createContext("");
 
+/** True while the block shows the tree a reader's click or change produced. */
+export const ReaderEventContext = createContext(false);
+
 /** The block's fence ordinal in its answer, which names it to the server. */
 export const BlockOrdinalContext = createContext(-1);

@@ -4,6 +4,7 @@
 // `skill.test.ts` renders through the real engine.
 
 import { catalogReference } from "./catalog.ts";
+import { HELPERS_REFERENCE } from "./helpers.ts";
 
 export const INTERACTIVE_UI_SKILL_ID = "builtin:interactive-ui";
 
@@ -107,6 +108,24 @@ export const SKILL_EXAMPLES = {
   <question options={["dem", "den", "der"]} answer="dem" hint="Which case does helfen take?" feedback={["helfen takes the dative; der becomes dem.", "Den is accusative or dative plural.", "Der is dative only for feminine nouns."]}>Ich helfe ___ Mann.</question>
   <question options={["der", "die"]} answer="der" explain="mit always takes the dative.">Ich fahre mit ___ Bahn.</question>
 </quiz>`,
+  split: `<script>
+  const people = ["Ana", "Ben", "Chloe"];
+  let bill = $state(84.5);
+  let tip = $state(10);
+  let paid = $state([]);
+  const shares = $derived(allocate(bill * (1 + tip / 100), people.length));
+</script>
+<card title="Split the bill">
+  <number label="Bill (EUR)" value={bill} min={0} step={0.5} onchange={(v) => bill = v}/>
+  <slider label="Tip %" min={0} max={25} value={tip} onchange={(v) => tip = v}/>
+  <table sortable columns={["Who", "Share"]} formats={[null, "currency:EUR"]} rows={people.map((p, i) => [p, shares[i]])}/>
+  <row gap={2} wrap>
+    {#each people as person}
+      <button variant={paid.includes(person) ? "default" : "outline"} onclick={() => paid = paid.includes(person) ? paid.filter((x) => x !== person) : [...paid, person]}>{#if paid.includes(person)}<icon name="check"/> {/if}{person}</button>
+    {/each}
+  </row>
+  <celebrate when={paid.length === people.length}/>
+</card>`,
   map: `<script>
   let stops = $state([
     { id: "station", place: "Potsdam Hauptbahnhof", icon: "🚉", note: "Trains every 10 min." },
@@ -178,11 +197,17 @@ An answer may contain \`\`\`ui fenced blocks, drawn with the app's own component
 - Only \`$state\` variables may be assigned or mutated (\`n++\`, \`items.push(x)\`, \`form.name = v\`). Writing anything else rejects the whole block, and it is shown as source. Inside \`{#each items as item, i}\`, write through the state (\`items[i].done = true\`), never to \`item\`. Keep everything the reader changes in \`$state\`: a \`Set\`, \`Map\` or closure variable is lost when the block reloads.
 - Rendering is pure: state changes only inside event handlers. \`random()\` and \`Math.random()\` work only in handlers. \`now\` and \`Date.now()\` are the answer's creation time, fixed.
 - There is no network, no DOM and no \`window\`, and scripts have no timers: for a countdown or stopwatch use \`<timer>\`, for timed phases that run on their own (breathing, intervals) \`<routine>\`; both count in the page. Handlers may call \`send(text)\` (puts a message in the composer for the reader to send), \`open(url)\`, \`copy(text)\` and \`reveal(anchor)\` (scrolls to the element with that \`anchor\`), one per event.
-- Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale.
+- Prefer \`<num>\` and \`<date>\` to \`toLocaleString\`: they use the reader's locale. In a table, give numbers as numbers with a column format rather than as formatted text, so they sort and align.
 - Images: show physical things (places, products, dishes, animals, the stages of a process) with \`<images>\` when web search is on. \`<image query>\` and \`<images query>\` are found by web search when the answer finishes writing the block. Write queries as literal strings; a computed query is never searched. Without web search the reader sees a note instead.
 - Maps: \`<pin place>\` and \`<route stops>\` names are looked up on OpenStreetMap when the block is finished, so write each place as a literal: its name on a map plus its town ("Museum Barberini, Potsdam", not "the museum" or "Potsdam old town"). Give \`lat\` and \`lng\` instead when you know them exactly. Routes drive, walk or bike along real roads; \`mode="straight"\` is a direct line, for flights or distances. Call \`map_route\` before stating a distance or time, and give the \`<route>\` its stops and mode. A place that cannot be found is listed as such, never guessed. Pins and stops may come from \`$state\` when each name is a string in the block; names the reader types are never looked up.
 - \`<suggestion>\` text is sent as the reader's next message when clicked. Use them only at a real fork the reader has to choose; most blocks need none.
 - Up to 8 blocks per answer, 32 KB each. A failing expression blanks only its own spot.
+
+## Helpers
+
+Globals for arithmetic that goes wrong by hand. Split money with \`allocate\`: shares rounded one by one rarely add up.
+
+${HELPERS_REFERENCE}
 
 ## Catalog
 
@@ -209,6 +234,10 @@ ${fence(SKILL_EXAMPLES.plan)}
 A quiz that explains each option:
 
 ${fence(SKILL_EXAMPLES.quiz)}
+
+A split that always adds up, a sortable table and confetti once everyone paid:
+
+${fence(SKILL_EXAMPLES.split)}
 
 A trip the reader edits, with pins and rows that lead to each other:
 

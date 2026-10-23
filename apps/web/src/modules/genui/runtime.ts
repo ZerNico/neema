@@ -10,6 +10,7 @@ import {
   type QuickJSWASMModule,
 } from "quickjs-emscripten-core";
 import type { CompiledBlock } from "./compile.ts";
+import { HELPERS } from "./helpers.ts";
 import { INTL_SHIM } from "./intl-shim.ts";
 import { PRELUDE } from "./prelude.ts";
 
@@ -89,8 +90,11 @@ export class BlockRuntime {
     runtime.setMaxStackSize(RUNTIME_LIMITS.stackBytes);
     const context = runtime.newContext();
     const instance = new BlockRuntime(runtime, context);
-    // The shim installs before the prelude freezes the global object.
-    const prelude = instance.evaluate(`${INTL_SHIM}\n${PRELUDE}`, RUNTIME_LIMITS.scriptMs);
+    // The shim and helpers install before the prelude freezes the global object.
+    const prelude = instance.evaluate(
+      `${INTL_SHIM}\n${HELPERS}\n${PRELUDE}`,
+      RUNTIME_LIMITS.scriptMs,
+    );
     if (!prelude.ok) {
       instance.dispose();
       return { ok: false, error: `prelude: ${prelude.error}` };

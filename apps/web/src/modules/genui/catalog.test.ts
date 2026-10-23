@@ -86,6 +86,54 @@ describe("validateTree", () => {
     });
   });
 
+  it("keeps known icons inline and drops a name outside the list", () => {
+    const { nodes, diagnostics } = validateTree([
+      el("text", {}, [el("icon", { name: "pin", label: "Where" }), " Potsdam"]),
+      el("button", {}, [el("icon", { name: "Location01Icon" }), "Go"]),
+    ]);
+    expect(nodes.map((n) => typeof n !== "string" && n.children)).toEqual([
+      [{ tag: "icon", props: { name: "pin", label: "Where" }, children: [] }, " Potsdam"],
+      ["Go"],
+    ]);
+    expect(diagnostics.map((d) => d.code)).toEqual(["invalid_prop", "missing_prop"]);
+  });
+
+  it("takes calendar days, number formats per column and the new chart types", () => {
+    const { nodes, diagnostics } = validateTree([
+      el("datepicker", { value: "2026-05-01", min: "2026-05-01T00:00:00Z" }),
+      el("table", {
+        columns: ["Who", "Share"],
+        rows: [["Ana", 28.17]],
+        sortable: true,
+        formats: [null, "currency:EUR"],
+      }),
+      el("table", { columns: ["A"], rows: [], formats: ["money"] }),
+      el("chart", {
+        type: "donut",
+        label: "Budget",
+        x: ["Rent"],
+        series: [{ name: "EUR", values: [900] }],
+      }),
+      el("celebrate", { when: false }),
+    ]);
+    expect(nodes.map((n) => typeof n !== "string" && n.props)).toEqual([
+      { value: "2026-05-01" },
+      {
+        columns: ["Who", "Share"],
+        rows: [["Ana", 28.17]],
+        sortable: true,
+        formats: [null, "currency:EUR"],
+      },
+      { columns: ["A"], rows: [] },
+      { type: "donut", label: "Budget", x: ["Rent"], series: [{ name: "EUR", values: [900] }] },
+      { when: false },
+    ]);
+    expect(diagnostics.map((d) => `${d.code}:${d.detail}`)).toEqual([
+      "invalid_prop:datepicker.min",
+      "invalid_prop:table.formats",
+    ]);
+  });
+
   it("enforces the node cap", () => {
     const many = Array.from({ length: TREE_LIMITS.nodes + 5 }, () => el("divider"));
     const { nodes, diagnostics } = validateTree(many);
