@@ -17,8 +17,12 @@ export const COLOR_SCHEMES = [
   "classic",
 ] as const;
 
-/** Runs before paint in `__root` to avoid a flash of the wrong theme. Runs by the CSP nonce. */
-export const themeInitScript = `(function(){var r=document.documentElement;r.dataset.scheme="${COLOR_SCHEMES[0]}";try{var s=localStorage.getItem("${SCHEME_STORAGE_KEY}");if(${JSON.stringify(COLOR_SCHEMES)}.indexOf(s)>=0)r.dataset.scheme=s;var t=localStorage.getItem("${THEME_STORAGE_KEY}");var d=t==="dark"||((!t||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches);r.classList.toggle("dark",d)}catch(e){}})()`;
+/**
+ * Runs before paint in `__root` to avoid a flash of the wrong theme. It also adds the
+ * `theme-color` meta, light or dark until `useThemeColor` reads the page: rendered by
+ * React, the meta would be hoisted and hydrate as a second copy. Runs by the CSP nonce.
+ */
+export const themeInitScript = `(function(){var r=document.documentElement;r.dataset.scheme="${COLOR_SCHEMES[0]}";try{var s=localStorage.getItem("${SCHEME_STORAGE_KEY}");if(${JSON.stringify(COLOR_SCHEMES)}.indexOf(s)>=0)r.dataset.scheme=s;var t=localStorage.getItem("${THEME_STORAGE_KEY}");var d=t==="dark"||((!t||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches);r.classList.toggle("dark",d);var m=document.createElement("meta");m.name="theme-color";m.content=d?"#171717":"#ffffff";document.head.appendChild(m)}catch(e){}})()`;
 
 /** Capability detection mirrors `readDesktopChrome`. Runs by the CSP nonce. */
 export const desktopChromeInitScript = `(function(){var c=window.__chatDesktop&&window.__chatDesktop.chrome;if(c&&["darwin","win32","linux"].includes(c.platform)&&typeof c.getState==="function"&&typeof c.onState==="function"&&typeof c.setTheme==="function")document.documentElement.dataset.desktopChrome=c.platform})()`;

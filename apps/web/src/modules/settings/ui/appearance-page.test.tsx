@@ -67,4 +67,13 @@ describe("themeInitScript", () => {
     new Function(themeInitScript)();
     expect(document.documentElement.dataset.scheme).toBe("iris");
   });
+
+  it("gives the title bar the stored theme's colour before the page draws", () => {
+    const metas = () => [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
+    // The test above ran the script too.
+    for (const meta of metas()) meta.remove();
+    localStorage.setItem("theme", "dark");
+    new Function(themeInitScript)();
+    expect(metas().map((meta) => meta.content)).toEqual(["#171717"]);
+  });
 });

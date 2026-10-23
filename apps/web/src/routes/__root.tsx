@@ -14,6 +14,8 @@ import { DesktopChromeFrame, DesktopChromeProvider } from "~/ui/desktop-chrome.t
 import { desktopChromeInitScript } from "~/ui/boot-scripts.ts";
 import { RouteError, RouteNotFound } from "~/ui/route-error.tsx";
 import { StartupPending } from "~/ui/startup-pending.tsx";
+import { useAppWorker } from "~/ui/app-worker.ts";
+import { useThemeColor } from "~/ui/theme-color.ts";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -25,6 +27,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "neema" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "neema" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -48,6 +52,8 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootDocument({ children }: { children: ReactNode }) {
   // The document CSP admits inline script only by this nonce (src/start.ts).
   const nonce = useRouter().options.ssr?.nonce;
+  useAppWorker();
+  useThemeColor();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

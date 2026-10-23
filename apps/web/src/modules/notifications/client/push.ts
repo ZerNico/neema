@@ -1,17 +1,9 @@
-import { readDesktopChrome } from "@chat/desktop-rpc";
 import { useEffect } from "react";
+import { appWorkerSupported, registerAppWorker } from "~/ui/app-worker.ts";
 import { getPushKey, subscribePush } from "../server/functions.ts";
 
-/**
- * Whether this browser can be reached while closed. Needs a secure origin and
- * a service worker; the desktop app notifies natively instead.
- */
-export const pushSupported = () =>
-  typeof window !== "undefined" &&
-  window.isSecureContext &&
-  "serviceWorker" in navigator &&
-  "PushManager" in window &&
-  readDesktopChrome() === null;
+/** Whether this browser can be reached while closed: the app's worker, and push. */
+export const pushSupported = () => appWorkerSupported() && "PushManager" in window;
 
 const keyBytes = (key: string) =>
   Uint8Array.from(atob(key.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -23,7 +15,7 @@ const keyBytes = (key: string) =>
  */
 export async function ensurePush() {
   if (!pushSupported() || Notification.permission !== "granted") return;
-  const worker = await navigator.serviceWorker.register("/sw.js");
+  const worker = await registerAppWorker();
   await navigator.serviceWorker.ready;
   const subscription =
     (await worker.pushManager.getSubscription()) ??
