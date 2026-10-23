@@ -30,11 +30,11 @@ describe("AppearancePage", () => {
     render(<AppearancePage />);
     expect(screen.getByRole("radio", { name: /Iris/ })).toHaveAttribute("aria-checked", "true");
 
-    fireEvent.click(screen.getByRole("radio", { name: /Sage/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Matcha/ }));
 
-    expect(document.documentElement.dataset.scheme).toBe("sage");
-    expect(localStorage.getItem("scheme")).toBe("sage");
-    expect(screen.getByRole("radio", { name: /Sage/ })).toHaveAttribute("aria-checked", "true");
+    expect(document.documentElement.dataset.scheme).toBe("matcha");
+    expect(localStorage.getItem("scheme")).toBe("matcha");
+    expect(screen.getByRole("radio", { name: /Matcha/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: /Iris/ })).toHaveAttribute("aria-checked", "false");
 
     // The default is the absence of a choice, so a later default change reaches it.
@@ -66,6 +66,13 @@ describe("themeInitScript", () => {
     localStorage.setItem("scheme", "neon");
     new Function(themeInitScript)();
     expect(document.documentElement.dataset.scheme).toBe("iris");
+  });
+
+  it("carries a retired scheme over to its successor", () => {
+    localStorage.setItem("scheme", "amber");
+    new Function(themeInitScript)();
+    expect(document.documentElement.dataset.scheme).toBe("cherry");
+    expect(localStorage.getItem("scheme")).toBe("cherry");
   });
 
   it("gives the title bar the stored theme's colour before the page draws", () => {

@@ -16,11 +16,12 @@ import { cn } from "~/ui/utils";
 const SCHEME_LABELS: Record<ColorScheme, string> = {
   iris: "Iris",
   stone: "Stone",
-  slate: "Slate",
-  sage: "Sage",
+  cobalt: "Cobalt",
+  matcha: "Matcha",
   ocean: "Ocean",
   clay: "Clay",
-  amber: "Amber",
+  cherry: "Cherry",
+  "rose-pine": "Rosé Pine",
   "t3-chat": "T3 Chat",
   classic: "Classic",
 };
