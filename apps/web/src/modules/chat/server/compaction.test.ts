@@ -1358,7 +1358,7 @@ describe("a history summary over the chat's own prompt", () => {
         });
         const deps = { ...h.deps, gateway: { generateText } } as CompactionDeps;
         // Over the 8k trigger, yet small enough for the whole prompt to fit.
-        const messages = history(24).map((message, index) =>
+        const messages = history(23).map((message, index) =>
           Object.assign(message, { createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)) }),
         );
         const decision = yield* prepareCompactedHistory(
@@ -1391,7 +1391,7 @@ describe("a history summary over the chat's own prompt", () => {
           return Effect.succeed({ text: "brief", usage, finishMetadata: undefined });
         });
         const deps = { ...h.deps, gateway: { generateText } } as CompactionDeps;
-        const messages = history(24).map((message, index) =>
+        const messages = history(23).map((message, index) =>
           Object.assign(message, { createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)) }),
         );
         for (const reasoningEffort of ["high", "none"] as const)

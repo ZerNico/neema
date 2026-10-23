@@ -1,10 +1,12 @@
 # Prompt caching
 
-A chat prompt is laid out so everything up to the end of retained history is byte-identical
-from one turn to the next, and within an answer each request extends the previous one exactly. Providers cache a
+A chat prompt only ever grows at its end: a new turn's request opens with the previous answer's
+first request, and within an answer each request extends the one before it. Providers cache a
 prompt by its prefix, in the order tools, system, messages, so one changed byte early on
-makes everything after it uncached. The model sees the same prompt either way; the cost is
-the whole input again on every turn.
+makes everything after it uncached. OpenAI from GPT-5.6 also reads only where an earlier
+request ended (its automatic breakpoint is the end of the latest message), so a prefix
+shared only part of the way is not read at all. The model sees the same prompt either way;
+the cost is the whole input again, at the write price, on every request.
 
 ## Layout
 
@@ -12,11 +14,30 @@ the whole input again on every turn.
   policies, memory, project and agent instructions, all built in `system-prompt.ts`), then
   retained history (skill replays included, see [skills](skills.md)). A compaction summary
   sits between them as a user-role block.
-- After history, fixed for the whole answer: draft, document and knowledge data, the skill
-  catalogue and pinned roots, kept drafts, the image model the answer draws with and the
-  runtime clock, as the answer's first request saw them. Then the answer's rounds. The image
-  tool's schema stays the same whichever model it uses, so picking another never uncaches the
-  tool list ([images](images.md)).
+- After history, the answer's opening, fixed for the whole answer: draft, document and knowledge
+  data, the skill catalogue and pinned roots, kept drafts, the image model the answer draws with
+  and the runtime clock, as its first request saw them, then its first reminder. Then the
+  answer's rounds. The image tool's schema stays the same whichever model it uses, so picking
+  another never uncaches the tool list ([images](images.md)).
+- The opening is kept on the answer (`messages.opening`, server only) and history replays it in
+  place, after its user message, so the next turn extends that answer's first request. It holds
+  only what retained history's openings do not already show, by block (first line, or first two
+  under a bare tag) and content; a source's blocks (a document's policy and view, knowledge
+  evidence and the line about it) go again together. It ends on the clock, so a request never
+  ends on a data block, then a line for any block that vanished, said once. What history cannot
+  replay as the model saw it (an answer's tool rounds, rendered from their rows) is written once
+  more on the next turn; nothing before it is. A retry or edit sends a new opening; a resumed
+  answer keeps the one it began with; a branch, a new conversation with its own cache, keeps
+  none. Compaction counts replayed openings but never summarizes them, since each attempt shows
+  their data again under its own access.
+- Replaying an opening is not a grant. Each block records what rendered it (the agent or schedule
+  authoring permission, documents and the chat's project, the agent's collections, skills, the
+  image model) and the documents, knowledge documents, skills, skill revisions and kept drafts it
+  shows (`needsOf`, from their renderers' markers), and history replays it only while the
+  attempt may still show all of them; otherwise it is left out, which costs one cache miss and
+  only when access changed. Pinned skill instructions carry their revision, so an edited skill is
+  never replayed at its old one. A reminder records the earlier sources its recap listed, and a
+  later one lists only those neither a replayed reminder nor a replayed tool result already shows.
 - Each request ends on what changed during the answer (an edited draft, a skill loaded
   mid-answer) and then the reminder, and that tail stays where it was sent, ahead of the round it
   produced. The next request adds only what changed since: new sources, a changed checklist or
@@ -45,13 +66,20 @@ the whole input again on every turn.
 
 ## Cache points
 
-- Streaming marks up to four anchors (`cacheAnchor`, `anchorLastMessage`): the last system
-  message, the end of retained history, and the last two completed rounds of the answer, so
-  a long tool loop reads its earlier rounds from cache. The second round anchor covers a round
-  with more blocks than one anchor looks back over. The mark is provider-neutral and inert;
-  the gateway alone decides what it means.
-- A round ends on its tool results, which go out as plain strings. A marked round's last
-  result goes out as a text part instead, so it can carry `cache_control`.
+- Streaming marks anchors (`cacheAnchor`, `anchorLastMessage`): the last system message, the
+  end of retained history, the last two completed rounds of the answer, and the end of every
+  request, which the next request extends, and the end of the newest replayed opening, where the
+  previous turn's first request ended (Claude looks back only about twenty blocks from an anchor,
+  and that answer's rounds can be more). Claude then reads the whole previous request, turn to
+  turn as well as round to round, as OpenAI does by itself. The model client keeps at most four,
+  the first and the latest; the second round anchor covers a round with more blocks than one
+  anchor looks back over. The mark is provider-neutral and inert; the gateway alone decides what
+  it means.
+- For a model that takes markers, every message and tool result goes out as text parts, marked
+  or not. A relay merges a plain string and a part into different blocks, so a message whose
+  marker moved on (the turn's user message, a round that is no longer among the last two) stopped
+  matching the prefix it was cached under. Other models get plain strings, which some servers
+  require.
 - Chat requests to OpenRouter carry the conversation id as `session_id` and
   `prompt_cache_key`, keeping a conversation on the provider that holds its cache. Other
   servers never see them.

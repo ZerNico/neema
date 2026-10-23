@@ -1282,6 +1282,8 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   return {
     group,
     refresh,
+    /** The documents this attempt may show, by id. */
+    knownIds: () => known.map((document) => document.id),
     live: {
       start: (id: string, name: string) => {
         if (name === "edit_document" || name === "create_document")

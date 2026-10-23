@@ -32,8 +32,10 @@ const readSkillFileTool = Tool.make("read_skill_file", {
 });
 
 /** One skill's instructions as the model reads them, wherever they sit in the prompt. */
-const skillGuidance = (skillId: string, root: string) =>
-  `<skill-guidance id=${JSON.stringify(skillId)}>\n${root}\n</skill-guidance>`;
+// The revision lets a kept answer opening replay these instructions only while
+// they are still the skill's current ones.
+const skillGuidance = (skillId: string, root: string, revisionId?: string) =>
+  `<skill-guidance id=${JSON.stringify(skillId)}${revisionId ? ` revision=${JSON.stringify(revisionId)}` : ""}>\n${root}\n</skill-guidance>`;
 
 /**
  * A skill an earlier answer loaded, replayed in history just before that
@@ -292,7 +294,11 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     },
     ...[...loaded].map(([id, root]): Prompt.MessageEncoded => ({
       role: "user",
-      content: skillGuidance(id, root),
+      content: skillGuidance(
+        id,
+        root,
+        catalogue.find((entry) => entry.skillId === id)?.revisionId ?? "unknown",
+      ),
     })),
   ];
   return {
@@ -305,6 +311,10 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     },
     authorize,
     messages,
+    /** The skills this attempt may show, by id. */
+    skillIds: () => catalogue.map((entry) => entry.skillId),
+    /** The same skills at the revisions this attempt pins, as `id@revision`. */
+    skillRevisions: () => catalogue.map((entry) => `${entry.skillId}@${entry.revisionId}`),
     /** Changes with every operation, so it belongs in the per-round reminder. */
     remaining: () => remaining,
     readEarlier,

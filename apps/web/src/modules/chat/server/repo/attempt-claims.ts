@@ -585,6 +585,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 generationLeaseUntil: freshLease(),
                 assistantOutput: null,
                 providerReplay: null,
+                opening: null,
                 content: "",
                 reasoning: "",
                 usage: null,

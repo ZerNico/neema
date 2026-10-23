@@ -197,6 +197,9 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                   conversationId: branch.id,
                   generationId: null,
                   generationLeaseUntil: null,
+                  // A branch is a new conversation with its own cache, and an
+                  // opening names the source chat's drafts and documents.
+                  opening: null,
                   // A steer sorts just before its answer, so the answer is
                   // always in the same prefix; point at the copy.
                   steeredIntoMessageId: m.steeredIntoMessageId

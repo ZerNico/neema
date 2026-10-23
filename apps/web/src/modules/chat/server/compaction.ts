@@ -712,6 +712,12 @@ export interface CompactionInput {
   /** The same messages rendered for the model, aligned one-to-one. */
   readonly renderedMessages: ReadonlyArray<Prompt.MessageEncoded>;
   readonly renderedMessageGroups?: ReadonlyArray<ReadonlyArray<Prompt.MessageEncoded>>;
+  /**
+   * Messages in those groups that count toward the budget but are never
+   * summarized: an answer's replayed opening (documents, knowledge evidence,
+   * skill instructions), which each attempt shows again under its own access.
+   */
+  readonly unsummarized?: ReadonlySet<Prompt.MessageEncoded>;
   /** Everything that precedes the history in the prompt (the web-tools hint). */
   readonly fixedPrefix: ReadonlyArray<Prompt.MessageEncoded>;
   /** Per-call text budgeted after history, but not injected into the base prompt. */
@@ -853,7 +859,8 @@ export const prepareCompactedHistory = Effect.fn("chat.prepareCompactedHistory")
       input.renderedMessageGroups?.[index] ?? [input.renderedMessages[index]!];
     const aged = input.renderedMessages
       .slice(baseStart, boundary + 1)
-      .flatMap((_, index) => groupOf(baseStart + index));
+      .flatMap((_, index) => groupOf(baseStart + index))
+      .filter((message) => !input.unsummarized?.has(message));
     const firstKept = input.messages[boundary + 1];
     const lastSystem = input.fixedPrefix.map((message) => message.role).lastIndexOf("system");
     const history = input.renderedMessages
@@ -1020,6 +1027,7 @@ const samePrefixInstruction = (summary: SamePrefixSummary) =>
     "<compaction-request>",
     SUMMARY_SYSTEM,
     `Summarize everything in this conversation before ${summary.boundary}. That message and everything after it stay verbatim, so read them for context but leave them out of the briefing.`,
+    "Leave out application-provided data; it is shown again.",
     summary.folding
       ? "Fold the earlier generated-conversation-summary above into your briefing, keeping whatever in it is still relevant."
       : null,

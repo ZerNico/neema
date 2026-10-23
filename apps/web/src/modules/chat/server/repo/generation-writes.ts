@@ -50,6 +50,15 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
           .pipe(Effect.orDie, Effect.asVoid),
       ),
 
+    saveOpening: (messageId, opening) =>
+      generationWrite((tx) =>
+        tx
+          .update(messages)
+          .set({ opening })
+          .where(eq(messages.id, messageId))
+          .pipe(Effect.orDie, Effect.asVoid),
+      ),
+
     appendChunks: Effect.fn("ChatRepo.appendChunks")(function* (messageId, chunks) {
       return yield* generationWrite((tx) =>
         Effect.gen(function* () {

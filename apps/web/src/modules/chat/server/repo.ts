@@ -359,9 +359,9 @@ export interface ConversationCursor {
 type StoredMessage = typeof messages.$inferSelect;
 export type MessageRow = Omit<
   StoredMessage,
-  "generationId" | "assistantOutput" | "providerReplay"
+  "generationId" | "assistantOutput" | "providerReplay" | "opening"
 > &
-  Partial<Pick<StoredMessage, "generationId" | "assistantOutput" | "providerReplay">>;
+  Partial<Pick<StoredMessage, "generationId" | "assistantOutput" | "providerReplay" | "opening">>;
 export type HistorySnapshot = ReadonlyArray<
   Pick<
     MessageRow,
@@ -441,8 +441,12 @@ export type SteeredMessage = MessageRow & {
   openDocument?: OpenDocument | undefined;
 };
 
-const { providerReplay: _privateReplay, ...windowColumns } = getTableColumns(messages);
-export type WindowMessageRow = Omit<MessageRow, "providerReplay">;
+const {
+  providerReplay: _privateReplay,
+  opening: _privateOpening,
+  ...windowColumns
+} = getTableColumns(messages);
+export type WindowMessageRow = Omit<MessageRow, "providerReplay" | "opening">;
 
 export class ChatRepo extends Context.Service<
   ChatRepo,
@@ -452,6 +456,8 @@ export class ChatRepo extends Context.Service<
       messageId: string,
       replay: NonNullable<MessageRow["providerReplay"]>,
     ): Effect.Effect<void>;
+    /** What the answer's first request carried after its user message. */
+    saveOpening(messageId: string, opening: NonNullable<MessageRow["opening"]>): Effect.Effect<void>;
     /**
      * One page of a user's conversations, newest activity first. Ordered by
      * `coalesce(lastMessageAt, createdAt)` with `id` as a tiebreaker so the

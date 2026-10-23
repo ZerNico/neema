@@ -1002,12 +1002,103 @@ describe("conversational agent authoring", () => {
       // Only what changed comes after the second round: the new draft, not Helper again.
       const added = third!.slice(second!.length);
       expect(added.some((message) => message.includes('\\"name\\":\\"Second\\"'))).toBe(true);
-      // At most four cache points, the last on the latest completed round.
+      // At most four cache points: the completed round, and the request's end,
+      // which the next request extends.
       const anchors = prompts[1]!.prompt.content.flatMap((message, index) =>
         (message.options["cache"] as { anchor?: boolean } | undefined)?.anchor ? [index] : [],
       );
       expect(anchors.length).toBeLessThanOrEqual(4);
-      expect(anchors.at(-1)).toBe(round);
+      expect(anchors).toContain(round);
+      expect(anchors.at(-1)).toBe(prompts[1]!.prompt.content.length - 1);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("opens a turn with the previous answer's whole first request, then keeps or drops it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      // The first answer calls a tool once, so its first request is not its last.
+      if (prompts.length === 1)
+        return authoringTool(input, "draft_agent", { changes: { name: "Helper" } });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    const send = (content: string) =>
+      runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+    try {
+      const first = await send("Make me an agent.");
+      await collectDraftTurn(first.assistantMessageId);
+      const second = await send("Thanks.");
+      await collectDraftTurn(second.assistantMessageId);
+      const third = await send("And now?");
+      await collectDraftTurn(third.assistantMessageId);
+      expect(prompts).toHaveLength(4);
+      const serialized = (input: GatewayInput) =>
+        input.prompt.content.map((message) =>
+          JSON.stringify({ role: message.role, content: message.content }),
+        );
+      const [opened, , answered, again] = prompts.map(serialized);
+      // A cache written at the end of an answer's first request is read by the next turn.
+      expect(answered!.slice(0, opened!.length)).toEqual(opened);
+      expect(again!.slice(0, answered!.length)).toEqual(answered);
+      // Only what changed comes again: the draft and the policies are not repeated.
+      const added = again!.slice(answered!.length);
+      expect(added.some((message) => message.includes("<runtime-context>"))).toBe(true);
+      expect(added.some((message) => message.includes('\\"name\\":\\"Helper\\"'))).toBe(false);
+
+      const rows = () =>
+        runtime.runPromise(
+          Effect.flatMap(ChatRepo, (repo) => repo.listMessages(seed.conversation.id)),
+        );
+      expect(
+        (await rows()).find((row) => row.id === third.assistantMessageId)?.opening,
+      ).toMatchObject({ v: 1 });
+      // A branch is a new conversation with a cache of its own: no opening comes along.
+      const branch = await runtime.runPromise(
+        ChatService.use((service) =>
+          service.branchConversation({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: third.assistantMessageId,
+          }),
+        ),
+      );
+      const copied = await runtime.runPromise(
+        ChatRepo.use((repo) => repo.listMessages(branch.conversationId)),
+      );
+      expect(copied.every((row) => row.opening == null)).toBe(true);
+      // A retry is a new first request, so it keeps the opening it sent, not the old one.
+      const before = (await rows()).find((row) => row.id === third.assistantMessageId)?.opening;
+      await runtime.runPromise(
+        ChatService.use((service) =>
+          service.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: third.assistantMessageId,
+          }),
+        ),
+      );
+      await collectDraftTurn(third.assistantMessageId);
+      const after = (await rows()).find((row) => row.id === third.assistantMessageId)?.opening;
+      expect(after).toMatchObject({ v: 1 });
+      expect(after).not.toEqual(before);
     } finally {
       authoringScript = null;
     }
@@ -1416,9 +1507,12 @@ describe("conversational agent authoring", () => {
         (message, index) => index > replayAt && message.role === "assistant",
       );
       expect(answerAt).toBeGreaterThan(replayAt);
-      expect(JSON.stringify(content(latest!).slice(0, answerAt + 1))).toBe(
-        JSON.stringify(content(later!).slice(0, answerAt + 1)),
-      );
+      // Cache anchors move on from turn to turn; what is sent does not.
+      const bytes = (input: GatewayInput) =>
+        content(input)
+          .slice(0, answerAt + 1)
+          .map(({ role, content: sent }) => JSON.stringify({ role, sent }));
+      expect(bytes(latest!)).toEqual(bytes(later!));
     } finally {
       authoringScript = null;
     }

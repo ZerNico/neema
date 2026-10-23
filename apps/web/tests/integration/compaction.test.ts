@@ -1366,10 +1366,13 @@ describe("compaction inside a generation", () => {
     expect(continuation).not.toContain("RAW_PAGE_BODY_SENTINEL_");
     const initialClock = runtimeBlock(gateway.streamPrompts[0]!);
     const continuedClock = runtimeBlock(continuation);
-    expect(continuedClock.message).toEqual(initialClock.message);
+    // The same block; only the first request's closing cache anchor is gone.
+    expect(continuedClock.message.content).toEqual(initialClock.message.content);
     expect(continuedClock.index).toBe(initialClock.index);
-    expect(continuedClock.content.slice(0, continuedClock.index + 1)).toEqual(
-      initialClock.content.slice(0, initialClock.index + 1),
+    const bytes = (messages: ReadonlyArray<{ role: string; content: unknown }>) =>
+      messages.map(({ role, content }) => ({ role, content }));
+    expect(bytes(continuedClock.content.slice(0, continuedClock.index + 1))).toEqual(
+      bytes(initialClock.content.slice(0, initialClock.index + 1)),
     );
     expect(JSON.stringify(continuedClock.content.slice(continuedClock.index + 1))).toContain(
       "ACTIVE ROUND SUMMARY",

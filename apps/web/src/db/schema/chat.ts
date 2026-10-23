@@ -2,6 +2,7 @@ import { uuidv7 } from "uuidv7";
 import type { AssistantOutput } from "~/modules/chat/assistant-output.ts";
 import type { FileReferenceAliases } from "~/modules/chat/file-reference-aliases.ts";
 import type { ProviderReplay } from "~/modules/chat/server/provider-replay.ts";
+import type { AnswerOpening } from "~/modules/chat/server/answer-opening.ts";
 import type { QueuedTurnInput } from "~/modules/chat/queued-turn.ts";
 import { desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -184,6 +185,9 @@ export const messages = pgTable(
     generationLeaseUntil: timestamp("generation_lease_until", { withTimezone: true }),
     assistantOutput: jsonb("assistant_output").$type<AssistantOutput>(),
     providerReplay: jsonb("provider_replay").$type<ProviderReplay>(),
+    // What an answer's first request carried after its user message, replayed
+    // in history so the next turn extends that request. Server only.
+    opening: jsonb().$type<AnswerOpening>(),
     questionResponse: jsonb("question_response").$type<JsonValue>(),
     // A user message a connected app sent, by OAuth client id, with its name
     // as it was then, since the client may be deleted. Never changes.

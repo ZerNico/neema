@@ -43,6 +43,17 @@ import type { AttemptUsage, GenerationSink } from "./sink.ts";
 import { quotedName, type GenerationTools } from "./tools.ts";
 import { json, promptMessages } from "./json.ts";
 import type { ProviderReplay } from "../provider-replay.ts";
+import {
+  blockKey,
+  blockName,
+  needsOf,
+  replayedBlocks,
+  replayedOpening,
+  resultSources,
+  type AnswerOpening,
+  type MarkerKind,
+  type OpeningAccess,
+} from "../answer-opening.ts";
 
 /** Which round an attempt is in, for the reminders that count down or follow a steer. */
 export interface RoundProgress {
@@ -71,6 +82,18 @@ export interface RoundState {
 
 // A block's first line names it ("Application-provided documents…"),
 // so an updated block is matched to its earlier snapshot by that line.
+const MARKERS_BY_SOURCE: Record<string, ReadonlyArray<MarkerKind>> = {
+  documents: ["documents"],
+  knowledge: ["knowledge"],
+  skills: ["skills"],
+  kept: ["working"],
+};
+
+const goneMessage = (names: ReadonlyArray<string>): Prompt.MessageEncoded => ({
+  role: "user",
+  content: `<context-update>\nNo longer current; the earlier snapshot of each no longer applies:\n${names.map((name) => `- ${name}`).join("\n")}\n</context-update>`,
+});
+
 const headerOf = (message: Prompt.MessageEncoded) => {
   const text =
     typeof message.content === "string"
@@ -299,9 +322,36 @@ export const prepareAttemptPrompt = (env: {
     const plainById = new Map(
       plainHistory.map((message, index) => [message.id, plainMessages[index]!]),
     );
+    // An earlier answer's opening goes back where it was sent, so this
+    // request extends that answer's first one; access is checked again now.
+    const openingAccess: OpeningAccess = {
+      documents: new Set(permissions.documents ? documents.knownIds() : []),
+      knowledge: new Set(knowledgeSession?.manifest.map((entry) => entry.documentId) ?? []),
+      skills: new Set(skillTools?.skillIds() ?? []),
+      skillRevisions: new Set(skillTools?.skillRevisions() ?? []),
+      working: new Set(
+        publishFileTool
+          ? kept.flatMap((file) => (file.ref.kind === "working" ? [file.ref.id] : []))
+          : [],
+      ),
+      features: new Set([
+        ...(permissions.agentsCreate ? ["agents"] : []),
+        ...(permissions.schedules ? ["schedules"] : []),
+        ...(permissions.documents ? ["documents"] : []),
+        ...(config.resolvedProject ? [`project:${config.resolvedProject.id}`] : []),
+        ...(knowledgeSession ? ["knowledge"] : []),
+        ...(skillTools ? ["skills"] : []),
+        ...(imageTool ? ["images"] : []),
+      ]),
+    };
+    const openingOf = (message: (typeof historySuffix)[number]) =>
+      message.role === "assistant" ? replayedOpening(message.opening, openingAccess) : [];
+    // Counted toward the budget, never summarized: each attempt shows them again.
+    const replayedOpenings = new Set(historySuffix.flatMap(openingOf));
     const historyGroups: Array<ReadonlyArray<Prompt.MessageEncoded>> = [];
+    const ownMessages: Prompt.MessageEncoded[] = [];
     for (const message of historySuffix) {
-      historyGroups.push([
+      const own = [
         ...skillReplay(message),
         ...(message.assistantOutput?.files.length ||
         message.providerReplay?.turns.length ||
@@ -324,11 +374,13 @@ export const prepareAttemptPrompt = (env: {
                 : {}),
             })
           : [plainById.get(message.id)!]),
-      ]);
+      ];
+      ownMessages.push(own[0]!);
+      historyGroups.push([...openingOf(message), ...own]);
     }
     // Compaction indexes stored rows; each representative's full group is
     // supplied alongside it for token estimates and summary input.
-    const historyMessages = historyGroups.map((group) => group[0]!);
+    const historyMessages = ownMessages;
     const sourcesByIndex = new Map(priorSources.map((source) => [source.index, source]));
     const recapSources = () => {
       const sources = [...sourcesByIndex.values()];
@@ -401,12 +453,18 @@ export const prepareAttemptPrompt = (env: {
     };
     const earlierSources = new Set(priorSources.map((source) => source.index));
     const telling = new WeakMap<Prompt.Prompt, () => void>();
+    const sentAs = new WeakMap<
+      Prompt.Prompt,
+      { messages: ReadonlyArray<Prompt.MessageEncoded>; sources: ReadonlyArray<number> }
+    >();
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- key is a one-line comparison read where it is used
     const key = (message: Prompt.MessageEncoded) => JSON.stringify(message.content);
     const reminderPrompt = (lastCycle: boolean) => {
+      const listed = shownBefore().sources;
       const fresh = recapSources().filter(
         (source) =>
           !told.sources.has(source.index) &&
+          !listed.has(source.index) &&
           (earlierSources.has(source.index) || !told.ownSourcesShown),
       );
       // Named, so a section is compared with its own last copy: a state that
@@ -463,6 +521,12 @@ export const prepareAttemptPrompt = (env: {
       ];
       if (messages.length === 0) return null;
       const prompt = Prompt.make(messages);
+      // Only a recap that went out lists its sources.
+      const recapped = slots["search"] !== null && sections.includes(slots["search"]!);
+      sentAs.set(prompt, {
+        messages,
+        sources: recapped ? fresh.map((source) => source.index) : [],
+      });
       telling.set(prompt, () => {
         for (const [slot, text] of Object.entries(slots))
           if (text) told.sections.set(slot, text);
@@ -482,19 +546,39 @@ export const prepareAttemptPrompt = (env: {
       told.updates.clear();
       told.ownSourcesShown = false;
     };
-    // Everything after retained history, in order. It is the one list both
-    // the transcript and the compaction budget read, so anything added
-    // here is automatically budgeted. Rebuilt per call since loaded skills
-    // and the clock change; being after history keeps the cacheable prefix
-    // intact when they do.
+    // Each block knows what rendered it: an opening stores that as what the
+    // block needs, and a source's blocks are sent again together, so data and
+    // the line about it never part.
+    const blockSources = new WeakMap<
+      Prompt.MessageEncoded,
+      { source: string; features: ReadonlyArray<string> }
+    >();
+    const sourced = (
+      source: string,
+      features: ReadonlyArray<string>,
+      messages: ReadonlyArray<Prompt.MessageEncoded>,
+    ) => {
+      for (const message of messages) blockSources.set(message, { source, features });
+      return messages;
+    };
+    const documentFeatures = [
+      "documents",
+      ...(config.resolvedProject ? [`project:${config.resolvedProject.id}`] : []),
+    ];
+    // Everything after retained history, in order: the one list both the
+    // transcript and the compaction budget read, so all of it is budgeted.
     const trailingContext = (): ReadonlyArray<Prompt.MessageEncoded> => [
-      ...(permissions.agentsCreate ? authoring.messages() : []),
-      ...(permissions.schedules ? scheduleAuthoring.messages() : []),
-      ...(permissions.documents ? documents.messages() : []),
-      ...(knowledgeContext?.messages ?? []),
-      ...(skillTools?.messages() ?? []),
-      ...keptNotice,
-      ...imageNotice,
+      ...(permissions.agentsCreate ? sourced("agents", ["agents"], authoring.messages()) : []),
+      ...(permissions.schedules
+        ? sourced("schedules", ["schedules"], scheduleAuthoring.messages())
+        : []),
+      ...(permissions.documents
+        ? sourced("documents", documentFeatures, documents.messages())
+        : []),
+      ...sourced("knowledge", ["knowledge"], knowledgeContext?.messages ?? []),
+      ...sourced("skills", ["skills"], skillTools?.messages() ?? []),
+      ...sourced("kept", [], keptNotice),
+      ...sourced("images", ["images"], imageNotice),
       ...(uiStateContext ? [uiStateContext] : []),
       runtimeContext,
     ];
@@ -514,20 +598,111 @@ export const prepareAttemptPrompt = (env: {
       const gone = answerContext.map(headerOf).filter((header) => header && !headers.has(header));
       return [
         ...now.filter((message) => !before.has(key(message))),
-        ...(gone.length
-          ? [
-              {
-                role: "user" as const,
-                content: `<context-update>\nNo longer current; the earlier snapshot of each no longer applies:\n${gone.map((header) => `- ${header}`).join("\n")}\n</context-update>`,
-              },
-            ]
-          : []),
+        ...(gone.length ? [goneMessage(gone)] : []),
       ];
+    };
+    // What retained history's openings already show, by block, and which
+    // earlier sources their reminders listed. Kept per retained start, since
+    // compaction can drop the openings they came from.
+    let shown: {
+      startIndex: number;
+      blocks: ReadonlyMap<string, string>;
+      sources: ReadonlySet<number>;
+    } | null = null;
+    // Budgeting before the first compaction assumes all history is kept.
+    let roundState: RoundState | null = null;
+    const shownBefore = () => {
+      const startIndex = roundState?.compaction.startIndex ?? 0;
+      if (shown?.startIndex === startIndex) return shown;
+      const blocks = new Map<string, string>();
+      const sources = new Set<number>();
+      // A source whose tool result history still shows needs no recap: the
+      // result names it by index, title and address already.
+      for (const message of historyGroups.slice(startIndex).flat())
+        if (message.role === "tool")
+          for (const part of message.content)
+            if (part.type === "tool-result")
+              for (const index of resultSources(part.result)) sources.add(index);
+      for (const message of historySuffix.slice(startIndex)) {
+        if (message.role !== "assistant" || !message.opening) continue;
+        for (const block of replayedBlocks(message.opening, openingAccess)) {
+          if (block.gone) for (const name of block.gone) blocks.delete(name);
+          else if (!block.reminder) blocks.set(blockName(block.message), blockKey(block.message));
+          for (const index of block.sources ?? []) sources.add(index);
+        }
+      }
+      shown = { startIndex, blocks, sources };
+      return shown;
+    };
+    // This answer's data as its first request sends it: only what history's
+    // openings do not already show, and the clock, which always comes last so
+    // the request never ends on a data block.
+    let opening: {
+      startIndex: number;
+      messages: ReadonlyArray<Prompt.MessageEncoded>;
+      gone: { message: Prompt.MessageEncoded; names: ReadonlyArray<string> } | null;
+    } | null = null;
+    const answerOpening = () => {
+      const before = shownBefore();
+      if (opening?.startIndex === before.startIndex) return opening.messages;
+      const context = startContext();
+      const names = new Set(context.map(blockName));
+      const gone = [...before.blocks.keys()].filter((name) => !names.has(name));
+      const goneLine = gone.length ? goneMessage(gone) : null;
+      const changed = (message: Prompt.MessageEncoded) =>
+        before.blocks.get(blockName(message)) !== blockKey(message);
+      const resent = new Set(
+        context.filter(changed).flatMap((message) => blockSources.get(message)?.source ?? []),
+      );
+      const messages = [
+        ...context.filter(
+          (message, index) =>
+            index === context.length - 1 ||
+            changed(message) ||
+            resent.has(blockSources.get(message)?.source ?? ""),
+        ),
+        ...(goneLine ? [goneLine] : []),
+      ];
+      opening = {
+        startIndex: before.startIndex,
+        messages,
+        gone: goneLine ? { message: goneLine, names: gone } : null,
+      };
+      return messages;
+    };
+    /** What to keep on the answer for history: its opening and the first reminder it sent. */
+    const openingRecord = (reminder: Prompt.Prompt | null): AnswerOpening => {
+      const sent = reminder ? sentAs.get(reminder) : undefined;
+      const listed = sent?.messages.at(-1);
+      return {
+        v: 1,
+        blocks: [...answerOpening(), ...(sent?.messages ?? [])].map((message) => {
+          const source = blockSources.get(message);
+          const fromReminder = sent?.messages.includes(message) === true;
+          // A block is held to the markers its own source writes; the
+          // reminder names kept drafts near the end of an answer.
+          const parsed = needsOf(
+            message,
+            source ? (MARKERS_BY_SOURCE[source.source] ?? []) : fromReminder ? ["working"] : [],
+          );
+          const features = source?.features ?? [];
+          const needs = features.length ? { ...parsed, features } : parsed;
+          const sources = message === listed && sent?.sources.length ? sent.sources : undefined;
+          const gone = message === opening?.gone?.message ? opening.gone.names : undefined;
+          return {
+            message,
+            ...(needs ? { needs } : {}),
+            ...(sources ? { sources } : {}),
+            ...(gone ? { gone } : {}),
+            ...(fromReminder ? { reminder: true as const } : {}),
+          };
+        }),
+      };
     };
     // Reminders are appended per request rather than stored in the
     // transcript, so only the budget adds them to the tail.
     const historyBudgetTail = (lastCycle: boolean): ReadonlyArray<Prompt.MessageEncoded> => [
-      ...(answerContext ?? trailingContext()),
+      ...(answerContext ? answerOpening() : trailingContext()),
       ...((reminderPrompt(lastCycle)?.content ?? []) as ReadonlyArray<Prompt.MessageEncoded>),
     ];
 
@@ -593,6 +768,7 @@ export const prepareAttemptPrompt = (env: {
           messages: historySuffix,
           renderedMessages: historyMessages,
           renderedMessageGroups: historyGroups,
+          unsummarized: replayedOpenings,
           fixedPrefix,
           trailingMessages: historyBudgetTail(false),
           webToolsEnabled: webTools !== undefined,
@@ -620,6 +796,7 @@ export const prepareAttemptPrompt = (env: {
       questionPresented: false,
       replay: ctx.replay,
     };
+    roundState = state;
     syncEarlierSkills(state.compaction.startIndex);
 
     // What retained history already worked with stays loaded: an explicit
@@ -637,25 +814,48 @@ export const prepareAttemptPrompt = (env: {
     // context, so overflow repair drops history turns, not document
     // bodies.
     if (knowledgeSession && config) {
-      const prepared = yield* prepareKnowledgeContext({
-        userId: input.userId,
-        session: knowledgeSession,
-        indexer,
-        mode: config.knowledgeMode === "retrieval" ? "retrieval" : "context",
-        budget: computeBudget({
-          contextLength: model?.contextLength,
-          webToolsEnabled: webTools !== undefined,
-        }),
-        baseMessages: [
-          ...fixedPrefix,
-          ...state.compaction.injectedMessages,
-          ...historyGroups.slice(state.compaction.startIndex).flat(),
-          ...historyBudgetTail(false),
-        ],
-        toolSchemaTokens,
-        toolResultReserveTokens: knowledgeTools ? KNOWLEDGE_TOOL_LIMITS.resultTokens : 0,
-        priorUsage,
-      }).pipe(Effect.provideService(KnowledgeService, knowledgeService));
+      const baseMessages = [
+        ...fixedPrefix,
+        ...state.compaction.injectedMessages,
+        ...historyGroups.slice(state.compaction.startIndex).flat(),
+        ...historyBudgetTail(false),
+      ];
+      const prepare = (base: ReadonlyArray<Prompt.MessageEncoded>) =>
+        prepareKnowledgeContext({
+          userId: input.userId,
+          session: knowledgeSession,
+          indexer,
+          mode: config.knowledgeMode === "retrieval" ? "retrieval" : "context",
+          budget: computeBudget({
+            contextLength: model?.contextLength,
+            webToolsEnabled: webTools !== undefined,
+          }),
+          baseMessages: base,
+          toolSchemaTokens,
+          toolResultReserveTokens: knowledgeTools ? KNOWLEDGE_TOOL_LIMITS.resultTokens : 0,
+          priorUsage,
+        }).pipe(Effect.provideService(KnowledgeService, knowledgeService));
+      // The newest replayed evidence is this turn's when nothing changed, and
+      // then it is not sent twice: sized without it, and again with it only
+      // when the evidence did change and both copies go out.
+      const replayedEvidence =
+        historySuffix
+          .slice(state.compaction.startIndex)
+          .map((message) =>
+            message.role === "assistant"
+              ? replayedBlocks(message.opening, openingAccess)
+                  .filter((block) => block.needs?.features?.includes("knowledge"))
+                  .map((block) => block.message)
+              : [],
+          )
+          .findLast((blocks) => blocks.length > 0) ?? [];
+      const replayed = new Set(replayedEvidence);
+      let prepared = yield* prepare(baseMessages.filter((message) => !replayed.has(message)));
+      if (
+        replayed.size > 0 &&
+        prepared.messages.map(blockKey).join("\n") !== replayedEvidence.map(blockKey).join("\n")
+      )
+        prepared = yield* prepare(baseMessages);
       knowledgeContext = prepared;
       offerState.retrievalEnabled = prepared.mode === "retrieval";
       for (const source of prepared.activity?.sources ?? [])
@@ -778,6 +978,7 @@ export const prepareAttemptPrompt = (env: {
     for (let index = state.compaction.startIndex; index < historySuffix.length; index++) {
       const message = historySuffix[index]!;
       retainedHistory.set(index, [
+        ...openingOf(message),
         ...skillReplay(message),
         ...(message.assistantOutput?.files.length ||
         message.providerReplay?.turns.length ||
@@ -821,11 +1022,20 @@ export const prepareAttemptPrompt = (env: {
           ),
       ];
       const last = stable.length - 1;
+      // Where the newest answer's first request ended: Claude looks back only
+      // about twenty blocks from an anchor, and that answer's rounds can be more.
+      const openingEnd = historySuffix
+        .slice(state.compaction.startIndex)
+        .map(openingOf)
+        .findLast((replayed) => replayed.length > 0)
+        ?.at(-1);
       return Prompt.make([
         ...stable.map((message, index) =>
-          index === last && index > lastSystem ? cacheAnchor(message) : message,
+          (index === last && index > lastSystem) || message === openingEnd
+            ? cacheAnchor(message)
+            : message,
         ),
-        ...startContext(),
+        ...answerOpening(),
       ]);
     };
     // A resumed answer's earlier rounds come first, each one compactable
@@ -872,12 +1082,17 @@ export const prepareAttemptPrompt = (env: {
       });
 
     state.transcript = buildTranscript();
+    // The request as sent, its closing cache anchor included, so the estimate
+    // and the provider's count describe the same bytes.
     const estimateRequestPrompt = (lastCycle: boolean) => {
       const trailing = reminderPrompt(lastCycle);
-      return estimatePromptTokens([
-        ...promptMessages(state.transcript),
-        ...(trailing ? promptMessages(trailing) : []),
-      ]);
+      return estimatePromptTokens(
+        promptMessages(
+          anchorLastMessage(
+            trailing ? Prompt.concat(state.transcript, trailing) : state.transcript,
+          ),
+        ),
+      );
     };
     // Persist the raw estimate of the exact first request. The provider's
     // actual/raw pair then learns one stable calibration multiplier.
@@ -930,6 +1145,7 @@ export const prepareAttemptPrompt = (env: {
       reminderPrompt,
       keepReminder,
       forgetReminders,
+      openingRecord,
       sourceManifest,
       recordHardTruncation,
       nextPassIndex,

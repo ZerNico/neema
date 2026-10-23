@@ -6,7 +6,7 @@ import { Effect, Exit, Stream, type Scope } from "effect";
 import { PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { Prompt, type Response } from "effect/unstable/ai";
 import { toAttachmentDto } from "~/modules/attachments/server/repo.ts";
-import { ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
+import { anchorLastMessage, ProviderContextOverflow } from "~/modules/providers/server/gateway.ts";
 import type { SteerChunkEnvelope } from "../../schema.ts";
 import {
   calibrationFactor,
@@ -111,6 +111,7 @@ export const runRound = (env: RoundEnv, round: number) =>
       reminderPrompt,
       keepReminder,
       forgetReminders,
+      openingRecord,
       sourceManifest,
       recordHardTruncation,
       nextPassIndex,
@@ -261,9 +262,11 @@ export const runRound = (env: RoundEnv, round: number) =>
         : [];
       usage.modelCallOpen = true;
       sentReminder = currentReminderPrompt();
-      const prompt = sentReminder
-        ? Prompt.concat(state.transcript, sentReminder)
-        : state.transcript;
+      // The whole request is a cache point, since the next one extends it
+      // exactly: Claude then reads all of it, as OpenAI does by itself.
+      const prompt = anchorLastMessage(
+        sentReminder ? Prompt.concat(state.transcript, sentReminder) : state.transcript,
+      );
       // Only what this request carries counts as what the model saw of a document.
       documents.sent(prompt);
       return gateway
@@ -410,6 +413,10 @@ export const runRound = (env: RoundEnv, round: number) =>
       );
 
     yield* runProviderCall(0);
+    // What the answer's first request ended on, for history to replay so the
+    // next turn extends it. A resumed answer keeps the opening it began with.
+    if (round === 0 && !ctx.resuming)
+      yield* repo.saveOpening(input.messageId, openingRecord(sentReminder));
     if (skillTools) yield* skillTools.authorize();
     if (knowledgeTools) yield* knowledgeTools.authorize();
     else if (knowledgeSession) yield* knowledgeSession.authorize();
