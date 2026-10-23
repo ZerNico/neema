@@ -110,7 +110,9 @@ not catch:
   outside the desktop app) handles push and page loads that fail outright, which get a cached
   self-contained offline page. It never caches the document, which is `no-store` and carries its
   own nonce, and never sees assets, server functions or SSE, so a deploy needs no worker update.
-  `theme-color` follows the colour at the top of the page, not a fixed brand colour.
+  `theme-color` follows the colour at the top of the page, not a fixed brand colour. Its share
+  target is `/share`, which turns what was shared into a new chat's draft, never a sent message;
+  the auth guard passes any address on through sign-in so a share made signed out survives it.
 - Page chrome lives in `src/ui/page-shell.tsx` (`SectionShell`, `Page`, `Section`, `ListCard`/`ListRow`,
   `EmptyState`, `ErrorState`), used across admin, settings, tools, agents, knowledge and the chats index.
   **`Page` is the scroll container**: the app layout's `<main>` is a fixed-height flex child that never

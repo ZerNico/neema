@@ -36,9 +36,9 @@ const user: SessionData["user"] = {
   updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
 
-const runBeforeLoad = (queryClient: QueryClient) =>
-  // Only the field beforeLoad reads; the router supplies the rest.
-  Route.options.beforeLoad!({ context: { queryClient } } as never);
+const runBeforeLoad = (queryClient: QueryClient, href = "/") =>
+  // Only the fields beforeLoad reads; the router supplies the rest.
+  Route.options.beforeLoad!({ context: { queryClient }, location: { href } } as never);
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -85,6 +85,14 @@ describe("app shell guard", () => {
 
     await expect(runBeforeLoad(newClient())).rejects.toMatchObject({
       options: { to: "/login" },
+    });
+  });
+
+  it("brings a signed-out visitor back to where they were going after signing in", async () => {
+    sessionMock.mockResolvedValue(null as never);
+
+    await expect(runBeforeLoad(newClient(), "/share?text=hello")).rejects.toMatchObject({
+      options: { to: "/login", search: { redirect: "/share?text=hello" } },
     });
   });
 

@@ -7,6 +7,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, type CSSProperties } from "react";
 import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
 import { useDesktopSessionRefresh } from "~/modules/auth/desktop-session-refresh.ts";
 import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
@@ -43,14 +44,19 @@ import { BrowserPanelOwner } from "~/modules/browser/ui/browser-tab.tsx";
 import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
 
+/** The sign-in page's `redirect`, left out for the home page it returns to anyway. */
+const returnTo = (href: string | undefined) =>
+  redirectSearch(href === "/" ? undefined : safeRedirect(href));
+
 export const Route = createFileRoute("/_app")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
     // Subscribed while the session is checked, so the loaders read after it and
     // the first sync open has nothing to refetch. Browser only, like the cache owner.
     const feed = typeof window === "undefined" ? undefined : openSyncFeed();
     try {
       const user = await context.queryClient.ensureQueryData(sessionUserQuery);
-      if (!user) throw redirect({ to: "/login" });
+      // Back to where they were going once signed in: a deep link, or what was shared.
+      if (!user) throw redirect({ to: "/login", search: returnTo(location?.href) });
       const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
       if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
       // Every server function this tree loads would refuse an unapproved
