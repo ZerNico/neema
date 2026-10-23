@@ -61,7 +61,12 @@ export function auditOverflow(
     .auditTextLayout(deck, { measureText, tolerancePx: TOLERANCE_PX })
     .flatMap((issue) => {
       const slide = slides[issue.slideIndex];
-      if (issue.kind === "soft-wrap" || slide?.slideId === undefined) return [];
+      // Only text escaping its box: wraps, split words and small sizes are typography, not overflow.
+      if (
+        (issue.kind !== "overflow-x" && issue.kind !== "overflow-y") ||
+        slide?.slideId === undefined
+      )
+        return [];
       const named = (issue.shapeName !== null && slide.byName.get(issue.shapeName)) || [];
       return [
         {

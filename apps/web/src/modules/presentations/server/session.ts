@@ -186,6 +186,7 @@ const newNotesParts = [
   /^ppt\/theme\/theme\d+\.xml$/,
 ];
 const newMedia = /^ppt\/media\/[^/]+\.(?:png|jpe?g)$/i;
+const tableStyles = "ppt/tableStyles.xml";
 const replacedMedia = /^ppt\/media\/presentation-[0-9a-f-]+\.(?:png|jpg)$/;
 
 /** The chart part a frame points at, its relationships and the workbook they embed. */
@@ -604,6 +605,14 @@ export async function apply(
         bandRow: op.banded ?? true,
       });
       styleTable(deck, shape, op, op.header ?? true);
+      // Office Kit writes the table style's definition into the deck, as PowerPoint
+      // does, so other viewers draw the same table; a deck without the part gains it.
+      allowed.add(tableStyles);
+      if (!session.parts.has(tableStyles)) {
+        allowed.add("ppt/_rels/presentation.xml.rels");
+        allowed.add("[Content_Types].xml");
+        additions.push(/^ppt\/tableStyles\.xml$/);
+      }
       createdShape = { slide, shape };
       break;
     }

@@ -118,7 +118,7 @@ catalogs:
       version: 4.0.5
 
 patchedDependencies:
-  '@office-kit/pptx-preview@0.11.0': e85d2415c0d8e9aad93a8a6a6e74b1fedb4c888834fe43361803d55a679df24f
+  '@office-kit/pptx-preview@0.17.0': fdb8b517646e4bcb6f4dd3b0fb813af4eb78e291d2a4ca09d3e05833af025469
 
 importers:
 
@@ -279,17 +279,17 @@ importers:
         specifier: 10.0.4
         version: 10.0.4(supports-color@7.2.0)
       '@office-kit/docx':
-        specifier: 0.1.1
-        version: 0.1.1
+        specifier: 0.2.0
+        version: 0.2.0
       '@office-kit/pptx':
-        specifier: 0.21.0
-        version: 0.21.0
+        specifier: 0.25.0
+        version: 0.25.0
       '@office-kit/pptx-preview':
-        specifier: 0.11.0
-        version: 0.11.0(patch_hash=e85d2415c0d8e9aad93a8a6a6e74b1fedb4c888834fe43361803d55a679df24f)(@office-kit/pptx@0.21.0)
+        specifier: 0.17.0
+        version: 0.17.0(patch_hash=fdb8b517646e4bcb6f4dd3b0fb813af4eb78e291d2a4ca09d3e05833af025469)(@office-kit/pptx@0.25.0)
       '@office-kit/xlsx':
-        specifier: 0.23.0
-        version: 0.23.0
+        specifier: 0.24.2
+        version: 0.24.2
       '@react-email/components':
         specifier: 1.0.12
         version: 1.0.12(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -1846,9 +1846,6 @@ packages:
     resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
     engines: {node: '>= 20.19.0'}
 
-  '@nodable/entities@3.0.0':
-    resolution: {integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==}
-
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
     engines: {node: '>= 8'}
@@ -1922,22 +1919,22 @@ packages:
     resolution: {integrity: sha512-leBRl6F5F0TvWut8m1/aZcMTUHi2vXjKeMJ/Ik1lW7Q7Yy16Dhtkklu+cEqQww1p1NeLnUNzV3+uwpzqRcy9vw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@office-kit/docx@0.1.1':
-    resolution: {integrity: sha512-ZzFJ0danc30XLtShhjsJi4bUu7TM9UhHFB0QfU3eHUaRLm9mXzP0mOlg/QsdlXpOsupSk23qsLJEwNwAzK3D/Q==}
+  '@office-kit/docx@0.2.0':
+    resolution: {integrity: sha512-kPXzoT1+Anv7W7cWae/MI6Np00LWR5Y1+Mt5Cr9bmB2dMuZ+CC4Fm239kPFjCDOBuiAJ/onZ4LV5Y0sSNlhcYg==}
     engines: {node: '>=20'}
 
-  '@office-kit/pptx-preview@0.11.0':
-    resolution: {integrity: sha512-Mf4zcaT/uvlTxkkqRvHjZY8Ejy9N0zHdRrZcGygm1D4ZqpHsmk5x1GzUg3xCbX295JdJGWvZmSogBTSNQcP+8Q==}
+  '@office-kit/pptx-preview@0.17.0':
+    resolution: {integrity: sha512-pqZyhZvsGVFXrVB2Q2UmZTSjN08Gu1V12uI2mDNhA+c/M2sZm64rtXwKiEji6xIl8ExWJp6sbN7j1B+glR0mug==}
     engines: {node: '>=22.18.0'}
     peerDependencies:
-      '@office-kit/pptx': ^0.21.0
+      '@office-kit/pptx': ^0.25.0
 
-  '@office-kit/pptx@0.21.0':
-    resolution: {integrity: sha512-m3E+DUw4KmnK1IMh87huvm84DUISjS4nxRZsGq4mJvVoqHmkqloZcZcxbFncwC8eLfpyHyHGk5x8OjN0LXcmLA==}
+  '@office-kit/pptx@0.25.0':
+    resolution: {integrity: sha512-kUqVs3r3hf+p5JUp4dcrNt4rSFySZREkg0FycB+H2eJuvoiSh7AuMsNhm780/OplTnDFgeadm09YW3VLWd9fiQ==}
     engines: {node: '>=22.18.0'}
 
-  '@office-kit/xlsx@0.23.0':
-    resolution: {integrity: sha512-Qkz4AOyuSWLmMy8jfx4oSFnpSvOTUz9pqAGmvOMJTGN5M5xKX4BApuBqKYZmWJk++HXVfNhK56reOG12Vl8j1Q==}
+  '@office-kit/xlsx@0.24.2':
+    resolution: {integrity: sha512-QOzkHrtBqYRDrSRiQXqeUTWrbvx9G1/XkkfdhiIATlpZ78+cNgFOSdcKTGrgMHxdhOeHrx5hqGQKpKt7wFfNRg==}
     engines: {node: '>=22.0.0'}
 
   '@oozcitak/dom@2.0.2':
@@ -4133,9 +4130,6 @@ packages:
     resolution: {integrity: sha512-BJ8/l4R5LRE7hW9WdSuGYrLSHi2ynxeFpDFbH0K/CgNeY/tyhk+vO6TYxXC5r5CpUhNVX310xzPsN/H9lCdfOA==}
     engines: {node: '>=14'}
 
-  anynum@1.0.1:
-    resolution: {integrity: sha512-N6//FLET/tXYNM/F6ABca1oH6fWB+KlTt909Le28WMDBk8oaT4vY17DCrwg2MvmuqUKt3Ni4N5dGJ/EoBgcO6A==}
-
   app-builder-lib@26.15.3:
     resolution: {integrity: sha512-2VnyWkqsP5v5XbBhL3tD5Syx8iNPBYsoU7kY4S2fz7wg8Rj/nztWKCUzGKaFRTv0Xwf3/H058CR1Kvtd/3lRow==}
     engines: {node: '>=14.0.0'}
@@ -5526,13 +5520,6 @@ packages:
   fast-uri@3.1.7:
     resolution: {integrity: sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg==}
 
-  fast-xml-builder@1.3.1:
-    resolution: {integrity: sha512-pIM/1n3ntFXKYrUZwW7QCK0gAW7XY+wzj1YMIV3tLDvPj/V+zTGJK5e3/4WJfwj0qWw2ElNXiTixda/R+3YSug==}
-
-  fast-xml-parser@5.11.1:
-    resolution: {integrity: sha512-TBw6K/fxoQGGjCmZDw9w/ZwP3uDcnTM4YH/g+PFRWr8sbe5idXtxNN6vITh4+1ruCZaho6uBFurElsA7F0zzgw==}
-    hasBin: true
-
   fastdom@1.0.12:
     resolution: {integrity: sha512-LB+xjSTEbjHE1cWsxu+tN2Xqr1kpi+V9aADI7sVM5ZMaXyYGPHULQMzpJMYqOTULK/73pUkWVzzObFRBkPr+hg==}
 
@@ -6066,9 +6053,6 @@ packages:
   is-unicode-supported@2.1.0:
     resolution: {integrity: sha512-mE00Gnza5EEB3Ds0HfMyllZzbBrmLOX3vfWoj9A9PEnTfratQ/BcaJOuMhnkhjXvb2+FkY3VuHqtAGpTPmglFQ==}
     engines: {node: '>=18'}
-
-  is-unsafe@2.0.2:
-    resolution: {integrity: sha512-HgbIHPBH0KHHCcjLfGsCvhtPTVxjaAZlXjwdz7/GQC40SjSe4sfQsar8J5VFo8JOSbarkpV0OLG95bbaNd9aAQ==}
 
   is-wsl@2.2.0:
     resolution: {integrity: sha512-fKzAra0rGJUUBwGBgNkHZuToZcn+TtXHpeCgmkMJMMYx1sQDYaCSyjJBSCa2nH1DGm7s3n1oBnohoVTBaN7Lww==}
@@ -7167,10 +7151,6 @@ packages:
     resolution: {integrity: sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==}
     engines: {node: '>=8'}
 
-  path-expression-matcher@1.6.2:
-    resolution: {integrity: sha512-enSlaiat05iasnzmgNxRj8reFdj3puY2QpNgP1aPIaVfT6nn9ICuPoFlKHk8EN22HcwewshO+mN2DGbkCEOtqQ==}
-    engines: {node: '>=14.0.0'}
-
   path-is-absolute@1.0.1:
     resolution: {integrity: sha512-AVbw3UJ2e9bq64vSaS9Am0fje1Pa8pbGqTTsmXfaIiMpnr5DlDhfJOuLj9Sf95ZPVDAUerDfEk88MPmPe7UCQg==}
     engines: {node: '>=0.10.0'}
@@ -7977,9 +7957,6 @@ packages:
     resolution: {integrity: sha512-laJTa3Jb+VQpaC6DseHhF7dXVqHTfJPCRDaEbid/drOhgitgYku/letMUqOXFoWV0zIIUbjpdH2t+tYj4bQMRQ==}
     engines: {node: '>=8'}
 
-  strnum@2.4.2:
-    resolution: {integrity: sha512-rDG3Ah4TV0k1hWvLSzkZtMmLN9+eS+h3knq4MP6A42Y3Yh5qGNnOUs1jJkoSr8FG5dsL28c7KgkIBzSEykqtuw==}
-
   style-mod@4.1.3:
     resolution: {integrity: sha512-i/n8VsZydrugj3Iuzll8+x/00GH2vnYsk1eomD8QiRrSAeW6ItbCQDtfXCeJHd0iwiNagqjQkvpvREEPtW3IoQ==}
 
@@ -8565,10 +8542,6 @@ packages:
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
-
-  xml-naming@0.3.0:
-    resolution: {integrity: sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==}
-    engines: {node: '>=16.0.0'}
 
   xmlbuilder2@4.0.3:
     resolution: {integrity: sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==}
@@ -10026,8 +9999,6 @@ snapshots:
 
   '@noble/hashes@2.3.0': {}
 
-  '@nodable/entities@3.0.0': {}
-
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
       '@nodelib/fs.stat': 2.0.5
@@ -10165,23 +10136,22 @@ snapshots:
       node-gyp: 13.0.2
       proc-log: 7.0.0
 
-  '@office-kit/docx@0.1.1':
+  '@office-kit/docx@0.2.0':
     dependencies:
       fflate: 0.8.3
 
-  '@office-kit/pptx-preview@0.11.0(patch_hash=e85d2415c0d8e9aad93a8a6a6e74b1fedb4c888834fe43361803d55a679df24f)(@office-kit/pptx@0.21.0)':
+  '@office-kit/pptx-preview@0.17.0(patch_hash=fdb8b517646e4bcb6f4dd3b0fb813af4eb78e291d2a4ca09d3e05833af025469)(@office-kit/pptx@0.25.0)':
     dependencies:
-      '@office-kit/pptx': 0.21.0
+      '@office-kit/pptx': 0.25.0
       '@resvg/resvg-js': 2.6.2
       fontkit: 2.0.4
 
-  '@office-kit/pptx@0.21.0':
+  '@office-kit/pptx@0.25.0':
     dependencies:
       fflate: 0.8.3
 
-  '@office-kit/xlsx@0.23.0':
+  '@office-kit/xlsx@0.24.2':
     dependencies:
-      fast-xml-parser: 5.11.1
       fflate: 0.8.3
       saxes: 6.0.0
 
@@ -12070,8 +12040,6 @@ snapshots:
 
   ansis@4.3.1: {}
 
-  anynum@1.0.1: {}
-
   app-builder-lib@26.15.3(dmg-builder@26.15.3)(electron-builder-squirrel-windows@26.15.3)(supports-color@7.2.0):
     dependencies:
       '@electron/asar': 3.4.1
@@ -13443,20 +13411,6 @@ snapshots:
 
   fast-uri@3.1.7: {}
 
-  fast-xml-builder@1.3.1:
-    dependencies:
-      path-expression-matcher: 1.6.2
-      xml-naming: 0.3.0
-
-  fast-xml-parser@5.11.1:
-    dependencies:
-      '@nodable/entities': 3.0.0
-      fast-xml-builder: 1.3.1
-      is-unsafe: 2.0.2
-      path-expression-matcher: 1.6.2
-      strnum: 2.4.2
-      xml-naming: 0.3.0
-
   fastdom@1.0.12:
     dependencies:
       strictdom: 1.0.1
@@ -14081,8 +14035,6 @@ snapshots:
   is-unicode-supported@1.3.0: {}
 
   is-unicode-supported@2.1.0: {}
-
-  is-unsafe@2.0.2: {}
 
   is-wsl@2.2.0:
     dependencies:
@@ -15488,8 +15440,6 @@ snapshots:
 
   path-exists@4.0.0: {}
 
-  path-expression-matcher@1.6.2: {}
-
   path-is-absolute@1.0.1: {}
 
   path-key@3.1.1: {}
@@ -16477,10 +16427,6 @@ snapshots:
     dependencies:
       min-indent: 1.0.1
 
-  strnum@2.4.2:
-    dependencies:
-      anynum: 1.0.1
-
   style-mod@4.1.3: {}
 
   style-to-js@1.1.21:
@@ -17106,8 +17052,6 @@ snapshots:
       powershell-utils: 0.1.0
 
   xml-name-validator@5.0.0: {}
-
-  xml-naming@0.3.0: {}
 
   xmlbuilder2@4.0.3:
     dependencies:

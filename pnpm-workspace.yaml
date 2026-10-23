@@ -57,4 +57,4 @@ allowBuilds:
 
 # Behaviour these packages do not have upstream; see Version pins in AGENTS.md.
 patchedDependencies:
-  "@office-kit/pptx-preview@0.11.0": patches/@office-kit__pptx-preview@0.11.0.patch
+  "@office-kit/pptx-preview@0.17.0": patches/@office-kit__pptx-preview@0.17.0.patch

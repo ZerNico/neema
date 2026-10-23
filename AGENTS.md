@@ -357,11 +357,13 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
 - `marked` stays on the major `@tiptap/markdown` depends on (17): documents hand the
   Markdown manager our own instance in place of its bundled one, so its lexer must
   produce the tokens Tiptap was written for.
-- `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
-  instead of the bundled substitutes. On a bump, check the substitution still runs through
-  one function. pnpm applies patches without fuzz, so when the patched file moved,
-  regenerate: drop the `patchedDependencies` entry, install, `pnpm patch` the new version,
-  apply the old patch there with `patch -p1`, then `pnpm patch-commit`.
+- `@office-kit/pptx-preview` is patched so `renderSlideToImage` passes `resolveFamily` on to
+  the SVG render; without it uploaded fonts draw as the bundled substitutes. On a bump,
+  check whether upstream passes it through (then drop the patch) and that every server
+  text path still resolves families through that option. pnpm applies patches without
+  fuzz, so when the patched file moved, regenerate: drop the `patchedDependencies` entry,
+  install, `pnpm patch` the new version, apply the old patch there with `patch -p1`, then
+  `pnpm patch-commit`.
 - `@dnd-kit/react`, `@dnd-kit/dom` and `@dnd-kit/abstract` are pre-1.0, pinned exact as a
   matched set; re-check the panel's tab dragging on a bump.
 - `@tanstack/charts` is pinned exact (1.x, after an API that moved every pre-1.0
