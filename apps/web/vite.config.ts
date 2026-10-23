@@ -40,6 +40,10 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  // The dependency scan reads server function files before Start strips their
+  // server imports, so it finds linkedom, which no page loads. Since 0.18.14 its
+  // CSS parser's browser build exports nothing, and bundling it crashes dev.
+  optimizeDeps: { exclude: ["linkedom"] },
   // The code highlight Worker loads each grammar with a dynamic import, which
   // only an ES module Worker bundle can split out. Every Worker here is a module.
   worker: { format: "es" },
