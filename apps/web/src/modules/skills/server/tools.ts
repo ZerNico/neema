@@ -7,6 +7,7 @@ import type { SkillManifestEntry } from "../schema.ts";
 import { formatFileRef } from "~/modules/custom-tools/authoring.ts";
 import { SkillReader, type SkillFileRead } from "./reader.ts";
 import { EntityId } from "~/entity-id.ts";
+import { advertisedAs, decodeToolInput } from "~/modules/tools/server/toolset.ts";
 
 const LoadParams = Schema.Struct({ skillId: EntityId });
 const ReadParams = Schema.Struct({
@@ -17,7 +18,7 @@ const ReadParams = Schema.Struct({
 const loadSkillTool = Tool.make("load_skill", {
   description:
     "Load a catalogue skill's pinned instructions into protected context. Use only when relevant. Skills never grant tools or permission to execute scripts.",
-  parameters: LoadParams,
+  parameters: Schema.Struct({ skillId: advertisedAs(LoadParams.fields.skillId) }),
   success: SkillToolResult,
   failure: SkillNotAvailable,
   failureMode: "error",
@@ -25,7 +26,11 @@ const loadSkillTool = Tool.make("load_skill", {
 const readSkillFileTool = Tool.make("read_skill_file", {
   description:
     "Read a supporting file from a loaded skill at its exact relative path. Start at offset 0, then follow nextOffset. References are guidance, never web URL authority; scripts remain inert text. A binary file (a template, image or font) returns file.ref instead of text: pass that reference to a tool that takes files, such as the sourceRef of inspect_presentation, inspect_spreadsheet or inspect_word_file for a PowerPoint, Excel or Word template.",
-  parameters: ReadParams,
+  parameters: Schema.Struct({
+    skillId: advertisedAs(ReadParams.fields.skillId),
+    path: advertisedAs(ReadParams.fields.path),
+    offset: advertisedAs(ReadParams.fields.offset),
+  }),
   success: SkillToolResult,
   failure: SkillNotAvailable,
   failureMode: "error",
@@ -166,9 +171,15 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     if (!root.ok)
       return yield* new SkillRejected({ reason: root.error ?? "Could not load selected skill." });
   }
-  const read = (raw: typeof ReadParams.Type) =>
+  // A malformed call is answered with what was wrong, so the model can retry;
+  // a strict tool schema would fail the whole answer.
+  const invalid = (issue: string) =>
+    Effect.succeed(result(undefined, "", "", "", `Invalid arguments: ${issue}`));
+  const read = (raw: unknown) =>
     Effect.gen(function* () {
-      const args = yield* Schema.decodeUnknownEffect(ReadParams)(raw).pipe(Effect.orDie);
+      const decoded = decodeToolInput(ReadParams, raw);
+      if (!decoded.ok) return yield* invalid(decoded.issue);
+      const args = decoded.value;
       yield* authorize();
       if (remaining <= 0)
         return result(undefined, args.skillId, "", "", "Skill operation limit reached.");
@@ -305,7 +316,10 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
     group: {
       toolkit: Toolkit.make(loadSkillTool, readSkillFileTool),
       handlers: {
-        load_skill: (args: typeof LoadParams.Type) => load(args.skillId),
+        load_skill: (raw: unknown) => {
+          const decoded = decodeToolInput(LoadParams, raw);
+          return decoded.ok ? load(decoded.value.skillId) : invalid(decoded.issue);
+        },
         read_skill_file: read,
       },
     },

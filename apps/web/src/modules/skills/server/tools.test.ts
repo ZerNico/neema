@@ -158,6 +158,17 @@ describe("private skill execution", () => {
     control.restore();
     await expect(Effect.runPromise(session.authorize())).rejects.toMatchObject(unavailable);
   });
+  it("answers a malformed call with what was wrong instead of failing the answer", async () => {
+    const session = await setup().prepare;
+    const missing = await Effect.runPromise(
+      session.group.handlers.read_skill_file({ skillId: "one", path: "references/notes.md" }),
+    );
+    expect(missing).toMatchObject({ ok: false, error: expect.stringMatching(/offset/) });
+    expect(
+      await Effect.runPromise(session.group.handlers.load_skill({ skillId: "x".repeat(129) })),
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/at most 128/) });
+    expect(session.remaining()).toBe(SKILL_LIMITS.operations);
+  });
   it("charges repeated and refused calls against a single operation budget", async () => {
     const session = await setup().prepare;
     for (let index = 0; index < SKILL_LIMITS.operations; index++)
