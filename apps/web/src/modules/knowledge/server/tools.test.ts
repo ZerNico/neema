@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Schema, Stream } from "effect";
-import { Tool } from "effect/unstable/ai";
+import { type AiError, Tool } from "effect/ai";
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { KnowledgeNotAvailable } from "../errors.ts";
@@ -226,12 +226,15 @@ describe("selected knowledge tools", () => {
     Effect.gen(function* () {
       const tools = yield* setup();
       const toolkit = (yield* mergeToolGroups([tools.group]))!;
+      // An untyped toolkit reports unknown services; its handlers' were provided when merged.
       const stream = yield* toolkit.handle("search_knowledge", {
         queries: ["one", "two", "three", "four"],
-      }) as Effect.Effect<Stream.Stream<{ result: unknown }, unknown, unknown>, unknown, never>;
-      const narrowed = stream as Stream.Stream<{ result: unknown }, unknown, never>;
-      const result = [...(yield* Stream.runCollect(narrowed))].at(-1)!
-        .result as KnowledgeToolResult;
+      }) as Effect.Effect<
+        Stream.Stream<Tool.HandlerResult<Tool.Any>, AiError.AiError, never>,
+        AiError.AiError,
+        never
+      >;
+      const result = [...(yield* Stream.runCollect(stream))].at(-1)!.result as KnowledgeToolResult;
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/invalid knowledge tool arguments: .*at most 3/);
       expect(tools.remaining()).toBe(KNOWLEDGE_TOOL_LIMITS.operations);
