@@ -354,6 +354,9 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
   on 4.0's graduated paths (`effect/sql`).
 - `vitest` is v5 (peer of `@effect/vitest`). `katex` stays on 0.16 because
   `@streamdown/math` pins `rehype-katex@7`.
+- `marked` stays on the major `@tiptap/markdown` depends on (17): documents hand the
+  Markdown manager our own instance in place of its bundled one, so its lexer must
+  produce the tokens Tiptap was written for.
 - `@office-kit/pptx-preview` is patched with `setFamilyResolver` so uploaded fonts render
   instead of the bundled substitutes. On a bump, check the substitution still runs through
   one function. pnpm applies patches without fuzz, so when the patched file moved,
