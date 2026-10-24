@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { approvalStatusQuery } from "./client.ts";
+import { meQuery } from "./client.ts";
 
 export function useApprovalStatus() {
-  const query = useQuery(approvalStatusQuery);
+  const query = useQuery({ ...meQuery, select: (me) => me?.approval ?? null });
   const client = useQueryClient();
   useEffect(() => {
     const source = new EventSource("/api/approval");
@@ -17,9 +17,9 @@ export function useApprovalStatus() {
         return;
       }
       refreshing = true;
-      dirty = client.isFetching({ queryKey: approvalStatusQuery.queryKey }) > 0;
+      dirty = client.isFetching({ queryKey: meQuery.queryKey }) > 0;
       void client
-        .invalidateQueries({ queryKey: approvalStatusQuery.queryKey }, { cancelRefetch: false })
+        .invalidateQueries({ queryKey: meQuery.queryKey }, { cancelRefetch: false })
         .finally(() => {
           refreshing = false;
           if (dirty && !disposed) refresh();

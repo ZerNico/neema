@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { meQuery } from "~/modules/auth/client.ts";
 import { myIntegrationsQuery } from "../client/queries.ts";
 import { announceSignIn } from "../client/sign-in-channel.ts";
 import type { IntegrationConnectionView, UserIntegration } from "../schema.ts";
@@ -50,7 +50,7 @@ const account: IntegrationConnectionView = {
 const mount = () => {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
   client.setQueryData(myIntegrationsQuery.queryKey, [wiki]);
-  client.setQueryData(sessionUserQuery.queryKey, { id: "me" } as never);
+  client.setQueryData(meQuery.queryKey, { user: { id: "me" } } as never);
   const done = vi.fn();
   render(
     <QueryClientProvider client={client}>

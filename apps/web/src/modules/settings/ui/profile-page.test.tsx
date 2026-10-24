@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "./profile-page.tsx";
-import { authClient, sessionUserQuery, type SessionData } from "~/modules/auth/client.ts";
+import { authClient, meQuery, type Me, type SessionData } from "~/modules/auth/client.ts";
 import { toast } from "sonner";
 import { signInOptionsQuery } from "~/modules/auth/queries.ts";
 
@@ -15,8 +15,8 @@ vi.mock("~/modules/auth/client.ts", () => ({
   },
   // The page reads the session the app shell already loaded, so every render
   // here seeds that cache. Fetching instead would mean it found nothing.
-  sessionUserQuery: {
-    queryKey: ["session-user"],
+  meQuery: {
+    queryKey: ["me"],
     staleTime: Infinity,
     queryFn: () => {
       throw new Error("ProfilePage must read the seeded session, not refetch it");
@@ -51,6 +51,11 @@ const SESSION_USER: SessionData["user"] = {
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
+const ME: Me = {
+  user: SESSION_USER,
+  identity: { userId: SESSION_USER.id, impersonatedBy: null },
+  approval: "approved",
+};
 
 // A promise that only resolves when the test says so, to observe the pending
 // state of a submit button.
@@ -67,7 +72,7 @@ const renderPage = (
   passwordLogin = true,
   providers: { id: string; label: string; signup: boolean; exclusive: boolean }[] = [],
 ) => {
-  client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+  client.setQueryData(meQuery.queryKey, ME);
   client.setQueryData(signInOptionsQuery.queryKey, {
     passwordLogin,
     passwordSignup: passwordLogin,
@@ -135,7 +140,7 @@ describe("ProfilePage", () => {
   it("updates the cached session user immediately after saving", async () => {
     const user = userEvent.setup();
     const client = new QueryClient();
-    client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+    client.setQueryData(meQuery.queryKey, ME);
     const invalidate = vi.spyOn(client, "invalidateQueries");
     updateUserMock.mockResolvedValue({ error: null } as never);
     renderPage(client);
@@ -146,12 +151,12 @@ describe("ProfilePage", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(updateUserMock).toHaveBeenCalledWith({ name: "Nico F" }));
-    expect(client.getQueryData(sessionUserQuery.queryKey)).toEqual({
-      ...SESSION_USER,
-      name: "Nico F",
+    expect(client.getQueryData(meQuery.queryKey)).toEqual({
+      ...ME,
+      user: { ...SESSION_USER, name: "Nico F" },
     });
     expect(invalidate).toHaveBeenCalledWith({
-      queryKey: sessionUserQuery.queryKey,
+      queryKey: meQuery.queryKey,
       exact: true,
     });
   });
@@ -171,7 +176,7 @@ describe("ProfilePage", () => {
   it("toasts without changing the cached user when the profile cannot be saved", async () => {
     const user = userEvent.setup();
     const client = new QueryClient();
-    client.setQueryData(sessionUserQuery.queryKey, SESSION_USER);
+    client.setQueryData(meQuery.queryKey, ME);
     const invalidate = vi.spyOn(client, "invalidateQueries");
     updateUserMock.mockResolvedValue({ error: { message: "nope" } } as never);
     renderPage(client);
@@ -179,7 +184,7 @@ describe("ProfilePage", () => {
     await user.type(screen.getByLabelText("Display name"), "!{Enter}");
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not save the profile."));
-    expect(client.getQueryData(sessionUserQuery.queryKey)).toEqual(SESSION_USER);
+    expect(client.getQueryData(meQuery.queryKey)).toEqual(ME);
     expect(invalidate).not.toHaveBeenCalled();
   });
 
@@ -197,7 +202,9 @@ describe("ProfilePage", () => {
     await user.type(input, "Later B");
     pending.resolve({ error: null });
     await waitFor(() =>
-      expect(client.getQueryData(sessionUserQuery.queryKey)).toMatchObject({ name: "Submitted A" }),
+      expect(client.getQueryData(meQuery.queryKey)).toMatchObject({
+        user: { name: "Submitted A" },
+      }),
     );
     expect(input).toHaveValue("Later B");
     const save = screen.getByRole("button", { name: /^(Save|Saved)$/ });

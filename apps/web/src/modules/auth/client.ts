@@ -1,8 +1,8 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
-import { getSessionUser, getSessionIdentity } from "./server/functions.ts";
-import { getApprovalStatus, getNeedsSetup } from "./server/signup-functions.ts";
+import { getMe } from "./server/functions.ts";
+import { getNeedsSetup } from "./server/signup-functions.ts";
 
 export const authClient = createAuthClient({
   plugins: [adminClient()],
@@ -11,36 +11,26 @@ export const authClient = createAuthClient({
 export type SessionData = typeof authClient.$Infer.Session;
 
 /**
- * The signed-in user behind the query cache, because `_app.beforeLoad` runs on
- * every navigation AND every hover preload. Uncached, that is a round trip in
- * front of the route's own data on each one, including a switch between two
- * chats already held in the cache.
+ * Who is signed in, whose caches this is and whether they may use the app,
+ * behind the query cache because `_app.beforeLoad` runs on every navigation
+ * AND every hover preload. Uncached, that is a round trip in front of the
+ * route's own data on each one, including a switch between two chats already
+ * held in the cache.
  *
  * Cleared on sign-out rather than expired: nothing here may outlive the
- * session it was read from.
+ * session it was read from. The stale time is short because approval changes
+ * apart from the session, and a waiting page also invalidates it on push.
  */
-export const sessionUserQuery = queryOptions({
-  queryKey: ["session-user"],
-  queryFn: () => getSessionUser(),
+export const meQuery = queryOptions({
+  queryKey: ["me"],
+  queryFn: () => getMe(),
   staleTime: 30_000,
 });
 
-export const sessionIdentityQuery = queryOptions({
-  queryKey: ["session-identity"],
-  queryFn: () => getSessionIdentity(),
-  staleTime: 30_000,
-});
+export type Me = NonNullable<Awaited<ReturnType<typeof getMe>>>;
 
-/**
- * Whether this account may use the app. Not folded into `sessionUserQuery`
- * because approval changes independently, and a user held there for a week must
- * not keep a week-old answer.
- */
-export const approvalStatusQuery = queryOptions({
-  queryKey: ["approval-status"],
-  queryFn: () => getApprovalStatus(),
-  staleTime: 30_000,
-});
+/** The signed-in user as the shell holds it; undefined until first read, null when signed out. */
+export const useSessionUser = () => useQuery({ ...meQuery, select: (me) => me?.user ?? null }).data;
 
 /** Once set up, an instance never goes back, so a false answer is kept for good. */
 export const needsSetupQuery = queryOptions({

@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { approvalStatusQuery, sessionUserQuery } from "~/modules/auth/client.ts";
+import { meQuery } from "~/modules/auth/client.ts";
 import { authorizeQuery, packQuery, unpackQuery } from "~/modules/mcp-server/authorize-query.ts";
 import { getConsentRequest } from "~/modules/mcp-server/server/functions.ts";
 import { ConsentPage } from "~/modules/mcp-server/ui/consent-page.tsx";
@@ -11,16 +11,15 @@ export const Route = createFileRoute("/oauth/approve")({
   beforeLoad: async ({ context, search }) => {
     const query = unpackQuery(search.request);
     if (query === null) throw redirect({ to: "/" });
-    const user = await context.queryClient.ensureQueryData(sessionUserQuery);
-    if (!user) {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) {
       throw redirect({
         to: "/oauth/continue",
         search: { request: packQuery(authorizeQuery(query)) },
       });
     }
-    const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
-    if (approval !== "approved") throw redirect({ to: "/pending" });
-    return { query, account: user.email };
+    if (me.approval !== "approved") throw redirect({ to: "/pending" });
+    return { query, account: me.user.email };
   },
   loader: async ({ context }) => ({
     query: context.query,

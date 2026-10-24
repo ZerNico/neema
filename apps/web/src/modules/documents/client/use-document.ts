@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import type { DocumentComment } from "../schema.ts";
 import {
   commentOnDocument,
@@ -156,7 +156,7 @@ class Connections {
  */
 export function useDocument(documentId: string, live: boolean) {
   const query = useQuery(documentQuery(documentId));
-  const { data: user } = useQuery(sessionUserQuery);
+  const user = useSessionUser();
   const [connections] = useState(() => new Connections());
   useEffect(
     () => (live ? connections.open(documentId) : undefined),

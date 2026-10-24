@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ComponentProps, ReactNode } from "react";
 import { StrictMode, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getSessionIdentity } from "~/modules/auth/server/functions.ts";
+import { getMe } from "~/modules/auth/server/functions.ts";
 import { AppMotionProvider } from "~/ui/motion";
 import { defaultDetailPanelWidth, detailPanelMax } from "./detail-panel-width.ts";
 import {
@@ -64,7 +64,7 @@ vi.mock("@tanstack/react-router", () => ({
     }),
 }));
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => environment.mobile }));
-vi.mock("~/modules/auth/server/functions.ts", () => ({ getSessionIdentity: vi.fn() }));
+vi.mock("~/modules/auth/server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("~/modules/auth/client.ts", () => ({
   authClient: {
     $store: {
@@ -610,10 +610,10 @@ it("survives an identity revalidation on tab return without replaying its open a
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
   const identity = { userId: "user", impersonatedBy: null };
   let release!: (value: typeof identity) => void;
-  vi.mocked(getSessionIdentity).mockImplementation(
+  vi.mocked(getMe).mockImplementation(
     () =>
       new Promise((resolve) => {
-        release = resolve;
+        release = (next) => resolve({ identity: next } as never);
       }),
   );
   render(

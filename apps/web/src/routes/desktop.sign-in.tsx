@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { approvalStatusQuery, sessionUserQuery } from "~/modules/auth/client.ts";
+import { meQuery } from "~/modules/auth/client.ts";
 import { DesktopSignInPage } from "~/modules/auth/ui/desktop-sign-in-page.tsx";
 import { desktopSignInPath } from "~/modules/auth/ui/desktop-sign-in-path.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
@@ -19,12 +19,11 @@ export const Route = createFileRoute("/desktop/sign-in")({
       ? { challenge: search["challenge"] }
       : {},
   beforeLoad: async ({ context, search }) => {
-    const user = await context.queryClient.ensureQueryData(sessionUserQuery);
-    if (!user)
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me)
       throw redirect({ to: "/login", search: { redirect: desktopSignInPath(search.challenge) } });
-    const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
-    if (approval !== "approved") throw redirect({ to: "/pending" });
-    return { user };
+    if (me.approval !== "approved") throw redirect({ to: "/pending" });
+    return { user: me.user };
   },
   loader: ({ context }) => ({ user: context.user }),
   component: DesktopSignInRoute,

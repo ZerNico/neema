@@ -2,7 +2,7 @@ import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-quer
 import { Schema } from "effect";
 import { useState } from "react";
 import { toast } from "sonner";
-import { authClient, sessionUserQuery } from "~/modules/auth/client.ts";
+import { authClient, meQuery } from "~/modules/auth/client.ts";
 import { linkedAccountsQuery, signInOptionsQuery } from "~/modules/auth/queries.ts";
 import { ConnectedAccounts } from "~/modules/auth/ui/connected-accounts.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
@@ -35,7 +35,7 @@ export function ProfilePage({ linkError }: { linkError?: string | undefined }) {
   // The same session the app shell already resolved, not a second read of it:
   // `_app` cannot reach this route without it, and the name form patches this
   // cache on save, so reading anything else would show a stale display name.
-  const { data: user } = useSuspenseQuery(sessionUserQuery);
+  const { data: user } = useSuspenseQuery({ ...meQuery, select: (me) => me?.user ?? null });
   if (!user) return null;
   return <ProfileForms user={user} linkError={linkError} />;
 }
@@ -71,8 +71,8 @@ function ProfileForms({
       // Confirm before the reset: resetting ends the submit, and in between the
       // button would show its idle label for a moment.
       markNameSaved();
-      queryClient.setQueryData(sessionUserQuery.queryKey, (current) =>
-        current ? { ...current, name } : current,
+      queryClient.setQueryData(meQuery.queryKey, (current) =>
+        current ? { ...current, user: { ...current.user, name } } : current,
       );
       const currentName = nameForm.state.values.name;
       nameForm.reset({ name });
@@ -80,7 +80,7 @@ function ProfileForms({
       // The shell observes this cache, so the patch above updates it immediately;
       // refetch in the background to reconcile with the authoritative session.
       void queryClient.invalidateQueries({
-        queryKey: sessionUserQuery.queryKey,
+        queryKey: meQuery.queryKey,
         exact: true,
       });
     },

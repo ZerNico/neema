@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { clearDeviceCaches, setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { authClient } from "./client.ts";
 import { isNotApprovedError } from "./signup.ts";
-import { getSessionIdentity } from "./server/functions.ts";
+import { getMe } from "./server/functions.ts";
 import {
   cacheOwnerOf,
   isUnauthenticatedError,
@@ -99,8 +99,9 @@ export function IdentityBoundary({
     if (current.leaving || current.disposed || current.mutating) return Promise.resolve(false);
     if (current.check) return current.check;
     const epoch = current.epoch;
-    current.check = getSessionIdentity()
-      .then((next) => {
+    current.check = getMe()
+      .then((me) => {
+        const next = me?.identity ?? null;
         if (current.leaving || current.disposed || current.mutating || epoch !== current.epoch)
           return false;
         if (!sameIdentity(initialIdentity, next)) {

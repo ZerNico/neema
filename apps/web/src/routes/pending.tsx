@@ -1,16 +1,16 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useApprovalStatus } from "~/modules/auth/use-approval-status.ts";
 import { useEffect } from "react";
-import { approvalStatusQuery, authClient } from "~/modules/auth/client.ts";
+import { authClient, meQuery } from "~/modules/auth/client.ts";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 
 export const Route = createFileRoute("/pending")({
   beforeLoad: async ({ context }) => {
-    const status = await context.queryClient.ensureQueryData(approvalStatusQuery);
-    if (status === null) throw redirect({ to: "/login" });
-    if (status === "approved") throw redirect({ to: "/" });
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (me === null) throw redirect({ to: "/login" });
+    if (me.approval === "approved") throw redirect({ to: "/" });
   },
   component: PendingPage,
 });

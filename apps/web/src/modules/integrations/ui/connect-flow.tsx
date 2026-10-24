@@ -2,7 +2,7 @@ import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { Button } from "~/ui/primitives/button";
 import { DialogFooter } from "~/ui/primitives/dialog";
@@ -57,7 +57,7 @@ export function ConnectFlow({
   );
   const { data } = useQuery({ ...myIntegrationsQuery, enabled: live === undefined });
   // Who is asking, which every sign-in link names; until it is known there is no link.
-  const { data: me } = useQuery(sessionUserQuery);
+  const me = useSessionUser();
   // The window of the sign-in under way: a new one or Cancel closes it, so an earlier
   // sign-in cannot finish behind the dialog's back and add a second account.
   const popup = useRef<Window | null>(null);

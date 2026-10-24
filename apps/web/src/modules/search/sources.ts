@@ -19,7 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ADMIN_SECTIONS } from "~/modules/admin/sections.ts";
 import { useAgentSearch } from "~/modules/agents/client/search.ts";
 import { useProjectSearch } from "~/modules/projects/client/search.ts";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { useChatSearch } from "~/modules/chat/client/search.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import type { Capabilities } from "~/modules/groups/policy.ts";
@@ -132,7 +132,7 @@ const page = (to: string, label: string, icon: SearchItem["icon"], detail?: stri
 /** App pages you may open, only once something is typed so they don't crowd recents. */
 const usePageSearch: SearchSource = (query, active) => {
   const { data: capabilities } = useQuery(capabilitiesQuery);
-  const { data: user } = useQuery(sessionUserQuery);
+  const user = useSessionUser();
   const desktop = useDesktop();
   const can = (capability: keyof Capabilities) => !!capabilities?.[capability];
   const items =

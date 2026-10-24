@@ -1,7 +1,7 @@
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { useQuery } from "@tanstack/react-query";
 import { useBlocker } from "@tanstack/react-router";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { projectMembersQuery } from "~/modules/projects/client/queries.ts";
 import {
   useCallback,
@@ -161,7 +161,7 @@ function DocumentSession({
     shouldBlockFn: async () => controller.unpersisted() && !(await controller.flush()),
     enableBeforeUnload: controller.unpersisted,
   });
-  const { data: me } = useQuery(sessionUserQuery);
+  const me = useSessionUser();
   const subtitle = documentSubtitle(controller, me?.id);
   const projectId = controller.document?.projectId ?? null;
   const { data: members } = useQuery({

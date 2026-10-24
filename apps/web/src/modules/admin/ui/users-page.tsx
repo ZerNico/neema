@@ -2,7 +2,7 @@ import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { authClient, sessionIdentityQuery } from "~/modules/auth/client.ts";
+import { authClient, meQuery } from "~/modules/auth/client.ts";
 import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import { membershipsQuery, usersQuery } from "../client/queries.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -31,7 +31,7 @@ export function UsersPage() {
   const boundary = useIdentityBoundary();
   // The identity the boundary already pinned for this tree, not a second
   // session read: impersonating swaps it, and both must agree on who "you" is.
-  const { data: identity } = useQuery(sessionIdentityQuery);
+  const { data: identity } = useQuery({ ...meQuery, select: (me) => me?.identity ?? null });
   // Read-only here; membership is edited on the group detail pages.
   const memberships = useQuery(membershipsQuery);
 

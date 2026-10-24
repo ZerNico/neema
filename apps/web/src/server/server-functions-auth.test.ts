@@ -10,10 +10,8 @@ const SOURCE = join(import.meta.dirname, "..");
  */
 const PUBLIC = new Set([
   "modules/auth/server/signup-functions.ts#getSignInOptions",
-  "modules/auth/server/signup-functions.ts#getApprovalStatus",
   "modules/auth/server/signup-functions.ts#getNeedsSetup",
-  "modules/auth/server/functions.ts#getSessionUser",
-  "modules/auth/server/functions.ts#getSessionIdentity",
+  "modules/auth/server/functions.ts#getMe",
 ]);
 
 const sources = (directory: string): string[] =>

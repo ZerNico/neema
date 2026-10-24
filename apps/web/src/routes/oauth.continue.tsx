@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { approvalStatusQuery, authClient, sessionUserQuery } from "~/modules/auth/client.ts";
+import { authClient, meQuery } from "~/modules/auth/client.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { AUTHORIZE_PATH, unpackQuery } from "~/modules/mcp-server/authorize-query.ts";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -21,11 +21,10 @@ export const Route = createFileRoute("/oauth/continue")({
     const query = unpackQuery(search.request);
     if (query === null) throw redirect({ to: "/" });
     const back = `/oauth/continue?request=${search.request}`;
-    const user = await context.queryClient.ensureQueryData(sessionUserQuery);
-    if (!user) throw redirect({ to: "/login", search: { redirect: back } });
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) throw redirect({ to: "/login", search: { redirect: back } });
     if (search.fresh) return { back };
-    const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
-    if (approval !== "approved") throw redirect({ to: "/pending" });
+    if (me.approval !== "approved") throw redirect({ to: "/pending" });
     throw redirect({ href: `${AUTHORIZE_PATH}?${query}`, reloadDocument: true });
   },
   component: SignInAgain,

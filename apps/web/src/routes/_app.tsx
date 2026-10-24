@@ -4,7 +4,6 @@ import {
   WorkAttention,
   WorkConnectionNotice,
 } from "~/modules/desktop/client/work-host.tsx";
-import { useQuery } from "@tanstack/react-query";
 import { useCallback, type CSSProperties } from "react";
 import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
@@ -13,11 +12,7 @@ import { IdentityBoundary } from "~/modules/auth/identity-boundary.tsx";
 import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import { cacheOwnerOf, type SessionIdentity } from "~/modules/auth/identity.ts";
 import { setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
-import {
-  approvalStatusQuery,
-  sessionIdentityQuery,
-  sessionUserQuery,
-} from "~/modules/auth/client.ts";
+import { meQuery, useSessionUser } from "~/modules/auth/client.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { sidebarPinsQuery } from "~/modules/navigation/client/queries.ts";
@@ -54,15 +49,13 @@ export const Route = createFileRoute("/_app")({
     // the first sync open has nothing to refetch. Browser only, like the cache owner.
     const feed = typeof window === "undefined" ? undefined : openSyncFeed();
     try {
-      const user = await context.queryClient.ensureQueryData(sessionUserQuery);
+      const me = await context.queryClient.ensureQueryData(meQuery);
       // Back to where they were going once signed in: a deep link, or what was shared.
-      if (!user) throw redirect({ to: "/login", search: returnTo(location?.href) });
-      const identity = await context.queryClient.ensureQueryData(sessionIdentityQuery);
-      if (!identity || identity.userId !== user.id) throw redirect({ to: "/login" });
+      if (!me) throw redirect({ to: "/login", search: returnTo(location?.href) });
       // Every server function this tree loads would refuse an unapproved
       // account, so it is turned away before any of them runs.
-      const approval = await context.queryClient.ensureQueryData(approvalStatusQuery);
-      if (approval !== "approved") throw redirect({ to: "/pending" });
+      if (me.approval !== "approved") throw redirect({ to: "/pending" });
+      const { user, identity } = me;
       // Known before anything renders, so a cache can be read for the first frame.
       // Browser only: on a server, module state would be shared by every request.
       if (typeof window !== "undefined") setDeviceCacheOwner(cacheOwnerOf(identity));
@@ -179,7 +172,7 @@ export function SessionAppSidebar({
   initialUser: Parameters<typeof AppSidebar>[0]["user"];
   impersonating?: boolean;
 }) {
-  const { data: sessionUser } = useQuery(sessionUserQuery);
+  const sessionUser = useSessionUser();
   if (sessionUser === null || (sessionUser && sessionUser.id !== initialUser.id)) return null;
   return (
     <AppSidebar

@@ -6,7 +6,14 @@ import { useApprovalStatus } from "./use-approval-status.ts";
 
 const status = vi.hoisted(() => vi.fn<() => Promise<"pending" | "approved" | "rejected" | null>>());
 vi.mock("./client.ts", () => ({
-  approvalStatusQuery: { queryKey: ["approval-status"], queryFn: status, staleTime: Infinity },
+  meQuery: {
+    queryKey: ["me"],
+    queryFn: async () => {
+      const approval = await status();
+      return approval === null ? null : { approval };
+    },
+    staleTime: Infinity,
+  },
 }));
 
 beforeEach(() => {

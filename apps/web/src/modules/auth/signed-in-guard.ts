@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
-import { approvalStatusQuery, needsSetupQuery, sessionUserQuery } from "./client.ts";
+import { meQuery, needsSetupQuery } from "./client.ts";
 import { redirectSearch } from "./redirect.ts";
 
 /**
@@ -10,10 +10,9 @@ import { redirectSearch } from "./redirect.ts";
  * they wanted sits behind a form they cannot usefully submit.
  */
 export async function leaveIfSignedIn(queryClient: QueryClient, redirectTo: string | undefined) {
-  const user = await queryClient.ensureQueryData(sessionUserQuery);
-  if (!user) return;
-  const approval = await queryClient.ensureQueryData(approvalStatusQuery);
-  if (approval !== "approved") throw redirect({ to: "/pending" });
+  const me = await queryClient.ensureQueryData(meQuery);
+  if (!me) return;
+  if (me.approval !== "approved") throw redirect({ to: "/pending" });
   throw redirect({ href: redirectTo ?? "/" });
 }
 

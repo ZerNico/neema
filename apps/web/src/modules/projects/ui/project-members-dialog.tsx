@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { shareRecipientsQuery } from "~/modules/sharing/client/queries.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
@@ -81,7 +81,7 @@ export function ProjectMembersDialog({
   const confirm = useConfirm();
   const navigate = useNavigate();
   const manage = project.role === "owner";
-  const { data: me } = useQuery(sessionUserQuery);
+  const me = useSessionUser();
   const members = useQuery({ ...projectMembersQuery(project.id), enabled: open });
   const [role, setRole] = useState<ProjectMemberRole>("editor");
   const [picker, setPicker] = useState(false);

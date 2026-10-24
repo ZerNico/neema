@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { useId, useState, type ReactNode } from "react";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -118,7 +118,7 @@ export function SignInButton({
 }) {
   const desktop = useDesktop();
   // Every link names who asked: the system browser may be signed in as someone else.
-  const { data: me } = useQuery(sessionUserQuery);
+  const me = useSessionUser();
   return (
     <Button
       size="sm"

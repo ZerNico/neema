@@ -9,12 +9,8 @@ import {
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authClient } from "~/modules/auth/client.ts";
-import { getSessionIdentity, getSessionUser } from "~/modules/auth/server/functions.ts";
-import {
-  getApprovalStatus,
-  getNeedsSetup,
-  saveAuthSettings,
-} from "~/modules/auth/server/signup-functions.ts";
+import { getMe } from "~/modules/auth/server/functions.ts";
+import { getNeedsSetup, saveAuthSettings } from "~/modules/auth/server/signup-functions.ts";
 import { signInOptionsQuery } from "~/modules/auth/queries.ts";
 import type { SignInOptions } from "~/modules/auth/signup.ts";
 import { Route as AppRoute } from "./_app.tsx";
@@ -22,12 +18,8 @@ import { Route as LoginRoute } from "./login.tsx";
 import { Route as RegisterRoute } from "./register.tsx";
 import { Route as SetupRoute } from "./setup.tsx";
 
-vi.mock("~/modules/auth/server/functions.ts", () => ({
-  getSessionUser: vi.fn(),
-  getSessionIdentity: vi.fn(),
-}));
+vi.mock("~/modules/auth/server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("~/modules/auth/server/signup-functions.ts", () => ({
-  getApprovalStatus: vi.fn(),
   getNeedsSetup: vi.fn(),
   saveAuthSettings: vi.fn(),
   getSignInOptions: vi.fn(),
@@ -110,11 +102,13 @@ async function renderAt(
 beforeEach(() => {
   vi.clearAllMocks();
   // Signed out while the page's own guard runs; signed in once the form posts.
-  vi.mocked(getSessionUser)
+  vi.mocked(getMe)
     .mockResolvedValueOnce(null)
-    .mockResolvedValue(user as never);
-  vi.mocked(getSessionIdentity).mockResolvedValue({ userId: "u1", impersonatedBy: null });
-  vi.mocked(getApprovalStatus).mockResolvedValue("approved");
+    .mockResolvedValue({
+      user,
+      identity: { userId: "u1", impersonatedBy: null },
+      approval: "approved",
+    } as never);
   vi.mocked(getNeedsSetup).mockResolvedValue(false);
 });
 

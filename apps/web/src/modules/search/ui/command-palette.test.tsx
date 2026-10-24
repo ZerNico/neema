@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
-import { sessionUserQuery } from "~/modules/auth/client.ts";
+import { meQuery } from "~/modules/auth/client.ts";
 import { listConversations, searchChats } from "~/modules/chat/server/functions.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts";
@@ -32,10 +32,7 @@ vi.mock("~/modules/skills/server/functions.ts", () => ({
 vi.mock("~/modules/schedules/server/functions.ts", () => ({
   listSchedules: vi.fn().mockResolvedValue([]),
 }));
-vi.mock("~/modules/auth/server/functions.ts", () => ({
-  getSessionUser: vi.fn(),
-  getSessionIdentity: vi.fn(),
-}));
+vi.mock("~/modules/auth/server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("~/modules/groups/server/functions.ts", () => ({ getMyCapabilities: vi.fn() }));
 
 const agent = {
@@ -56,10 +53,8 @@ async function renderPalette(
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   queryClient.setQueryData(capabilitiesQuery.queryKey, options.capabilities ?? ALL_CAPABILITIES);
-  queryClient.setQueryData(sessionUserQuery.queryKey, {
-    id: "u1",
-    name: "Ada",
-    role: options.role ?? "user",
+  queryClient.setQueryData(meQuery.queryKey, {
+    user: { id: "u1", name: "Ada", role: options.role ?? "user" },
   } as never);
   queryClient.setQueryData(agentsQuery.queryKey, [agent] as never);
   const root = createRootRoute({

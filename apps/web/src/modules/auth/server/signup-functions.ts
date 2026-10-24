@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequestHeaders } from "@tanstack/react-start/server";
 import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { account, oauthProviders } from "~/db/schema/index.ts";
@@ -14,26 +13,13 @@ import {
   type AuthSettingsView,
   type SignInOptions,
 } from "../signup.ts";
-import { invalidateAuth, sessionFromHeaders } from "./auth.ts";
+import { invalidateAuth } from "./auth.ts";
 import { passwordLoginForced } from "./config.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
 
 const standard = Schema.toStandardSchemaV1;
-
-/**
- * Deliberately outside `requireSession`: the one thing a waiting account is
- * allowed to ask is whether it is still waiting. Null for a signed-out caller.
- */
-export const getApprovalStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const current = await sessionFromHeaders(getRequestHeaders());
-  if (!current) return null;
-  const status = await runServerFn(
-    Effect.flatMap(SignupRepo, (repo) => repo.statusOf(current.session.user.id)),
-  );
-  return status ?? "pending";
-});
 
 /** Public: a signed-out visitor has to know whether to set up or sign in. */
 export const getNeedsSetup = createServerFn({ method: "GET" }).handler(() =>

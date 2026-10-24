@@ -14,7 +14,7 @@ import {
 import type { SessionIdentity } from "./identity.ts";
 import { AccountMenu } from "./account-menu.tsx";
 import { SidebarProvider } from "~/ui/primitives/sidebar";
-import { getSessionIdentity } from "./server/functions.ts";
+import { getMe } from "./server/functions.ts";
 import { UsersPage } from "~/modules/admin/ui/users-page.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
 // A callback ref, not a ref object: the lint rule reads `hostRef` in JSX
 // as a ref access during render, and a plain function is what we assert on.
 const hostRef = vi.fn();
-vi.mock("./server/functions.ts", () => ({ getSessionIdentity: vi.fn() }));
+vi.mock("./server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
@@ -66,9 +66,9 @@ vi.mock("./client.ts", () => ({
   },
   // The users page reads who "you" are from the same identity the boundary
   // pins, so impersonation controls and the boundary cannot disagree.
-  sessionIdentityQuery: {
-    queryKey: ["session-identity"],
-    queryFn: async () => ({ userId: "admin", impersonatedBy: null }),
+  meQuery: {
+    queryKey: ["me"],
+    queryFn: async () => ({ identity: { userId: "admin", impersonatedBy: null } }),
   },
 }));
 vi.mock("~/modules/admin/client/queries.ts", async (importOriginal) => ({
@@ -83,7 +83,8 @@ vi.mock("./ui/pending-accounts.tsx", () => ({
 
 const original = { userId: "admin", impersonatedBy: null };
 const active = { userId: "target", impersonatedBy: "admin" };
-const identity = vi.mocked(getSessionIdentity);
+/** The identity the focus check reads; `getMe` answers with it. */
+const identity = vi.fn<() => Promise<SessionIdentity | null>>();
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -143,6 +144,10 @@ beforeEach(() => {
     vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   );
   identity.mockReset().mockResolvedValue(original);
+  vi.mocked(getMe).mockImplementation(async () => {
+    const next = await identity();
+    return next && ({ identity: next } as never);
+  });
   mocks.start.mockReset().mockResolvedValue({ error: null });
   mocks.stop.mockReset().mockResolvedValue({ error: null });
   mocks.signOut.mockReset().mockResolvedValue({ error: null });
