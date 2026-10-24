@@ -1,6 +1,12 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { SearchProviderSettings, UpdateWebSearchToolInput, WebSearchConfig } from "./schema.ts";
+import {
+  SearchProviderSettings,
+  ToolSettingsInput,
+  UpdateToolSettingsInput,
+  UpdateWebSearchToolInput,
+  WebSearchConfig,
+} from "./schema.ts";
 
 const config = { maxResults: 8 };
 const decodeConfig = Schema.decodeUnknownSync(WebSearchConfig);
@@ -47,5 +53,30 @@ describe("search provider settings", () => {
   it("keeps a hosted provider on its fixed endpoint", () => {
     expect(decode({ kind: "brave", baseUrl: "http://elsewhere" })).toEqual({ kind: "brave" });
     expect(() => decode({ kind: "bing" })).toThrow(/^Expected "tavily" \| .*\n  at \["kind"\]$/);
+  });
+});
+
+describe("tool settings", () => {
+  const decodeSettings = Schema.decodeUnknownSync(UpdateToolSettingsInput);
+
+  it("validates each write against its own tool's fields", () => {
+    expect(decodeSettings({ tool: "read_url", perPageCharCap: 15000 })).toEqual({
+      tool: "read_url",
+      perPageCharCap: 15000,
+    });
+    expect(() => decodeSettings({ tool: "maps", routing: "http://osrm.example.org" })).toThrow(
+      /at \["routing"\]$/,
+    );
+    expect(() => decodeSettings({ tool: "memory" })).toThrow(/^Missing key\n  at \["enabled"\]$/);
+  });
+
+  // Knowledge search changes only with its embedding space, which this call cannot see.
+  it("offers no write or read of knowledge search", () => {
+    expect(() => decodeSettings({ tool: "knowledge_search", enabled: false })).toThrow(
+      /^Expected \{ readonly "tool": "memory"/,
+    );
+    expect(() => Schema.decodeUnknownSync(ToolSettingsInput)({ tool: "knowledge_search" })).toThrow(
+      /^Expected "memory" \| .*\n  at \["tool"\]$/,
+    );
   });
 });

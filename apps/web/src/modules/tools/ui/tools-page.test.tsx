@@ -6,53 +6,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolsPage } from "./tools-page.tsx";
 import type { PublicTool } from "../server/repo.ts";
 import {
-  getDocumentParserTool,
-  getMemoryTool,
-  getUrlReaderTool,
-  getWebSearchTool,
   createSearchProvider,
   deleteSearchProvider,
+  getToolSettings,
   listSearchProviders,
   setSearchProviderOrder,
   testSearchProvider,
-  updateInteractiveUiTool,
-  updateMapsTool,
-  updateMemoryTool,
-  updateOfficeFilesTool,
-  updateUrlReaderTool,
   updateSearchProvider,
-  updateWebSearchTool,
+  updateToolSettings,
 } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { toast } from "sonner";
 
 vi.mock("../server/functions.ts", () => ({
-  getMemoryTool: vi.fn(),
-  getWebSearchTool: vi.fn(),
-  getUrlReaderTool: vi.fn(),
-  getDocumentParserTool: vi.fn(),
+  getToolSettings: vi.fn(),
+  updateToolSettings: vi.fn(),
   listSearchProviders: vi.fn(),
   createSearchProvider: vi.fn(),
   updateSearchProvider: vi.fn(),
   deleteSearchProvider: vi.fn(),
   setSearchProviderOrder: vi.fn(),
   testSearchProvider: vi.fn(),
-  updateMemoryTool: vi.fn(),
-  updateWebSearchTool: vi.fn(),
-  updateUrlReaderTool: vi.fn(),
-  updateDocumentParserTool: vi.fn(),
-  getOfficeFilesTool: vi.fn(),
-  updateOfficeFilesTool: vi.fn(),
-  getInteractiveUiTool: vi.fn(),
-  updateInteractiveUiTool: vi.fn(),
-  getMapsTool: vi.fn(),
-  updateMapsTool: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("~/modules/images/server/functions.ts", () => ({
-  getImageGenerationTool: vi.fn(),
-  updateImageGenerationTool: vi.fn(),
   listImageModels: vi.fn(async () => []),
   testImageModel: vi.fn(),
 }));
@@ -118,6 +96,9 @@ const defaultProviders = [
   searchProvider("Tavily", { kind: "tavily" }),
 ];
 
+/** What `getToolSettings` answers on a refetch, by tool. */
+const settings: Record<string, PublicTool | null> = {};
+
 const renderPage = ({
   webSearch = tool("web_search", { maxResults: 8 }),
   officeFiles = tool("office_files", {}),
@@ -133,14 +114,19 @@ const renderPage = ({
 } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const memory = tool("memory", {});
-  vi.mocked(getMemoryTool).mockResolvedValue(memory);
-  vi.mocked(getWebSearchTool).mockResolvedValue(webSearch);
+  Object.assign(settings, {
+    memory,
+    web_search: webSearch,
+    read_url: tool("read_url", { perPageCharCap: 12000 }),
+    document_parser: tool("document_parser", { maxChars: 120000, maxPages: 200 }),
+    office_files: officeFiles,
+    image_generation: tool("image_generation", {}),
+    interactive_ui: interactiveUi,
+    maps,
+  });
+  vi.mocked(getToolSettings).mockImplementation(async ({ data }) => settings[data.tool] ?? null);
   vi.mocked(listSearchProviders).mockResolvedValue(providers);
   client.setQueryData(["admin", "tools", "search-providers"], providers);
-  vi.mocked(getUrlReaderTool).mockResolvedValue(tool("read_url", { perPageCharCap: 12000 }));
-  vi.mocked(getDocumentParserTool).mockResolvedValue(
-    tool("document_parser", { maxChars: 120000, maxPages: 200 }),
-  );
   client.setQueryData(["admin", "tools", "memory"], memory);
   client.setQueryData(["admin", "presentation-fonts"], []);
   client.setQueryData(["admin", "tools", "office-files"], officeFiles);
@@ -176,34 +162,38 @@ beforeEach(() => {
 describe("ToolsPage", () => {
   it("updates the single instance-wide memory switch", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateMemoryTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateToolSettings).mockResolvedValue(undefined as never);
     renderPage();
 
     await user.click(screen.getByRole("switch", { name: "Memory enabled" }));
 
     await waitFor(() =>
-      expect(updateMemoryTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+      expect(updateToolSettings).toHaveBeenCalledWith({ data: { tool: "memory", enabled: false } }),
     );
   });
 
   it("switches interactive answers off, and their images with them", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateInteractiveUiTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateToolSettings).mockResolvedValue(undefined as never);
     renderPage();
 
     await user.click(screen.getByRole("switch", { name: "Images in interactive answers" }));
     await waitFor(() =>
-      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { images: false } }),
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "interactive_ui", images: false },
+      }),
     );
     await user.click(screen.getByRole("switch", { name: "Interactive answers enabled" }));
     await waitFor(() =>
-      expect(updateInteractiveUiTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "interactive_ui", enabled: false },
+      }),
     );
   });
 
   it("switches maps on their own and saves their services", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateMapsTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateToolSettings).mockResolvedValue(undefined as never);
     renderPage();
     // Maps are not part of interactive answers any more.
     expect(screen.queryByRole("switch", { name: "Maps in interactive answers" })).toBeNull();
@@ -214,8 +204,9 @@ describe("ToolsPage", () => {
     await user.type(routing, "https://osrm.example.org");
     await user.click(within(routing.closest("form")!).getByRole("button", { name: "Save" }));
     await waitFor(() =>
-      expect(updateMapsTool).toHaveBeenCalledWith({
+      expect(updateToolSettings).toHaveBeenCalledWith({
         data: {
+          tool: "maps",
           styleLight: "https://tiles.openfreemap.org/styles/positron",
           styleDark: "https://tiles.openfreemap.org/styles/dark",
           geocoder: "https://photon.komoot.io",
@@ -225,7 +216,9 @@ describe("ToolsPage", () => {
     );
 
     await user.click(screen.getByRole("switch", { name: "Maps enabled" }));
-    await waitFor(() => expect(updateMapsTool).toHaveBeenCalledWith({ data: { enabled: false } }));
+    await waitFor(() =>
+      expect(updateToolSettings).toHaveBeenCalledWith({ data: { tool: "maps", enabled: false } }),
+    );
   });
 
   it("keeps maps on while interactive answers are off", () => {
@@ -245,14 +238,14 @@ describe("ToolsPage", () => {
   it("submits the web search form on Enter and keeps the label while pending", async () => {
     const user = userEvent.setup();
     const pending = deferred<unknown>();
-    vi.mocked(updateWebSearchTool).mockReturnValue(pending.promise as never);
+    vi.mocked(updateToolSettings).mockReturnValue(pending.promise as never);
     renderPage();
 
     await user.type(screen.getByLabelText("Max results per query"), "{Backspace}5{Enter}");
 
     await waitFor(() =>
-      expect(updateWebSearchTool).toHaveBeenCalledWith({
-        data: { maxResults: 5, researchMaxSearchQueries: 80 },
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "web_search", maxResults: 5, researchMaxSearchQueries: 80 },
       }),
     );
     const [save] = saveButtons();
@@ -267,7 +260,7 @@ describe("ToolsPage", () => {
   it("loads and saves the research search budget without changing the pending label", async () => {
     const user = userEvent.setup();
     const pending = deferred<unknown>();
-    vi.mocked(updateWebSearchTool).mockReturnValue(pending.promise as never);
+    vi.mocked(updateToolSettings).mockReturnValue(pending.promise as never);
     renderPage({
       webSearch: tool("web_search", { maxResults: 8, researchMaxSearchQueries: 40 }),
     });
@@ -276,17 +269,15 @@ describe("ToolsPage", () => {
     await user.clear(cap);
     await user.type(cap, "60{Enter}");
     await waitFor(() =>
-      expect(updateWebSearchTool).toHaveBeenCalledWith({
-        data: { maxResults: 8, researchMaxSearchQueries: 60 },
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "web_search", maxResults: 8, researchMaxSearchQueries: 60 },
       }),
     );
     const [save] = saveButtons();
     expect(save).toBeDisabled();
     expect(save).toHaveAttribute("aria-busy", "true");
     expect(save).toHaveTextContent("Save");
-    vi.mocked(getWebSearchTool).mockResolvedValue(
-      tool("web_search", { maxResults: 8, researchMaxSearchQueries: 60 }),
-    );
+    settings.web_search = tool("web_search", { maxResults: 8, researchMaxSearchQueries: 60 });
     pending.resolve(undefined);
     await waitFor(() => expect(save).not.toHaveAttribute("aria-busy"));
     await waitFor(() => expect(cap).toHaveValue(60));
@@ -304,12 +295,12 @@ describe("ToolsPage", () => {
     await user.clear(cap);
     await user.type(cap, `${value}{Enter}`);
     expect(await screen.findByRole("alert")).toHaveTextContent(error);
-    expect(updateWebSearchTool).not.toHaveBeenCalled();
+    expect(updateToolSettings).not.toHaveBeenCalled();
   });
 
   it("retains the edited research budget after a failed save", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateWebSearchTool).mockRejectedValueOnce(new Error("offline"));
+    vi.mocked(updateToolSettings).mockRejectedValueOnce(new Error("offline"));
     renderPage();
     const cap = screen.getByLabelText("Search queries per research run");
     await user.clear(cap);
@@ -328,12 +319,12 @@ describe("ToolsPage", () => {
     await user.type(screen.getByLabelText("Max results per query"), "0{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Between 1 and 20.");
-    expect(updateWebSearchTool).not.toHaveBeenCalled();
+    expect(updateToolSettings).not.toHaveBeenCalled();
   });
 
   it("submits the URL reader form on Enter and rejects a cap below the floor", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateUrlReaderTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateToolSettings).mockResolvedValue(undefined as never);
     renderPage();
 
     const cap = screen.getByLabelText("Per-page character cap");
@@ -344,7 +335,9 @@ describe("ToolsPage", () => {
     await user.clear(cap);
     await user.type(cap, "15000{Enter}");
     await waitFor(() =>
-      expect(updateUrlReaderTool).toHaveBeenCalledWith({ data: { perPageCharCap: 15000 } }),
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "read_url", perPageCharCap: 15000 },
+      }),
     );
     // The URL reader's own button confirms; the web search and map ones are untouched.
     expect(
@@ -468,7 +461,7 @@ describe("ToolsPage", () => {
 
   it("toasts when a toggle fails", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateWebSearchTool).mockRejectedValue(new Error("boom"));
+    vi.mocked(updateToolSettings).mockRejectedValue(new Error("boom"));
     renderPage();
 
     await user.click(screen.getByRole("switch", { name: "Web search enabled" }));
@@ -489,13 +482,15 @@ describe("ToolsPage", () => {
 
   it("switches Office file editing off", async () => {
     const user = userEvent.setup();
-    vi.mocked(updateOfficeFilesTool).mockResolvedValue(undefined as never);
+    vi.mocked(updateToolSettings).mockResolvedValue(undefined as never);
     renderPage();
 
     await user.click(screen.getByRole("switch", { name: "Office files enabled" }));
 
     await waitFor(() =>
-      expect(updateOfficeFilesTool).toHaveBeenCalledWith({ data: { enabled: false } }),
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "office_files", enabled: false },
+      }),
     );
   });
 });

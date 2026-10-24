@@ -13,6 +13,8 @@ import { ResearchProgress } from "~/modules/chat/research-schema.ts";
 import { AskUserResult } from "./ask-user-schema.ts";
 import { ScheduleDraftToolEnvelope } from "~/modules/schedules/tool-schema.ts";
 import { CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
+import { INTERACTIVE_UI_TOOL, MAPS_TOOL } from "~/modules/genui/settings.ts";
+import { IMAGE_GENERATION_TOOL } from "~/modules/images/settings.ts";
 import { ImageToolEnvelope } from "~/modules/images/tool-schema.ts";
 import { SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
@@ -450,11 +452,6 @@ export type ToolChunkEnvelope = typeof ToolChunkEnvelope.Type;
 /**
  * Admin server-fn inputs
  */
-export const UpdateMemoryToolInput = Schema.Struct({
-  enabled: Schema.Boolean,
-});
-export type UpdateMemoryToolInput = typeof UpdateMemoryToolInput.Type;
-
 export const UpdateWebSearchToolInput = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   maxResults: Schema.optionalKey(WebSearchConfig.fields.maxResults),
@@ -500,6 +497,58 @@ export const UpdateUrlReaderToolInput = Schema.Struct({
   perPageCharCap: Schema.optionalKey(UrlReaderConfig.fields.perPageCharCap),
 });
 export type UpdateUrlReaderToolInput = typeof UpdateUrlReaderToolInput.Type;
+
+/** Map services are reached from the server and named in the reader's map: https only. */
+const MapServiceUrl = Schema.String.check(
+  Schema.isMaxLength(500),
+  Schema.isPattern(/^https:\/\/[^\s/]+(\/\S*)?$/),
+);
+
+const OnlyEnabled = { enabled: Schema.Boolean };
+
+/**
+ * One settings write per built-in tool, keyed by the `tools` row it changes.
+ * Scanned pages and knowledge search are not here: each validates against
+ * other state, so each has its own call.
+ */
+export const UpdateToolSettingsInput = Schema.Union([
+  Schema.Struct({ tool: Schema.Literal("memory"), ...OnlyEnabled }),
+  Schema.Struct({ tool: Schema.Literal("web_search"), ...UpdateWebSearchToolInput.fields }),
+  Schema.Struct({ tool: Schema.Literal("read_url"), ...UpdateUrlReaderToolInput.fields }),
+  Schema.Struct({
+    tool: Schema.Literal("document_parser"),
+    ...UpdateDocumentParserToolInput.fields,
+  }),
+  Schema.Struct({ tool: Schema.Literal("office_files"), ...OnlyEnabled }),
+  Schema.Struct({ tool: Schema.Literal(IMAGE_GENERATION_TOOL), ...OnlyEnabled }),
+  Schema.Struct({
+    tool: Schema.Literal(INTERACTIVE_UI_TOOL),
+    enabled: Schema.optionalKey(Schema.Boolean),
+    images: Schema.optionalKey(Schema.Boolean),
+  }),
+  Schema.Struct({
+    tool: Schema.Literal(MAPS_TOOL),
+    enabled: Schema.optionalKey(Schema.Boolean),
+    styleLight: Schema.optionalKey(MapServiceUrl),
+    styleDark: Schema.optionalKey(MapServiceUrl),
+    geocoder: Schema.optionalKey(MapServiceUrl),
+    routing: Schema.optionalKey(MapServiceUrl),
+  }),
+]);
+export type UpdateToolSettingsInput = typeof UpdateToolSettingsInput.Type;
+export const ToolSettingsInput = Schema.Struct({
+  tool: Schema.Literals([
+    "memory",
+    "web_search",
+    "read_url",
+    "document_parser",
+    "office_files",
+    IMAGE_GENERATION_TOOL,
+    INTERACTIVE_UI_TOOL,
+    MAPS_TOOL,
+  ]),
+});
+export type ToolSettingsInput = typeof ToolSettingsInput.Type;
 
 const ProviderLabel = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80));
 const ProviderSecret = Schema.String.check(Schema.isMaxLength(4000));

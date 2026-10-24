@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { INTERACTIVE_UI_TOOL, MAPS_TOOL } from "~/modules/genui/settings.ts";
 import { Effect, Redacted, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -10,12 +9,10 @@ import {
   SearchProviderOrderInput,
   TestScanReaderInput,
   TestSearchProviderInput,
-  UpdateDocumentParserToolInput,
+  ToolSettingsInput,
   UpdateScanReadingInput,
-  UpdateMemoryToolInput,
-  UpdateUrlReaderToolInput,
   UpdateSearchProviderInput,
-  UpdateWebSearchToolInput,
+  UpdateToolSettingsInput,
 } from "../schema.ts";
 import { readVisionConnection } from "~/modules/attachments/server/document-parser.ts";
 import { OcrModels } from "~/modules/pdf/server/ocr-models.ts";
@@ -30,53 +27,45 @@ import { WebSearchExecutor } from "./web-search.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-export const getMemoryTool = createServerFn({ method: "GET" })
+/** The built-in tools' settings rows, one per tool, without their secrets. */
+export const getToolSettings = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("memory"))));
+  .validator(standard(ToolSettingsInput))
+  .handler(({ data }) => runServerFn(ToolsRepo.use((repo) => repo.getTool(data.tool))));
 
-export const updateMemoryTool = createServerFn({ method: "POST" })
+export const updateToolSettings = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
-  .validator(standard(UpdateMemoryToolInput))
-  .handler(({ data }) =>
-    runServerFn(
-      Effect.gen(function* () {
-        const repo = yield* ToolsRepo;
-        const sync = yield* SyncBus;
-        const result = yield* repo.setToolEnabled("memory", data.enabled);
-        if (result.changed) {
-          yield* sync
-            .publishGlobal({ type: "memory.policy.changed" })
-            .pipe(
-              Effect.catchCause(() =>
-                Effect.logWarning("memory policy changed but sync publication failed"),
-              ),
-            );
-        }
-        return result.tool;
-      }),
-    ),
-  );
-
-export const getWebSearchTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("web_search"))));
-
-export const updateWebSearchTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(UpdateWebSearchToolInput))
+  .validator(standard(UpdateToolSettingsInput))
   .handler(({ data }) => {
-    const { enabled, ...config } = data;
+    if (data.tool === "memory") return runServerFn(setMemoryEnabled(data.enabled));
+    const { tool, enabled, ...config } = data;
     const configPatch = Object.fromEntries(
       Object.entries(config).filter(([, v]) => v !== undefined),
     );
     return runServerFn(
       ToolsRepo.use((repo) =>
-        repo.updateTool("web_search", {
+        repo.updateTool(tool, {
           ...(enabled !== undefined ? { enabled } : {}),
           ...(Object.keys(configPatch).length > 0 ? { config: configPatch } : {}),
         }),
       ),
     );
+  });
+
+/** Open chats read the memory policy live, so a real change is announced to them. */
+const setMemoryEnabled = (enabled: boolean) =>
+  Effect.gen(function* () {
+    const result = yield* (yield* ToolsRepo).setToolEnabled("memory", enabled);
+    if (result.changed) {
+      yield* (yield* SyncBus)
+        .publishGlobal({ type: "memory.policy.changed" })
+        .pipe(
+          Effect.catchCause(() =>
+            Effect.logWarning("memory policy changed but sync publication failed"),
+          ),
+        );
+    }
+    return result.tool;
   });
 
 /**
@@ -173,124 +162,6 @@ export const getWebSearchAvailability = createServerFn({ method: "GET" })
       }),
     ),
   );
-
-export const getUrlReaderTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("read_url"))));
-
-export const updateUrlReaderTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(UpdateUrlReaderToolInput))
-  .handler(({ data }) => {
-    const { enabled, ...config } = data;
-    const configPatch = Object.fromEntries(
-      Object.entries(config).filter(([, v]) => v !== undefined),
-    );
-    return runServerFn(
-      ToolsRepo.use((repo) =>
-        repo.updateTool("read_url", {
-          ...(enabled !== undefined ? { enabled } : {}),
-          ...(Object.keys(configPatch).length > 0 ? { config: configPatch } : {}),
-        }),
-      ),
-    );
-  });
-
-export const getOfficeFilesTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("office_files"))));
-
-export const updateOfficeFilesTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(Schema.Struct({ enabled: Schema.Boolean })))
-  .handler(({ data }) =>
-    runServerFn(
-      ToolsRepo.use((repo) => repo.updateTool("office_files", { enabled: data.enabled })),
-    ),
-  );
-
-/** Map services are reached from the server and named in the reader's map: https only. */
-const MapServiceUrl = Schema.String.check(
-  Schema.isMaxLength(500),
-  Schema.isPattern(/^https:\/\/[^\s/]+(\/\S*)?$/),
-);
-
-export const getInteractiveUiTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool(INTERACTIVE_UI_TOOL))));
-
-export const updateInteractiveUiTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(
-    standard(
-      Schema.Struct({
-        enabled: Schema.optionalKey(Schema.Boolean),
-        images: Schema.optionalKey(Schema.Boolean),
-      }),
-    ),
-  )
-  .handler(({ data }) => {
-    const { enabled, ...config } = data;
-    return runServerFn(
-      ToolsRepo.use((repo) =>
-        repo.updateTool(INTERACTIVE_UI_TOOL, {
-          ...(enabled !== undefined ? { enabled } : {}),
-          ...(Object.keys(config).length > 0 ? { config } : {}),
-        }),
-      ),
-    );
-  });
-
-export const getMapsTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool(MAPS_TOOL))));
-
-export const updateMapsTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(
-    standard(
-      Schema.Struct({
-        enabled: Schema.optionalKey(Schema.Boolean),
-        styleLight: Schema.optionalKey(MapServiceUrl),
-        styleDark: Schema.optionalKey(MapServiceUrl),
-        geocoder: Schema.optionalKey(MapServiceUrl),
-        routing: Schema.optionalKey(MapServiceUrl),
-      }),
-    ),
-  )
-  .handler(({ data }) => {
-    const { enabled, ...config } = data;
-    return runServerFn(
-      ToolsRepo.use((repo) =>
-        repo.updateTool(MAPS_TOOL, {
-          ...(enabled !== undefined ? { enabled } : {}),
-          ...(Object.keys(config).length > 0 ? { config } : {}),
-        }),
-      ),
-    );
-  });
-
-export const getDocumentParserTool = createServerFn({ method: "GET" })
-  .middleware([requireAdmin])
-  .handler(() => runServerFn(ToolsRepo.use((repo) => repo.getTool("document_parser"))));
-
-export const updateDocumentParserTool = createServerFn({ method: "POST" })
-  .middleware([requireAdmin])
-  .validator(standard(UpdateDocumentParserToolInput))
-  .handler(({ data }) => {
-    const { enabled, ...config } = data;
-    const configPatch = Object.fromEntries(
-      Object.entries(config).filter(([, v]) => v !== undefined),
-    );
-    return runServerFn(
-      ToolsRepo.use((repo) =>
-        repo.updateTool("document_parser", {
-          ...(enabled !== undefined ? { enabled } : {}),
-          ...(Object.keys(configPatch).length > 0 ? { config: configPatch } : {}),
-        }),
-      ),
-    );
-  });
 
 /**
  * How scanned pages are read, with what the admin page needs to show for it:

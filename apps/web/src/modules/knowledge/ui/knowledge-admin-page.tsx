@@ -17,7 +17,7 @@ import {
   disableEmbeddings,
   rebuildAllKnowledgeIndexes,
 } from "../server/functions.ts";
-import { updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
+import { updateToolSettings } from "~/modules/tools/server/functions.ts";
 import { NumberField } from "~/modules/tools/ui/tool-fields.tsx";
 import { useInvalidateTools } from "~/modules/tools/client/use-invalidate-tools.ts";
 import { integerBetween } from "~/modules/tools/ui/integer-between.ts";
@@ -284,7 +284,8 @@ function DocumentParserSection() {
   const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
 
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateDocumentParserTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) =>
+      updateToolSettings({ data: { tool: "document_parser", enabled } }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not update document parsing.", error),
   });
@@ -298,8 +299,12 @@ function DocumentParserSection() {
     validators: { onSubmit: Schema.toStandardSchemaV1(DocumentParserForm) },
     onSubmit: async ({ value }) => {
       try {
-        await updateDocumentParserTool({
-          data: { maxChars: Number(value.maxChars), maxPages: Number(value.maxPages) },
+        await updateToolSettings({
+          data: {
+            tool: "document_parser",
+            maxChars: Number(value.maxChars),
+            maxPages: Number(value.maxPages),
+          },
         });
       } catch {
         toast.error("Could not save the document parsing settings.");

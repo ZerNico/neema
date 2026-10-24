@@ -5,7 +5,6 @@ import { DropdownMenu, DropdownMenuContent } from "~/ui/primitives/dropdown-menu
 import { ImageModelMenu } from "./image-model-picker.tsx";
 
 vi.mock("../server/functions.ts", () => ({
-  getImageGenerationTool: vi.fn(),
   listImageModels: vi.fn(),
 }));
 

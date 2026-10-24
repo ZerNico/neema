@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeAdminPage } from "./knowledge-admin-page.tsx";
-import { getScanReading, updateDocumentParserTool } from "~/modules/tools/server/functions.ts";
+import { getScanReading, updateToolSettings } from "~/modules/tools/server/functions.ts";
 import type { PublicTool } from "~/modules/tools/server/repo.ts";
 import { configureEmbeddings, rebuildAllKnowledgeIndexes } from "../server/functions.ts";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
@@ -22,20 +22,14 @@ vi.mock("~/modules/tools/server/functions.ts", () => ({
   updateScanReading: vi.fn(),
   retryOcrModelDownload: vi.fn(),
   testMistralOcr: vi.fn(),
-  getMemoryTool: vi.fn(),
-  getWebSearchTool: vi.fn(),
-  getUrlReaderTool: vi.fn(),
-  getDocumentParserTool: vi.fn(),
+  getToolSettings: vi.fn(),
   listSearchProviders: vi.fn(),
   createSearchProvider: vi.fn(),
   updateSearchProvider: vi.fn(),
   deleteSearchProvider: vi.fn(),
   setSearchProviderOrder: vi.fn(),
   testSearchProvider: vi.fn(),
-  updateMemoryTool: vi.fn(),
-  updateWebSearchTool: vi.fn(),
-  updateUrlReaderTool: vi.fn(),
-  updateDocumentParserTool: vi.fn(),
+  updateToolSettings: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
@@ -265,20 +259,20 @@ describe("KnowledgeAdminPage", () => {
   it("submits the document parser form on Enter and flags a non-integer page count", async () => {
     const user = userEvent.setup();
     const pending = deferred<unknown>();
-    vi.mocked(updateDocumentParserTool).mockReturnValue(pending.promise as never);
+    vi.mocked(updateToolSettings).mockReturnValue(pending.promise as never);
     renderPage();
 
     const pages = screen.getByLabelText("Max pages");
     await user.clear(pages);
     await user.type(pages, "2.5{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Enter a whole number.");
-    expect(updateDocumentParserTool).not.toHaveBeenCalled();
+    expect(updateToolSettings).not.toHaveBeenCalled();
 
     await user.clear(pages);
     await user.type(pages, "300{Enter}");
     await waitFor(() =>
-      expect(updateDocumentParserTool).toHaveBeenCalledWith({
-        data: { maxChars: 120000, maxPages: 300 },
+      expect(updateToolSettings).toHaveBeenCalledWith({
+        data: { tool: "document_parser", maxChars: 120000, maxPages: 300 },
       }),
     );
     const save = within(pages.closest("form")!).getByRole("button", { name: "Save" });

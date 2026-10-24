@@ -8,9 +8,9 @@ import {
   urlReaderToolQuery,
   webSearchToolQuery,
   searchProvidersQuery,
+  imageGenerationToolQuery,
 } from "~/modules/tools/client/queries.ts";
 import { presentationFontsQuery } from "~/modules/presentations/client/queries.ts";
-import { imageGenerationToolQuery } from "~/modules/images/client/queries.ts";
 
 export const Route = createFileRoute("/_app/admin/tools")({
   loader: ({ context }) =>

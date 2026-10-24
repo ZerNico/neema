@@ -1,44 +1,37 @@
 import { queryOptions } from "@tanstack/react-query";
-import {
-  getDocumentParserTool,
-  getMemoryTool,
-  getInteractiveUiTool,
-  getMapsTool,
-  getOfficeFilesTool,
-  getScanReading,
-  getUrlReaderTool,
-  getWebSearchTool,
-  listSearchProviders,
-} from "../server/functions.ts";
+import type { ToolSettingsInput } from "../schema.ts";
+import { getScanReading, getToolSettings, listSearchProviders } from "../server/functions.ts";
+
+const toolSettings = (tool: ToolSettingsInput["tool"]) => () => getToolSettings({ data: { tool } });
 
 export const memoryToolQuery = queryOptions({
   queryKey: ["admin", "tools", "memory"],
-  queryFn: () => getMemoryTool(),
+  queryFn: toolSettings("memory"),
 });
 
 export const webSearchToolQuery = queryOptions({
   queryKey: ["admin", "tools", "web-search"],
-  queryFn: () => getWebSearchTool(),
+  queryFn: toolSettings("web_search"),
 });
 
 export const urlReaderToolQuery = queryOptions({
   queryKey: ["admin", "tools", "url-reader"],
-  queryFn: () => getUrlReaderTool(),
+  queryFn: toolSettings("read_url"),
 });
 
 export const officeFilesToolQuery = queryOptions({
   queryKey: ["admin", "tools", "office-files"],
-  queryFn: () => getOfficeFilesTool(),
+  queryFn: toolSettings("office_files"),
 });
 
 export const interactiveUiToolQuery = queryOptions({
   queryKey: ["admin", "tools", "interactive-ui"],
-  queryFn: () => getInteractiveUiTool(),
+  queryFn: toolSettings("interactive_ui"),
 });
 
 export const mapsToolQuery = queryOptions({
   queryKey: ["admin", "tools", "maps"],
-  queryFn: () => getMapsTool(),
+  queryFn: toolSettings("maps"),
 });
 
 export const searchProvidersQuery = queryOptions({
@@ -46,9 +39,14 @@ export const searchProvidersQuery = queryOptions({
   queryFn: () => listSearchProviders(),
 });
 
+export const imageGenerationToolQuery = queryOptions({
+  queryKey: ["admin", "tools", "image-generation"],
+  queryFn: toolSettings("image_generation"),
+});
+
 export const documentParserToolQuery = queryOptions({
   queryKey: ["admin", "tools", "document-parser"],
-  queryFn: () => getDocumentParserTool(),
+  queryFn: toolSettings("document_parser"),
 });
 
 export const scanReadingQuery = queryOptions({

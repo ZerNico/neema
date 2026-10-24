@@ -1,8 +1,6 @@
 import { NumberField } from "./tool-fields.tsx";
 import { useInvalidateTools } from "../client/use-invalidate-tools.ts";
 import { integerBetween } from "./integer-between.ts";
-import { imageGenerationToolQuery } from "~/modules/images/client/queries.ts";
-import { updateImageGenerationTool } from "~/modules/images/server/functions.ts";
 import {
   Brain02Icon,
   DashboardSquare01Icon,
@@ -21,14 +19,7 @@ import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
 import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Switch } from "~/ui/primitives/switch";
 import { RESEARCH_SEARCH_BUDGET, type WebSearchConfig } from "../schema.ts";
-import {
-  updateInteractiveUiTool,
-  updateMapsTool,
-  updateMemoryTool,
-  updateOfficeFilesTool,
-  updateUrlReaderTool,
-  updateWebSearchTool,
-} from "../server/functions.ts";
+import { updateToolSettings } from "../server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { PresentationFontsRow } from "~/modules/presentations/ui/presentation-fonts.tsx";
 import { SearchProviderRows } from "./search-providers.tsx";
@@ -39,6 +30,7 @@ import {
   officeFilesToolQuery,
   interactiveUiToolQuery,
   mapsToolQuery,
+  imageGenerationToolQuery,
 } from "../client/queries.ts";
 import { readInteractiveUi, readMaps, type MapServices } from "~/modules/genui/settings.ts";
 
@@ -72,7 +64,7 @@ function MemorySection() {
   const { data: tool } = useSuspenseQuery(memoryToolQuery);
   const queryClient = useQueryClient();
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateMemoryTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "memory", enabled } }),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
@@ -118,7 +110,7 @@ function WebSearchSection() {
   const config = (tool?.config ?? {}) as Partial<WebSearchConfig>;
 
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateWebSearchTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "web_search", enabled } }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not update web search.", error),
   });
@@ -134,8 +126,9 @@ function WebSearchSection() {
     validators: { onSubmit: Schema.toStandardSchemaV1(WebSearchForm) },
     onSubmit: async ({ value }) => {
       try {
-        await updateWebSearchTool({
+        await updateToolSettings({
           data: {
+            tool: "web_search",
             maxResults: Number(value.maxResults),
             researchMaxSearchQueries: Number(value.researchMaxSearchQueries),
           },
@@ -244,7 +237,7 @@ function UrlReaderSection() {
   const config = (tool?.config ?? {}) as { perPageCharCap?: number };
 
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateUrlReaderTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "read_url", enabled } }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not update the URL reader.", error),
   });
@@ -255,7 +248,9 @@ function UrlReaderSection() {
     validators: { onSubmit: Schema.toStandardSchemaV1(UrlReaderForm) },
     onSubmit: async ({ value }) => {
       try {
-        await updateUrlReaderTool({ data: { perPageCharCap: Number(value.perPageCharCap) } });
+        await updateToolSettings({
+          data: { tool: "read_url", perPageCharCap: Number(value.perPageCharCap) },
+        });
       } catch {
         toast.error("Could not save the URL reader settings.");
         return;
@@ -340,7 +335,8 @@ function OfficeFilesSection() {
   const { data: tool } = useSuspenseQuery(officeFilesToolQuery);
   const queryClient = useQueryClient();
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateOfficeFilesTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) =>
+      updateToolSettings({ data: { tool: "office_files", enabled } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: officeFilesToolQuery.queryKey }),
     onError: (error) => toastError("Could not update Office files.", error),
   });
@@ -385,7 +381,8 @@ function ImageGenerationSection() {
   const { data: tool } = useSuspenseQuery(imageGenerationToolQuery);
   const queryClient = useQueryClient();
   const toggle = useMutation({
-    mutationFn: (enabled: boolean) => updateImageGenerationTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) =>
+      updateToolSettings({ data: { tool: "image_generation", enabled } }),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: imageGenerationToolQuery.queryKey }),
@@ -434,7 +431,7 @@ function InteractiveUiSection() {
   const queryClient = useQueryClient();
   const update = useMutation({
     mutationFn: (patch: { enabled?: boolean; images?: boolean }) =>
-      updateInteractiveUiTool({ data: patch }),
+      updateToolSettings({ data: { tool: "interactive_ui", ...patch } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
     onError: (error) => toastError("Could not update interactive answers.", error),
   });
@@ -493,7 +490,7 @@ function MapsSection() {
   const { data: tool } = useSuspenseQuery(mapsToolQuery);
   const queryClient = useQueryClient();
   const update = useMutation({
-    mutationFn: (enabled: boolean) => updateMapsTool({ data: { enabled } }),
+    mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "maps", enabled } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: mapsToolQuery.queryKey }),
     onError: (error) => toastError("Could not update maps.", error),
   });
@@ -547,7 +544,7 @@ function MapServicesRow({ services }: { services: MapServices }) {
     validators: { onSubmit: Schema.toStandardSchemaV1(MapServicesForm) },
     onSubmit: async ({ value }) => {
       try {
-        await updateMapsTool({ data: value });
+        await updateToolSettings({ data: { tool: "maps", ...value } });
       } catch {
         toast.error("Could not save the map services.");
         return;
