@@ -12,6 +12,8 @@ import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import type { KnowledgePassage, KnowledgeSearchMode } from "../schema.ts";
 import { EmbeddingSpace } from "./embedding-space.ts";
 import { KnowledgeRepo, type ManifestEntry } from "./repo.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** Candidates taken from each ranking before fusion. */
 const CANDIDATES = 30;
@@ -99,7 +101,9 @@ export class KnowledgeSearch extends Context.Service<
           input.versionIds.length >
             KNOWLEDGE_LIMITS.maxCollectionsPerSelection * KNOWLEDGE_LIMITS.maxDocumentsPerCollection
         )
-          return yield* new KnowledgeRejected({ reason: "knowledge search exceeds input limits" });
+          return yield* new KnowledgeRejected({
+            reason: localized(m.knowledge_error_search_input_limits),
+          });
         const versionIds = [...new Set(input.versionIds)];
         const authorize =
           input.authorize ?? (() => repo.authorizeVersions(input.userId, versionIds));
@@ -216,7 +220,9 @@ export class KnowledgeSearch extends Context.Service<
               KNOWLEDGE_LIMITS.maxCollectionsPerSelection *
                 KNOWLEDGE_LIMITS.maxDocumentsPerCollection
           )
-            return yield* new KnowledgeRejected({ reason: "knowledge selection exceeds limits" });
+            return yield* new KnowledgeRejected({
+              reason: localized(m.knowledge_error_selection_limits),
+            });
           const userId = input.userId;
           const collectionIds = [...new Set(input.collectionIds)];
           const manifest = Object.freeze(

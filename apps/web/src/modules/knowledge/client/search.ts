@@ -1,9 +1,13 @@
 import { FolderLibraryIcon } from "@hugeicons/core-free-icons";
 import { listSource } from "~/modules/search/registry.ts";
 import { knowledgeCollectionsQuery } from "./queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 export const useCollectionSearch = listSource({
-  heading: "Knowledge",
+  // A getter, so the heading is read in the page's language when shown.
+  get heading() {
+    return m.knowledge_title();
+  },
   icon: FolderLibraryIcon,
   query: knowledgeCollectionsQuery,
   allowed: (capabilities) => capabilities.knowledgeUse,

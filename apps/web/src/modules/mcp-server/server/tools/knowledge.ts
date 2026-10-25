@@ -4,6 +4,7 @@ import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
 import { sourceTarget } from "~/modules/tools/sources.ts";
 import { defineTool, refused, result } from "./define.ts";
+import { english } from "~/i18n/localized.ts";
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const MAX_READ = 16_000;
@@ -105,7 +106,8 @@ export const searchKnowledge = defineTool({
       ).pipe(
         Effect.catchTags({
           KnowledgeNotAvailable: unavailable,
-          KnowledgeRejected: (error) => Effect.fail(refused(`Can't search: ${error.reason}.`)),
+          KnowledgeRejected: (error) =>
+            Effect.fail(refused(`Can't search: ${english(error.reason)}.`)),
         }),
       );
       const versionIds = manifest.flatMap((entry) =>
@@ -116,7 +118,8 @@ export const searchKnowledge = defineTool({
       ).pipe(
         Effect.catchTags({
           KnowledgeNotAvailable: unavailable,
-          KnowledgeRejected: (error) => Effect.fail(refused(`Can't search: ${error.reason}.`)),
+          KnowledgeRejected: (error) =>
+            Effect.fail(refused(`Can't search: ${english(error.reason)}.`)),
         }),
       );
       const passages = found.passages.map((passage) => ({
@@ -172,7 +175,8 @@ export const readKnowledgeDocument = defineTool({
       ).pipe(
         Effect.catchTags({
           KnowledgeNotAvailable: unavailable,
-          KnowledgeRejected: (error) => Effect.fail(refused(`Can't read that: ${error.reason}.`)),
+          KnowledgeRejected: (error) =>
+            Effect.fail(refused(`Can't read that: ${english(error.reason)}.`)),
         }),
       );
       const more =

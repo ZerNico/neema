@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { refusal } from "~/server/refusal.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
 import {
@@ -109,8 +111,9 @@ export const uploadKnowledgeDocument = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ data, context }) => {
     const file = data.get("file");
-    if (!(file instanceof File)) throw refusal(400, "Expected a file");
-    if (file.size > MAX_ATTACHMENT_BYTES) throw refusal(413, "File is too large");
+    if (!(file instanceof File)) throw refusal(400, localized(m.knowledge_error_expected_file));
+    if (file.size > MAX_ATTACHMENT_BYTES)
+      throw refusal(413, localized(m.knowledge_error_file_too_large));
     const collectionId = data.get("collectionId");
     const documentId = data.get("documentId");
     const title = data.get("title");
@@ -123,7 +126,7 @@ export const uploadKnowledgeDocument = createServerFn({ method: "POST" })
       (documentId !== null &&
         (typeof documentId !== "string" || !documentId || documentId.length > 128))
     )
-      throw refusal(400, "Invalid document fields");
+      throw refusal(400, localized(m.knowledge_error_invalid_document_fields));
     const bytes = new Uint8Array(await file.arrayBuffer());
     return runServerFn(
       StorageQuota.use((quota) => quota.admit(context.session.user.id, [bytes])).pipe(

@@ -13,6 +13,8 @@ import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { KnowledgeRejected } from "~/modules/knowledge/errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { resolveSkillManifest } from "~/modules/skills/server/repo.ts";
 import { KnowledgeRepo, type ManifestEntry } from "~/modules/knowledge/server/repo.ts";
 import { KNOWLEDGE_CONTEXT_LIMITS } from "~/modules/knowledge/server/context.ts";
@@ -252,7 +254,9 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       ]),
     ];
     if (collectionIds.length > KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
-      return yield* new KnowledgeRejected({ reason: "select at most five knowledge collections" });
+      return yield* new KnowledgeRejected({
+        reason: localized(m.knowledge_error_select_at_most_five),
+      });
 
     // Preferences degrade rather than fail: an agent that likes search must not
     // break on an instance that has none. Tool support itself is never a

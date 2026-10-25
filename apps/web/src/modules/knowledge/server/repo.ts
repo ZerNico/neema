@@ -24,6 +24,8 @@ import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { type DocumentChunk } from "./chunking.ts";
 import { readEmbeddingTarget, type EmbeddingTarget } from "./embedding-connection.ts";
 import { indexingJobs } from "./indexing-jobs.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 export { MAX_EXTRACTION_ATTEMPTS } from "./indexing-jobs.ts";
 
@@ -606,7 +608,10 @@ export class KnowledgeRepo extends Context.Service<
             }),
           )
           .pipe(Effect.orDie);
-        if (!created) return yield* new KnowledgeRejected({ reason: "collection limit reached" });
+        if (!created)
+          return yield* new KnowledgeRejected({
+            reason: localized(m.knowledge_error_collection_limit),
+          });
         return id;
       });
 

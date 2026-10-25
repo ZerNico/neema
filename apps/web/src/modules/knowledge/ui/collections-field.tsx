@@ -18,6 +18,7 @@ import {
   ComboboxTrigger,
 } from "~/ui/primitives/combobox";
 import { FieldError } from "~/ui/primitives/field";
+import { m } from "~/paraglide/messages.js";
 
 /** The knowledge collections a saved configuration attaches, with any the reader lost. */
 export function CollectionsField({
@@ -38,10 +39,13 @@ export function CollectionsField({
   const collections = useQuery(knowledgeCollectionsQuery);
   if (collections.isError)
     return (
-      <ErrorState title="Could not load collections" onRetry={() => void collections.refetch()} />
+      <ErrorState
+        title={m.knowledge_list_load_failed()}
+        onRetry={() => void collections.refetch()}
+      />
     );
   if (collections.data === undefined)
-    return <ListSkeleton rows={2} media="none" label="Loading collections" />;
+    return <ListSkeleton rows={2} media="none" label={m.knowledge_list_loading()} />;
   const known = collections.data;
   const attached = value.flatMap((id) => {
     const collection = known.find((candidate) => candidate.id === id);
@@ -52,13 +56,16 @@ export function CollectionsField({
   const atLimit = value.length >= KNOWLEDGE_LIMITS.maxCollectionsPerSelection;
   const detach = (id: string) => onChange(value.filter((current) => current !== id));
   const detail = (collection: CollectionSummary) =>
-    `${collection.documentCount} documents${
-      showOwner && collection.ownerName ? ` · shared by ${collection.ownerName}` : ""
-    }`;
+    showOwner && collection.ownerName
+      ? m.knowledge_field_detail_shared({
+          count: collection.documentCount,
+          name: collection.ownerName,
+        })
+      : m.knowledge_count_documents({ count: collection.documentCount });
   return (
     <div
       role="group"
-      aria-label="Knowledge collections"
+      aria-label={m.knowledge_field_group()}
       tabIndex={-1}
       aria-invalid={errors.length > 0 || undefined}
       className="flex flex-col gap-3"
@@ -75,7 +82,7 @@ export function CollectionsField({
                 size="icon-sm"
                 variant="ghost"
                 className="text-muted-foreground hover:text-foreground"
-                aria-label={`Remove ${collection.name}`}
+                aria-label={m.knowledge_field_remove({ name: collection.name })}
                 onClick={() => detach(collection.id)}
               >
                 <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
@@ -84,13 +91,13 @@ export function CollectionsField({
           ))}
           {unavailable.map((id) => (
             <ListRow key={id}>
-              <span className="flex-1 text-sm">A collection you can no longer read</span>
-              <Badge variant="destructive">Unavailable</Badge>
+              <span className="flex-1 text-sm">{m.knowledge_field_lost()}</span>
+              <Badge variant="destructive">{m.knowledge_field_unavailable()}</Badge>
               <Button
                 size="icon-sm"
                 variant="ghost"
                 className="text-muted-foreground hover:text-foreground"
-                aria-label="Remove unavailable collection"
+                aria-label={m.knowledge_field_remove_unavailable()}
                 onClick={() => detach(id)}
               >
                 <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
@@ -101,9 +108,9 @@ export function CollectionsField({
       ) : null}
       {known.length === 0 && unavailable.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          No collections yet.{" "}
+          {m.knowledge_field_empty()}{" "}
           <Link to="/knowledge" className="underline underline-offset-2">
-            Manage knowledge
+            {m.knowledge_field_manage()}
           </Link>
         </p>
       ) : (
@@ -127,16 +134,16 @@ export function CollectionsField({
                 size="sm"
                 className="w-fit"
                 disabled={atLimit || addable.length === 0}
-                aria-label="Add collection"
+                aria-label={m.knowledge_field_add()}
               />
             }
           >
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            Add collection
+            {m.knowledge_field_add()}
           </ComboboxTrigger>
           <ComboboxContent align="start" className="w-72">
-            <ComboboxInput placeholder="Search collections…" showTrigger={false} />
-            <ComboboxEmpty>No collections match</ComboboxEmpty>
+            <ComboboxInput placeholder={m.knowledge_field_search()} showTrigger={false} />
+            <ComboboxEmpty>{m.knowledge_field_no_match()}</ComboboxEmpty>
             <ComboboxList>
               {(collection: CollectionSummary) => (
                 <ComboboxItem key={collection.id} value={collection}>
@@ -155,7 +162,7 @@ export function CollectionsField({
       {children}
       {atLimit ? (
         <p className="text-muted-foreground text-xs">
-          Up to {KNOWLEDGE_LIMITS.maxCollectionsPerSelection} collections.
+          {m.knowledge_field_limit({ max: KNOWLEDGE_LIMITS.maxCollectionsPerSelection })}
         </p>
       ) : null}
       <FieldError errors={errors} />

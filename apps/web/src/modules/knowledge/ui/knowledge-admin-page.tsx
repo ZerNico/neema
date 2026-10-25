@@ -35,6 +35,7 @@ import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
 import { documentParserToolQuery } from "../../tools/client/queries.ts";
 import { embeddingConfigurationQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Everything an admin decides about how documents become searchable: how text
@@ -44,7 +45,7 @@ import { embeddingConfigurationQuery } from "../client/queries.ts";
  */
 export function KnowledgeAdminPage() {
   return (
-    <Page title="Documents">
+    <Page title={m.knowledge_admin_title()}>
       <SemanticSearchSection />
       <DocumentParserSection />
     </Page>
@@ -76,19 +77,17 @@ function SemanticSearchSection() {
       }),
     onSuccess: async () => {
       await invalidate();
-      toast.success("Semantic search configured. Use Rebuild all to index existing collections.");
+      toast.success(m.knowledge_admin_configured());
     },
     onError: (error) =>
       toast.error(
-        error instanceof Error && error.message
-          ? error.message
-          : "Could not save the configuration.",
+        error instanceof Error && error.message ? error.message : m.knowledge_admin_save_failed(),
       ),
   });
   const disable = useMutation({
     mutationFn: () => disableEmbeddings({ data: { expectedRevision: current.connectionRevision } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not disable semantic search.", error),
+    onError: (error) => toastError(m.knowledge_admin_disable_failed(), error),
   });
   const rebuildAll = useMutation({
     mutationFn: () => rebuildAllKnowledgeIndexes(),
@@ -97,13 +96,15 @@ function SemanticSearchSection() {
       const total = reextracted + reembedded;
       toast.success(
         total === 0
-          ? "Everything is already prepared."
-          : `Rebuilding ${total} documents across ${collections} collections in the background.`,
+          ? m.knowledge_admin_all_prepared()
+          : m.knowledge_admin_rebuild_started({ count: total, collections }),
       );
     },
     onError: (error) =>
       toast.error(
-        error instanceof Error && error.message ? error.message : "Could not start the rebuild.",
+        error instanceof Error && error.message
+          ? error.message
+          : m.knowledge_admin_rebuild_failed(),
       ),
   });
   const pending = apply.isPending || disable.isPending || rebuildAll.isPending;
@@ -114,9 +115,9 @@ function SemanticSearchSection() {
     if (!current.spaceId || !current.approvedConnection) {
       const ok = await confirm({
         destructive: false,
-        title: "Enable semantic search?",
-        description: `Document text from collections that get prepared is sent to ${providerLabel}. Existing collections stay as they are until their owners redo them.`,
-        confirmLabel: "Enable",
+        title: m.knowledge_admin_enable_title(),
+        description: m.knowledge_admin_enable_description({ provider: providerLabel ?? "" }),
+        confirmLabel: m.knowledge_admin_enable(),
       });
       if (ok) apply.mutate("rebuild");
       return;
@@ -124,9 +125,13 @@ function SemanticSearchSection() {
     if (current.dimensions !== dimensions) {
       const ok = await confirm({
         destructive: false,
-        title: "Rebuild embeddings?",
-        description: `${providerLabel} produces ${dimensions}-dimensional vectors; the current index holds ${current.dimensions}. Existing embeddings cannot be reused and stay excluded until each collection is rebuilt. Keyword search keeps working.`,
-        confirmLabel: "Rebuild",
+        title: m.knowledge_admin_rebuild_embeddings_title(),
+        description: m.knowledge_admin_rebuild_embeddings_description({
+          provider: providerLabel ?? "",
+          dimensions,
+          current: current.dimensions ?? 0,
+        }),
+        confirmLabel: m.knowledge_admin_rebuild(),
       });
       if (ok) apply.mutate("rebuild");
       return;
@@ -137,19 +142,17 @@ function SemanticSearchSection() {
   };
 
   return (
-    <Section title="Semantic search">
+    <Section title={m.knowledge_admin_semantic_search()}>
       <Dialog open={compatibilityOpen} onOpenChange={setCompatibilityOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Are the existing embeddings compatible?</DialogTitle>
+            <DialogTitle>{m.knowledge_admin_compatible_title()}</DialogTitle>
             <DialogDescription>
-              Keep them only if {providerLabel} produces vectors comparable to the previous model.
-              Rebuild approves a fresh vector space; existing collections are not submitted until
-              you explicitly rebuild their indexes.
+              {m.knowledge_admin_compatible_description({ provider: providerLabel ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" />}>{m.common_cancel()}</DialogClose>
             <Button
               variant="outline"
               onClick={() => {
@@ -157,7 +160,7 @@ function SemanticSearchSection() {
                 apply.mutate("rebuild");
               }}
             >
-              Rebuild instead
+              {m.knowledge_admin_rebuild_instead()}
             </Button>
             <Button
               onClick={() => {
@@ -165,7 +168,7 @@ function SemanticSearchSection() {
                 apply.mutate("keep");
               }}
             >
-              Keep existing embeddings
+              {m.knowledge_admin_keep_embeddings()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -173,34 +176,30 @@ function SemanticSearchSection() {
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Knowledge embeddings</span>
+            <span className="text-sm font-medium">{m.knowledge_admin_embeddings()}</span>
             <span className="text-muted-foreground text-xs">
-              Finds documents that mean the same thing, not just matching words. Sends their text to
-              the model you choose.
+              {m.knowledge_admin_embeddings_description()}
             </span>
           </div>
           <Badge variant={data.status === "ready" ? "secondary" : "outline"}>
             {data.status === "ready"
-              ? "Ready"
+              ? m.knowledge_admin_status_ready()
               : data.status === "needs_approval"
-                ? "Needs approval"
-                : "Off"}
+                ? m.knowledge_admin_status_needs_approval()
+                : m.knowledge_admin_status_off()}
           </Badge>
         </ListRow>
         {data.status === "needs_approval" ? (
           <ListRow>
-            <p className="text-warning text-xs">
-              The approved model or provider was edited. Confirm the configuration again before
-              semantic search resumes; keyword search is unaffected.
-            </p>
+            <p className="text-warning text-xs">{m.knowledge_admin_needs_approval_hint()}</p>
           </ListRow>
         ) : null}
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
-            <FieldLabel htmlFor="embedding-model">Embedding model</FieldLabel>
+            <FieldLabel htmlFor="embedding-model">{m.knowledge_admin_embedding_model()}</FieldLabel>
             <ModelSelect
               id="embedding-model"
-              aria-label="Embedding model"
+              aria-label={m.knowledge_admin_embedding_model()}
               models={data.models.map((model) => ({
                 id: model.id,
                 displayName: model.displayName,
@@ -210,13 +209,13 @@ function SemanticSearchSection() {
               value={modelId}
               onChange={setModelId}
               disabled={pending}
-              emptyPlaceholder="Add a public embedding model to a provider first"
+              emptyPlaceholder={m.knowledge_admin_embedding_model_empty()}
             />
-            <FieldDescription>Only models everyone can use are listed.</FieldDescription>
+            <FieldDescription>{m.knowledge_admin_embedding_model_hint()}</FieldDescription>
           </Field>
           {selected && !selected.dimensions ? (
             <p className="text-warning text-xs" role="alert">
-              Set the model’s dimensions on its provider page before enabling it.
+              {m.knowledge_admin_dimensions_missing()}
             </p>
           ) : null}
           <FormActions>
@@ -226,7 +225,7 @@ function SemanticSearchSection() {
               disabled={pending || !selected || !dimensions || !changed}
               onClick={() => void save()}
             >
-              {data.enabled ? "Apply" : "Enable"}
+              {data.enabled ? m.knowledge_admin_apply() : m.knowledge_admin_enable()}
             </PendingButton>
             {data.status === "ready" ? (
               <PendingButton
@@ -237,16 +236,15 @@ function SemanticSearchSection() {
                 onClick={() => {
                   void confirm({
                     destructive: false,
-                    title: "Rebuild every collection’s index?",
-                    description:
-                      "Documents that need it are prepared again, across everyone's collections. This sends their text to the model and costs money. Search keeps working meanwhile.",
-                    confirmLabel: "Rebuild all",
+                    title: m.knowledge_admin_rebuild_all_title(),
+                    description: m.knowledge_admin_rebuild_all_description(),
+                    confirmLabel: m.knowledge_admin_rebuild_all(),
                   }).then((ok) => {
                     if (ok) rebuildAll.mutate();
                   });
                 }}
               >
-                Rebuild all
+                {m.knowledge_admin_rebuild_all()}
               </PendingButton>
             ) : null}
             {data.enabled ? (
@@ -257,16 +255,15 @@ function SemanticSearchSection() {
                 onClick={() => {
                   void confirm({
                     destructive: false,
-                    title: "Disable semantic search?",
-                    description:
-                      "Search goes back to matching words. Nothing is deleted, so you can turn this on again later.",
-                    confirmLabel: "Disable",
+                    title: m.knowledge_admin_disable_title(),
+                    description: m.knowledge_admin_disable_description(),
+                    confirmLabel: m.knowledge_admin_disable(),
                   }).then((ok) => {
                     if (ok) disable.mutate();
                   });
                 }}
               >
-                Disable
+                {m.knowledge_admin_disable()}
               </Button>
             ) : null}
           </FormActions>
@@ -286,7 +283,7 @@ function DocumentParserSection() {
     mutationFn: (enabled: boolean) =>
       updateToolSettings({ data: { tool: "document_parser", enabled } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not update document parsing.", error),
+    onError: (error) => toastError(m.knowledge_admin_parsing_update_failed(), error),
   });
 
   const { justSaved, markSaved } = useSaveStatus();
@@ -306,7 +303,7 @@ function DocumentParserSection() {
           },
         });
       } catch {
-        toast.error("Could not save the document parsing settings.");
+        toast.error(m.knowledge_admin_parsing_save_failed());
         return;
       }
       markSaved();
@@ -316,20 +313,20 @@ function DocumentParserSection() {
   });
 
   return (
-    <Section title="Document parsing">
+    <Section title={m.knowledge_admin_parsing()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">PDF text extraction</span>
+            <span className="text-sm font-medium">{m.knowledge_admin_pdf_extraction()}</span>
             <span className="text-muted-foreground text-xs">
-              Reads the text of PDFs for models that can’t open them, and for collections.
+              {m.knowledge_admin_pdf_extraction_description()}
             </span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="Document parsing enabled"
+            aria-label={m.knowledge_admin_parsing_enabled()}
           />
         </ListRow>
 
@@ -354,7 +351,7 @@ function DocumentParserSection() {
                 {(field) => (
                   <NumberField
                     field={field}
-                    label="Max characters"
+                    label={m.knowledge_admin_max_characters()}
                     min={1000}
                     max={500000}
                     step={1000}
@@ -365,13 +362,20 @@ function DocumentParserSection() {
                 name="maxPages"
                 validators={{ onSubmit: Schema.toStandardSchemaV1(integerBetween(1, 2000)) }}
               >
-                {(field) => <NumberField field={field} label="Max pages" min={1} max={2000} />}
+                {(field) => (
+                  <NumberField
+                    field={field}
+                    label={m.knowledge_admin_max_pages()}
+                    min={1}
+                    max={2000}
+                  />
+                )}
               </form.Field>
             </div>
             <div className="flex gap-2">
               <form.AppForm>
                 <form.SubmitButton size="sm">
-                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                  <SaveLabel justSaved={justSaved}>{m.common_save()}</SaveLabel>
                 </form.SubmitButton>
               </form.AppForm>
               <SaveStatus justSaved={justSaved} />

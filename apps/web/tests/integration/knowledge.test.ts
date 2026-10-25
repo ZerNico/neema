@@ -3285,13 +3285,13 @@ describe("knowledge search", () => {
     const denied = await run(
       Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.configure(stranger, change))),
     );
-    expect(denied.reason).toContain("admins");
+    expect(denied.reason("en")).toContain("admins");
     const badWidth = await run(
       Effect.flatMap(EmbeddingSpace, (space) =>
         Effect.flip(space.configure(admin, { ...change, dimensions: DIMENSIONS + 1 })),
       ),
     );
-    expect(badWidth.reason).toContain("rebuild");
+    expect(badWidth.reason("en")).toContain("rebuild");
     const accepted = await run(
       Effect.flatMap(EmbeddingSpace, (space) => space.configure(admin, change)),
     );
@@ -3299,7 +3299,7 @@ describe("knowledge search", () => {
     const stale = await run(
       Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.configure(admin, change))),
     );
-    expect(stale.reason).toContain("reload");
+    expect(stale.reason("en")).toContain("reload");
     await exec(
       `update models set embedding_dimensions = ${DIMENSIONS + 1} where id = '${embeddingModelId}'`,
     );
@@ -3314,7 +3314,7 @@ describe("knowledge search", () => {
         ),
       ),
     );
-    expect(changedOutput.reason).toContain("rebuild");
+    expect(changedOutput.reason("en")).toContain("rebuild");
     await exec(
       `update models set model_key = 'embed-1', embedding_dimensions = ${DIMENSIONS} where id = '${embeddingModelId}'`,
     );
@@ -3344,8 +3344,9 @@ describe("knowledge search", () => {
     ]);
     for (const actor of [regular, uuidv7()]) {
       expect(
-        (await run(Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.detail(actor)))))
-          .reason,
+        (
+          await run(Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.detail(actor))))
+        ).reason("en"),
       ).toContain("admins");
       expect(
         (
@@ -3358,13 +3359,14 @@ describe("knowledge search", () => {
               ),
             ),
           )
-        ).reason,
+        ).reason("en"),
       ).toContain("admins");
     }
     await exec(`update "user" set role = 'user' where id = '${admin}'`);
     expect(
-      (await run(Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.detail(admin)))))
-        .reason,
+      (
+        await run(Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.detail(admin))))
+      ).reason("en"),
     ).toContain("admins");
     expect(await run(Effect.flatMap(EmbeddingSpace, (space) => space.current()))).not.toBeNull();
   });
@@ -3415,7 +3417,7 @@ describe("knowledge search", () => {
         await run(
           Effect.flatMap(EmbeddingSpace, (space) => Effect.flip(space.configure(admin, change))),
         )
-      ).reason,
+      ).reason("en"),
     ).toContain("reload");
     await run(
       Effect.flatMap(EmbeddingSpace, (space) =>
@@ -3469,7 +3471,7 @@ describe("knowledge search", () => {
           Effect.flip(space.configure(admin, { ...change, ...patch } as typeof change)),
         ),
       );
-      expect(denied.reason).toBe("invalid embedding configuration");
+      expect(denied.reason("en")).toBe("invalid embedding configuration");
     }
     expect(await run(Effect.flatMap(EmbeddingSpace, (space) => space.detail(admin)))).toEqual(
       before,

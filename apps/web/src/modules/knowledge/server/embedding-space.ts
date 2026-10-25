@@ -6,6 +6,8 @@ import { tools, user } from "~/db/schema/index.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { KnowledgeRejected } from "../errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import {
   DisableEmbeddingInput,
   EmbeddingConfigurationChange,
@@ -26,9 +28,7 @@ export type { EmbeddingConfigurationChange } from "../schema.ts";
 const checkRevision = (config: KnowledgeSearchConfig, expectedRevision: string | null) =>
   config.connectionRevision === expectedRevision
     ? Effect.void
-    : Effect.fail(
-        new KnowledgeRejected({ reason: "configuration changed; reload before confirming" }),
-      );
+    : Effect.fail(new KnowledgeRejected({ reason: localized(m.knowledge_error_config_changed) }));
 
 export class EmbeddingSpace extends Context.Service<
   EmbeddingSpace,
@@ -70,7 +70,7 @@ export class EmbeddingSpace extends Context.Service<
                 .for("share");
               if (actor?.role !== "admin")
                 return yield* new KnowledgeRejected({
-                  reason: "only admins can configure semantic search",
+                  reason: localized(m.knowledge_error_admins_configure),
                 });
               const [row] = yield* tx
                 .select({ enabled: tools.enabled, config: tools.config })
@@ -79,12 +79,12 @@ export class EmbeddingSpace extends Context.Service<
                 .for(lock);
               if (!row)
                 return yield* new KnowledgeRejected({
-                  reason: "knowledge search is not installed",
+                  reason: localized(m.knowledge_error_search_not_installed),
                 });
               const decoded = decodeEmbeddingConfig(row.config);
               if (Option.isNone(decoded))
                 return yield* new KnowledgeRejected({
-                  reason: "knowledge search configuration is invalid",
+                  reason: localized(m.knowledge_error_search_config_invalid),
                 });
               return yield* use(tx, { enabled: row.enabled, config: decoded.value });
             }),
@@ -117,7 +117,10 @@ export class EmbeddingSpace extends Context.Service<
         configure: Effect.fn("EmbeddingSpace.configure")(function* (userId, input) {
           const valid = yield* Schema.decodeUnknownEffect(EmbeddingConfigurationChange)(input).pipe(
             Effect.mapError(
-              () => new KnowledgeRejected({ reason: "invalid embedding configuration" }),
+              () =>
+                new KnowledgeRejected({
+                  reason: localized(m.knowledge_error_embedding_config_invalid),
+                }),
             ),
           );
           const result = yield* withConfiguration(userId, "update", (tx, { config: previous }) =>
@@ -126,7 +129,7 @@ export class EmbeddingSpace extends Context.Service<
               const connection = yield* readConnection(tx, valid.modelId, true).pipe(Effect.orDie);
               if (!connection)
                 return yield* new KnowledgeRejected({
-                  reason: "select an enabled, instance-usable embedding model",
+                  reason: localized(m.knowledge_error_select_embedding_model),
                 });
               if (
                 valid.decision === "keep" &&
@@ -138,7 +141,7 @@ export class EmbeddingSpace extends Context.Service<
                   previous.approvedConnection.modelDimensions !== connection.modelDimensions)
               )
                 return yield* new KnowledgeRejected({
-                  reason: "changed dimensions or preprocessing require a rebuild",
+                  reason: localized(m.knowledge_error_rebuild_required),
                 });
               const unchanged =
                 valid.decision === "keep" &&
@@ -172,7 +175,10 @@ export class EmbeddingSpace extends Context.Service<
         disable: Effect.fn("EmbeddingSpace.disable")(function* (userId, input) {
           const valid = yield* Schema.decodeUnknownEffect(DisableEmbeddingInput)(input).pipe(
             Effect.mapError(
-              () => new KnowledgeRejected({ reason: "invalid embedding configuration" }),
+              () =>
+                new KnowledgeRejected({
+                  reason: localized(m.knowledge_error_embedding_config_invalid),
+                }),
             ),
           );
           const result = yield* withConfiguration(userId, "update", (tx, row) =>

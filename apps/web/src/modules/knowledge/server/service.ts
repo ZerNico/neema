@@ -6,6 +6,8 @@ import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { KNOWLEDGE_LIMITS, type CollectionSummary, type KnowledgeDocument } from "../schema.ts";
 import { pipelineFingerprint } from "./chunking.ts";
 import { textEnd } from "./text-range.ts";
@@ -45,7 +47,7 @@ const validateIdentity = (input: { name: string; description: string }) =>
     ? Effect.void
     : Effect.fail(
         new KnowledgeRejected({
-          reason: "enter a name of 1–120 characters and a description of at most 500 characters",
+          reason: localized(m.knowledge_error_collection_identity),
         }),
       );
 
@@ -196,8 +198,7 @@ export class KnowledgeService extends Context.Service<
         const document = yield* repo.documentCollection(userId, documentId);
         if (document?.synced)
           return yield* new KnowledgeRejected({
-            reason:
-              "this document is synced from an integration; change it there or edit the source's selection",
+            reason: localized(m.knowledge_error_synced_document),
           });
       });
       const saveNote = Effect.fn(function* (
@@ -215,8 +216,7 @@ export class KnowledgeService extends Context.Service<
           input.content.length > KNOWLEDGE_LIMITS.maxNoteChars
         )
           return yield* new KnowledgeRejected({
-            reason:
-              "enter a title of 1–120 characters and a nonempty note of at most 200,000 characters",
+            reason: localized(m.knowledge_error_note_fields),
           });
         const normalized = { ...input, title: input.title.trim() };
         if (input.documentId) yield* notSynced(userId, input.documentId);
@@ -227,7 +227,7 @@ export class KnowledgeService extends Context.Service<
           if (input.documentId)
             return yield* new KnowledgeNotAvailable({ resourceId: input.documentId });
           return yield* new KnowledgeRejected({
-            reason: "document could not be added; reload and check the collection limit",
+            reason: localized(m.knowledge_error_document_not_added),
           });
         }
         yield* changed();
@@ -282,7 +282,9 @@ export class KnowledgeService extends Context.Service<
         }),
         create: Effect.fn(function* (userId, input) {
           if (!(yield* policy.can(userId, "knowledgeCreate")))
-            return yield* new KnowledgeRejected({ reason: "knowledge creation is unavailable" });
+            return yield* new KnowledgeRejected({
+              reason: localized(m.knowledge_error_creation_unavailable),
+            });
           yield* validateIdentity(input);
           const id = yield* repo.createCollection(userId, {
             name: input.name.trim(),
@@ -311,7 +313,9 @@ export class KnowledgeService extends Context.Service<
         upload: Effect.fn(function* (userId, input) {
           yield* available(userId, input.collectionId, true);
           if (!name(input.title))
-            return yield* new KnowledgeRejected({ reason: "enter a title of 1–120 characters" });
+            return yield* new KnowledgeRejected({
+              reason: localized(m.knowledge_error_title_length),
+            });
           if (input.documentId) {
             const document = yield* repo.documentCollection(userId, input.documentId);
             if (!document?.canEdit || document.collectionId !== input.collectionId)
@@ -344,7 +348,7 @@ export class KnowledgeService extends Context.Service<
               : yield* repo.addFileDocument(userId, file);
             if (!document)
               return yield* new KnowledgeRejected({
-                reason: "document could not be added; reload and check the collection limit",
+                reason: localized(m.knowledge_error_document_not_added),
               });
             yield* changed();
             return document;
@@ -364,7 +368,7 @@ export class KnowledgeService extends Context.Service<
             return yield* new KnowledgeNotAvailable({ resourceId: documentId });
           if (!(yield* repo.retryDocument(userId, documentId)))
             return yield* new KnowledgeRejected({
-              reason: "only a failed document extraction can be retried",
+              reason: localized(m.knowledge_error_retry_only_failed),
             });
           yield* changed();
         }),
@@ -386,10 +390,12 @@ export class KnowledgeService extends Context.Service<
         rebuildIndex: (userId, collectionId) => rebuildIndexFor(userId, collectionId),
         rebuildAllIndexes: Effect.fn(function* (userId) {
           if (!(yield* repo.isAdmin(userId)))
-            return yield* new KnowledgeRejected({ reason: "only admins can rebuild every index" });
+            return yield* new KnowledgeRejected({
+              reason: localized(m.knowledge_error_admins_rebuild_all),
+            });
           if (!(yield* space.current()))
             return yield* new KnowledgeRejected({
-              reason: "semantic search needs an approved, enabled embedding connection",
+              reason: localized(m.knowledge_error_needs_embedding_connection),
             });
           const totals = { collections: 0, reextracted: 0, reembedded: 0 };
           for (const collection of yield* repo.listAllCollectionIds()) {
@@ -410,7 +416,7 @@ export class KnowledgeService extends Context.Service<
           yield* available(userId, collectionId, true);
           if (!(yield* space.current()))
             return yield* new KnowledgeRejected({
-              reason: "semantic search needs an approved, enabled embedding connection",
+              reason: localized(m.knowledge_error_needs_embedding_connection),
             });
           const count = yield* repo.reindexCollection(userId, collectionId);
           yield* changed();
@@ -422,7 +428,7 @@ export class KnowledgeService extends Context.Service<
           const ids = [...new Set(collectionIds)];
           if (ids.length > KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
             return yield* new KnowledgeRejected({
-              reason: "select at most five knowledge collections",
+              reason: localized(m.knowledge_error_select_at_most_five),
             });
           return yield* repo.resolveManifest(userId, ids);
         }),
@@ -436,13 +442,15 @@ export class KnowledgeService extends Context.Service<
             input.maxChars < 1 ||
             input.maxChars > MAX_READ_CHARS
           )
-            return yield* new KnowledgeRejected({ reason: "invalid document range" });
+            return yield* new KnowledgeRejected({
+              reason: localized(m.knowledge_error_invalid_range),
+            });
           const version = yield* repo.readVersionForAccess(userId, input);
           if (!version || version.status !== "ready" || version.charCount === null)
             return yield* new KnowledgeNotAvailable({ resourceId: input.versionId });
           if (input.startOffset > version.charCount)
             return yield* new KnowledgeRejected({
-              reason: `startOffset is past the end of the document, which has ${version.charCount} characters`,
+              reason: localized(m.knowledge_error_offset_past_end, { count: version.charCount }),
             });
           const requestedEnd = Math.min(version.charCount, input.startOffset + input.maxChars);
           const from = Math.max(0, input.startOffset - 1);
@@ -456,12 +464,12 @@ export class KnowledgeService extends Context.Service<
           const start = input.startOffset - from;
           if (textEnd(range, start) !== start)
             return yield* new KnowledgeRejected({
-              reason: "startOffset splits a Unicode character",
+              reason: localized(m.knowledge_error_offset_splits_character),
             });
           const end = textEnd(range, requestedEnd - from);
           if (end === start && input.startOffset < version.charCount)
             return yield* new KnowledgeRejected({
-              reason: "maxChars must fit the next Unicode character",
+              reason: localized(m.knowledge_error_max_chars_too_small),
             });
           const content = range.slice(start, end);
           const endOffset = from + end;

@@ -5,6 +5,7 @@ import { documentLocationLabel, sourceIdentity } from "~/modules/tools/sources.t
 import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { readKnowledgeDocument } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** Each open/range change reauthorizes; extracted bodies are not a client cache. */
 export function DocumentSourcePanel({ source }: { source: DocumentSource }) {
@@ -33,9 +34,10 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
     refetchOnMount: "always",
   });
   // Hide prior bodies during access revalidation and after a failed refetch.
-  if (query.isFetching || query.isPending) return <Spinner aria-label="Loading source" />;
+  if (query.isFetching || query.isPending)
+    return <Spinner aria-label={m.knowledge_source_loading()} />;
   if (query.isError || query.data.totalChars < source.endOffset)
-    return <p className="text-muted-foreground text-sm">Source unavailable.</p>;
+    return <p className="text-muted-foreground text-sm">{m.knowledge_source_unavailable()}</p>;
   const data = query.data;
   // The extracted text carries the parser's `[page N]` marker lines. They are
   // real characters of the immutable version (offsets count them), but a
@@ -60,15 +62,13 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
               key={index}
               className="text-muted-foreground border-border my-3 border-t pt-2 text-2xs font-medium tracking-wide uppercase"
             >
-              Page {page}
+              {m.knowledge_source_page({ page })}
             </div>
           );
         })}
       </div>
       {partial ? (
-        <p className="text-muted-foreground text-xs">
-          This is the part of the document the answer cited, not the whole file.
-        </p>
+        <p className="text-muted-foreground text-xs">{m.knowledge_source_partial()}</p>
       ) : null}
       <div className="flex gap-2">
         {offset > source.startOffset ? (
@@ -77,7 +77,7 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
             size="sm"
             onClick={() => setStarts((visited) => visited.slice(0, -1))}
           >
-            Previous excerpt
+            {m.knowledge_source_previous()}
           </Button>
         ) : null}
         {data.endOffset < source.endOffset ? (
@@ -86,7 +86,7 @@ function DocumentSourceExcerpt({ source }: { source: DocumentSource }) {
             size="sm"
             onClick={() => setStarts((visited) => [...visited, data.endOffset])}
           >
-            Next excerpt
+            {m.knowledge_source_next()}
           </Button>
         ) : null}
       </div>

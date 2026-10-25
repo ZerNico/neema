@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /**
  * A collection/document/version the caller may not use. Nonexistent and
@@ -12,7 +13,7 @@ export class KnowledgeNotAvailable extends Schema.TaggedError<KnowledgeNotAvaila
 
 export class KnowledgeRejected extends Schema.TaggedError<KnowledgeRejected>()(
   "KnowledgeRejected",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 /** Sharing into a group the caller is not allowed to share into. */

@@ -16,6 +16,7 @@ import {
 import type { KnowledgeSearchSession } from "./search.ts";
 import { KnowledgeService } from "./service.ts";
 import { textEnd, textPrefix } from "./text-range.ts";
+import { english, verbatim } from "~/i18n/localized.ts";
 
 export const listDocumentsTool = Tool.make("list_knowledge_documents", {
   description:
@@ -101,8 +102,9 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
     const targets = decoded.ok ? targetsOf(decoded.value) : [];
     return Effect.gen(function* () {
       if (!decoded.ok)
+        // Only the model reads these three reasons, so they are English alone.
         return yield* new KnowledgeRejected({
-          reason: `invalid knowledge tool arguments: ${decoded.issue}`,
+          reason: verbatim(`invalid knowledge tool arguments: ${decoded.issue}`),
         });
       const value = decoded.value;
       const operations = operationsOf(value);
@@ -129,7 +131,9 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
           if (error._tag === "KnowledgeNotAvailable") accessFailure = error;
         }),
       ),
-      Effect.catchTag("KnowledgeRejected", (error) => Effect.succeed(fail(targets, error.reason))),
+      Effect.catchTag("KnowledgeRejected", (error) =>
+        Effect.succeed(fail(targets, english(error.reason))),
+      ),
     );
   };
 
@@ -207,10 +211,10 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
             const prefix = `${cursorPrefix}:`;
             const suffix = value.cursor.slice(prefix.length);
             if (!value.cursor.startsWith(prefix) || !/^\d+$/.test(suffix))
-              return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
+              return yield* new KnowledgeRejected({ reason: verbatim("invalid document cursor") });
             start = Number(suffix);
             if (!Number.isSafeInteger(start) || start >= input.session.manifest.length)
-              return yield* new KnowledgeRejected({ reason: "invalid document cursor" });
+              return yield* new KnowledgeRejected({ reason: verbatim("invalid document cursor") });
           }
           const documents = input.session.manifest.slice(
             start,
@@ -305,7 +309,7 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
           );
           if (selected.some((entry) => !entry))
             return yield* new KnowledgeRejected({
-              reason: "document is not in the selected manifest",
+              reason: verbatim("document is not in the selected manifest"),
             });
           let result = base(value.documents.map((document) => document.versionId));
           let characters = KNOWLEDGE_TOOL_LIMITS.readChars as number;

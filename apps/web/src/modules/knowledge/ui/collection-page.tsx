@@ -76,40 +76,54 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
 
-const NoteForm = Schema.Struct({
-  title: Schema.String.check(
-    Schema.isMinLength(1, { message: "Enter a title." }),
-    Schema.isMaxLength(KNOWLEDGE_LIMITS.maxNameLength, { message: "Keep the title short." }),
-  ),
-  content: Schema.String.check(
-    Schema.isMinLength(1, { message: "Enter the note." }),
-    Schema.isMaxLength(KNOWLEDGE_LIMITS.maxNoteChars, {
-      message: `Notes hold up to ${KNOWLEDGE_LIMITS.maxNoteChars.toLocaleString()} characters.`,
-    }),
-  ),
-});
+// Built when the dialog mounts: a check's message is a plain string, read then
+// in the page's language.
+const noteForm = () =>
+  Schema.Struct({
+    title: Schema.String.check(
+      Schema.isMinLength(1, { message: m.knowledge_note_title_required() }),
+      Schema.isMaxLength(KNOWLEDGE_LIMITS.maxNameLength, {
+        message: m.knowledge_note_title_short(),
+      }),
+    ),
+    content: Schema.String.check(
+      Schema.isMinLength(1, { message: m.knowledge_note_content_required() }),
+      Schema.isMaxLength(KNOWLEDGE_LIMITS.maxNoteChars, {
+        message: m.knowledge_note_content_limit({
+          max: KNOWLEDGE_LIMITS.maxNoteChars.toLocaleString(getLocale()),
+        }),
+      }),
+    ),
+  });
 
 const statusBadge = (document: KnowledgeDocument) => {
   if (document.status === "failed")
     return (
       <Badge variant="destructive" className="max-w-full whitespace-normal">
-        Couldn’t prepare document
+        {m.knowledge_status_failed()}
       </Badge>
     );
-  if (document.status !== "ready") return <Badge variant="secondary">Preparing</Badge>;
+  if (document.status !== "ready")
+    return <Badge variant="secondary">{m.knowledge_status_preparing()}</Badge>;
   if (document.replacement)
     return (
       <Badge variant={document.replacement.status === "failed" ? "destructive" : "secondary"}>
-        {document.replacement.status === "failed" ? "Update failed" : "Updating"}
+        {document.replacement.status === "failed"
+          ? m.knowledge_status_update_failed()
+          : m.knowledge_status_updating()}
       </Badge>
     );
   const search = searchState(document);
-  if (search === "basic") return <Badge variant="outline">Basic search</Badge>;
-  if (search === "preparing") return <Badge variant="outline">Preparing search</Badge>;
+  if (search === "basic")
+    return <Badge variant="outline">{m.knowledge_status_basic_search()}</Badge>;
+  if (search === "preparing")
+    return <Badge variant="outline">{m.knowledge_status_preparing_search()}</Badge>;
   return null;
 };
 
@@ -155,9 +169,10 @@ function NoteDialog({
       }
     },
   });
+  const [validator] = useState(() => Schema.toStandardSchemaV1(noteForm()));
   const form = useAppForm({
     defaultValues: { title: source?.title ?? "", content: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(NoteForm) },
+    validators: { onSubmit: validator },
     onSubmit: async ({ value }) => {
       if (editing === null || !initialized.current) return;
       try {
@@ -178,7 +193,7 @@ function NoteDialog({
         onOpenChange(false);
         form.reset();
       } catch (error) {
-        toastError("Could not save the note.", error);
+        toastError(m.knowledge_note_save_failed(), error);
       }
     },
   });
@@ -201,11 +216,13 @@ function NoteDialog({
     >
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>{editing === "new" ? "Add note" : "Replace note"}</DialogTitle>
+          <DialogTitle>
+            {editing === "new" ? m.knowledge_note_add() : m.knowledge_note_replace()}
+          </DialogTitle>
           <DialogDescription>
             {editing === "new"
-              ? "Add text to use in chats."
-              : "The current text stays readable until the new one is ready."}
+              ? m.knowledge_note_add_description()
+              : m.knowledge_note_replace_description()}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -216,18 +233,21 @@ function NoteDialog({
           }}
         >
           <form.AppField name="title">
-            {(field) => <field.TextField label="Title" placeholder="Refund policy" />}
+            {(field) => (
+              <field.TextField
+                label={m.knowledge_note_title()}
+                placeholder={m.knowledge_note_title_placeholder()}
+              />
+            )}
           </form.AppField>
-          {current.isError ? (
-            <FieldError>Could not load the current text. Close and try again.</FieldError>
-          ) : null}
+          {current.isError ? <FieldError>{m.knowledge_note_load_failed()}</FieldError> : null}
           <form.AppField name="content">
             {(field) => (
               <field.TextareaField
-                label="Note"
+                label={m.knowledge_note_label()}
                 rows={10}
                 disabled={loading}
-                {...(loading ? { description: "Loading the current text…" } : {})}
+                {...(loading ? { description: m.knowledge_note_loading() } : {})}
               />
             )}
           </form.AppField>
@@ -236,13 +256,13 @@ function NoteDialog({
               <form.Subscribe selector={(state) => state.isSubmitting}>
                 {(isSubmitting) => (
                   <DialogClose render={<Button variant="outline" disabled={isSubmitting} />}>
-                    Cancel
+                    {m.common_cancel()}
                   </DialogClose>
                 )}
               </form.Subscribe>
               {/* Submitting before the text loads would replace it with a blank. */}
               <form.SubmitButton disabled={loading || current.isError}>
-                {editing === "new" ? "Add note" : "Replace note"}
+                {editing === "new" ? m.knowledge_note_add() : m.knowledge_note_replace()}
               </form.SubmitButton>
             </DialogFooter>
           </form.AppForm>
@@ -255,9 +275,9 @@ function NoteDialog({
 // The limit only matters once it is close, so it stays out of the way until then.
 const documentCount = (count: number) => {
   const max = KNOWLEDGE_LIMITS.maxDocumentsPerCollection;
-  if (count >= max) return `Full: ${count} of ${max} documents`;
-  if (count >= max * 0.8) return `${count} of ${max} documents`;
-  return count === 1 ? "1 document" : `${count} documents`;
+  if (count >= max) return m.knowledge_documents_full({ count, max });
+  if (count >= max * 0.8) return m.knowledge_documents_near_limit({ count, max });
+  return m.knowledge_count_documents({ count });
 };
 
 /**
@@ -292,14 +312,14 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       body.set(
         "title",
         input.file.name.replace(/\.[^.]+$/, "").slice(0, KNOWLEDGE_LIMITS.maxNameLength) ||
-          "Document",
+          m.knowledge_upload_default_title(),
       );
       if (input.documentId) body.set("documentId", input.documentId);
       body.set("file", input.file);
       return uploadKnowledgeDocument({ data: body });
     },
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not upload the document.", error),
+    onError: (error) => toastError(m.knowledge_upload_failed(), error),
   });
   // A drop can carry several files; each is its own upload with its own
   // outcome, so one bad file does not swallow the rest.
@@ -315,12 +335,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
   const remove = useMutation({
     mutationFn: (documentId: string) => deleteKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not delete the document.", error),
+    onError: (error) => toastError(m.knowledge_document_delete_failed(), error),
   });
   const retry = useMutation({
     mutationFn: (documentId: string) => retryKnowledgeDocument({ data: { documentId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not try again.", error),
+    onError: (error) => toastError(m.knowledge_document_retry_failed(), error),
   });
   const rebuild = useMutation({
     mutationFn: () => rebuildKnowledgeIndex({ data: { collectionId } }),
@@ -329,11 +349,11 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       const total = reextracted + reembedded;
       toast.success(
         total === 0
-          ? "Everything is already up to date."
-          : `Rebuilding ${total} ${total === 1 ? "document" : "documents"} in the background. Search keeps working meanwhile.`,
+          ? m.knowledge_rebuild_up_to_date()
+          : m.knowledge_rebuild_started({ count: total }),
       );
     },
-    onError: (error) => toastError("Could not redo preparation.", error),
+    onError: (error) => toastError(m.knowledge_rebuild_failed(), error),
   });
   const removeCollection = useMutation({
     mutationFn: () => deleteKnowledgeCollection({ data: { collectionId } }),
@@ -341,15 +361,19 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       await invalidate();
       await navigate({ to: "/knowledge" });
     },
-    onError: (error) => toastError("Could not delete the collection.", error),
+    onError: (error) => toastError(m.knowledge_collection_delete_failed(), error),
   });
 
   if (detail.isError)
     return (
-      <Page title="Collection" backTo="/knowledge" backLabel="Knowledge">
+      <Page
+        title={m.knowledge_collection_title()}
+        backTo="/knowledge"
+        backLabel={m.knowledge_title()}
+      >
         <ErrorState
-          title="Could not load this collection"
-          description="It may have been deleted, or you no longer have access."
+          title={m.knowledge_collection_load_failed()}
+          description={m.knowledge_collection_load_failed_description()}
           onRetry={() => {
             void detail.refetch();
           }}
@@ -358,8 +382,12 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
     );
   if (!detail.data)
     return (
-      <Page title="Collection" backTo="/knowledge" backLabel="Knowledge">
-        <ListSkeleton label="Loading collection" />
+      <Page
+        title={m.knowledge_collection_title()}
+        backTo="/knowledge"
+        backLabel={m.knowledge_title()}
+      >
+        <ListSkeleton label={m.knowledge_collection_loading()} />
       </Page>
     );
   const { collection, documents } = detail.data;
@@ -378,34 +406,42 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
       title={collection.name}
       description={
         collection.description ||
-        (collection.ownerName ? `Shared by ${collection.ownerName}. Read and use only.` : undefined)
+        (collection.ownerName
+          ? m.knowledge_collection_shared_read_only({ name: collection.ownerName })
+          : undefined)
       }
       backTo="/knowledge"
-      backLabel="Knowledge"
+      backLabel={m.knowledge_title()}
       actions={
         canEdit ? (
           <>
             <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
               <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-              Access
+              {m.knowledge_access()}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<Button size="icon-sm" variant="ghost" aria-label="Collection actions" />}
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={m.knowledge_collection_actions()}
+                  />
+                }
               >
                 <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setRenaming(true)}>
                   <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                  Rename
+                  {m.common_rename()}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
                   <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
                   <span>
-                    Rebuild index
+                    {m.knowledge_rebuild_index()}
                     <span className="text-muted-foreground block text-xs">
-                      Redo preparation for documents that need it.
+                      {m.knowledge_rebuild_index_description()}
                     </span>
                   </span>
                 </DropdownMenuItem>
@@ -414,17 +450,16 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   variant="destructive"
                   onClick={() => {
                     void confirm({
-                      title: `Delete “${collection.name}”?`,
-                      description:
-                        "Every document and note in it is removed. Chats that cited them will show those sources as unavailable.",
-                      confirmLabel: "Delete collection",
+                      title: m.knowledge_collection_delete_title({ name: collection.name }),
+                      description: m.knowledge_collection_delete_description(),
+                      confirmLabel: m.knowledge_collection_delete(),
                     }).then((confirmed) => {
                       if (confirmed) removeCollection.mutate();
                     });
                   }}
                 >
                   <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  Delete collection
+                  {m.knowledge_collection_delete()}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -440,7 +475,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
         {...dropHandlers}
       >
         <Section
-          title="Documents"
+          title={m.knowledge_documents_title()}
           description={documentCount(documents.length)}
           actions={
             canEdit ? (
@@ -451,7 +486,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                   multiple
                   accept=".pdf,.txt,.md,.markdown,text/plain,text/markdown,application/pdf"
                   className="sr-only"
-                  aria-label="Upload documents"
+                  aria-label={m.knowledge_upload_label()}
                   onChange={(event) => {
                     const files = event.target.files;
                     if (files && files.length > 0) {
@@ -468,16 +503,16 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                     render={<PendingButton size="sm" pending={upload.isPending} disabled={full} />}
                   >
                     <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                    Add
+                    {m.knowledge_add_menu()}
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={() => pickFile(null)}>
                       <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} />
-                      Upload files
+                      {m.knowledge_upload_files()}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setNote("new")}>
                       <HugeiconsIcon icon={NoteIcon} strokeWidth={2} />
-                      Write a note
+                      {m.knowledge_write_note()}
                     </DropdownMenuItem>
                     {syncable.length > 0 ? <DropdownMenuSeparator /> : null}
                     {syncable.map((integration) => (
@@ -492,7 +527,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         }
                       >
                         <IntegrationLogo integrationId={integration.id} />
-                        Sync from {integration.name}
+                        {m.knowledge_sync_from({ name: integration.name })}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -506,11 +541,9 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
           {onlySynced ? null : ownDocuments.length === 0 ? (
             <EmptyState
               icon={FolderLibraryIcon}
-              title="No documents yet"
+              title={m.knowledge_documents_empty_title()}
               description={
-                canEdit
-                  ? "Add documents or notes to use in chats."
-                  : "The owner has not added anything yet."
+                canEdit ? m.knowledge_documents_empty_owner() : m.knowledge_documents_empty_reader()
               }
             />
           ) : (
@@ -539,18 +572,20 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                           document.replacement?.error ??
                           [
                             document.fileName,
-                            document.pageCount ? `${document.pageCount} pages` : null,
+                            document.pageCount
+                              ? m.knowledge_document_pages({ count: document.pageCount })
+                              : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                       </span>
                       {document.replacement ? (
                         <span className="text-muted-foreground text-xs">
-                          The current version remains available.
+                          {m.knowledge_document_current_available()}
                         </span>
                       ) : document.status === "ready" && document.semanticStatus === "failed" ? (
                         <span className="text-muted-foreground text-xs">
-                          This document is still usable with basic search.
+                          {m.knowledge_document_basic_search()}
                         </span>
                       ) : null}
                     </div>
@@ -564,14 +599,14 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         disabled={retry.isPending}
                         onClick={() => retry.mutate(document.id)}
                       >
-                        Try again
+                        {m.knowledge_document_try_again()}
                       </PendingButton>
                     ) : null}
                     {document.versionId && document.kind === "file" ? (
                       <a
                         href={`/api/knowledge/${encodeURIComponent(collectionId)}/${encodeURIComponent(document.id)}/${encodeURIComponent(document.versionId)}`}
                         className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-                        aria-label={`Download ${document.title}`}
+                        aria-label={m.knowledge_document_download({ name: document.title })}
                         download
                       >
                         <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
@@ -610,7 +645,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                           })
                         }
                       >
-                        Read note
+                        {m.knowledge_document_read_note()}
                       </Button>
                     ) : null}
                     {document.source?.url ? (
@@ -620,7 +655,9 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                         rel="noreferrer"
                         className={buttonVariants({ size: "sm", variant: "ghost" })}
                       >
-                        Open in {integrations.name(document.source.integrationId)}
+                        {m.knowledge_document_open_in({
+                          name: integrations.name(document.source.integrationId),
+                        })}
                       </a>
                     ) : null}
                     {canEdit && !document.source ? (
@@ -630,7 +667,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                             <Button
                               size="icon-sm"
                               variant="ghost"
-                              aria-label={`Actions for ${document.title}`}
+                              aria-label={m.knowledge_document_actions({ name: document.title })}
                             />
                           }
                         >
@@ -640,7 +677,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                           {document.kind === "note" ? (
                             <DropdownMenuItem onClick={() => setNote(document)}>
                               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                              Replace note
+                              {m.knowledge_note_replace()}
                             </DropdownMenuItem>
                           ) : (
                             <DropdownMenuItem
@@ -648,7 +685,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                               disabled={upload.isPending}
                             >
                               <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} />
-                              Replace file
+                              {m.knowledge_document_replace_file()}
                             </DropdownMenuItem>
                           )}
                           <DropdownMenuSeparator />
@@ -656,17 +693,16 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
                             variant="destructive"
                             onClick={() => {
                               void confirm({
-                                title: `Delete “${document.title}”?`,
-                                description:
-                                  "Chats that cited it will show the source as unavailable. This cannot be undone.",
-                                confirmLabel: "Delete document",
+                                title: m.knowledge_document_delete_title({ name: document.title }),
+                                description: m.knowledge_document_delete_description(),
+                                confirmLabel: m.knowledge_document_delete(),
                               }).then((confirmed) => {
                                 if (confirmed) remove.mutate(document.id);
                               });
                             }}
                           >
                             <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                            Delete
+                            {m.common_delete()}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -682,7 +718,7 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
             </>
           )}
         </Section>
-        <m.div
+        <motion.div
           aria-hidden={!dragging}
           inert
           initial={false}
@@ -692,9 +728,9 @@ export function CollectionPage({ collectionId }: { collectionId: string }) {
         >
           <span className="text-foreground flex items-center gap-2 text-sm font-medium">
             <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} className="size-4" />
-            Drop files to add them
+            {m.knowledge_drop_files()}
           </span>
-        </m.div>
+        </motion.div>
       </div>
       <KnowledgeSourcesSection
         collectionId={collectionId}

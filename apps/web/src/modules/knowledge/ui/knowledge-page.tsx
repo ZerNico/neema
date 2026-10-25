@@ -30,11 +30,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
+import { m } from "~/paraglide/messages.js";
 
 const collectionStatusLabel = (collection: CollectionSummary): string => {
-  const parts: string[] = [`${collection.documentCount} documents`];
-  if (collection.pendingCount > 0) parts.push(`${collection.pendingCount} preparing`);
-  if (collection.failedCount > 0) parts.push(`${collection.failedCount} failed`);
+  const parts: string[] = [m.knowledge_count_documents({ count: collection.documentCount })];
+  if (collection.pendingCount > 0)
+    parts.push(m.knowledge_count_preparing({ count: collection.pendingCount }));
+  if (collection.failedCount > 0)
+    parts.push(m.knowledge_count_failed({ count: collection.failedCount }));
   return parts.join(" · ");
 };
 
@@ -76,7 +79,7 @@ export function CollectionDialog({
         toast.error(
           error instanceof Error && error.message
             ? error.message
-            : "Could not save the collection.",
+            : m.knowledge_collection_save_failed(),
         );
       }
     },
@@ -91,8 +94,12 @@ export function CollectionDialog({
     >
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>{collection ? "Rename collection" : "New collection"}</DialogTitle>
-          <DialogDescription>Private until you share it.</DialogDescription>
+          <DialogTitle>
+            {collection
+              ? m.knowledge_collection_rename_title()
+              : m.knowledge_collection_new_title()}
+          </DialogTitle>
+          <DialogDescription>{m.knowledge_collection_private()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -102,21 +109,28 @@ export function CollectionDialog({
           }}
         >
           <form.AppField name="name">
-            {(field) => <field.TextField label="Name" placeholder="Contracts" />}
+            {(field) => (
+              <field.TextField
+                label={m.common_name()}
+                placeholder={m.knowledge_collection_name_placeholder()}
+              />
+            )}
           </form.AppField>
           <form.AppField name="description">
-            {(field) => <field.TextareaField label="Description" optional rows={2} />}
+            {(field) => <field.TextareaField label={m.common_description()} optional rows={2} />}
           </form.AppField>
           <form.AppForm>
             <DialogFooter>
               <form.Subscribe selector={(state) => state.isSubmitting}>
                 {(isSubmitting) => (
                   <DialogClose render={<Button variant="outline" disabled={isSubmitting} />}>
-                    Cancel
+                    {m.common_cancel()}
                   </DialogClose>
                 )}
               </form.Subscribe>
-              <form.SubmitButton>{collection ? "Save" : "Create collection"}</form.SubmitButton>
+              <form.SubmitButton>
+                {collection ? m.common_save() : m.knowledge_collection_create()}
+              </form.SubmitButton>
             </DialogFooter>
           </form.AppForm>
         </form>
@@ -144,7 +158,7 @@ export function KnowledgePage() {
           key={collection.id}
           to="/knowledge/$collectionId"
           params={{ collectionId: collection.id }}
-          aria-label={`Open ${collection.name}`}
+          aria-label={m.knowledge_list_open({ name: collection.name })}
           className="block"
         >
           <ListRow interactive>
@@ -155,18 +169,24 @@ export function KnowledgePage() {
               <span className="flex items-center gap-2 text-sm font-medium">
                 <span className="truncate">{collection.name}</span>
                 {collection.audience === "instance" ? (
-                  <Badge variant="outline">Everyone</Badge>
+                  <Badge variant="outline">{m.knowledge_list_everyone()}</Badge>
                 ) : null}
                 {collection.failedCount > 0 ? (
-                  <Badge variant="destructive">{collection.failedCount} failed</Badge>
+                  <Badge variant="destructive">
+                    {m.knowledge_count_failed({ count: collection.failedCount })}
+                  </Badge>
                 ) : collection.pendingCount > 0 ? (
-                  <Badge variant="secondary">{collection.pendingCount} preparing</Badge>
+                  <Badge variant="secondary">
+                    {m.knowledge_count_preparing({ count: collection.pendingCount })}
+                  </Badge>
                 ) : null}
               </span>
               <span className="text-muted-foreground truncate text-xs">
                 {[
                   collection.description || collectionStatusLabel(collection),
-                  collection.ownerName ? `Shared by ${collection.ownerName}` : null,
+                  collection.ownerName
+                    ? m.knowledge_shared_by({ name: collection.ownerName })
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -184,41 +204,41 @@ export function KnowledgePage() {
   );
   return (
     <Page
-      title="Knowledge"
+      title={m.knowledge_title()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.knowledge_root_label()}
       actions={
         capabilities?.knowledgeCreate ? (
           <Button size="sm" onClick={() => setCreating(true)} disabled={atLimit}>
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            New collection
+            {m.knowledge_list_new()}
           </Button>
         ) : null
       }
     >
       {collections.isError ? (
         <ErrorState
-          title="Could not load collections"
+          title={m.knowledge_list_load_failed()}
           onRetry={() => {
             void collections.refetch();
           }}
         />
       ) : collections.data === undefined ? (
-        <ListSkeleton label="Loading collections" />
+        <ListSkeleton label={m.knowledge_list_loading()} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={FolderLibraryIcon}
-          title="No collections yet"
+          title={m.knowledge_list_empty_title()}
           description={
             capabilities?.knowledgeCreate
-              ? "Keep documents together to use in chats and agents."
-              : "No collections are shared with you yet."
+              ? m.knowledge_list_empty_create()
+              : m.knowledge_list_empty_shared()
           }
           action={
             capabilities?.knowledgeCreate ? (
               <Button size="sm" onClick={() => setCreating(true)}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                New collection
+                {m.knowledge_list_new()}
               </Button>
             ) : null
           }
@@ -226,10 +246,10 @@ export function KnowledgePage() {
       ) : (
         <>
           {own.length > 0 ? (
-            <Section title="Your collections">{collectionRows(own)}</Section>
+            <Section title={m.knowledge_list_yours()}>{collectionRows(own)}</Section>
           ) : null}
           {shared.length > 0 ? (
-            <Section title="Shared with you">{collectionRows(shared)}</Section>
+            <Section title={m.knowledge_list_shared_with_you()}>{collectionRows(shared)}</Section>
           ) : null}
         </>
       )}
