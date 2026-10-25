@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "./_app.chat.$conversationId.tsx";
 import { Route as NewChatRoute } from "./_app.index.tsx";
 import { getConversationWithMessages, listChatModels } from "~/modules/chat/server/functions.ts";
-import { getWebSearchAvailability } from "~/modules/tools/server/functions.ts";
+import { getComposerAvailability } from "~/modules/tools/server/functions.ts";
 
 vi.mock("~/modules/chat/server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("~/modules/chat/server/functions.ts", () => ({
   listConversations: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 // The views are covered by chat-view.test; the routes only have to hand them data.
 vi.mock("~/modules/chat/ui/chat-view.tsx", () => ({
@@ -33,8 +33,9 @@ vi.mock("~/modules/chat/ui/new-chat-view.tsx", () => ({ NewChatView: () => <div 
 
 const conversationMock = vi.mocked(getConversationWithMessages);
 const modelsMock = vi.mocked(listChatModels);
-const availabilityMock = vi.mocked(getWebSearchAvailability);
-const availability = { configured: true, enabled: true };
+const availabilityMock = vi.mocked(getComposerAvailability);
+const on = { configured: true, enabled: true };
+const availability = { search: on, research: on, documentParsing: on };
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -105,7 +106,7 @@ describe.each([
     search.resolve(availability);
     // The SSR query integration serializes the cache; don't duplicate the payload.
     await expect(pending).resolves.toBeUndefined();
-    expect(queryClient.getQueryData(["tools", "web-search", "availability"])).toEqual(availability);
+    expect(queryClient.getQueryData(["tools", "availability"])).toEqual(availability);
     if (route === Route) {
       expect(queryClient.getQueryData(["conversation", "c1"])).toEqual({
         conversation: { id: "c1" },
@@ -131,9 +132,7 @@ describe.each([
     await expect(runLoader(queryClient, route)).resolves.toBeUndefined();
     expect(availabilityMock).toHaveBeenCalledTimes(1);
     expect(queryClient.getQueryData(["chat-models"])).toEqual([]);
-    expect(queryClient.getQueryState(["tools", "web-search", "availability"])?.status).toBe(
-      "error",
-    );
+    expect(queryClient.getQueryState(["tools", "availability"])?.status).toBe("error");
   });
 
   it("still rejects a failed required model lookup", async () => {

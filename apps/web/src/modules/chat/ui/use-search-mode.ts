@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { webSearchAvailabilityQuery } from "../client/queries.ts";
+import { composerAvailabilityQuery } from "../client/queries.ts";
 
 /**
  * Per-message search preference, constrained by the admin config. The model
@@ -12,7 +12,10 @@ import { webSearchAvailabilityQuery } from "../client/queries.ts";
  * an agent conversation. A per-message opt-out never outlives the send.
  */
 export function useSearchMode(defaultEnabled = true) {
-  const { data: availability } = useQuery(webSearchAvailabilityQuery);
+  const { data: availability } = useQuery({
+    ...composerAvailabilityQuery,
+    select: (available) => available.search,
+  });
   const [preferred, setPreferred] = useState<boolean | null>(null);
   const eligible = availability?.enabled ?? false;
 

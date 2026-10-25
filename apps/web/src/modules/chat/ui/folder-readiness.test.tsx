@@ -31,11 +31,13 @@ vi.mock("./chat-view.tsx", () => ({ ChatView: () => null }));
 vi.mock("./new-chat-view.tsx", () => ({ NewChatView: () => null }));
 vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: async () => [] }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: async () => ({ configured: false, enabled: false }),
-  getResearchAvailability: async () => ({ configured: false, enabled: false }),
+  getComposerAvailability: async () => ({
+    search: { configured: false, enabled: false },
+    research: { configured: false, enabled: false },
+    documentParsing: { configured: false, enabled: false },
+  }),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: async () => ({ configured: false, enabled: false }),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));

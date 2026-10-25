@@ -25,9 +25,8 @@ vi.mock("~/modules/chat/server/functions.ts", () => ({
   listConversations: vi.fn(),
   getConversationWithMessages: vi.fn(),
 }));
-vi.mock("~/modules/tools/server/functions.ts", () => ({ getWebSearchAvailability: vi.fn() }));
+vi.mock("~/modules/tools/server/functions.ts", () => ({ getComposerAvailability: vi.fn() }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -147,15 +146,21 @@ const setup = (
   });
   client.setQueryData(["capabilities"], options.capabilities ?? ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], MODELS);
-  client.setQueryData(["tools", "web-search", "availability"], {
-    configured: false,
-    enabled: false,
-  });
-  client.setQueryData(["tools", "document-parsing", "availability"], {
-    configured: true,
-    enabled: options.parsingEnabled ?? true,
-    kind: "local",
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: false,
+      enabled: false,
+    },
+  }));
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    documentParsing: {
+      configured: true,
+      enabled: options.parsingEnabled ?? true,
+      kind: "local",
+    },
+  }));
 
   const onSubmit = vi.fn();
   const upload = vi.fn(options.upload ?? (() => Promise.resolve(dto())));
@@ -254,7 +259,10 @@ const renderDefaultProbe = (
   });
   client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], rows);
-  client.setQueryData(["tools", "web-search", "availability"], { configured: true, enabled: true });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: { configured: true, enabled: true },
+  }));
   render(
     <QueryClientProvider client={client}>
       <DefaultProbe initialModelId={initialModelId} />
@@ -404,10 +412,13 @@ describe("ChatInput first render", () => {
               capabilities: { ...entry.capabilities, tools: entry.id === "vision" },
             })),
       );
-      client.setQueryData(["tools", "web-search", "availability"], {
-        configured,
-        enabled: configured,
-      });
+      client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+        ...current,
+        search: {
+          configured,
+          enabled: configured,
+        },
+      }));
       const onModelChange = vi.fn();
       const onSubmit = vi.fn();
       const input = (modelId: string | null) => (
@@ -449,10 +460,13 @@ it("keeps one focused action button while Send becomes Stop and back", () => {
   });
   client.setQueryData(["capabilities"], ALL_CAPABILITIES);
   client.setQueryData(["chat-models"], MODELS);
-  client.setQueryData(["tools", "web-search", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   const send = vi.fn();
   const stop = vi.fn();
   const input = (running: boolean) => (
@@ -500,10 +514,13 @@ describe("ChatInput search toggle", () => {
       ["chat-models"],
       [{ ...MODELS[0]!, capabilities: { ...MODELS[0]!.capabilities, tools: true } }],
     );
-    client.setQueryData(["tools", "web-search", "availability"], {
-      configured: true,
-      enabled: true,
-    });
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: true,
+        enabled: true,
+      },
+    }));
     const onSearchEnabledChange = vi.fn();
     const input = (searchEnabled: boolean) => (
       <QueryClientProvider client={client}>
@@ -556,10 +573,13 @@ describe("ChatInput plus menu", () => {
     });
     client.setQueryData(["capabilities"], ALL_CAPABILITIES);
     client.setQueryData(["chat-models"], MODELS);
-    client.setQueryData(["tools", "web-search", "availability"], {
-      configured: false,
-      enabled: false,
-    });
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: false,
+        enabled: false,
+      },
+    }));
     render(
       <AppMotionProvider>
         <QueryClientProvider client={client}>
@@ -614,10 +634,13 @@ describe("ChatInput pickers", () => {
     });
     client.setQueryData(["capabilities"], ALL_CAPABILITIES);
     client.setQueryData(["chat-models"], MODELS);
-    client.setQueryData(["tools", "web-search", "availability"], {
-      configured: false,
-      enabled: false,
-    });
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: false,
+        enabled: false,
+      },
+    }));
     render(
       <AppMotionProvider>
         <QueryClientProvider client={client}>
@@ -1045,10 +1068,13 @@ describe("queueing behind a live response", () => {
     });
     queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
     queryClient.setQueryData(["chat-models"], MODELS);
-    queryClient.setQueryData(["tools", "web-search", "availability"], {
-      configured: false,
-      enabled: false,
-    });
+    queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: false,
+        enabled: false,
+      },
+    }));
     return queryClient;
   };
   const input = (queryClient: QueryClient, value: string, onSubmit = vi.fn(), onStop = vi.fn()) => (

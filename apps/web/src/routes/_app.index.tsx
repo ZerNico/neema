@@ -3,11 +3,7 @@ import { useCallback } from "react";
 import { readChatPrefill } from "~/modules/agents/authoring.ts";
 import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import { NewChatView } from "~/modules/chat/ui/new-chat-view.tsx";
-import {
-  chatModelsQuery,
-  researchAvailabilityQuery,
-  webSearchAvailabilityQuery,
-} from "~/modules/chat/client/queries.ts";
+import { chatModelsQuery, composerAvailabilityQuery } from "~/modules/chat/client/queries.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 
@@ -41,8 +37,7 @@ export const Route = createFileRoute("/_app/")({
       context.queryClient.prefetchQuery(knowledgeCollectionsQuery),
       context.queryClient.prefetchQuery(skillsQuery),
       // Optional: a search-config failure must not prevent opening a chat.
-      context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
-      context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),
+      context.queryClient.prefetchQuery({ ...composerAvailabilityQuery, retry: false }),
     ]);
   },
   component: NewChatPage,

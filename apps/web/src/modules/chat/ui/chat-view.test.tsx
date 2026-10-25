@@ -113,7 +113,7 @@ vi.mock("../server/functions.ts", () => ({
 vi.mock("../client/time-zone.ts", () => ({ browserTimeZone: () => "Europe/Berlin" }));
 
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/knowledge/server/functions.ts", () => ({
   listKnowledgeCollections: vi.fn(),
@@ -601,10 +601,13 @@ const renderView = (
       },
     ],
   );
-  client.setQueryData(["tools", "web-search", "availability"], {
-    configured: true,
-    enabled: true,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: true,
+      enabled: true,
+    },
+  }));
   client.setQueryData(["skills"], []);
   return {
     client,

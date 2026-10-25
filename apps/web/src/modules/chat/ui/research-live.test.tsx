@@ -20,8 +20,7 @@ vi.mock("../server/functions.ts", () => ({
   stopGeneration: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", () => ({
   Link: () => null,
@@ -116,10 +115,13 @@ it.each(["stream first", "detail first"])(
     };
     client.setQueryData(["conversation", "c1"], payload);
     client.setQueryData(["chat-models"], [{ id: "model-1", capabilities: { tools: true } }]);
-    client.setQueryData(["tools", "web-search", "availability"], {
-      enabled: true,
-      configured: true,
-    });
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        enabled: true,
+        configured: true,
+      },
+    }));
     vi.mocked(getConversationWithMessages).mockResolvedValue({
       ...payload,
       messages: [{ ...message, status: "complete", completedAt: now }],

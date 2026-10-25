@@ -7,7 +7,6 @@ import { MAX_ATTACHMENT_BYTES } from "../constants.ts";
 import { withoutImageMetadata } from "../image-metadata.ts";
 import { AttachmentIdInput } from "../schema.ts";
 import { AttachmentService } from "./service.ts";
-import { DocumentParser } from "./document-parser.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { AttachmentRejected } from "../errors.ts";
@@ -79,7 +78,3 @@ export const deleteAttachment = createServerFn({ method: "POST" })
       ),
     ),
   );
-
-export const getDocumentParsingAvailability = createServerFn({ method: "GET" })
-  .middleware([requireSession])
-  .handler(() => runServerFn(DocumentParser.use((parser) => parser.availability())));

@@ -14,7 +14,10 @@ import {
   UpdateSearchProviderInput,
   UpdateToolSettingsInput,
 } from "../schema.ts";
-import { readVisionConnection } from "~/modules/attachments/server/document-parser.ts";
+import {
+  DocumentParser,
+  readVisionConnection,
+} from "~/modules/attachments/server/document-parser.ts";
 import { OcrModels } from "~/modules/pdf/server/ocr-models.ts";
 import { mistralBaseUrl, mistralOcr } from "~/modules/pdf/server/scan-readers.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -147,18 +150,29 @@ export const testSearchProvider = createServerFn({ method: "POST" })
   );
 
 /**
- * Non-admin: lets the composer decide whether to show the Search toggle, which
- * controls web_search only. The URL reader has no toggle and is gated separately
- * by URLs in user-authored messages, so it is deliberately not ORed in here.
- * Exposes nothing beyond booleans.
+ * Non-admin: what the composer may offer, as booleans only. Search is the
+ * Search toggle, which controls web_search alone: the URL reader has no
+ * toggle and is gated by URLs in user-authored messages. Research needs both.
+ * Document parsing decides whether a PDF chip is usable without native file
+ * support on the selected model.
  */
-export const getWebSearchAvailability = createServerFn({ method: "GET" })
+export const getComposerAvailability = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(() =>
     runServerFn(
       Effect.gen(function* () {
         const search = yield* (yield* WebSearchExecutor).availability();
-        return { configured: search.configured, enabled: search.configured && search.enabled };
+        const reader = yield* (yield* UrlReaderExecutor).availability();
+        const parser = yield* (yield* DocumentParser).availability();
+        const researchConfigured = search.configured && reader.configured;
+        return {
+          search: { configured: search.configured, enabled: search.configured && search.enabled },
+          research: {
+            configured: researchConfigured,
+            enabled: researchConfigured && search.enabled && reader.enabled,
+          },
+          documentParsing: { configured: parser.configured, enabled: parser.enabled },
+        };
       }),
     ),
   );
@@ -303,19 +317,6 @@ export const testMistralOcr = createServerFn({ method: "POST" })
               ok: false as const,
               error: "The service answered, but did not read the sample page.",
             };
-      }),
-    ),
-  );
-
-export const getResearchAvailability = createServerFn({ method: "GET" })
-  .middleware([requireSession])
-  .handler(() =>
-    runServerFn(
-      Effect.gen(function* () {
-        const search = yield* (yield* WebSearchExecutor).availability();
-        const reader = yield* (yield* UrlReaderExecutor).availability();
-        const configured = search.configured && reader.configured;
-        return { configured, enabled: configured && search.enabled && reader.enabled };
       }),
     ),
   );

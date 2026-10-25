@@ -24,11 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  chatModelsQuery,
-  researchAvailabilityQuery,
-  webSearchAvailabilityQuery,
-} from "../client/queries.ts";
+import { chatModelsQuery, composerAvailabilityQuery } from "../client/queries.ts";
 import { resolveChatModel } from "../client/selected-model.ts";
 import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
 import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";
@@ -48,7 +44,6 @@ import {
 } from "./context-picker.tsx";
 import { collectionStatus } from "./collection-status.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
-import { documentParsingAvailabilityQuery } from "~/modules/attachments/client/queries.ts";
 import {
   type AttachmentUpload,
   type AttachmentUploads,
@@ -262,9 +257,13 @@ export const ChatInput = forwardRef<
   }));
   const { data: models } = useSuspenseQuery(chatModelsQuery);
   const { data: capabilities } = useQuery(capabilitiesQuery);
-  const { data: searchAvailability } = useQuery(webSearchAvailabilityQuery);
+  const { data: searchAvailability } = useQuery({
+    ...composerAvailabilityQuery,
+    select: (available) => available.search,
+  });
   const { data: researchAvailability } = useQuery({
-    ...researchAvailabilityQuery,
+    ...composerAvailabilityQuery,
+    select: (available) => available.research,
     enabled:
       !!capabilities?.deepResearch &&
       !!capabilities.webSearch &&
@@ -406,7 +405,8 @@ export const ChatInput = forwardRef<
     setPendingPicker(kind);
   };
   const { data: parsingAvailability } = useQuery({
-    ...documentParsingAvailabilityQuery,
+    ...composerAvailabilityQuery,
+    select: (available) => available.documentParsing,
     enabled: attachments !== undefined && workspaceImports === undefined,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);

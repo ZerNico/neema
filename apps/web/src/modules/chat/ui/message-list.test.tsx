@@ -1308,10 +1308,13 @@ describe("MessageBubble actions", () => {
         },
       ],
     );
-    queryClient.setQueryData(["tools", "web-search", "availability"], {
-      configured: true,
-      enabled: true,
-    });
+    queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: true,
+        enabled: true,
+      },
+    }));
     seed?.(queryClient);
     return render(
       <QueryClientProvider client={queryClient}>

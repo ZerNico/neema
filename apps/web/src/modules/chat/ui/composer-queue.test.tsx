@@ -27,11 +27,9 @@ vi.mock("../server/functions.ts", () => ({
 }));
 vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: vi.fn() }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -102,12 +100,21 @@ function setup(onSend = vi.fn().mockResolvedValue(undefined)) {
     ],
   );
   client.setQueryData(["skills"], skills);
-  client.setQueryData(["tools", "web-search", "availability"], { configured: true, enabled: true });
-  client.setQueryData(["tools", "research", "availability"], { configured: true, enabled: true });
-  client.setQueryData(["tools", "document-parsing", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: { configured: true, enabled: true },
+  }));
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    research: { configured: true, enabled: true },
+  }));
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    documentParsing: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   const view = (send: ComponentProps<typeof Composer>["onSend"]) => (
     <QueryClientProvider client={client}>
       <Composer
@@ -308,15 +315,24 @@ describe("editing a queued message", () => {
       ],
     );
     client.setQueryData(["skills"], skills);
-    client.setQueryData(["tools", "web-search", "availability"], {
-      configured: true,
-      enabled: true,
-    });
-    client.setQueryData(["tools", "research", "availability"], { configured: true, enabled: true });
-    client.setQueryData(["tools", "document-parsing", "availability"], {
-      configured: false,
-      enabled: false,
-    });
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      search: {
+        configured: true,
+        enabled: true,
+      },
+    }));
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      research: { configured: true, enabled: true },
+    }));
+    client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+      ...current,
+      documentParsing: {
+        configured: false,
+        enabled: false,
+      },
+    }));
     const queue = {
       entries: [entry, ...otherEntries],
       steeringIds: new Set<string>(),

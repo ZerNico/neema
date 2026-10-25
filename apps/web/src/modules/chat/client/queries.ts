@@ -6,10 +6,7 @@ import {
   listChatModels,
   listConversations,
 } from "../server/functions.ts";
-import {
-  getResearchAvailability,
-  getWebSearchAvailability,
-} from "~/modules/tools/server/functions.ts";
+import { getComposerAvailability } from "~/modules/tools/server/functions.ts";
 
 export const CONVERSATIONS_PAGE_SIZE = 30;
 
@@ -83,15 +80,14 @@ export const chatModelsQuery = queryOptions({
   staleTime: 60_000,
 });
 
-export const researchAvailabilityQuery = queryOptions({
-  queryKey: ["tools", "research", "availability"],
-  queryFn: () => getResearchAvailability(),
-  staleTime: 30_000,
-});
-
-export const webSearchAvailabilityQuery = queryOptions({
-  queryKey: ["tools", "web-search", "availability"],
-  queryFn: () => getWebSearchAvailability(),
+/**
+ * What the composer may offer: search, research and PDF parsing. One read,
+ * since each composer needs all three and an admin change can move any of
+ * them; the tools pages invalidate this key.
+ */
+export const composerAvailabilityQuery = queryOptions({
+  queryKey: ["tools", "availability"],
+  queryFn: () => getComposerAvailability(),
   staleTime: 30_000,
 });
 

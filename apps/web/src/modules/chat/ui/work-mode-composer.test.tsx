@@ -24,11 +24,9 @@ vi.mock("~/modules/skills/server/functions.ts", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -91,18 +89,27 @@ const client = () => {
   });
   queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
   queryClient.setQueryData(["chat-models"], [model]);
-  queryClient.setQueryData(["tools", "web-search", "availability"], {
-    configured: false,
-    enabled: false,
-  });
-  queryClient.setQueryData(["tools", "research", "availability"], {
-    configured: false,
-    enabled: false,
-  });
-  queryClient.setQueryData(["tools", "document-parsing", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: false,
+      enabled: false,
+    },
+  }));
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    research: {
+      configured: false,
+      enabled: false,
+    },
+  }));
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    documentParsing: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   return queryClient;
 };
 

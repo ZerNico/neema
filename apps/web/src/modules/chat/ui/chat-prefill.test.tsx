@@ -30,8 +30,7 @@ vi.mock("../server/functions.ts", () => ({
   stopGeneration: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/agents/server/functions.ts", () => ({
   listAgents: vi.fn(),
@@ -44,7 +43,6 @@ vi.mock("~/modules/knowledge/server/functions.ts", () => ({
 }));
 vi.mock("~/modules/skills/server/functions.ts", () => ({ listSkills: vi.fn() }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -119,8 +117,11 @@ async function fixture({
   );
   client.setQueryData(["knowledge", "collections"], []);
   client.setQueryData(["skills"], []);
-  for (const name of ["web-search", "research", "document-parsing"])
-    client.setQueryData(["tools", name, "availability"], { configured: false, enabled: false });
+  client.setQueryData(["tools", "availability"], {
+    search: { configured: false, enabled: false },
+    research: { configured: false, enabled: false },
+    documentParsing: { configured: false, enabled: false },
+  });
   const root = createRootRouteWithContext<{ queryClient: QueryClient; user: { name: string } }>()();
   const app = createRoute({ getParentRoute: () => root, id: "_app" });
   // Use the real file-route component and search validator under its real route ID.

@@ -18,11 +18,9 @@ vi.mock("../server/functions.ts", () => ({
   getConversationWithMessages: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -44,18 +42,27 @@ function client(available = true) {
   });
   queryClient.setQueryData(["capabilities"], ALL_CAPABILITIES);
   queryClient.setQueryData(["chat-models"], [model]);
-  queryClient.setQueryData(["tools", "web-search", "availability"], {
-    configured: true,
-    enabled: true,
-  });
-  queryClient.setQueryData(["tools", "research", "availability"], {
-    configured: available,
-    enabled: available,
-  });
-  queryClient.setQueryData(["tools", "document-parsing", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: true,
+      enabled: true,
+    },
+  }));
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    research: {
+      configured: available,
+      enabled: available,
+    },
+  }));
+  queryClient.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    documentParsing: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   return queryClient;
 }
 function Harness({ onSend }: { onSend: React.ComponentProps<typeof Composer>["onSend"] }) {
@@ -235,10 +242,13 @@ describe("research composer", () => {
     await enableResearch();
     setComposerText(screen.getByRole("textbox"), "Investigate this");
     await act(async () => {
-      cache.setQueryData(["tools", "research", "availability"], {
-        configured: true,
-        enabled: false,
-      });
+      cache.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+        ...current,
+        research: {
+          configured: true,
+          enabled: false,
+        },
+      }));
     });
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(

@@ -55,7 +55,7 @@ export function KnowledgeAdminPage() {
 function SemanticSearchSection() {
   const { data } = useSuspenseQuery(embeddingConfigurationQuery);
   const confirm = useConfirm();
-  const invalidate = useInvalidateTools("knowledge");
+  const invalidate = useInvalidateTools();
   const current = data.config;
   const [compatibilityOpen, setCompatibilityOpen] = useState(false);
   const [modelId, setModelId] = useState<string | null>(current.embeddingModelId);
@@ -279,7 +279,7 @@ function SemanticSearchSection() {
 
 function DocumentParserSection() {
   const { data: tool } = useSuspenseQuery(documentParserToolQuery);
-  const invalidate = useInvalidateTools("document-parsing");
+  const invalidate = useInvalidateTools();
 
   const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
 

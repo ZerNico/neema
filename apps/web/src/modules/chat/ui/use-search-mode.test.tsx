@@ -5,17 +5,20 @@ import { describe, expect, it, vi } from "vitest";
 import { useSearchMode } from "./use-search-mode.ts";
 
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 
 const setup = (options: { searchEnabled?: boolean } = {}) => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } },
   });
-  client.setQueryData(["tools", "web-search", "availability"], {
-    configured: true,
-    enabled: options.searchEnabled ?? true,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: true,
+      enabled: options.searchEnabled ?? true,
+    },
+  }));
 
   const wrapper = ({ children }: PropsWithChildren) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -44,18 +47,24 @@ describe("useSearchMode", () => {
     const { client, result } = setup();
 
     act(() => {
-      client.setQueryData(["tools", "web-search", "availability"], {
-        configured: true,
-        enabled: false,
-      });
+      client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+        ...current,
+        search: {
+          configured: true,
+          enabled: false,
+        },
+      }));
     });
     await waitFor(() => expect(result.current.enabled).toBe(false));
 
     act(() => {
-      client.setQueryData(["tools", "web-search", "availability"], {
-        configured: true,
-        enabled: true,
-      });
+      client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+        ...current,
+        search: {
+          configured: true,
+          enabled: true,
+        },
+      }));
     });
     await waitFor(() => expect(result.current.enabled).toBe(true));
   });

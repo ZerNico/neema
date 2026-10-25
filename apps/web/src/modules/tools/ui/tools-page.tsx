@@ -106,7 +106,7 @@ function MemorySection() {
 
 function WebSearchSection() {
   const { data: tool } = useSuspenseQuery(webSearchToolQuery);
-  const invalidate = useInvalidateTools("web-search");
+  const invalidate = useInvalidateTools();
   const config = (tool?.config ?? {}) as Partial<WebSearchConfig>;
 
   const toggle = useMutation({
@@ -232,7 +232,7 @@ function WebSearchSection() {
 // redirects to them are refused); the page is extracted to markdown locally.
 function UrlReaderSection() {
   const { data: tool } = useSuspenseQuery(urlReaderToolQuery);
-  const invalidate = useInvalidateTools("web-search");
+  const invalidate = useInvalidateTools();
 
   const config = (tool?.config ?? {}) as { perPageCharCap?: number };
 

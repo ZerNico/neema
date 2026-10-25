@@ -20,7 +20,7 @@ vi.mock("../server/functions.ts", () => ({
   stopGeneration: vi.fn(),
 }));
 vi.mock("../client/time-zone.ts", () => ({ browserTimeZone: () => "Europe/Berlin" }));
-vi.mock("~/modules/tools/server/functions.ts", () => ({ getWebSearchAvailability: vi.fn() }));
+vi.mock("~/modules/tools/server/functions.ts", () => ({ getComposerAvailability: vi.fn() }));
 vi.mock("~/modules/agents/server/functions.ts", () => ({
   listAgents: vi.fn(),
   getAgent: vi.fn(),
@@ -31,7 +31,6 @@ vi.mock("~/modules/knowledge/server/functions.ts", () => ({
   getKnowledgeCollection: vi.fn(),
 }));
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
-  getDocumentParsingAvailability: vi.fn(),
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
 }));
@@ -103,7 +102,10 @@ const renderNewChat = (
         : AGENT,
     );
   client.setQueryData(["knowledge", "collections"], []);
-  client.setQueryData(["tools", "web-search", "availability"], { enabled: searchAvailable });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: { enabled: searchAvailable },
+  }));
   return render(
     <QueryClientProvider client={client}>
       <NewChatView user={{ name: "Nico" }} initialAgentId={initialAgentId} />

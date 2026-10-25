@@ -6,8 +6,7 @@ import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import {
   chatModelsQuery,
   conversationQuery,
-  webSearchAvailabilityQuery,
-  researchAvailabilityQuery,
+  composerAvailabilityQuery,
 } from "~/modules/chat/client/queries.ts";
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
@@ -45,8 +44,7 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
         }),
       context.queryClient.ensureQueryData(chatModelsQuery),
       // Prefetch keeps optional search-config failures out of the route error boundary.
-      context.queryClient.prefetchQuery({ ...webSearchAvailabilityQuery, retry: false }),
-      context.queryClient.prefetchQuery({ ...researchAvailabilityQuery, retry: false }),
+      context.queryClient.prefetchQuery({ ...composerAvailabilityQuery, retry: false }),
       // The composer mounts its agent, collection and skill pickers with the
       // view rather than on open, so all three fetch on arrival regardless.
       // Started here they overlap the conversation instead of trailing it.

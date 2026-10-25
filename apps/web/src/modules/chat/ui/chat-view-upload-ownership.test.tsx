@@ -42,7 +42,6 @@ vi.mock("../server/functions.ts", () => ({
 vi.mock("~/modules/attachments/server/functions.ts", () => ({
   uploadAttachment: vi.fn(),
   deleteAttachment: vi.fn(),
-  getDocumentParsingAvailability: vi.fn(),
 }));
 vi.mock("~/modules/integrations/server/functions.ts", () => ({
   listAdminIntegrations: vi.fn().mockResolvedValue([]),
@@ -68,8 +67,7 @@ vi.mock("~/modules/documents/server/document-functions.ts", () => ({
   pushDocument: vi.fn(),
 }));
 vi.mock("~/modules/tools/server/functions.ts", () => ({
-  getWebSearchAvailability: vi.fn(),
-  getResearchAvailability: vi.fn(),
+  getComposerAvailability: vi.fn(),
 }));
 vi.mock("~/modules/knowledge/server/functions.ts", () => ({
   listKnowledgeCollections: vi.fn(),
@@ -218,10 +216,13 @@ function setup() {
     ...Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, false])),
     attachments: true,
   });
-  client.setQueryData(["tools", "document-parsing", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    documentParsing: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   client.setQueryData(["conversation", conversationId], payload);
   client.setQueryData(
     ["chat-models"],
@@ -241,10 +242,13 @@ function setup() {
   );
   client.setQueryData(["skills"], []);
   client.setQueryData(["knowledge", "collections"], []);
-  client.setQueryData(["tools", "web-search", "availability"], {
-    configured: false,
-    enabled: false,
-  });
+  client.setQueryData(["tools", "availability"], (current: object | undefined) => ({
+    ...current,
+    search: {
+      configured: false,
+      enabled: false,
+    },
+  }));
   return render(
     <QueryClientProvider client={client}>
       <AppMotionProvider>
