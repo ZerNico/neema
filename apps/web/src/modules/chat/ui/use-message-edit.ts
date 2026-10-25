@@ -79,13 +79,8 @@ export function useMessageEdit({
         seedEditUploads(attachmentsByMessage.get(messageId) ?? []);
       }
       setEditSkillIds((skillsByUserMessage.get(messageId) ?? []).map((skill) => skill.id));
-      // A message records the *effective* collections. The agent's own are in the
-      // selection already; reseeding them as standalone would rewrite the turn's
-      // provenance, so only the standalone remainder is seeded.
-      const fromAgent = new Set(data.agent?.collectionIds ?? []);
-      seedEditContext(
-        (collectionsByUserMessage.get(messageId) ?? []).filter((id) => !fromAgent.has(id)),
-      );
+      // The person's own collections only: the agent's ride with the agent.
+      seedEditContext(collectionsByUserMessage.get(messageId) ?? []);
     },
     [
       attachmentsByMessage,
@@ -96,7 +91,6 @@ export function useMessageEdit({
       skillsByUserMessage,
       collectionsByUserMessage,
       seedEditContext,
-      data.agent,
     ],
   );
 

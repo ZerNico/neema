@@ -690,6 +690,7 @@ export class ChatRepo extends Context.Service<
     listGenerationDisplay(messageIds: ReadonlyArray<string>): Effect.Effect<
       Array<{
         messageId: string;
+        /** The collections the person chose, never the agent's: the agent is shown as itself. */
         collectionIds: ReadonlyArray<string>;
         skills?: ReadonlyArray<{ id: string; name: string }>;
         /**
@@ -1515,7 +1516,12 @@ export class ChatRepo extends Context.Service<
           const rows = yield* db
             .select({
               messageId: messageGenerationConfig.messageId,
-              collectionIds: messageGenerationConfig.collectionIds,
+              // The person's picks the turn's agent did not also bring.
+              collectionIds: sql<string[]>`coalesce((
+                select jsonb_agg(picked.id order by picked.ord)
+                from jsonb_array_elements(${messageGenerationConfig.standaloneCollectionIds}) with ordinality as picked(id, ord)
+                where not coalesce(${messageGenerationConfig.resolvedAgent}->'collectionIds', '[]'::jsonb) @> jsonb_build_array(picked.id)
+              ), '[]'::jsonb)`,
               skills: sql<
                 Array<{ id: string; name: string }>
               >`coalesce((select jsonb_agg(jsonb_build_object('id', entry->>'skillId', 'name', entry->>'name')) from jsonb_array_elements(${messageGenerationConfig.skills}) entry where (entry->>'explicit')::boolean), '[]'::jsonb)`,

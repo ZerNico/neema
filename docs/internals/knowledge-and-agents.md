@@ -115,8 +115,8 @@ whatever agent the conversation is associated with.
 - Editing a message resends its own selection: the editor is seeded from that message and its
   submitted `skillIds`/`collectionIds` replace the saved standalone set, the same rule
   `searchEnabled` follows. Omitting them keeps the saved selection; retry always does, having
-  no submission. Seed from the standalone remainder, never `message.collectionIds` — that is
-  the effective union, and reseeding the agent's own collections as standalone would rewrite
+  no submission. A question shows and an edit seeds from `standalone_collection_ids` minus the
+  turn's agent's own, never the effective `collection_ids`: reseeding the agent's would rewrite
   what the turn ran with. An edit that changes collections must skip the plain-chat replay
   shortcut in `resolver`, because a new collection set needs a rebuilt manifest.
 - Editing is not a mode: an open editor disables nothing, another message's Edit switches to it
@@ -136,9 +136,12 @@ whatever agent the conversation is associated with.
   what loads; the tags mirror it, kept in step by `useTagSync` in `ChatInput`, shared by the
   composer and the edit box. Deleting a tag deselects it, a + menu pick puts its tag at the
   caret, unticking in the picker removes its tags, and a tag that appears unselected (a paste,
-  an edit whose message kept the words) selects it if it is one this person can use. Only the
-  agent's own skills and collections stay chips; a sent message shows as chips only the picks
-  its text does not name.
+  an edit whose message kept the words) selects it if it is one this person can use. An agent is one
+  bundle: a chosen agent is one chip and its collections and skills get none. The composer's
+  selection holds only the person's collections; the agent's are not offered and count only
+  toward the per-message limit, which blocks a send past it. A pick the agent also brings is
+  kept but hidden while that agent is chosen. A sent message shows as chips only the person's
+  picks its agent did not bring and its text does not name.
 
 - File classification belongs to each validated resource, not to the first filename that
   stored its bytes. Knowledge publication preserves the supplied media type while using the

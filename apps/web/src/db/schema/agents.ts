@@ -152,7 +152,7 @@ export const messageGenerationConfig = pgTable(
     resolvedAgent: jsonb("resolved_agent").$type<ResolvedAgentConfig>(),
     /** The project this attempt ran in, as it stood then; null outside a project. */
     resolvedProject: jsonb("resolved_project").$type<ResolvedProject>(),
-    /** Original standalone inputs, including overlaps with agent dependencies. */
+    /** The collections the person chose for the turn, beside its agent's; what its question shows. */
     standaloneCollectionIds: jsonb("standalone_collection_ids")
       .$type<string[]>()
       .notNull()

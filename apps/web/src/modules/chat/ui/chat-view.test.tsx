@@ -494,7 +494,6 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     name: string;
     icon: string;
     collectionIds: ReadonlyArray<string>;
-    skillIds: ReadonlyArray<string>;
     searchEnabled: boolean;
     available: boolean;
   } | null,
@@ -1096,14 +1095,14 @@ describe("ChatView inline question answers", () => {
         name: "Agent",
         icon: "robot",
         collectionIds: ["c-agent"],
-        skillIds: [],
         searchEnabled: true,
         available: true,
       },
       generations: [
         {
           messageId: "m-answer",
-          collectionIds: ["c-agent", "c-standalone"],
+          // The server sends the person's own collections only, never the agent's.
+          collectionIds: ["c-standalone"],
           knowledgeMode: "context" as const,
           skills: [{ id: "s1", name: "Brand" }],
         },
@@ -1111,8 +1110,6 @@ describe("ChatView inline question answers", () => {
     });
     renderView(null, withSelection);
     fireEvent.click(screen.getByRole("button", { name: "Edit m-user" }));
-    // The agent's own collection stays out: reseeding it as standalone would
-    // rewrite what the turn actually ran with.
     expect(screen.getByTestId("edit-selection-m-user")).toHaveTextContent("s1|c-standalone");
   });
 
@@ -1451,7 +1448,6 @@ describe("ChatView search mode", () => {
         name: "Quiet agent",
         icon: "robot",
         collectionIds: [],
-        skillIds: [],
         searchEnabled: false,
         available: true,
       },

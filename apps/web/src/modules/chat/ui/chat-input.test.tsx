@@ -627,6 +627,52 @@ describe("ChatInput plus menu", () => {
   });
 });
 
+describe("ChatInput collection limit", () => {
+  it("refuses a send whose collections, the agent's included, pass the limit", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["capabilities"], ALL_CAPABILITIES);
+    client.setQueryData(["chat-models"], MODELS);
+    client.setQueryData(["knowledge", "collections"], []);
+    const onSubmit = vi.fn();
+    render(
+      <AppMotionProvider>
+        <QueryClientProvider client={client}>
+          <ChatInput
+            value="Summarize"
+            onValueChange={() => {}}
+            onSubmit={onSubmit}
+            disabled={false}
+            modelId="text-only"
+            onModelChange={() => {}}
+            searchEnabled={false}
+            onSearchEnabledChange={() => {}}
+            context={{
+              // Picked before an agent that brings two of the five was chosen.
+              selection: {
+                agent: { id: "a1", name: "Reviewer" },
+                collectionIds: ["c1", "c2", "c3", "c4"],
+              },
+              agentCollectionIds: new Set(["c5", "c6"]),
+              maxCollections: 3,
+              agentLocked: false,
+              onAgentChange: () => {},
+              onCollectionsChange: () => {},
+            }}
+          />
+        </QueryClientProvider>
+      </AppMotionProvider>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Too many collections for one message: remove 1.",
+    );
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatInput pickers", () => {
   it("opens a picker on the side the plus menu opened", async () => {
     const client = new QueryClient({

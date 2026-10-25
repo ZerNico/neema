@@ -43,20 +43,18 @@ export interface ContextSelection {
    * is an unavailable agent. Both block new attempts, never historical reading.
    */
   agent: { id: string | null; name: string | null; icon?: string } | null;
-  /** Agent-attached collections (fixed by the agent) then standalone ones. */
+  /** The person's own collections; the agent's come with it and are never listed here. */
   collectionIds: ReadonlyArray<string>;
 }
 
 export interface ComposerContext {
   selection: ContextSelection;
+  /** Not offered for picking: the agent already brings them. */
   agentCollectionIds: ReadonlySet<string>;
-  agentSkillIds?: ReadonlySet<string>;
+  maxCollections: number;
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
-  onCollectionsChange: (
-    collectionIds: ReadonlyArray<string>,
-    additions?: ReadonlyArray<string>,
-  ) => void;
+  onCollectionsChange: (collectionIds: ReadonlyArray<string>) => void;
 }
 
 export const MAX_SELECTED_COLLECTIONS = KNOWLEDGE_LIMITS.maxCollectionsPerSelection;
@@ -183,39 +181,31 @@ const sameIds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) =>
 
 /**
  * Multi-select popup for this message's collections. Ticks are a draft until
- * Add commits them; Escape or clicking away discards. The agent's own
- * collections show as selected but cannot be toggled: they leave with the
- * agent, never one by one.
+ * Add commits them; Escape or clicking away discards. The agent's own are not
+ * offered: they come with the agent.
  */
 export function CollectionPicker({
   selection,
   agentCollectionIds,
+  maxCollections,
   onCollectionsChange,
   open,
   onOpenChange,
   anchor,
   side,
-}: PickerPopupProps & {
-  selection: ContextSelection;
-  agentCollectionIds: ReadonlySet<string>;
-  agentSkillIds?: ReadonlySet<string>;
-  onCollectionsChange: (
-    collectionIds: ReadonlyArray<string>,
-    additions?: ReadonlyArray<string>,
-  ) => void;
-}) {
+}: PickerPopupProps &
+  Pick<
+    ComposerContext,
+    "selection" | "agentCollectionIds" | "maxCollections" | "onCollectionsChange"
+  >) {
   const collections = useQuery(knowledgeCollectionsQuery);
-  const items = collections.data ?? [];
-  // Keep user edits as deltas, not a copied effective union: a live agent
-  // refresh must not turn a removed dependency into a standalone selection.
-  const [draft, setDraft] = useState<{ added: string[]; removed: string[] } | null>(null);
-  const draftIds = [...new Set([...selection.collectionIds, ...(draft?.added ?? [])])].filter(
-    (id) => agentCollectionIds.has(id) || !draft?.removed.includes(id),
+  const items = (collections.data ?? []).filter(
+    (collection) => !agentCollectionIds.has(collection.id),
   );
-  const draftSet = new Set(draftIds);
-  const selected = items.filter((collection) => draftSet.has(collection.id));
-  const full = draftSet.size >= MAX_SELECTED_COLLECTIONS;
-  const changed = (draft?.added.length ?? 0) > 0 || !sameIds(draftIds, selection.collectionIds);
+  const [draft, setDraft] = useState<ReadonlyArray<string> | null>(null);
+  const draftIds = draft ?? selection.collectionIds;
+  const selected = items.filter((collection) => draftIds.includes(collection.id));
+  const full = draftIds.length >= maxCollections;
   const close = () => {
     setDraft(null);
     onOpenChange(false);
@@ -230,17 +220,9 @@ export function CollectionPicker({
       }}
       items={items}
       value={selected}
-      onValueChange={(next: CollectionSummary[]) => {
-        const ids = next.map((collection) => collection.id);
-        setDraft({
-          added: ids.filter(
-            (id) => !selection.collectionIds.includes(id) || draft?.added.includes(id),
-          ),
-          removed: selection.collectionIds.filter(
-            (id) => !ids.includes(id) && !agentCollectionIds.has(id),
-          ),
-        });
-      }}
+      onValueChange={(next: CollectionSummary[]) =>
+        setDraft(next.map((collection) => collection.id))
+      }
       itemToStringLabel={(collection: CollectionSummary) => collection.name}
       isItemEqualToValue={(a: CollectionSummary, b: CollectionSummary) => a.id === b.id}
       filter={(collection: CollectionSummary, query: string) =>
@@ -264,35 +246,34 @@ export function CollectionPicker({
                 : "No collections match"}
         </ComboboxEmpty>
         <ComboboxList>
-          {(collection: CollectionSummary) => {
-            const fromAgent = agentCollectionIds.has(collection.id);
-            return (
-              <ComboboxItem
-                key={collection.id}
-                value={collection}
-                disabled={fromAgent || (!draftSet.has(collection.id) && full)}
-              >
-                <span className="min-w-0 flex-1 truncate">{collection.name}</span>
-                <span className="text-muted-foreground truncate text-xs font-normal">
-                  {fromAgent ? "From agent" : collectionStatus(collection)}
-                </span>
-              </ComboboxItem>
-            );
-          }}
+          {(collection: CollectionSummary) => (
+            <ComboboxItem
+              key={collection.id}
+              value={collection}
+              disabled={!draftIds.includes(collection.id) && full}
+            >
+              <span className="min-w-0 flex-1 truncate">{collection.name}</span>
+              <span className="text-muted-foreground truncate text-xs font-normal">
+                {collectionStatus(collection)}
+              </span>
+            </ComboboxItem>
+          )}
         </ComboboxList>
         <div className="border-border flex items-center gap-2 border-t px-3 py-2">
           <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
             {full
-              ? `Up to ${MAX_SELECTED_COLLECTIONS} per message`
-              : draftSet.size > 0
-                ? `${draftSet.size} selected`
+              ? maxCollections < MAX_SELECTED_COLLECTIONS
+                ? `Up to ${maxCollections} beside the agent’s`
+                : `Up to ${MAX_SELECTED_COLLECTIONS} per message`
+              : draftIds.length > 0
+                ? `${draftIds.length} selected`
                 : ""}
           </span>
           <Button
             size="sm"
-            disabled={!changed}
+            disabled={draft === null || sameIds(draft, selection.collectionIds)}
             onClick={() => {
-              onCollectionsChange(draftIds, draft?.added);
+              if (draft) onCollectionsChange(draft);
               close();
             }}
           >
@@ -318,102 +299,49 @@ export interface ContextChipItem {
   readonly note?: string | undefined;
 }
 
-function contextChipItems(
-  selection: ContextSelection,
-  options: {
-    agentCollectionIds: ReadonlySet<string>;
-    agentSkillIds?: ReadonlySet<string>;
-    collections: ReadonlyArray<{ id: string; name: string }> | undefined;
-    agents: ReadonlyArray<{ id: string; name: string; icon: string }> | undefined;
-  },
-): ContextChipItem[] {
-  const items: ContextChipItem[] = [];
-  if (selection.agent) {
-    const agent = selection.agent.id
-      ? options.agents?.find((candidate) => candidate.id === selection.agent!.id)
-      : undefined;
-    items.push({
-      kind: "agent",
-      id: selection.agent.id,
-      name: selection.agent.name ?? agent?.name ?? null,
-      icon: agent?.icon ?? "robot",
-      note: selection.agent.id === null ? "Deleted agent" : "Agent",
-    });
-  }
-  for (const id of selection.collectionIds) {
-    const name = options.collections?.find((candidate) => candidate.id === id)?.name ?? null;
-    items.push({
-      kind: "collection",
-      id,
-      name,
-      note: options.agentCollectionIds.has(id) ? "From agent" : "Collection",
-    });
-  }
-  return items;
-}
-
 /**
- * Chips beside the file chips. Agent-attached collections leave with the
- * agent. An associated agent (an existing conversation) is not a chip: the
+ * The agent chosen for a new chat, beside the file chips. It stands for
+ * everything it brings, so its collections and skills get no chips of their
+ * own. An associated agent (an existing conversation) is not a chip: the
  * composer's agent bar names it, and nothing here can remove it.
  */
-export function ContextChips({
-  selection,
-  agentCollectionIds,
+export function AgentChip({
+  agent,
   agentLocked,
   onAgentChange,
-  onCollectionsChange,
   disabled,
 }: {
-  selection: ContextSelection;
-  agentCollectionIds: ReadonlySet<string>;
-  agentSkillIds?: ReadonlySet<string>;
+  agent: ContextSelection["agent"];
   agentLocked: boolean;
   onAgentChange: (agentId: string | null) => void;
-  onCollectionsChange: (
-    collectionIds: ReadonlyArray<string>,
-    additions?: ReadonlyArray<string>,
-  ) => void;
   disabled: boolean;
 }) {
-  const collections = useQuery(knowledgeCollectionsQuery);
   const agents = useQuery({ ...agentsQuery, enabled: !agentLocked });
-  const items = contextChipItems(selection, {
-    agentCollectionIds,
-    collections: collections.data,
-    agents: agents.data,
-  })
-    .filter((item) => !(agentLocked && item.kind === "agent"))
-    // The user's own collections are tags in the text; only the agent's show here.
-    .filter(
-      (item) => item.kind !== "collection" || (item.id !== null && agentCollectionIds.has(item.id)),
-    );
+  const listed = agent?.id
+    ? agents.data?.find((candidate) => candidate.id === agent.id)
+    : undefined;
+  const name = agent?.name ?? listed?.name ?? null;
   return (
     <AnimatePresence initial={false}>
-      {items.map((item) => (
-        <CollapseItem key={`${item.kind}:${item.id ?? "deleted"}`}>
+      {agent && !agentLocked ? (
+        <CollapseItem key={`agent:${agent.id ?? "deleted"}`}>
           <ContextChip
-            item={
-              item.name === null &&
-              (item.kind === "collection" ? !collections.isSuccess : !agents.isSuccess)
-                ? {
-                    ...item,
-                    name: (item.kind === "collection" ? collections.isError : agents.isError)
-                      ? "Could not load selection"
-                      : "Loading…",
-                  }
-                : item
-            }
-            onRemove={
-              disabled || (item.kind === "collection" && agentCollectionIds.has(item.id!))
-                ? undefined
-                : item.kind === "agent"
-                  ? () => onAgentChange(null)
-                  : () => onCollectionsChange(selection.collectionIds.filter((c) => c !== item.id))
-            }
+            item={{
+              kind: "agent",
+              id: agent.id,
+              name:
+                name === null && !agents.isSuccess
+                  ? agents.isError
+                    ? "Could not load selection"
+                    : "Loading…"
+                  : name,
+              icon: listed?.icon ?? "robot",
+              note: agent.id === null ? "Deleted agent" : "Agent",
+            }}
+            onRemove={disabled ? undefined : () => onAgentChange(null)}
           />
         </CollapseItem>
-      ))}
+      ) : null}
     </AnimatePresence>
   );
 }

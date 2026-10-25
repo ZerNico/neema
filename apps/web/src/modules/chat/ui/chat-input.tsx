@@ -34,11 +34,9 @@ import { imageModelsQuery } from "~/modules/images/client/queries.ts";
 import {
   AgentPicker,
   CollectionPicker,
-  ContextChips,
-  ContextChip,
+  AgentChip,
   ReferenceChip,
   ContextMenuItems,
-  MAX_SELECTED_COLLECTIONS,
   type ContextPickerKind,
   type ComposerContext,
 } from "./context-picker.tsx";
@@ -319,10 +317,8 @@ export const ChatInput = forwardRef<
     // Only when there is something to connect or already connected.
     !!(integrations && (integrations.items.length || integrations.canAdd));
   const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
-  // "#" offers the same collections the Knowledge popup does, minus the ones
-  // already on this message and the agent's own (not the user's to add or
-  // remove). Selecting one commits immediately, passing the full list plus
-  // the single addition, exactly as the popup's Add button does.
+  // "#" offers the same collections the Knowledge popup does: not the agent's
+  // own, which come with it. Selecting one commits immediately.
   const knowledge = useQuery({
     ...knowledgeCollectionsQuery,
     enabled: !!context && canChooseKnowledge,
@@ -330,10 +326,10 @@ export const ChatInput = forwardRef<
   const mentionableCollections = useMemo(() => {
     if (!context || controlsDisabled || !canChooseKnowledge) return undefined;
     const selected = new Set(context.selection.collectionIds);
-    const full = selected.size >= MAX_SELECTED_COLLECTIONS;
+    const full = selected.size >= context.maxCollections;
     return {
       // Added ones stay listed, to be named again in the text; at the cap only
-      // they are. The agent's own are not the user's to add.
+      // they are.
       items: (knowledge.data ?? [])
         .filter(
           (collection) =>
@@ -346,8 +342,7 @@ export const ChatInput = forwardRef<
           description: collection.description || collectionStatus(collection),
         })),
       onSelect: (id: string) => {
-        if (!context.selection.collectionIds.includes(id))
-          context.onCollectionsChange([...context.selection.collectionIds, id], [id]);
+        if (!selected.has(id)) context.onCollectionsChange([...selected, id]);
       },
     };
   }, [context, controlsDisabled, canChooseKnowledge, knowledge.data]);
@@ -370,9 +365,7 @@ export const ChatInput = forwardRef<
       ? [
           {
             kind: "collection" as const,
-            selected: context.selection.collectionIds.filter(
-              (id) => !context.agentCollectionIds.has(id),
-            ),
+            selected: context.selection.collectionIds,
             nameOf: (id: string) =>
               knowledge.data?.find((collection) => collection.id === id)?.name ??
               (knowledge.isSuccess ? "Unavailable collection" : undefined),
@@ -380,7 +373,9 @@ export const ChatInput = forwardRef<
               !!knowledge.data?.some((collection) => collection.id === id) &&
               !context.agentCollectionIds.has(id),
             select: (ids: readonly string[]) =>
-              context.onCollectionsChange([...context.selection.collectionIds, ...ids], ids),
+              context.onCollectionsChange([
+                ...new Set([...context.selection.collectionIds, ...ids]),
+              ]),
             deselect: (ids: readonly string[]) =>
               context.onCollectionsChange(
                 context.selection.collectionIds.filter((id) => !ids.includes(id)),
@@ -458,6 +453,14 @@ export const ChatInput = forwardRef<
     items.some((item) => item.status === "error") ||
     items.some((item) => warningFor(item) !== null) ||
     importItems.some((item) => item.status === "error");
+  // The agent's collections count toward the per-message limit too.
+  const extraCollections = context
+    ? context.selection.collectionIds.length - context.maxCollections
+    : 0;
+  const collectionsReason =
+    extraCollections > 0
+      ? `Too many collections for one message: remove ${extraCollections}.`
+      : null;
   const usable = items.filter((item) => item.status !== "error").length;
   const usableImports = importItems.filter((item) => item.status !== "error").length;
   const canSubmit =
@@ -467,6 +470,7 @@ export const ChatInput = forwardRef<
     !blocked &&
     !(researchEnabled && (!canResearch || researchUnavailableReason)) &&
     !blockedReason &&
+    !collectionsReason &&
     !target?.queued &&
     (value.trim() !== "" || usable > 0 || usableImports > 0);
 
@@ -490,12 +494,9 @@ export const ChatInput = forwardRef<
           the row is already full height for the edit swap's measurement. */}
       <AnimatePresence initial={false}>
         {(references && references.items.length > 0) ||
-        (context?.agentSkillIds && context.agentSkillIds.size > 0) ||
         (attachments && items.length > 0) ||
         (workspaceImports && importItems.length > 0) ||
-        (context &&
-          ((context.selection.agent && !context.agentLocked) ||
-            context.selection.collectionIds.some((id) => context.agentCollectionIds.has(id)))) ? (
+        (context?.selection.agent && !context.agentLocked) ? (
           <m.div key="chips" {...rowMotion}>
             <AttachmentChipRow className="px-3 pt-3">
               <AnimatePresence initial={false}>
@@ -508,29 +509,13 @@ export const ChatInput = forwardRef<
                     />
                   </CollapseItem>
                 ))}
-                {/* The user's own skills and collections are tags in the text; only
-                    what the agent brings stays up here, not the user's to remove. */}
-                {[...(context?.agentSkillIds ?? [])].map((id) => (
-                  <CollapseItem key={`agent-skill:${id}`}>
-                    <ContextChip
-                      item={{
-                        kind: "skill",
-                        id,
-                        name: skills?.items.find((skill) => skill.id === id)?.name ?? null,
-                        note: "From agent",
-                      }}
-                    />
-                  </CollapseItem>
-                ))}
               </AnimatePresence>
               {/* Context first: it frames the files that follow. */}
               {context ? (
-                <ContextChips
-                  selection={context.selection}
-                  agentCollectionIds={context.agentCollectionIds}
+                <AgentChip
+                  agent={context.selection.agent}
                   agentLocked={context.agentLocked}
                   onAgentChange={context.onAgentChange}
-                  onCollectionsChange={context.onCollectionsChange}
                   disabled={controlsDisabled}
                 />
               ) : null}
@@ -799,6 +784,7 @@ export const ChatInput = forwardRef<
           <CollectionPicker
             selection={context.selection}
             agentCollectionIds={context.agentCollectionIds}
+            maxCollections={context.maxCollections}
             onCollectionsChange={context.onCollectionsChange}
             open={picker === "collections"}
             onOpenChange={(open) => setPicker(open ? "collections" : null)}
@@ -958,11 +944,16 @@ export const ChatInput = forwardRef<
         </div>
       </div>
       <Disclosure
-        open={(researchEnabled && (!canResearch || !!researchUnavailableReason)) || !!blockedReason}
+        open={
+          (researchEnabled && (!canResearch || !!researchUnavailableReason)) ||
+          !!blockedReason ||
+          !!collectionsReason
+        }
       >
         <DisclosureContent>
           <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
             {blockedReason ??
+              collectionsReason ??
               (!canResearch
                 ? "Deep research isn’t available for your account."
                 : researchUnavailableReason)}

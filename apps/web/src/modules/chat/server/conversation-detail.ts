@@ -318,7 +318,6 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
             name: liveAgent?.row.name ?? null,
             icon: liveAgent?.row.icon ?? "robot",
             collectionIds: liveAgent?.collectionIds ?? [],
-            skillIds: liveAgent?.skillIds ?? [],
             // The composer's resting toggle: the agent's own default, like its model.
             searchEnabled: liveAgent?.row.searchEnabled ?? true,
             // What the next answer falls back to when the chat's image model went away.

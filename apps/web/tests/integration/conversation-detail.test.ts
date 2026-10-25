@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
 import { eq, inArray } from "drizzle-orm";
@@ -12,6 +13,7 @@ import {
   documents,
   messageAttachments,
   messageChunks,
+  messageGenerationConfig,
   messageToolCalls,
   messages,
   models,
@@ -111,6 +113,27 @@ const seedThread = Effect.fn("test.seedThread")(function* (userId: string, title
   });
   yield* repo.finalizeMessage({ messageId: assistant.id, status: "complete", content: "hi" });
   return { conversationId: conversation.id, userMessageId: user.id, assistantId: assistant.id };
+});
+
+/** An agent turn that ran with the agent's `agent-c` and the person's `own-c`. */
+const configureCollections = Effect.fn("test.configureCollections")(function* (
+  assistantId: string,
+  standalone: ReadonlyArray<string>,
+) {
+  const db = yield* Db;
+  const agent = JSON.stringify({
+    agentId: uuidv7(),
+    configRevision: 1,
+    name: "Agent",
+    icon: "robot",
+    instructions: "",
+    collectionIds: ["agent-c"],
+    searchEnabled: false,
+    planEnabled: false,
+  });
+  yield* db.execute(
+    `update message_generation_config set resolved_agent = '${agent}'::jsonb, collection_ids = '["agent-c","own-c"]'::jsonb, standalone_collection_ids = '${JSON.stringify(standalone)}'::jsonb where message_id = '${assistantId}'` as never,
+  );
 });
 
 /**
@@ -517,7 +540,6 @@ describe("loadConversationDetail", () => {
           name: "Renamed",
           icon: "code",
           collectionIds: ["unavailable-dependency"],
-          skillIds: [],
           searchEnabled: false,
           imageModelId: null,
           available: true,
@@ -531,7 +553,6 @@ describe("loadConversationDetail", () => {
           name: null,
           icon: "robot",
           collectionIds: [],
-          skillIds: [],
           searchEnabled: true,
           imageModelId: null,
           available: false,
@@ -544,12 +565,57 @@ describe("loadConversationDetail", () => {
           name: null,
           icon: "robot",
           collectionIds: [],
-          skillIds: [],
           searchEnabled: true,
           imageModelId: null,
           available: false,
         });
         expect(deleted.messages).toEqual(first.messages);
+      }),
+    );
+  });
+
+  it("shows a turn's own collections, never the ones its agent brought", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const thread = yield* seedThread(userId, "Agent chat");
+        yield* configureCollections(thread.assistantId, ["own-c"]);
+        const detail = yield* loadConversationDetail(userId, thread.conversationId);
+        expect(detail.generations).toMatchObject([
+          { messageId: thread.assistantId, collectionIds: ["own-c"] },
+        ]);
+      }),
+    );
+  });
+
+  it("backfills the person's own collections on rows that recorded only the effective set", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const legacy = yield* seedThread(userId, "Legacy");
+        yield* configureCollections(legacy.assistantId, []);
+        // A pick the agent also brings is kept, though the question never shows it.
+        const current = yield* seedThread(userId, "Current");
+        yield* configureCollections(current.assistantId, ["agent-c", "own-c"]);
+        const db = yield* Db;
+        yield* db.execute(
+          readFileSync(
+            new URL(
+              "../../drizzle/20261025113025_standalone_collections_backfill/migration.sql",
+              import.meta.url,
+            ),
+            "utf8",
+          ) as never,
+        );
+        const legacyDetail = yield* loadConversationDetail(userId, legacy.conversationId);
+        expect(legacyDetail.generations).toMatchObject([{ collectionIds: ["own-c"] }]);
+        const currentDetail = yield* loadConversationDetail(userId, current.conversationId);
+        expect(currentDetail.generations).toMatchObject([{ collectionIds: ["own-c"] }]);
+        const [stored] = yield* db
+          .select({ ids: messageGenerationConfig.standaloneCollectionIds })
+          .from(messageGenerationConfig)
+          .where(eq(messageGenerationConfig.messageId, current.assistantId));
+        expect(stored?.ids).toEqual(["agent-c", "own-c"]);
       }),
     );
   });
