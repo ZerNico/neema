@@ -2,7 +2,7 @@ import { Copy01Icon, McpServerIcon, Tick02Icon } from "@hugeicons/core-free-icon
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { connectedAppsQuery } from "~/modules/mcp-server/client/queries.ts";
 import { accessSummary } from "~/modules/mcp-server/scopes.ts";
 import { revokeConnectedApp } from "~/modules/mcp-server/server/functions.ts";
@@ -157,6 +157,15 @@ const setups = (url: string) => [
   },
 ];
 
+/** The link inside the API key setup note, to the page that makes keys. */
+const API_KEYS_LINK = {
+  link: (children: ReactNode) => (
+    <Link to="/settings/api-keys" className="text-foreground underline">
+      {children}
+    </Link>
+  ),
+};
+
 function Setup({ url }: { url: string }) {
   return (
     <Section title={m.settings_apps_setup()}>
@@ -173,16 +182,7 @@ function Setup({ url }: { url: string }) {
             <div className="flex flex-col gap-2">
               <p className="text-muted-foreground text-sm">
                 {setup.note ?? (
-                  <RichText
-                    parts={m.settings_apps_setup_key.parts()}
-                    tags={{
-                      link: (children) => (
-                        <Link to="/settings/api-keys" className="text-foreground underline">
-                          {children}
-                        </Link>
-                      ),
-                    }}
-                  />
+                  <RichText parts={m.settings_apps_setup_key.parts()} tags={API_KEYS_LINK} />
                 )}
               </p>
               <pre className="bg-muted overflow-x-auto rounded-2xl px-4 py-3 font-mono text-sm">
