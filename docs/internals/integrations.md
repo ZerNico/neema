@@ -184,7 +184,9 @@ otherwise an installed agent's attachments decide, and an agent names an integra
 someone's account, so all the sender's accounts of it come on; otherwise each account's "Turn
 on in new chats". An account that stopped working drops out rather than failing the turn.
 The choice is sticky per chat, not per message, because a changed tool list recaches the
-whole prefix. An existing chat saves each toggle immediately; a chat not created yet sends
+whole prefix. It outlives the account: disconnecting keeps the chat's on or off and "always
+allow" without one, and connecting again hands them over by the rule a schedule's grant
+follows, so an account turned off in a chat does not come back on there. An existing chat saves each toggle immediately; a chat not created yet sends
 its toggles with the first message. An `@` mention names an integration, as the message text
 does, and turns its accounts on when none is. Branch copies the chat’s choices and per-tool
 allowances like it copies the work permission level. Deep research workers are offered none.

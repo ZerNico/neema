@@ -179,7 +179,9 @@ export const integrationConnections = pgTable(
 /**
  * A chat's own choices over an account's defaults: whether it is offered, and
  * which tools need no approval here. Branch copies these; a one-off Allow is
- * never stored, only "always allow in this chat".
+ * never stored, only "always allow in this chat". Disconnecting the account
+ * keeps them without one, and the person's next account there takes them
+ * while it is their only one, as a schedule's grant does.
  */
 export const conversationIntegrations = pgTable(
   "conversation_integrations",
@@ -187,17 +189,22 @@ export const conversationIntegrations = pgTable(
     conversationId: text("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
-    connectionId: text("connection_id")
+    // Null once disconnected, until the person's next account there takes it.
+    connectionId: text("connection_id").references(() => integrationConnections.id, {
+      onDelete: "set null",
+    }),
+    integrationId: text("integration_id")
       .notNull()
-      .references(() => integrationConnections.id, { onDelete: "cascade" }),
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
     enabled: boolean(),
     // Tools the person said to always allow in this chat, from an approval.
     allowedTools: jsonb("allowed_tools").$type<string[]>().notNull().default([]),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.conversationId, t.connectionId] }),
+    uniqueIndex("conversation_integrations_account_idx").on(t.conversationId, t.connectionId),
     index("conversation_integrations_connection_idx").on(t.connectionId),
+    index("conversation_integrations_integration_idx").on(t.integrationId),
   ],
 );
 

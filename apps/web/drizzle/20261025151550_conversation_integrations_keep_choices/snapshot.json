@@ -1,0 +1,270 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b4922da2-5133-4169-a174-bca0d8c04bf7",
+  "prevIds": [
+    "3bb452d2-0fa0-4100-9c88-e38acde17b8f"
+  ],
+  "footprints": [
+    {
+      "statementType": "drop_pk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_integrations"
+      ],
+      "writes": [
+        "s|pk|public.conversation_integrations",
+        "n|pk|public.conversation_integrations",
+        "e|pk|public.conversation_integrations",
+        "n|con|public.conversation_integrations.conversation_integrations_pkey",
+        "n|rel|public.conversation_integrations_pkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "e|col|public.conversation_integrations.conversation_id",
+        "e|col|public.conversation_integrations.connection_id"
+      ],
+      "sharedWrites": [
+        "e|uniqueness|public.conversation_integrations.connection_id.conversation_id"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversation_integrations",
+        "integration_id"
+      ],
+      "writes": [
+        "s|col|public.conversation_integrations.integration_id",
+        "n|col|public.conversation_integrations.integration_id",
+        "e|col|public.conversation_integrations.integration_id"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversation_integrations",
+        "connection_id"
+      ],
+      "writes": [
+        "s|colprop|public.conversation_integrations.connection_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "n|col|public.conversation_integrations.connection_id"
+      ],
+      "sqlHash": "4f8286ee980328f9"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "conversation_integrations",
+        "conversation_integrations_account_idx"
+      ],
+      "writes": [
+        "s|idx|public.conversation_integrations_account_idx",
+        "n|idx|public.conversation_integrations_account_idx",
+        "e|idx|public.conversation_integrations_account_idx",
+        "n|rel|public.conversation_integrations_account_idx"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "n|col|public.conversation_integrations.conversation_id",
+        "n|col|public.conversation_integrations.connection_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "conversation_integrations",
+        "conversation_integrations_integration_idx"
+      ],
+      "writes": [
+        "s|idx|public.conversation_integrations_integration_idx",
+        "n|idx|public.conversation_integrations_integration_idx",
+        "e|idx|public.conversation_integrations_integration_idx",
+        "n|rel|public.conversation_integrations_integration_idx"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "n|col|public.conversation_integrations.integration_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_integrations"
+      ],
+      "writes": [
+        "s|fk|public.conversation_integrations.conversation_integrations_k1M6VEBZGC7j_fkey",
+        "n|fk|public.conversation_integrations.conversation_integrations_k1M6VEBZGC7j_fkey",
+        "e|fk|public.conversation_integrations.conversation_integrations_k1M6VEBZGC7j_fkey",
+        "n|con|public.conversation_integrations.conversation_integrations_k1M6VEBZGC7j_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "n|tbl|public.integration_configs",
+        "n|sch|public",
+        "n|col|public.conversation_integrations.integration_id",
+        "n|col|public.integration_configs.id",
+        "e|uniqueness|public.integration_configs.id"
+      ]
+    },
+    {
+      "statementType": "recreate_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_integrations"
+      ],
+      "writes": [
+        "s|fk|public.conversation_integrations.conversation_integrations_TksC4gQilTyn_fkey",
+        "n|fk|public.conversation_integrations.conversation_integrations_TksC4gQilTyn_fkey",
+        "e|fk|public.conversation_integrations.conversation_integrations_TksC4gQilTyn_fkey",
+        "n|con|public.conversation_integrations.conversation_integrations_TksC4gQilTyn_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_integrations",
+        "n|sch|public",
+        "n|tbl|public.integration_connections",
+        "n|sch|public",
+        "n|col|public.conversation_integrations.connection_id",
+        "n|col|public.integration_connections.id",
+        "e|uniqueness|public.integration_connections.id"
+      ],
+      "sqlHash": "8a82e44052d1ca0f"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_integrations",
+        "name": "integration_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_integrations",
+        "name": "conversation_integrations_account_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "conversation_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "connection_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_integrations",
+        "name": "conversation_integrations_integration_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "integration_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_integrations",
+        "name": "conversation_integrations_k1M6VEBZGC7j_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "integration_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "integration_configs",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"conversation_integrations\",\"conversation_integrations_pkey\"]"
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"conversation_integrations\",\"connection_id\"]",
+      "set": {
+        "notNull": false
+      }
+    },
+    {
+      "op": "alter",
+      "key": "fks\u0000[\"public\",\"conversation_integrations\",\"conversation_integrations_TksC4gQilTyn_fkey\"]",
+      "set": {
+        "onDelete": "SET NULL"
+      }
+    }
+  ]
+}

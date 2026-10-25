@@ -2487,6 +2487,30 @@ describe("several accounts of one integration", () => {
     expect(Exit.isFailure(second)).toBe(true);
   });
 
+  it("keeps a chat's choices for an account that is disconnected and connected again", async () => {
+    await configure();
+    const userId = await newUser();
+    await connectKey(userId);
+    const [ada] = await accountsOf(userId);
+    const conversationId = uuidv7();
+    await insert((db) => db.insert(conversations).values({ id: conversationId, userId }));
+    await service((s) =>
+      s.setConversationIntegration(userId, conversationId, ada!.id, {
+        enabled: false,
+        allowTool: "list",
+      }),
+    );
+    await service((s) => s.disconnect(userId, ada!.id));
+    await connectKey(userId);
+    const [again] = await accountsOf(userId);
+    expect(again!.id).not.toBe(ada!.id);
+    // Still off here, on by default elsewhere, and still allowed without asking.
+    const chat = await service((s) => s.chatIntegrations(userId, conversationId));
+    expect(chat.map((entry) => [entry.connectionId, entry.enabled])).toEqual([[again!.id, false]]);
+    const permissions = await service((s) => s.permissionsFor(userId, conversationId, again!.id));
+    expect(permissions.allowedInChat).toEqual(["list"]);
+  });
+
   it("refuses to reconnect an account as one already connected beside it", async () => {
     const { userId, ada, bo } = await twoAccounts();
     // As if Ada's row came from before accounts were known.

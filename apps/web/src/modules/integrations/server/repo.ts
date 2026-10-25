@@ -798,8 +798,9 @@ export class IntegrationRepo extends Context.Service<
             .pipe(Effect.orDie);
           if (!saved) return null;
           // What lost its account when that was disconnected (a knowledge source, a
-          // schedule's grant) takes this one only while it is the person's only account
-          // there: connecting again fixes it, and two accounts are never guessed between.
+          // schedule's grant, a chat's choices) takes this one only while it is the
+          // person's only account there: connecting again fixes it, and two accounts are
+          // never guessed between.
           const [{ accounts } = { accounts: 0 }] = yield* db
             .select({ accounts: count() })
             .from(integrationConnections)
@@ -840,6 +841,26 @@ export class IntegrationRepo extends Context.Service<
                   ),
                   sql`not exists (select 1 from ${scheduleIntegrationGrants} lost where lost.schedule_id = ${scheduleIntegrationGrants.scheduleId} and lost.connection_id = ${saved.id})`,
                   sql`(select count(*) from ${scheduleIntegrationGrants} lost where lost.schedule_id = ${scheduleIntegrationGrants.scheduleId} and lost.integration_id = ${input.integrationId} and lost.connection_id is null) = 1`,
+                ),
+              )
+              .pipe(Effect.orDie);
+            // A chat's choices likewise: on or off, and what it always allows.
+            yield* db
+              .update(conversationIntegrations)
+              .set({ connectionId: saved.id })
+              .where(
+                and(
+                  isNull(conversationIntegrations.connectionId),
+                  eq(conversationIntegrations.integrationId, input.integrationId),
+                  inArray(
+                    conversationIntegrations.conversationId,
+                    db
+                      .select({ id: conversations.id })
+                      .from(conversations)
+                      .where(eq(conversations.userId, input.userId)),
+                  ),
+                  sql`not exists (select 1 from ${conversationIntegrations} lost where lost.conversation_id = ${conversationIntegrations.conversationId} and lost.connection_id = ${saved.id})`,
+                  sql`(select count(*) from ${conversationIntegrations} lost where lost.conversation_id = ${conversationIntegrations.conversationId} and lost.integration_id = ${input.integrationId} and lost.connection_id is null) = 1`,
                 ),
               )
               .pipe(Effect.orDie);
@@ -952,6 +973,8 @@ export class IntegrationRepo extends Context.Service<
                 .values({
                   conversationId,
                   connectionId: choice.connectionId,
+                  integrationId: accounts.find((account) => account.id === choice.connectionId)!
+                    .integrationId,
                   enabled: choice.enabled,
                 })
                 .onConflictDoUpdate({
@@ -1016,8 +1039,8 @@ export class IntegrationRepo extends Context.Service<
               .pipe(Effect.orDie);
             if (owned.length === 0) return false;
             // A chat's choice can only name its owner's own account.
-            const account = yield* db
-              .select({ id: integrationConnections.id })
+            const [account] = yield* db
+              .select({ integrationId: integrationConnections.integrationId })
               .from(integrationConnections)
               .where(
                 and(
@@ -1026,7 +1049,7 @@ export class IntegrationRepo extends Context.Service<
                 ),
               )
               .pipe(Effect.orDie);
-            if (account.length === 0) return false;
+            if (!account) return false;
             const set = {
               ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
               updatedAt: new Date(),
@@ -1034,7 +1057,13 @@ export class IntegrationRepo extends Context.Service<
             const allowed = input.allowTool ? [input.allowTool] : [];
             yield* db
               .insert(conversationIntegrations)
-              .values({ conversationId, connectionId, ...set, allowedTools: allowed })
+              .values({
+                conversationId,
+                connectionId,
+                integrationId: account.integrationId,
+                ...set,
+                allowedTools: allowed,
+              })
               .onConflictDoUpdate({
                 target: [
                   conversationIntegrations.conversationId,
