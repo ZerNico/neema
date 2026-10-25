@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { AgentNotAvailable, AgentRejected } from "~/modules/agents/errors.ts";
+import type { AgentChanged, AgentNotAvailable, AgentRejected } from "~/modules/agents/errors.ts";
 import type {
   AttachmentBusy,
   AttachmentNotAvailable,
@@ -85,6 +85,7 @@ export type Refusable =
   | AccountIneligible
   | AgentNotAvailable
   | AgentRejected
+  | AgentChanged
   | AttachmentNotAvailable
   | AttachmentRejected
   | AttachmentUnsupported
@@ -161,6 +162,7 @@ const refusals: RefusalTable = {
       : { status: 401, body: UNAUTHENTICATED_BODY },
   AgentNotAvailable: notFound,
   AgentRejected: because(400),
+  AgentChanged: because(409),
   AttachmentNotAvailable: notFound,
   AttachmentBusy: () => ({ status: 409, body: "Stop the answer in that chat first." }),
   AttachmentRejected: (error) => ({

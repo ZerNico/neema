@@ -219,12 +219,11 @@ export class AgentDraftService extends Context.Service<
                   Effect.catchTag("AgentNotAvailable", () =>
                     Effect.succeed({ outcome: "agent_unavailable" as const }),
                   ),
+                  Effect.catchTag("AgentChanged", () =>
+                    Effect.succeed({ outcome: "agent_changed" as const }),
+                  ),
                   Effect.catchTag("AgentRejected", ({ reason }) =>
-                    Effect.succeed(
-                      reason === "agent changed; reload before saving"
-                        ? { outcome: "agent_changed" as const }
-                        : { outcome: "invalid" as const, reason },
-                    ),
+                    Effect.succeed({ outcome: "invalid" as const, reason }),
                   ),
                 );
                 if (saved.outcome !== "saved") return { ...saved, draft };

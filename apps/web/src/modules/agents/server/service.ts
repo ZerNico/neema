@@ -4,7 +4,7 @@ import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
-import { AgentNotAvailable, AgentRejected } from "../errors.ts";
+import { AgentChanged, AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
   AgentSettings,
   type AgentDetail,
@@ -72,7 +72,7 @@ export class AgentService extends Context.Service<
     update(
       userId: string,
       input: UpdateAgentInput,
-    ): Effect.Effect<void, AgentNotAvailable | AgentRejected>;
+    ): Effect.Effect<void, AgentNotAvailable | AgentRejected | AgentChanged>;
     remove(userId: string, agentId: string): Effect.Effect<void, AgentNotAvailable>;
   }
 >()("chat/agents/AgentService") {

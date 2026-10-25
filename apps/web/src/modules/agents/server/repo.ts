@@ -18,7 +18,7 @@ import { Db, type DbTx } from "~/server/db.ts";
 import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
-import { AgentNotAvailable, AgentRejected } from "../errors.ts";
+import { AgentChanged, AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
   AGENT_LIMITS,
   type AgentSettings,
@@ -77,13 +77,13 @@ export class AgentRepo extends Context.Service<
       update?: { agentId: string; expectedRevision: number },
     ): Effect.Effect<
       { agentId: string; configRevision: number },
-      AgentNotAvailable | AgentRejected
+      AgentNotAvailable | AgentRejected | AgentChanged
     >;
     create(userId: string, input: AgentSettings): Effect.Effect<string, AgentRejected>;
     update(
       userId: string,
       input: UpdateAgentInput,
-    ): Effect.Effect<void, AgentNotAvailable | AgentRejected>;
+    ): Effect.Effect<void, AgentNotAvailable | AgentRejected | AgentChanged>;
     remove(userId: string, agentId: string): Effect.Effect<boolean>;
     /** The integrations named, as this person may use them now, in the order given. */
     integrationsFor(
@@ -112,9 +112,7 @@ export class AgentRepo extends Context.Service<
               .for("update");
             if (!current) return yield* new AgentNotAvailable({ agentId: id });
             if (current.configRevision !== update.expectedRevision)
-              return yield* new AgentRejected({
-                reason: "agent changed; reload before saving",
-              });
+              return yield* new AgentChanged({ agentId: id });
           } else {
             const [owner] = yield* tx
               .select({ id: user.id })
@@ -310,7 +308,10 @@ export class AgentRepo extends Context.Service<
           return result ?? null;
         }),
         create: (userId, input) =>
-          save(userId, input).pipe(Effect.catchTag("AgentNotAvailable", Effect.die)),
+          // A creation names no revision, so it can neither miss its agent nor find it moved.
+          save(userId, input).pipe(
+            Effect.catchTag(["AgentNotAvailable", "AgentChanged"], Effect.die),
+          ),
         update: (userId, { agentId, expectedRevision, ...settings }) =>
           save(userId, settings, { agentId, expectedRevision }).pipe(Effect.asVoid),
         remove: (userId, agentId) =>
