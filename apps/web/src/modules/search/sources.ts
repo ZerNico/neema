@@ -39,6 +39,7 @@ import {
   type SearchResults,
   type SearchSource,
 } from "./registry.ts";
+import { m } from "~/paraglide/messages.js";
 
 type Entry = SearchItem & { keywords?: string };
 
@@ -55,70 +56,75 @@ const useActionSearch: SearchSource = (query, active) => {
   const can = (capability: keyof Capabilities) => !!capabilities?.[capability];
   const items = matching(
     [
-      { id: "action:new-chat", label: "New chat", icon: PlusSignIcon, href: "/" },
+      { id: "action:new-chat", label: m.search_action_new_chat(), icon: PlusSignIcon, href: "/" },
       {
         id: "action:new-temporary-chat",
-        label: "New temporary chat",
-        keywords: "incognito private",
+        label: m.search_action_new_temporary_chat(),
+        keywords: m.search_keywords_temporary_chat(),
         icon: IncognitoIcon,
         href: "/?temporary=1",
       },
       can("agentsCreate") && {
         id: "action:new-agent",
-        label: "New agent",
+        label: m.search_action_new_agent(),
         icon: Robot01Icon,
         href: "/agents/new",
       },
       can("schedules") && {
         id: "action:new-schedule",
-        label: "New schedule",
+        label: m.search_action_new_schedule(),
         icon: Calendar03Icon,
         href: "/schedules/new",
       },
       can("skillsCreate") && {
         id: "action:new-skill",
-        label: "New skill",
+        label: m.search_action_new_skill(),
         icon: Book02Icon,
         href: "/skills/new",
       },
       can("skillsCreate") && {
         id: "action:import-skill",
-        label: "Import skill",
+        label: m.search_action_import_skill(),
         icon: Book02Icon,
         href: "/skills/import",
       },
       {
         id: "action:theme-light",
-        label: "Use light theme",
-        keywords: "appearance mode",
+        label: m.search_action_theme_light(),
+        keywords: m.search_keywords_theme(),
         icon: Sun03Icon,
         run: () => setTheme("light"),
       },
       {
         id: "action:theme-dark",
-        label: "Use dark theme",
-        keywords: "appearance mode night",
+        label: m.search_action_theme_dark(),
+        keywords: m.search_keywords_theme_dark(),
         icon: Moon02Icon,
         run: () => setTheme("dark"),
       },
       {
         id: "action:theme-system",
-        label: "Use system theme",
-        keywords: "appearance mode automatic",
+        label: m.search_action_theme_system(),
+        keywords: m.search_keywords_theme_system(),
         icon: ComputerIcon,
         run: () => setTheme("system"),
       },
       {
         id: "action:toggle-sidebar",
-        label: "Toggle sidebar",
-        keywords: "hide show",
+        label: m.search_action_toggle_sidebar(),
+        keywords: m.search_keywords_toggle_sidebar(),
         icon: SidebarLeftIcon,
         run: toggleSidebar,
       },
     ],
     query,
   );
-  return { heading: "Actions", kind: "action", items: active ? items : [], pending: false };
+  return {
+    heading: m.search_heading_actions(),
+    kind: "action",
+    items: active ? items : [],
+    pending: false,
+  };
 };
 
 const page = (to: string, label: string, icon: SearchItem["icon"], detail?: string) => ({
@@ -139,22 +145,22 @@ const usePageSearch: SearchSource = (query, active) => {
     active && query
       ? matching(
           [
-            page("/chats", "Chats", BubbleChatIcon),
-            can("projectsUse") && page("/projects", "Projects", Folder01Icon),
-            can("agentsUse") && page("/agents", "Agents", Robot01Icon),
-            can("knowledgeUse") && page("/knowledge", "Knowledge", FolderLibraryIcon),
-            can("schedules") && page("/schedules", "Schedules", Calendar03Icon),
-            can("skillsUse") && page("/skills", "Skills", Book02Icon),
-            page("/help", "Help", HelpCircleIcon),
-            page("/settings", "Settings", Settings02Icon),
+            page("/chats", m.navigation_chats(), BubbleChatIcon),
+            can("projectsUse") && page("/projects", m.navigation_projects(), Folder01Icon),
+            can("agentsUse") && page("/agents", m.navigation_agents(), Robot01Icon),
+            can("knowledgeUse") && page("/knowledge", m.navigation_knowledge(), FolderLibraryIcon),
+            can("schedules") && page("/schedules", m.navigation_schedules(), Calendar03Icon),
+            can("skillsUse") && page("/skills", m.navigation_skills(), Book02Icon),
+            page("/help", m.search_page_help(), HelpCircleIcon),
+            page("/settings", m.common_settings(), Settings02Icon),
             ...settingsSections(desktop !== null).map((section) =>
-              page(section.to, section.label, section.icon, "Settings"),
+              page(section.to, section.label, section.icon, m.common_settings()),
             ),
             ...(user?.role === "admin"
               ? [
-                  page("/admin", "Admin", SecurityIcon),
+                  page("/admin", m.ui_page_admin(), SecurityIcon),
                   ...ADMIN_SECTIONS.map((section) =>
-                    page(section.to, section.label, section.icon, "Admin"),
+                    page(section.to, section.label, section.icon, m.ui_page_admin()),
                   ),
                 ]
               : []),
@@ -162,7 +168,7 @@ const usePageSearch: SearchSource = (query, active) => {
           query,
         ).slice(0, RESULT_LIMIT)
       : [];
-  return { heading: "Pages", kind: "result", items, pending: false };
+  return { heading: m.search_heading_pages(), kind: "result", items, pending: false };
 };
 
 /**

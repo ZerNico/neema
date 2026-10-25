@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import type { SearchGroup, SearchItem } from "../registry.ts";
 import { useSearchGroups } from "../sources.ts";
 import { MAX_SEARCH_LENGTH, type Snippet } from "../text.ts";
+import { m } from "~/paraglide/messages.js";
 
 const PaletteContext = createContext<((open: boolean) => void) | null>(null);
 
@@ -53,7 +54,7 @@ export function SearchButton() {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Search"
+            aria-label={m.common_search()}
             onClick={() => setOpen(true)}
           />
         }
@@ -61,7 +62,7 @@ export function SearchButton() {
         <HugeiconsIcon icon={Search01Icon} strokeWidth={2} />
       </TooltipTrigger>
       <TooltipContent>
-        Search <Kbd>{isMac() ? "⌘K" : "Ctrl K"}</Kbd>
+        {m.common_search()} <Kbd>{isMac() ? "⌘K" : "Ctrl K"}</Kbd>
       </TooltipContent>
     </Tooltip>
   );
@@ -95,7 +96,7 @@ export function CommandPalette({
       <DialogPortal>
         <DialogOverlay />
         <DialogPrimitive.Popup
-          aria-label="Search"
+          aria-label={m.common_search()}
           className="bg-popover text-popover-foreground ring-foreground/5 dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 fixed top-[12dvh] left-1/2 z-50 flex max-h-[76dvh] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-3xl text-sm shadow-xl ring-1 duration-100 outline-none sm:max-w-xl"
         >
           <Autocomplete.Root
@@ -118,9 +119,9 @@ export function CommandPalette({
                 aria-hidden
               />
               <Autocomplete.Input
-                aria-label="Search"
+                aria-label={m.common_search()}
                 maxLength={MAX_SEARCH_LENGTH}
-                placeholder="Search chats, agents, pages… or type > for actions"
+                placeholder={m.search_placeholder()}
                 className="placeholder:text-muted-foreground h-12 min-w-0 flex-1 bg-transparent outline-none"
               />
               {pending ? <Spinner className="text-muted-foreground shrink-0" /> : null}
@@ -128,7 +129,7 @@ export function CommandPalette({
             <div className="min-h-0 overflow-y-auto p-2">
               <Autocomplete.Empty>
                 <p className="text-muted-foreground px-3 py-8 text-center">
-                  {pending ? "Searching…" : "Nothing found"}
+                  {pending ? m.search_searching() : m.search_nothing_found()}
                 </p>
               </Autocomplete.Empty>
               <Autocomplete.List>
