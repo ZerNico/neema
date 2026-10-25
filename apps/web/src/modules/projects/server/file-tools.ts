@@ -7,6 +7,7 @@ import type { ProjectFileSummary } from "../files.ts";
 import type { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import type { ProjectFileService } from "./project-files.ts";
 import { EntityId } from "~/entity-id.ts";
+import { english } from "~/i18n/localized.ts";
 import type { DbTx } from "~/server/db.ts";
 
 const Name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
@@ -68,7 +69,7 @@ const failure = (error: ProjectNotAvailable | ProjectRejected | ProjectFileConfl
     ? { outcome: "unavailable", message: "This chat's project is no longer available to you." }
     : {
         outcome: error._tag === "ProjectFileConflict" ? "conflict" : "invalid",
-        message: `Not saved: ${error.reason}.`,
+        message: `Not saved: ${english(error.reason)}.`,
       };
 const lenient = (raw: unknown) =>
   typeof raw === "object" && raw !== null && !Array.isArray(raw)

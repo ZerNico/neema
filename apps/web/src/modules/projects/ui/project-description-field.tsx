@@ -3,6 +3,8 @@ import { Field, FieldDescription, FieldLabel } from "~/ui/primitives/field";
 import { Textarea } from "~/ui/primitives/textarea";
 import { PROJECT_LIMITS } from "../schema.ts";
 
+import { m } from "~/paraglide/messages.js";
+
 /** A project's description, below its name in the create and rename dialogs. */
 export function ProjectDescriptionField({
   value,
@@ -20,7 +22,7 @@ export function ProjectDescriptionField({
   const id = useId();
   return (
     <Field>
-      <FieldLabel htmlFor={id}>Description</FieldLabel>
+      <FieldLabel htmlFor={id}>{m.projects_description_label()}</FieldLabel>
       <Textarea
         id={id}
         value={value}

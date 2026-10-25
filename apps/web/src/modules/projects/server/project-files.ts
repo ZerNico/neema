@@ -1,3 +1,5 @@
+import { localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -262,9 +264,9 @@ export class ProjectFileService extends Context.Service<
         },
       ) {
         if (input.bytes.length === 0)
-          return yield* new ProjectRejected({ reason: "the file is empty" });
+          return yield* new ProjectRejected({ reason: localized(m.projects_error_file_empty) });
         if (input.bytes.length > PROJECT_FILE_LIMITS.fileBytes)
-          return yield* new ProjectRejected({ reason: "the file is larger than 50 MB" });
+          return yield* new ProjectRejected({ reason: localized(m.projects_error_file_too_large) });
         yield* admitWrite(writer, input.projectId);
         const name = sanitizeFileName(input.name);
         // Any file is kept; its bytes decide only how it is read and served.
@@ -277,13 +279,15 @@ export class ProjectFileService extends Context.Service<
         if (!project) return yield* new ProjectNotAvailable({ projectId: input.projectId });
         // What a person adds costs the owner's quota; the model's saves are kept like its files.
         if (writer.origin === "user")
-          yield* storage
-            .admitFor(project.ownerId, writer.userId, [input.bytes])
-            .pipe(
-              Effect.catchTag("StorageFull", (full) =>
-                Effect.fail(new ProjectRejected({ reason: full.reason })),
+          yield* storage.admitFor(project.ownerId, writer.userId, [input.bytes]).pipe(
+            Effect.catchTag("StorageFull", (full) =>
+              Effect.fail(
+                new ProjectRejected({
+                  reason: typeof full.reason === "string" ? verbatim(full.reason) : full.reason,
+                }),
               ),
-            );
+            ),
+          );
         const stored = yield* attachmentService.storeBlob(project.ownerId, input.bytes);
         const result = yield* transaction((tx) =>
           Effect.gen(function* () {
@@ -350,12 +354,15 @@ export class ProjectFileService extends Context.Service<
                 )
                 .for("update")
                 .pipe(Effect.orDie);
-              if (!file) return yield* new ProjectRejected({ reason: "that file is gone" });
+              if (!file)
+                return yield* new ProjectRejected({
+                  reason: localized(m.projects_error_file_gone),
+                });
               // A version is classified by its name, so a new name is a new file:
               // taken, it would break the unique name; free, it would rename silently.
               if (file.name !== name)
                 return yield* new ProjectRejected({
-                  reason: `a new version of ${file.name} keeps its name; save ${name} as its own file`,
+                  reason: localized(m.projects_error_version_keeps_name, { file: file.name, name }),
                 });
             } else {
               const [existing] = yield* tx
@@ -367,7 +374,7 @@ export class ProjectFileService extends Context.Service<
                 .pipe(Effect.orDie);
               if (existing)
                 return yield* new ProjectRejected({
-                  reason: `the project already has a file named ${name}; save a new version of it instead`,
+                  reason: localized(m.projects_error_name_taken, { name }),
                 });
               const [count] = yield* tx
                 .select({ value: sql<number>`count(*)::int` })
@@ -376,7 +383,7 @@ export class ProjectFileService extends Context.Service<
                 .pipe(Effect.orDie);
               if ((count?.value ?? 0) >= PROJECT_FILE_LIMITS.filesPerProject)
                 return yield* new ProjectRejected({
-                  reason: "this project has as many files as it can",
+                  reason: localized(m.projects_error_files_full),
                 });
               fileId = uuidv7();
               yield* tx
@@ -507,11 +514,12 @@ export class ProjectFileService extends Context.Service<
         const file = (yield* summaries(db, projectId)).find((each) =>
           target.fileId ? each.id === target.fileId : each.name === target.name,
         );
-        if (!file) return yield* new ProjectRejected({ reason: "no such file in this project" });
+        if (!file)
+          return yield* new ProjectRejected({ reason: localized(m.projects_error_no_such_file) });
         const row = yield* versionRow(file.versionId);
         const bytes = row ? yield* blobBytes(row.version.blobId) : null;
         if (!row || !bytes)
-          return yield* new ProjectRejected({ reason: "no such file in this project" });
+          return yield* new ProjectRejected({ reason: localized(m.projects_error_no_such_file) });
         return { file, bytes, blobId: row.version.blobId };
       });
       return ProjectFileService.of({
@@ -590,10 +598,14 @@ export class ProjectFileService extends Context.Service<
             .limit(1)
             .pipe(Effect.orDie);
           if (!attachment)
-            return yield* new ProjectRejected({ reason: "that attachment is not available" });
+            return yield* new ProjectRejected({
+              reason: localized(m.projects_error_attachment_unavailable),
+            });
           const bytes = yield* blobBytes(attachment.blobId);
           if (!bytes)
-            return yield* new ProjectRejected({ reason: "that attachment is not available" });
+            return yield* new ProjectRejected({
+              reason: localized(m.projects_error_attachment_unavailable),
+            });
           // A new version keeps its file's name unless one is given, as an upload does.
           const [target] = input.fileId
             ? yield* db
@@ -618,10 +630,16 @@ export class ProjectFileService extends Context.Service<
         restore: Effect.fn("ProjectFileService.restore")(
           function* (userId, versionId, basedOnVersion) {
             const row = yield* versionRow(versionId);
-            if (!row) return yield* new ProjectRejected({ reason: "that version is gone" });
+            if (!row)
+              return yield* new ProjectRejected({
+                reason: localized(m.projects_error_version_gone),
+              });
             yield* admitWrite({ origin: "user", userId }, row.projectId);
             const bytes = yield* blobBytes(row.version.blobId);
-            if (!bytes) return yield* new ProjectRejected({ reason: "that version is gone" });
+            if (!bytes)
+              return yield* new ProjectRejected({
+                reason: localized(m.projects_error_version_gone),
+              });
             // A restore is a new version like any other, so history stays in order.
             return yield* writeVersion(
               { origin: "user", userId },
@@ -637,7 +655,8 @@ export class ProjectFileService extends Context.Service<
         ),
         pin: Effect.fn("ProjectFileService.pin")(function* (userId, versionId, input) {
           const row = yield* versionRow(versionId);
-          if (!row) return yield* new ProjectRejected({ reason: "that version is gone" });
+          if (!row)
+            return yield* new ProjectRejected({ reason: localized(m.projects_error_version_gone) });
           yield* transaction((tx) =>
             Effect.gen(function* () {
               yield* requireProject(tx, userId, row.projectId, "edit", "update");
@@ -646,7 +665,10 @@ export class ProjectFileService extends Context.Service<
                 .from(projectFileVersions)
                 .where(eq(projectFileVersions.id, versionId))
                 .pipe(Effect.orDie);
-              if (!current) return yield* new ProjectRejected({ reason: "that version is gone" });
+              if (!current)
+                return yield* new ProjectRejected({
+                  reason: localized(m.projects_error_version_gone),
+                });
               if (input.pinned && !current.pinned) {
                 const [count] = yield* tx
                   .select({ value: sql<number>`count(*)::int` })
@@ -660,7 +682,9 @@ export class ProjectFileService extends Context.Service<
                   .pipe(Effect.orDie);
                 if ((count?.value ?? 0) >= PROJECT_FILE_LIMITS.pinsPerFile)
                   return yield* new ProjectRejected({
-                    reason: `a file keeps at most ${PROJECT_FILE_LIMITS.pinsPerFile} versions`,
+                    reason: localized(m.projects_error_pins_full, {
+                      max: PROJECT_FILE_LIMITS.pinsPerFile,
+                    }),
                   });
               }
               yield* tx

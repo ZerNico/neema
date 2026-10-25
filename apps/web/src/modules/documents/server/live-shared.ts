@@ -7,7 +7,6 @@ import {
   DOCUMENT_LIMITS,
   DocumentNotAvailable,
   DocumentRejected,
-  foreignReason,
   type CommentInput,
   type DeleteCommentInput,
   type EditableDocument,
@@ -73,8 +72,7 @@ export const lockProjectForEditing = (tx: DbTx, userId: string, projectId: strin
     Effect.asVoid,
     Effect.catchTags({
       ProjectNotAvailable: () => Effect.fail(new DocumentNotAvailable({})),
-      ProjectRejected: ({ reason }) =>
-        Effect.fail(new DocumentRejected({ reason: foreignReason(reason) })),
+      ProjectRejected: ({ reason }) => Effect.fail(new DocumentRejected({ reason })),
     }),
   );
 

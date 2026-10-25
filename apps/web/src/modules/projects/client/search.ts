@@ -1,9 +1,13 @@
 import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { listSource } from "~/modules/search/registry.ts";
+import { m } from "~/paraglide/messages.js";
 import { projectsQuery } from "./queries.ts";
 
 export const useProjectSearch = listSource({
-  heading: "Projects",
+  // A getter, so the heading is read in the page's language when shown.
+  get heading() {
+    return m.projects_title();
+  },
   icon: Folder01Icon,
   query: projectsQuery,
   allowed: (capabilities) => capabilities.projectsUse,

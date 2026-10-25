@@ -1,3 +1,5 @@
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -24,10 +26,10 @@ export type ProjectMemorySave =
 
 const prepare = (content: string) => prepareMemoryContent(content, PROJECT_MEMORY_LIMITS.content);
 const rejectionText = {
-  empty: "A project memory cannot be empty.",
-  too_long: `A project memory can be at most ${PROJECT_MEMORY_LIMITS.content} characters.`,
-  sensitive: "That looks like a secret or personal identifier, which a project should not keep.",
-} as const;
+  empty: localized(m.projects_error_memory_empty),
+  too_long: localized(m.projects_error_memory_too_long, { max: PROJECT_MEMORY_LIMITS.content }),
+  sensitive: localized(m.projects_error_memory_sensitive),
+};
 
 /** Serializes saves per project, so the cap holds under concurrent writers. */
 const lockProject = (tx: DbTx, projectId: string) =>
@@ -171,7 +173,7 @@ export class ProjectMemoryService extends Context.Service<
             }),
           );
           if (outcome.outcome === "limit_reached")
-            return yield* new ProjectRejected({ reason: "this project's memory is full" });
+            return yield* new ProjectRejected({ reason: localized(m.projects_error_memory_full) });
           yield* changed(projectId);
           const memories = yield* list(userId, projectId);
           return memories.find((memory) => memory.id === outcome.id)!;
@@ -199,7 +201,9 @@ export class ProjectMemoryService extends Context.Service<
                   )
                   .pipe(Effect.orDie);
                 if (duplicate)
-                  return yield* new ProjectRejected({ reason: "the project already keeps that" });
+                  return yield* new ProjectRejected({
+                    reason: localized(m.projects_error_memory_duplicate),
+                  });
                 const rows = yield* tx
                   .update(projectMemories)
                   .set({
@@ -215,7 +219,9 @@ export class ProjectMemoryService extends Context.Service<
                   .returning({ id: projectMemories.id })
                   .pipe(Effect.orDie);
                 if (!rows.length)
-                  return yield* new ProjectRejected({ reason: "that memory is gone" });
+                  return yield* new ProjectRejected({
+                    reason: localized(m.projects_error_memory_gone),
+                  });
               }),
             );
             yield* changed(projectId);

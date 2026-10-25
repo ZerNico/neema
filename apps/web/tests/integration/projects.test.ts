@@ -34,7 +34,14 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { collabEditor } from "../fixtures/collab-editor.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+/** Matches a Localized reason by its English rendering. */
+const says = (text: string) => ({
+  asymmetricMatch: (reason: unknown) =>
+    typeof reason === "function" && english(reason as Localized).includes(text),
+  toString: () => `a reason saying ${JSON.stringify(text)}`,
+});
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "projects-it-"));
 
@@ -253,7 +260,7 @@ describe("roles", () => {
     );
     expect(failureOf(byEditor)).toMatchObject({
       _tag: "ProjectRejected",
-      reason: "only the project's owner can do that",
+      reason: says("only the project's owner can do that"),
     });
     await projects((s) =>
       s.changeMembers(editor, project.id, { action: "removeUser", userId: editor }),
@@ -491,11 +498,14 @@ describe("chats in a project", () => {
       failureOf(
         await exit(Effect.flatMap(ProjectService, (s) => s.move(owner, temporary, project.id))),
       ),
-    ).toMatchObject({ _tag: "ProjectRejected", reason: "a temporary chat cannot join a project" });
+    ).toMatchObject({
+      _tag: "ProjectRejected",
+      reason: says("a temporary chat cannot join a project"),
+    });
     // Someone else's chat is not theirs to move.
     expect(
       failureOf(await exit(Effect.flatMap(ProjectService, (s) => s.move(owner, theirs, null)))),
-    ).toMatchObject({ _tag: "ProjectRejected", reason: "that chat is not available" });
+    ).toMatchObject({ _tag: "ProjectRejected", reason: says("that chat is not available") });
     expect((await projects((s) => s.chats(owner, project.id))).map((c) => c.id)).toEqual([mine]);
     expect((await projects((s) => s.chats(member, project.id))).map((c) => c.id)).toEqual([theirs]);
     await projects((s) => s.move(owner, mine, null));

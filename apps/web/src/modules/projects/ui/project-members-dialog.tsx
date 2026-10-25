@@ -52,15 +52,18 @@ import {
 type AddTarget =
   | { kind: "person"; id: string; name: string; detail: string; email: string }
   | { kind: "group"; id: string; name: string; detail: string };
+import { m } from "~/paraglide/messages.js";
+import { roleLabel } from "./role-labels.ts";
+
 interface AddSection {
   value: string;
   items: AddTarget[];
 }
-const ROLES: ReadonlyArray<{ value: ProjectMemberRole; label: string }> = [
-  { value: "editor", label: "Can edit" },
-  { value: "viewer", label: "Can view" },
+const roles = (): ReadonlyArray<{ value: ProjectMemberRole; label: string }> => [
+  { value: "editor", label: roleLabel.editor() },
+  { value: "viewer", label: roleLabel.viewer() },
 ];
-const roleText = (role: ProjectMemberRole) => (role === "editor" ? "Can edit" : "Can view");
+const roleText = (role: ProjectMemberRole) => roleLabel[role]();
 const responseText = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
 /**
@@ -81,6 +84,7 @@ export function ProjectMembersDialog({
   const confirm = useConfirm();
   const navigate = useNavigate();
   const manage = project.role === "owner";
+  const ROLES = roles();
   const me = useSessionUser();
   const members = useQuery({ ...projectMembersQuery(project.id), enabled: open });
   const [role, setRole] = useState<ProjectMemberRole>("editor");
@@ -106,25 +110,25 @@ export function ProjectMembersDialog({
       setAddError(null);
       await refresh();
     },
-    onError: (error) => setAddError(responseText(error, "Could not add them.")),
+    onError: (error) => setAddError(responseText(error, m.projects_members_add_failed())),
   });
   const changeRole = useMutation({
     mutationFn: (input: { userId: string; role: ProjectMemberRole }) =>
       setProjectMemberRole({ data: { projectId: project.id, ...input } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not change the role.", error),
+    onError: (error) => toastError(m.projects_members_role_failed(), error),
   });
   const removeUser = useMutation({
     mutationFn: (userId: string) =>
       removeProjectMember({ data: { projectId: project.id, userId } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not remove them.", error),
+    onError: (error) => toastError(m.projects_members_remove_failed(), error),
   });
   const removeGroup = useMutation({
     mutationFn: (groupId: string) =>
       removeProjectGroup({ data: { projectId: project.id, groupId } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not remove the group.", error),
+    onError: (error) => toastError(m.projects_members_remove_group_failed(), error),
   });
   const leave = useMutation({
     mutationFn: (userId: string) =>
@@ -134,7 +138,7 @@ export function ProjectMembersDialog({
       await refresh();
       await navigate({ to: "/projects" });
     },
-    onError: (error) => toastError("Could not leave the project.", error),
+    onError: (error) => toastError(m.projects_members_leave_failed(), error),
   });
   const pending =
     add.isPending ||
@@ -146,7 +150,7 @@ export function ProjectMembersDialog({
   const needle = query.trim().toLowerCase();
   const sections: AddSection[] = [
     {
-      value: "Groups",
+      value: m.projects_members_groups(),
       items: (data?.eligibleGroups ?? [])
         .filter((group) => !data?.groups.some((granted) => granted.groupId === group.id))
         .filter((group) => !needle || group.name.toLowerCase().includes(needle))
@@ -154,11 +158,11 @@ export function ProjectMembersDialog({
           kind: "group" as const,
           id: group.id,
           name: group.name,
-          detail: "Group",
+          detail: m.projects_members_group(),
         })),
     },
     {
-      value: "People",
+      value: m.projects_members_people(),
       items: (recipients.data ?? [])
         .filter((person) => person.userId !== project.ownerId)
         .filter((person) => !data?.users.some((member) => member.userId === person.userId))
@@ -230,22 +234,21 @@ export function ProjectMembersDialog({
         className="flex max-h-[min(40rem,calc(var(--dialog-viewport-height,100dvh)-2rem))] min-h-0 flex-col"
       >
         <DialogHeader>
-          <DialogTitle>Members</DialogTitle>
+          <DialogTitle>{m.projects_members_title()}</DialogTitle>
           <DialogDescription className="break-words">
-            Everyone here shares the project’s instructions, documents and memory. Their chats in it
-            stay their own.
+            {m.projects_members_description()}
           </DialogDescription>
         </DialogHeader>
         {members.isError ? (
           <ErrorState
-            title="Could not load members"
+            title={m.projects_members_load_failed()}
             onRetry={() => {
               void members.refetch();
             }}
           />
         ) : !data ? (
           <div className="flex justify-center py-10">
-            <Spinner aria-label="Loading members" />
+            <Spinner aria-label={m.projects_members_loading()} />
           </div>
         ) : (
           <div className="flex min-h-0 flex-col gap-5">
@@ -278,17 +281,22 @@ export function ProjectMembersDialog({
                           variant="outline"
                           className="min-w-0 flex-1 justify-start"
                           disabled={pending}
-                          aria-label="Add people or groups"
+                          aria-label={m.projects_members_add()}
                         />
                       }
                     >
                       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                      Add people or groups
+                      {m.projects_members_add()}
                     </ComboboxTrigger>
                     <ComboboxContent align="start" className="w-[var(--anchor-width)] min-w-72">
-                      <ComboboxInput placeholder="Search by name or email…" showTrigger={false} />
+                      <ComboboxInput
+                        placeholder={m.projects_members_search()}
+                        showTrigger={false}
+                      />
                       <ComboboxEmpty>
-                        {recipients.isPending ? "Searching…" : "No people or groups match"}
+                        {recipients.isPending
+                          ? m.projects_members_searching()
+                          : m.projects_members_no_match()}
                       </ComboboxEmpty>
                       <ComboboxList>
                         {(section: AddSection) => (
@@ -311,18 +319,21 @@ export function ProjectMembersDialog({
                       </ComboboxList>
                     </ComboboxContent>
                   </Combobox>
-                  {roleControl(role, "Role for people you add", setRole)}
+                  {roleControl(role, m.projects_members_role_for_new(), setRole)}
                 </div>
                 {addError ? <FieldError>{addError}</FieldError> : null}
               </div>
             ) : null}
-            <ul className="divide-border min-h-0 divide-y overflow-y-auto" aria-label="Members">
+            <ul
+              className="divide-border min-h-0 divide-y overflow-y-auto"
+              aria-label={m.projects_members_title()}
+            >
               <li className="flex items-center gap-3 py-2.5">
                 <Avatar className="size-9 shrink-0">
                   <AvatarFallback>{initials(project.ownerName)}</AvatarFallback>
                 </Avatar>
                 <span className="min-w-0 flex-1 truncate text-sm">{project.ownerName}</span>
-                <span className="text-muted-foreground shrink-0 text-xs">Owner</span>
+                <span className="text-muted-foreground shrink-0 text-xs">{roleLabel.owner()}</span>
               </li>
               {data.users.map((member) => (
                 <li key={member.userId} className="flex items-center gap-3 py-2.5">
@@ -333,11 +344,15 @@ export function ProjectMembersDialog({
                     <span className="truncate text-sm">{member.name}</span>
                     <span className="text-muted-foreground truncate text-xs">{member.email}</span>
                   </div>
-                  {roleControl(member.role, `Role for ${member.name}`, (next) =>
-                    changeRole.mutate({ userId: member.userId, role: next }),
+                  {roleControl(
+                    member.role,
+                    m.projects_members_role_for({ name: member.name }),
+                    (next) => changeRole.mutate({ userId: member.userId, role: next }),
                   )}
                   {manage
-                    ? remove(`Remove ${member.name}`, () => removeUser.mutate(member.userId))
+                    ? remove(m.projects_members_remove({ name: member.name }), () =>
+                        removeUser.mutate(member.userId),
+                      )
                     : null}
                 </li>
               ))}
@@ -348,13 +363,17 @@ export function ProjectMembersDialog({
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm">{group.name}</span>
-                    <span className="text-muted-foreground text-xs">Group</span>
+                    <span className="text-muted-foreground text-xs">
+                      {m.projects_members_group()}
+                    </span>
                   </div>
                   <span className="text-muted-foreground shrink-0 text-xs">
                     {roleText(group.role)}
                   </span>
                   {manage
-                    ? remove(`Remove ${group.name}`, () => removeGroup.mutate(group.groupId))
+                    ? remove(m.projects_members_remove({ name: group.name }), () =>
+                        removeGroup.mutate(group.groupId),
+                      )
                     : null}
                 </li>
               ))}
@@ -366,16 +385,15 @@ export function ProjectMembersDialog({
                 disabled={pending}
                 onClick={() => {
                   void confirm({
-                    title: `Leave “${project.name}”?`,
-                    description:
-                      "Your chats in it stop working with the project until someone adds you again.",
-                    confirmLabel: "Leave project",
+                    title: m.projects_members_leave_title({ name: project.name }),
+                    description: m.projects_members_leave_description(),
+                    confirmLabel: m.projects_members_leave(),
                   }).then((confirmed) => {
                     if (confirmed && me) leave.mutate(me.id);
                   });
                 }}
               >
-                Leave project
+                {m.projects_members_leave()}
               </Button>
             )}
           </div>

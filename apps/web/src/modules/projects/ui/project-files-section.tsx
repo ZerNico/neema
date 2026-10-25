@@ -49,6 +49,8 @@ import {
   restoreProjectFileVersion,
   uploadProjectFile,
 } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 const downloadHref = (versionId: string) => `/api/project-files/${versionId}`;
 
@@ -68,7 +70,7 @@ function useUpload(projectId: string) {
       return uploadProjectFile({ data });
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
-    onError: (error) => toastError("Could not upload the file.", error),
+    onError: (error) => toastError(m.projects_files_upload_failed(), error),
   });
 }
 
@@ -87,7 +89,7 @@ function useFilePicker(onPick: (file: File) => void) {
         event.target.value = "";
         if (!file) return;
         if (file.size > PROJECT_FILE_LIMITS.fileBytes) {
-          toastError("Could not upload the file.", new Error("The file is larger than 50 MB."));
+          toastError(m.projects_files_upload_failed(), new Error(m.projects_files_too_large()));
           return;
         }
         onPick(file);
@@ -111,8 +113,8 @@ export function ProjectFilesSection({
   const list = files.data;
   return (
     <Section
-      title="Files"
-      description="Decks, spreadsheets, documents and other files everyone works on, with 30 days of history."
+      title={m.projects_files_title()}
+      description={m.projects_files_description()}
       actions={
         editable ? (
           <PendingButton
@@ -122,7 +124,7 @@ export function ProjectFilesSection({
             onClick={picker.open}
           >
             <HugeiconsIcon icon={FileUploadIcon} strokeWidth={2} data-icon="inline-start" />
-            Upload file
+            {m.projects_files_upload()}
           </PendingButton>
         ) : null
       }
@@ -130,18 +132,16 @@ export function ProjectFilesSection({
       {picker.element}
       {files.isError ? (
         <ErrorState
-          title="Could not load files"
+          title={m.projects_files_load_failed()}
           onRetry={() => {
             void files.refetch();
           }}
         />
       ) : !list ? (
-        <ListSkeleton label="Loading files" />
+        <ListSkeleton label={m.projects_files_loading()} />
       ) : list.files.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          {editable
-            ? "No files yet. Upload one here, or save one from a project chat."
-            : "No files yet."}
+          {editable ? m.projects_files_empty_editable() : m.projects_files_empty()}
         </p>
       ) : (
         <>
@@ -157,7 +157,7 @@ export function ProjectFilesSection({
             ))}
           </ListCard>
           <p className="text-muted-foreground text-xs">
-            {formatFileSize(list.usedBytes)} used, history included
+            {m.projects_files_used({ size: formatFileSize(list.usedBytes) })}
           </p>
         </>
       )}
@@ -191,17 +191,21 @@ function ProjectFileRow({
   const remove = useMutation({
     mutationFn: () => deleteProjectFile({ data: { fileId: file.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
-    onError: (error) => toastError("Could not delete the file.", error),
+    onError: (error) => toastError(m.projects_files_delete_failed(), error),
   });
-  const by = file.origin === "model" ? "the assistant" : file.updatedBy;
+  const age = relativeAgeLabel(file.updatedAt, undefined, getLocale());
   const office = officePreview(
     { fileName: file.name, mediaType: file.mediaType },
     { kind: "project-version", id: file.versionId },
   );
   const detail = [
-    `Version ${file.version}`,
+    m.projects_files_version({ number: file.version }),
     formatFileSize(file.size),
-    `Updated ${relativeAgeLabel(file.updatedAt)}${by ? ` by ${by}` : ""}`,
+    file.origin === "model"
+      ? m.projects_files_updated_by_assistant({ age })
+      : file.updatedBy
+        ? m.projects_files_updated_by({ age, name: file.updatedBy })
+        : m.projects_files_updated({ age }),
   ].join(" · ");
   return (
     <ListRow>
@@ -212,13 +216,13 @@ function ProjectFileRow({
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm font-medium">{file.name}</span>
         <span className="text-muted-foreground truncate text-xs">
-          {upload.isPending ? "Uploading a new version…" : detail}
+          {upload.isPending ? m.projects_files_uploading_version() : detail}
         </span>
       </div>
       {office ? (
         <>
           <Button size="sm" variant="outline" onClick={() => setPreviewOpen(true)}>
-            Preview
+            {m.projects_files_preview()}
           </Button>
           <AttachmentPreviewDialog
             target={{
@@ -237,13 +241,19 @@ function ProjectFileRow({
         href={downloadHref(file.versionId)}
         download={file.name}
         className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-        aria-label={`Download ${file.name}`}
+        aria-label={m.projects_files_download({ name: file.name })}
       >
         <HugeiconsIcon icon={Download01Icon} strokeWidth={2} />
       </a>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${file.name}`} />}
+          render={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={m.projects_files_actions({ name: file.name })}
+            />
+          }
         >
           <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
         </DropdownMenuTrigger>
@@ -251,12 +261,12 @@ function ProjectFileRow({
           {editable ? (
             <DropdownMenuItem disabled={upload.isPending} onClick={picker.open}>
               <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} />
-              Upload new version
+              {m.projects_files_upload_version()}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem onClick={onHistory}>
             <HugeiconsIcon icon={Time04Icon} strokeWidth={2} />
-            Version history
+            {m.projects_files_history()}
           </DropdownMenuItem>
           {editable ? (
             <>
@@ -266,16 +276,16 @@ function ProjectFileRow({
                 disabled={remove.isPending}
                 onClick={() => {
                   void confirm({
-                    title: `Delete “${file.name}”?`,
-                    description: "The file and every saved version are deleted for everyone.",
-                    confirmLabel: "Delete file",
+                    title: m.projects_files_delete_title({ name: file.name }),
+                    description: m.projects_files_delete_description(),
+                    confirmLabel: m.projects_files_delete(),
                   }).then((confirmed) => {
                     if (confirmed) remove.mutate();
                   });
                 }}
               >
                 <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                Delete
+                {m.common_delete()}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -298,11 +308,10 @@ function VersionsDialog({
     <Dialog open={!!file} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Version history</DialogTitle>
+          <DialogTitle>{m.projects_files_history()}</DialogTitle>
           <DialogDescription>
             {file ? <span className="block wrap-anywhere">{file.name}</span> : null}
-            Versions stay for 30 days, up to {PROJECT_FILE_LIMITS.historyVersions}. Pin one to keep
-            it.
+            {m.projects_files_history_description({ max: PROJECT_FILE_LIMITS.historyVersions })}
           </DialogDescription>
         </DialogHeader>
         {file ? <VersionList file={file} editable={editable} /> : null}
@@ -322,49 +331,57 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
         data: { versionId: version.id, basedOnVersion: file.version },
       }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not restore the version.", error),
+    onError: (error) => toastError(m.projects_files_restore_failed(), error),
   });
   const unpin = useMutation({
     mutationFn: (version: ProjectFileVersion) =>
       pinProjectFileVersion({ data: { versionId: version.id, pinned: false } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not unpin the version.", error),
+    onError: (error) => toastError(m.projects_files_unpin_failed(), error),
   });
   if (versions.isError)
     return (
       <ErrorState
-        title="Could not load versions"
+        title={m.projects_files_versions_load_failed()}
         onRetry={() => {
           void versions.refetch();
         }}
       />
     );
-  if (!versions.data) return <ListSkeleton label="Loading versions" />;
+  if (!versions.data) return <ListSkeleton label={m.projects_files_versions_loading()} />;
   return (
     <>
       <ListCard>
         {versions.data.map((version) => {
-          const by = version.origin === "model" ? "the assistant" : version.createdBy;
+          const age = relativeAgeLabel(version.createdAt, undefined, getLocale());
           return (
             <ListRow key={version.id}>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                  <span className="truncate">{version.label ?? `Version ${version.number}`}</span>
-                  {version.current ? <Badge variant="secondary">Current</Badge> : null}
+                  <span className="truncate">
+                    {version.label ?? m.projects_files_version({ number: version.number })}
+                  </span>
+                  {version.current ? (
+                    <Badge variant="secondary">{m.projects_files_current()}</Badge>
+                  ) : null}
                   {version.pinned ? (
                     <HugeiconsIcon
                       icon={PinIcon}
                       strokeWidth={2}
                       className="text-muted-foreground size-3.5 shrink-0"
-                      aria-label="Pinned"
+                      aria-label={m.projects_files_pinned()}
                     />
                   ) : null}
                 </span>
                 <span className="text-muted-foreground truncate text-xs">
                   {[
-                    version.label ? `Version ${version.number}` : null,
+                    version.label ? m.projects_files_version({ number: version.number }) : null,
                     formatFileSize(version.size),
-                    `${relativeAgeLabel(version.createdAt)}${by ? ` by ${by}` : ""}`,
+                    version.origin === "model"
+                      ? m.projects_files_created_by_assistant({ age })
+                      : version.createdBy
+                        ? m.projects_files_created_by({ age, name: version.createdBy })
+                        : age,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -374,7 +391,7 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
                 href={downloadHref(version.id)}
                 download={file.name}
                 className={buttonVariants({ size: "icon-sm", variant: "ghost" })}
-                aria-label={`Download version ${version.number}`}
+                aria-label={m.projects_files_download_version({ number: version.number })}
               >
                 <HugeiconsIcon icon={Download01Icon} strokeWidth={2} />
               </a>
@@ -385,7 +402,7 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        aria-label={`Actions for version ${version.number}`}
+                        aria-label={m.projects_files_version_actions({ number: version.number })}
                       />
                     }
                   >
@@ -398,7 +415,7 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
                         onClick={() => restore.mutate(version)}
                       >
                         <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={2} />
-                        Restore as current
+                        {m.projects_files_restore()}
                       </DropdownMenuItem>
                     )}
                     {version.pinned ? (
@@ -407,12 +424,12 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
                         onClick={() => unpin.mutate(version)}
                       >
                         <HugeiconsIcon icon={PinOffIcon} strokeWidth={2} />
-                        Unpin
+                        {m.projects_files_unpin()}
                       </DropdownMenuItem>
                     ) : (
                       <DropdownMenuItem onClick={() => setPinning(version)}>
                         <HugeiconsIcon icon={PinIcon} strokeWidth={2} />
-                        Pin…
+                        {m.projects_files_pin_menu()}
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>
@@ -456,7 +473,7 @@ function PinDialog({
       setLabel("");
       onOpenChange(false);
     },
-    onError: (error) => toastError("Could not pin the version.", error),
+    onError: (error) => toastError(m.projects_files_pin_failed(), error),
   });
   return (
     <Dialog
@@ -469,10 +486,13 @@ function PinDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{version ? `Pin version ${version.number}` : "Pin version"}</DialogTitle>
+          <DialogTitle>
+            {version
+              ? m.projects_files_pin_title_number({ number: version.number })
+              : m.projects_files_pin_title()}
+          </DialogTitle>
           <DialogDescription>
-            A pinned version is kept until someone unpins it. A file keeps up to{" "}
-            {PROJECT_FILE_LIMITS.pinsPerFile}.
+            {m.projects_files_pin_description({ max: PROJECT_FILE_LIMITS.pinsPerFile })}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -483,24 +503,24 @@ function PinDialog({
           }}
         >
           <Field>
-            <FieldLabel htmlFor={`${id}-label`}>Label</FieldLabel>
+            <FieldLabel htmlFor={`${id}-label`}>{m.projects_files_pin_label()}</FieldLabel>
             <Input
               id={`${id}-label`}
               value={label}
               maxLength={80}
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Sent to the client"
+              placeholder={m.projects_files_pin_placeholder()}
               disabled={pin.isPending}
               autoFocus
             />
-            <FieldDescription>Optional. Shown in place of the version number.</FieldDescription>
+            <FieldDescription>{m.projects_files_pin_hint()}</FieldDescription>
           </Field>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={pin.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={pin.isPending}>
-              Pin version
+              {m.projects_files_pin()}
             </PendingButton>
           </DialogFooter>
         </form>

@@ -3,6 +3,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { refusal } from "~/server/refusal.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import type { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
@@ -181,9 +183,9 @@ const readFileUpload = (data: FormData) => {
   const fileId = data.get("fileId");
   const basedOn = data.get("basedOnVersion");
   if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
-    throw refusal(400, "Expected a file");
+    throw refusal(400, localized(m.projects_error_expected_file));
   if (file.size > PROJECT_FILE_LIMITS.fileBytes)
-    throw refusal(413, "The file is larger than 50 MB");
+    throw refusal(413, localized(m.projects_error_file_too_large));
   return {
     file,
     projectId,

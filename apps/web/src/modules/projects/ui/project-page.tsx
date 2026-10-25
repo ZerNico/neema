@@ -34,6 +34,8 @@ import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.
 import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { AlreadyTold, toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import {
   EmptyState,
   ErrorState,
@@ -80,21 +82,21 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const project = useQuery(projectQuery(projectId));
   if (project.isError)
     return (
-      <Page title="Project" rootPath="/projects" rootLabel="Projects">
+      <Page title={m.projects_page_title()} rootPath="/projects" rootLabel={m.projects_title()}>
         {notFound(project.error) ? (
           <EmptyState
             icon={Folder01Icon}
-            title="This project is not available"
-            description="It was deleted, or you are no longer a member."
+            title={m.projects_page_unavailable()}
+            description={m.projects_page_unavailable_description()}
             action={
               <Link to="/projects" className={buttonVariants({ size: "sm", variant: "outline" })}>
-                All projects
+                {m.projects_page_all()}
               </Link>
             }
           />
         ) : (
           <ErrorState
-            title="Could not load the project"
+            title={m.projects_page_load_failed()}
             onRetry={() => {
               void project.refetch();
             }}
@@ -104,8 +106,8 @@ export function ProjectPage({ projectId }: { projectId: string }) {
     );
   if (!project.data)
     return (
-      <Page title="Project" rootPath="/projects" rootLabel="Projects">
-        <ListSkeleton label="Loading project" />
+      <Page title={m.projects_page_title()} rootPath="/projects" rootLabel={m.projects_title()}>
+        <ListSkeleton label={m.projects_page_loading()} />
       </Page>
     );
   return <LoadedProject project={project.data} />;
@@ -124,38 +126,40 @@ function LoadedProject({ project }: { project: ProjectDetail }) {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await navigate({ to: "/projects" });
     },
-    onError: (error) => toastError("Could not delete the project.", error),
+    onError: (error) => toastError(m.projects_page_delete_failed(), error),
   });
   return (
     <Page
       title={project.name}
       description={project.description || undefined}
       backTo="/projects"
-      backLabel="Projects"
+      backLabel={m.projects_title()}
       actions={
         <>
           {project.role === "owner" ? null : (
-            <Badge variant="outline">{roleLabel[project.role]}</Badge>
+            <Badge variant="outline">{roleLabel[project.role]()}</Badge>
           )}
           <Button size="sm" variant="outline" onClick={() => setMembers(true)}>
             <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-            Members
+            {m.projects_page_members()}
           </Button>
           <Link to="/" search={{ project: project.id }} className={buttonVariants({ size: "sm" })}>
             <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} data-icon="inline-start" />
-            New chat
+            {m.projects_page_new_chat()}
           </Link>
           {editable ? (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<Button size="icon-sm" variant="ghost" aria-label="Project actions" />}
+                render={
+                  <Button size="icon-sm" variant="ghost" aria-label={m.projects_page_actions()} />
+                }
               >
                 <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setEditing(true)}>
                   <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                  Rename
+                  {m.common_rename()}
                 </DropdownMenuItem>
                 {project.role === "owner" ? (
                   <>
@@ -165,17 +169,16 @@ function LoadedProject({ project }: { project: ProjectDetail }) {
                       disabled={remove.isPending}
                       onClick={() => {
                         void confirm({
-                          title: `Delete “${project.name}”?`,
-                          description:
-                            "Its documents, files and memory are deleted for everyone. Chats in it become ordinary chats and keep their messages.",
-                          confirmLabel: "Delete project",
+                          title: m.projects_page_delete_title({ name: project.name }),
+                          description: m.projects_page_delete_description(),
+                          confirmLabel: m.projects_page_delete(),
                         }).then((confirmed) => {
                           if (confirmed) remove.mutate();
                         });
                       }}
                     >
                       <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                      Delete
+                      {m.common_delete()}
                     </DropdownMenuItem>
                   </>
                 ) : null}
@@ -208,12 +211,12 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
       setDraft(null);
       await queryClient.invalidateQueries({ queryKey: ["projects", "list"] });
     },
-    onError: (error) => toastError("Could not save the instructions.", error),
+    onError: (error) => toastError(m.projects_instructions_save_failed(), error),
   });
   return (
     <Section
-      title="Instructions"
-      description="Every chat in this project follows these, whoever starts it."
+      title={m.projects_instructions_title()}
+      description={m.projects_instructions_description()}
     >
       {editable ? (
         <form
@@ -225,14 +228,14 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
         >
           <Field>
             <FieldLabel htmlFor={`${id}-instructions`} className="sr-only">
-              Instructions
+              {m.projects_instructions_title()}
             </FieldLabel>
             <Textarea
               id={`${id}-instructions`}
               value={value}
               maxLength={PROJECT_LIMITS.instructions}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="How answers in this project should look: tone, audience, what to always keep in mind"
+              placeholder={m.projects_instructions_placeholder()}
               className="min-h-32"
               disabled={save.isPending}
             />
@@ -240,7 +243,7 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
           {draft !== null && draft !== project.instructions ? (
             <FormActions>
               <PendingButton type="submit" size="sm" pending={save.isPending}>
-                Save instructions
+                {m.projects_instructions_save()}
               </PendingButton>
               <Button
                 type="button"
@@ -249,7 +252,7 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
                 disabled={save.isPending}
                 onClick={() => setDraft(null)}
               >
-                Discard
+                {m.projects_instructions_discard()}
               </Button>
             </FormActions>
           ) : null}
@@ -257,7 +260,7 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
       ) : project.instructions ? (
         <p className="text-sm whitespace-pre-wrap">{project.instructions}</p>
       ) : (
-        <p className="text-muted-foreground text-sm">No instructions yet.</p>
+        <p className="text-muted-foreground text-sm">{m.projects_instructions_empty()}</p>
       )}
     </Section>
   );
@@ -273,31 +276,29 @@ function DocumentsSection({ project, editable }: { project: ProjectDetail; edita
   const askInNewChat = useAskInNewChat(project.id, owner);
   return (
     <Section
-      title="Documents"
-      description="Shared by everyone in the project and edited live, by people and by the assistant."
+      title={m.projects_documents_title()}
+      description={m.projects_documents_description()}
       actions={
         editable ? (
           <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
             <HugeiconsIcon icon={FileAddIcon} strokeWidth={2} data-icon="inline-start" />
-            New document
+            {m.projects_documents_new()}
           </Button>
         ) : null
       }
     >
       {documents.isError ? (
         <ErrorState
-          title="Could not load documents"
+          title={m.projects_documents_load_failed()}
           onRetry={() => {
             void documents.refetch();
           }}
         />
       ) : !documents.data ? (
-        <ListSkeleton label="Loading documents" />
+        <ListSkeleton label={m.projects_documents_loading()} />
       ) : rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          {editable
-            ? "No documents yet. Start one here, or ask the assistant in a project chat."
-            : "No documents yet."}
+          {editable ? m.projects_documents_empty_editable() : m.projects_documents_empty()}
         </p>
       ) : (
         // The owner keeps each document's live controller mounted while the
@@ -345,7 +346,7 @@ function useAskInNewChat(
   return async (request, asked) => {
     // The request names blocks, maybe one just planted: they must be stored first.
     if (!(await owner.current?.flush())) {
-      toast.error("Resolve the changes in your document before continuing.");
+      toast.error(m.projects_documents_resolve_first());
       return false;
     }
     const model = resolveChatModel(await queryClient.ensureQueryData(chatModelsQuery), null);
@@ -367,7 +368,7 @@ function useAskInNewChat(
         },
       },
     }).catch((error: unknown) => {
-      toastError("Could not send it to the assistant.", error);
+      toastError(m.projects_documents_ask_failed(), error);
       void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
       throw new AlreadyTold("ask refused");
     });
@@ -405,9 +406,11 @@ function ProjectDocumentRow({
   const remove = useMutation({
     mutationFn: () => deleteProjectDocument({ data: { documentId: document.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
-    onError: (error) => toastError("Could not delete the document.", error),
+    onError: (error) => toastError(m.projects_documents_delete_failed(), error),
   });
-  const detail = `Updated ${relativeAgeLabel(document.updatedAt)}`;
+  const detail = m.projects_documents_updated({
+    age: relativeAgeLabel(document.updatedAt, undefined, getLocale()),
+  });
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
@@ -416,7 +419,7 @@ function ProjectDocumentRow({
       <button
         type="button"
         className="flex min-w-0 flex-1 flex-col text-left"
-        aria-label={`Open document: ${entry?.title ?? document.title}`}
+        aria-label={m.projects_documents_open({ title: entry?.title ?? document.title })}
         aria-expanded={entry?.expanded ?? false}
         disabled={!entry?.open}
         onClick={() => entry?.open?.()}
@@ -428,7 +431,11 @@ function ProjectDocumentRow({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button size="icon-sm" variant="ghost" aria-label={`Actions for ${document.title}`} />
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={m.projects_documents_actions({ title: document.title })}
+              />
             }
           >
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
@@ -436,23 +443,23 @@ function ProjectDocumentRow({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setRenaming(true)}>
               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-              Rename
+              {m.common_rename()}
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
               disabled={remove.isPending}
               onClick={() => {
                 void confirm({
-                  title: `Delete “${document.title}”?`,
-                  description: "It is deleted for everyone in the project.",
-                  confirmLabel: "Delete document",
+                  title: m.projects_documents_delete_title({ title: document.title }),
+                  description: m.projects_documents_delete_description(),
+                  confirmLabel: m.projects_documents_delete(),
                 }).then((confirmed) => {
                   if (confirmed) remove.mutate();
                 });
               }}
             >
               <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-              Delete
+              {m.common_delete()}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -493,7 +500,8 @@ function NewDocumentDialog({
         data.set("projectId", projectId);
         data.set("title", title.trim());
         const imported = await createProjectDocumentFromWord({ data });
-        if (imported.dropped.length) toast(`Left out: ${imported.dropped.join(", ")}`);
+        if (imported.dropped.length)
+          toast(m.projects_documents_left_out({ parts: imported.dropped.join(", ") }));
         return imported.document;
       }
       return createProjectDocument({ data: { projectId, title: title.trim() } });
@@ -516,8 +524,8 @@ function NewDocumentDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New document</DialogTitle>
-          <DialogDescription>A document everyone in the project can edit.</DialogDescription>
+          <DialogTitle>{m.projects_documents_new()}</DialogTitle>
+          <DialogDescription>{m.projects_documents_new_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -528,7 +536,7 @@ function NewDocumentDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-file`}>Start from a Word file</FieldLabel>
+              <FieldLabel htmlFor={`${id}-file`}>{m.projects_documents_from_word()}</FieldLabel>
               <div className="flex items-center gap-2">
                 <Input
                   ref={picker}
@@ -554,20 +562,20 @@ function NewDocumentDialog({
                       if (picker.current) picker.current.value = "";
                     }}
                   >
-                    Clear
+                    {m.projects_documents_clear()}
                   </Button>
                 ) : null}
               </div>
-              <FieldDescription>Optional</FieldDescription>
+              <FieldDescription>{m.projects_documents_optional()}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
+              <FieldLabel htmlFor={`${id}-title`}>{m.projects_documents_title_label()}</FieldLabel>
               <Input
                 id={`${id}-title`}
                 value={title}
                 maxLength={200}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Launch checklist"
+                placeholder={m.projects_documents_title_placeholder()}
                 disabled={save.isPending}
                 autoFocus
               />
@@ -577,15 +585,15 @@ function NewDocumentDialog({
             <FieldError>
               {file && save.error instanceof Error && save.error.message
                 ? save.error.message
-                : "Could not create the document."}
+                : m.projects_documents_create_failed()}
             </FieldError>
           ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!title.trim()}>
-              Create document
+              {m.projects_documents_create()}
             </PendingButton>
           </DialogFooter>
         </form>
@@ -598,23 +606,18 @@ function ChatsSection({ projectId }: { projectId: string }) {
   const chats = useQuery(projectChatsQuery(projectId));
   const rows = chats.data ?? [];
   return (
-    <Section
-      title="Your chats"
-      description="Only you see your chats here, even in a shared project."
-    >
+    <Section title={m.projects_chats_title()} description={m.projects_chats_description()}>
       {chats.isError ? (
         <ErrorState
-          title="Could not load your chats"
+          title={m.projects_chats_load_failed()}
           onRetry={() => {
             void chats.refetch();
           }}
         />
       ) : !chats.data ? (
-        <ListSkeleton label="Loading chats" />
+        <ListSkeleton label={m.projects_chats_loading()} />
       ) : rows.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          No chats yet. Start one with New chat, or move an existing chat here from its menu.
-        </p>
+        <p className="text-muted-foreground text-sm">{m.projects_chats_empty()}</p>
       ) : (
         <ListCard>
           {rows.map((chat) => (
@@ -624,9 +627,11 @@ function ChatsSection({ projectId }: { projectId: string }) {
                 params={{ conversationId: chat.id }}
                 className="flex min-w-0 flex-1 flex-col"
               >
-                <span className="truncate text-sm font-medium">{chat.title ?? "New chat"}</span>
+                <span className="truncate text-sm font-medium">
+                  {chat.title ?? m.projects_page_new_chat()}
+                </span>
                 <span className="text-muted-foreground truncate text-xs">
-                  {relativeAgeLabel(chat.lastActivityAt)}
+                  {relativeAgeLabel(chat.lastActivityAt, undefined, getLocale())}
                 </span>
               </Link>
             </ListRow>
@@ -655,11 +660,11 @@ function RenameDialog({
         if (next) setDescription(project.description);
         onOpenChange(next);
       }}
-      title="Rename project"
+      title={m.projects_rename_title()}
       initial={project.name}
       maxLength={PROJECT_LIMITS.name}
-      submitLabel="Save"
-      failure="Could not save the project."
+      submitLabel={m.common_save()}
+      failure={m.projects_rename_failed()}
       changed={description.trim() !== project.description}
       onSubmit={async (name) => {
         const updated = await updateProject({
@@ -673,7 +678,7 @@ function RenameDialog({
           value={description}
           onChange={setDescription}
           pending={pending}
-          hint="Shown to everyone in the project."
+          hint={m.projects_rename_hint()}
         />
       )}
     />

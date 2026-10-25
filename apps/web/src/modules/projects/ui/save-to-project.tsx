@@ -23,6 +23,8 @@ export function WritableChatProjectProvider({
  * Preview actions for a stored chat file in a project chat: keep it with the
  * project, or open the original, which these actions replace.
  */
+import { m } from "~/paraglide/messages.js";
+
 export function SaveToProjectActions({
   project,
   attachmentId,
@@ -36,10 +38,10 @@ export function SaveToProjectActions({
   const save = useMutation({
     mutationFn: () => saveAttachmentToProject({ data: { projectId: project.id, attachmentId } }),
     onSuccess: (file) => {
-      toast.success(`Saved to ${project.name} as ${file.name}`);
+      toast.success(m.projects_save_to_project_done({ project: project.name, file: file.name }));
       return queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
-    onError: (error) => toastError("Could not save the file to the project.", error),
+    onError: (error) => toastError(m.projects_save_to_project_failed(), error),
   });
   return (
     <>
@@ -50,7 +52,7 @@ export function SaveToProjectActions({
         onClick={() => save.mutate()}
       >
         <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} data-icon="inline-start" />
-        Save to project
+        {m.projects_save_to_project()}
       </PendingButton>
       <a
         href={url}
@@ -58,7 +60,7 @@ export function SaveToProjectActions({
         rel="noreferrer"
         className={buttonVariants({ size: "sm", variant: "ghost" })}
       >
-        Open original
+        {m.projects_open_original()}
       </a>
     </>
   );

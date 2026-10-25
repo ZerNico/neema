@@ -23,10 +23,16 @@ import { PROJECT_LIMITS, type ProjectSummary } from "../schema.ts";
 import { createProject } from "../server/functions.ts";
 import { roleLabel } from "./role-labels.ts";
 
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+
 const detail = (project: ProjectSummary) =>
   [
-    project.description || `Updated ${relativeAgeLabel(project.updatedAt)}`,
-    project.role === "owner" ? null : `Shared by ${project.ownerName}`,
+    project.description ||
+      m.projects_list_updated({
+        age: relativeAgeLabel(project.updatedAt, new Date(), getLocale()),
+      }),
+    project.role === "owner" ? null : m.projects_list_shared_by({ name: project.ownerName }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -41,7 +47,7 @@ export function ProjectsPage() {
   const newProject = capabilities?.projectsCreate ? (
     <Button size="sm" onClick={() => setCreating(true)}>
       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      New project
+      {m.projects_list_new()}
     </Button>
   ) : null;
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- list renders this page's rows beside it
@@ -60,7 +66,7 @@ export function ProjectsPage() {
             <span className="flex items-center gap-2 text-sm font-medium">
               <span className="truncate">{project.name}</span>
               {project.role === "owner" ? null : (
-                <Badge variant="outline">{roleLabel[project.role]}</Badge>
+                <Badge variant="outline">{roleLabel[project.role]()}</Badge>
               )}
             </span>
             <span className="text-muted-foreground truncate text-xs">{detail(project)}</span>
@@ -76,36 +82,38 @@ export function ProjectsPage() {
   );
   return (
     <Page
-      title="Projects"
-      description="Instructions, documents and memory shared by everyone working on something. Your chats in a project stay yours."
+      title={m.projects_title()}
+      description={m.projects_list_description()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.projects_list_root_label()}
       actions={newProject}
     >
       {projects.isError ? (
         <ErrorState
-          title="Could not load projects"
+          title={m.projects_list_load_failed()}
           onRetry={() => {
             void projects.refetch();
           }}
         />
       ) : projects.data === undefined ? (
-        <ListSkeleton label="Loading projects" />
+        <ListSkeleton label={m.projects_list_loading()} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Folder01Icon}
-          title="No projects yet"
+          title={m.projects_list_empty_title()}
           description={
             capabilities?.projectsCreate
-              ? "Start a project for work you keep coming back to, alone or with others."
-              : "No projects are shared with you yet."
+              ? m.projects_list_empty_create()
+              : m.projects_list_empty_shared()
           }
           action={newProject}
         />
       ) : (
         <>
-          {own.length > 0 ? <Section title="Your projects">{list(own)}</Section> : null}
-          {shared.length > 0 ? <Section title="Shared with you">{list(shared)}</Section> : null}
+          {own.length > 0 ? <Section title={m.projects_list_yours()}>{list(own)}</Section> : null}
+          {shared.length > 0 ? (
+            <Section title={m.projects_list_shared_with_you()}>{list(shared)}</Section>
+          ) : null}
         </>
       )}
       <NewProjectDialog open={creating} onOpenChange={setCreating} />
@@ -130,12 +138,12 @@ function NewProjectDialog({
         if (!next) setDescription("");
         onOpenChange(next);
       }}
-      title="New project"
-      description="Name the work. You can add instructions, documents and people next."
+      title={m.projects_new_title()}
+      description={m.projects_new_description()}
       maxLength={PROJECT_LIMITS.name}
-      placeholder="Website relaunch"
-      submitLabel="Create project"
-      failure="Could not create the project."
+      placeholder={m.projects_new_placeholder()}
+      submitLabel={m.projects_new_submit()}
+      failure={m.projects_new_failed()}
       onSubmit={async (name) => {
         const project = await createProject({
           data: { name, description: description.trim() },
@@ -148,8 +156,8 @@ function NewProjectDialog({
           value={description}
           onChange={setDescription}
           pending={pending}
-          placeholder="What it is for, in a sentence"
-          hint="Optional. Shown to everyone in the project."
+          placeholder={m.projects_new_description_placeholder()}
+          hint={m.projects_new_description_hint()}
         />
       )}
     />

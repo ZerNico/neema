@@ -18,6 +18,7 @@ import { Input } from "~/ui/primitives/input";
 import { projectMemoriesQuery } from "../client/queries.ts";
 import { PROJECT_MEMORY_LIMITS, type ProjectMemory } from "../schema.ts";
 import { addProjectMemory, deleteProjectMemory, updateProjectMemory } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 const failure = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -48,25 +49,20 @@ export function ProjectMemorySection({
   });
   const rows = memories.data ?? [];
   return (
-    <Section
-      title="Memory"
-      description="Facts about this project that every chat in it knows. Never about a person."
-    >
+    <Section title={m.projects_memory_title()} description={m.projects_memory_description()}>
       {memories.isError ? (
         <ErrorState
-          title="Could not load project memory"
+          title={m.projects_memory_load_failed()}
           onRetry={() => {
             void memories.refetch();
           }}
         />
       ) : !memories.data ? (
-        <ListSkeleton label="Loading project memory" />
+        <ListSkeleton label={m.projects_memory_loading()} />
       ) : (
         <>
           {rows.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              Nothing yet. The assistant saves decisions and conventions here as you work.
-            </p>
+            <p className="text-muted-foreground text-sm">{m.projects_memory_empty()}</p>
           ) : (
             <ListCard>
               {rows.map((memory) => (
@@ -89,19 +85,19 @@ export function ProjectMemorySection({
             >
               <Field>
                 <FieldLabel htmlFor={`${id}-memory`} className="sr-only">
-                  Add to project memory
+                  {m.projects_memory_add_label()}
                 </FieldLabel>
                 <Input
                   id={`${id}-memory`}
                   value={content}
                   maxLength={PROJECT_MEMORY_LIMITS.content}
                   onChange={(event) => setContent(event.target.value)}
-                  placeholder="We release on Tuesdays"
+                  placeholder={m.projects_memory_placeholder()}
                   disabled={add.isPending}
                 />
               </Field>
               {add.isError ? (
-                <FieldError>{failure(add.error, "Could not save that.")}</FieldError>
+                <FieldError>{failure(add.error, m.projects_memory_add_failed())}</FieldError>
               ) : null}
               <FormActions>
                 <PendingButton
@@ -111,7 +107,7 @@ export function ProjectMemorySection({
                   pending={add.isPending}
                   disabled={!content.trim()}
                 >
-                  Add to memory
+                  {m.projects_memory_add()}
                 </PendingButton>
               </FormActions>
             </form>
@@ -142,19 +138,19 @@ function MemoryRow({
       setDraft(null);
       await refresh();
     },
-    onError: (error) => toastError("Could not update the memory.", error),
+    onError: (error) => toastError(m.projects_memory_update_failed(), error),
   });
   const remove = useMutation({
     mutationFn: () => deleteProjectMemory({ data: { projectId, memoryId: memory.id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not delete the memory.", error),
+    onError: (error) => toastError(m.projects_memory_delete_failed(), error),
   });
   const by =
     memory.origin === "model"
-      ? "Saved by the assistant"
+      ? m.projects_memory_by_assistant()
       : memory.createdByName
-        ? `Added by ${memory.createdByName}`
-        : "Added by a member";
+        ? m.projects_memory_added_by({ name: memory.createdByName })
+        : m.projects_memory_added_by_member();
   return (
     <ListRow>
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-2xl">
@@ -169,7 +165,7 @@ function MemoryRow({
           }}
         >
           <Input
-            aria-label="Memory"
+            aria-label={m.projects_memory_field()}
             value={draft}
             maxLength={PROJECT_MEMORY_LIMITS.content}
             onChange={(event) => setDraft(event.target.value)}
@@ -177,10 +173,10 @@ function MemoryRow({
             autoFocus
           />
           <PendingButton type="submit" size="sm" pending={save.isPending} disabled={!draft.trim()}>
-            Save
+            {m.common_save()}
           </PendingButton>
           <Button type="button" size="sm" variant="ghost" onClick={() => setDraft(null)}>
-            Cancel
+            {m.common_cancel()}
           </Button>
         </form>
       ) : (
@@ -194,7 +190,7 @@ function MemoryRow({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Edit memory: ${memory.content}`}
+                aria-label={m.projects_memory_edit({ content: memory.content })}
                 onClick={() => setDraft(memory.content)}
               >
                 <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
@@ -202,7 +198,7 @@ function MemoryRow({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Delete memory: ${memory.content}`}
+                aria-label={m.projects_memory_delete({ content: memory.content })}
                 disabled={remove.isPending}
                 onClick={() => remove.mutate()}
               >

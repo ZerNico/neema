@@ -39,7 +39,15 @@ import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+/** Matches a Localized reason by its English rendering. */
+const says = (text: string) => ({
+  asymmetricMatch: (reason: unknown) =>
+    typeof reason === "function" && english(reason as Localized).includes(text),
+  toString: () => `a reason saying ${JSON.stringify(text)}`,
+});
+
 import { FakeDocumentParser } from "./unused-services.ts";
 
 process.env.BLOB_STORE_ROOT = mkdtempSync(join(tmpdir(), "project-files-it-"));
@@ -364,10 +372,10 @@ describe("project files", () => {
           basedOnVersion: 1,
         }),
       ),
-    ).rejects.toMatchObject({ reason: expect.stringContaining("changed since version 1") });
+    ).rejects.toMatchObject({ reason: says("changed since version 1") });
     await expect(
       files((s) => s.write(person(owner), { projectId, name: "a.txt", bytes: text("again") })),
-    ).rejects.toMatchObject({ reason: expect.stringContaining("already has a file named") });
+    ).rejects.toMatchObject({ reason: says("already has a file named") });
     // A binary nobody can read is still kept, served as a download, and a
     // read explains that only a tool can use it.
     const binary = await files((s) =>
@@ -477,7 +485,11 @@ describe("project files", () => {
               bytes: text("x".repeat(20)),
             })
             .pipe(Effect.result),
-        ).then((result) => JSON.stringify(result));
+        ).then((result) =>
+          result._tag === "Failure" && "reason" in result.failure
+            ? english(result.failure.reason as Localized)
+            : JSON.stringify(result),
+        );
       // An editor learns only whose storage is full, never how full.
       expect(await refusal(editor)).toMatch(/owner of where this goes is out of storage/);
       expect(await refusal(owner)).toMatch(/Not enough storage/);
@@ -513,7 +525,7 @@ describe("project files", () => {
     const stranger = await createUser();
     const before = puts.length;
     for (const [writerId, refusal] of [
-      [viewer, { _tag: "ProjectRejected", reason: "this project is read-only for you" }],
+      [viewer, { _tag: "ProjectRejected", reason: says("this project is read-only for you") }],
       [stranger, { _tag: "ProjectNotAvailable", projectId }],
     ] as const) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each denial must precede physical storage.
@@ -948,7 +960,7 @@ describe("project files", () => {
           { projectId, attachment: { id: attachment.id }, conversationId: chat, fileId: saved.id },
         ),
       ),
-    ).rejects.toMatchObject({ reason: "that attachment is not available" });
+    ).rejects.toMatchObject({ reason: says("that attachment is not available") });
   });
 
   it("hands every file's bytes to cleanup when the project is deleted", async () => {

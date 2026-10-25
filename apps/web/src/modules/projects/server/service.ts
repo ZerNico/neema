@@ -1,3 +1,5 @@
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import {
   addressableByEmailSql,
   verificationRequiredIn,
@@ -156,7 +158,9 @@ export class ProjectService extends Context.Service<
         input: CreateProjectInput,
       ) {
         if (!(yield* policy.can(userId, "projectsCreate")))
-          return yield* new ProjectRejected({ reason: "creating projects is not permitted" });
+          return yield* new ProjectRejected({
+            reason: localized(m.projects_error_create_not_permitted),
+          });
         const id = uuidv7();
         yield* db
           .insert(projects)
@@ -259,7 +263,7 @@ export class ProjectService extends Context.Service<
           Effect.retry({ times: 4, while: (error) => error._tag === "ProjectDeleteBusy" }),
           Effect.catchTag("ProjectDeleteBusy", () =>
             Effect.fail(
-              new ProjectRejected({ reason: "the project changed; try deleting it again" }),
+              new ProjectRejected({ reason: localized(m.projects_error_changed_delete_again) }),
             ),
           ),
         );
@@ -341,14 +345,14 @@ export class ProjectService extends Context.Service<
               : yield* requireProject(tx, userId, projectId, "manage", "update");
             if (role === "owner" && leaving)
               return yield* new ProjectRejected({
-                reason: "the owner cannot leave; delete the project instead",
+                reason: localized(m.projects_error_owner_cannot_leave),
               });
             switch (change.action) {
               case "addUser": {
                 const email = change.email.trim().toLowerCase();
                 if (!EMAIL.test(email))
                   return yield* new ProjectRejected({
-                    reason: "enter an existing account's email address",
+                    reason: localized(m.projects_error_unknown_email),
                   });
                 const required = yield* verificationRequiredIn(tx);
                 const [recipient] = yield* tx
@@ -358,7 +362,9 @@ export class ProjectService extends Context.Service<
                   .for("key share")
                   .pipe(Effect.orDie);
                 if (!recipient || recipient.id === userId)
-                  return yield* new ProjectRejected({ reason: "could not add that account" });
+                  return yield* new ProjectRejected({
+                    reason: localized(m.projects_error_add_failed),
+                  });
                 const [count] = yield* tx
                   .select({ value: sql<number>`count(*)::int` })
                   .from(projectMembers)
@@ -366,7 +372,7 @@ export class ProjectService extends Context.Service<
                   .pipe(Effect.orDie);
                 if ((count?.value ?? 0) >= PROJECT_LIMITS.members)
                   return yield* new ProjectRejected({
-                    reason: "this project has as many members as it can",
+                    reason: localized(m.projects_error_members_full),
                   });
                 yield* tx
                   .insert(projectMembers)
@@ -391,7 +397,9 @@ export class ProjectService extends Context.Service<
                   .returning({ userId: projectMembers.userId })
                   .pipe(Effect.orDie);
                 if (!rows.length)
-                  return yield* new ProjectRejected({ reason: "that person is not a member" });
+                  return yield* new ProjectRejected({
+                    reason: localized(m.projects_error_not_member),
+                  });
                 return [change.userId];
               }
               case "removeUser":
@@ -413,7 +421,9 @@ export class ProjectService extends Context.Service<
                   .for("share")
                   .pipe(Effect.orDie);
                 if (!group)
-                  return yield* new ProjectRejected({ reason: "that group is not available" });
+                  return yield* new ProjectRejected({
+                    reason: localized(m.projects_error_group_unavailable),
+                  });
                 const [actor] = yield* tx
                   .select({ role: user.role })
                   .from(user)
@@ -433,7 +443,9 @@ export class ProjectService extends Context.Service<
                     .for("share")
                     .pipe(Effect.orDie);
                   if (!member?.canShare)
-                    return yield* new ProjectRejected({ reason: "that group is not available" });
+                    return yield* new ProjectRejected({
+                      reason: localized(m.projects_error_group_unavailable),
+                    });
                 }
                 const [granted] = yield* tx
                   .select({ value: sql<number>`count(*)::int` })
@@ -447,7 +459,7 @@ export class ProjectService extends Context.Service<
                   .pipe(Effect.orDie);
                 if ((granted?.value ?? 0) >= PROJECT_LIMITS.members)
                   return yield* new ProjectRejected({
-                    reason: "this project is shared with as many groups as it can be",
+                    reason: localized(m.projects_error_groups_full),
                   });
                 yield* tx
                   .insert(projectGroupGrants)
@@ -525,10 +537,12 @@ export class ProjectService extends Context.Service<
               .for("update")
               .pipe(Effect.orDie);
             if (!conversation)
-              return yield* new ProjectRejected({ reason: "that chat is not available" });
+              return yield* new ProjectRejected({
+                reason: localized(m.projects_error_chat_unavailable),
+              });
             if (conversation.temporary)
               return yield* new ProjectRejected({
-                reason: "a temporary chat cannot join a project",
+                reason: localized(m.projects_error_temporary_chat),
               });
             if (projectId && !(yield* projectRole(tx, userId, projectId)))
               return yield* new ProjectNotAvailable({ projectId });

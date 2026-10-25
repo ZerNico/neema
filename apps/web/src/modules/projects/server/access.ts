@@ -1,3 +1,5 @@
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { eq, sql, type SQL } from "drizzle-orm";
 import { Effect } from "effect";
 import { groupMembers, projectGroupGrants, projectMembers, projects } from "~/db/schema/index.ts";
@@ -85,8 +87,8 @@ export const requireProject = Effect.fn("projects.require")(function* (
     return yield* new ProjectRejected({
       reason:
         need === "edit"
-          ? "this project is read-only for you"
-          : "only the project's owner can do that",
+          ? localized(m.projects_error_read_only)
+          : localized(m.projects_error_owner_only),
     });
   return role;
 });

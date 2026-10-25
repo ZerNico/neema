@@ -1,7 +1,10 @@
 import type { ProjectRole } from "../schema.ts";
 
-export const roleLabel: Record<ProjectRole, string> = {
-  owner: "Owner",
-  editor: "Can edit",
-  viewer: "Can view",
+import { m } from "~/paraglide/messages.js";
+
+/** Each role's name, as a message so it reads in the page's language. */
+export const roleLabel: Record<ProjectRole, () => string> = {
+  owner: m.projects_role_owner,
+  editor: m.projects_role_editor,
+  viewer: m.projects_role_viewer,
 };

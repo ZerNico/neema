@@ -21,6 +21,7 @@ import {
 import { cn } from "~/ui/utils";
 import { projectChatsQuery, projectsQuery } from "../client/queries.ts";
 import type { ProjectSummary } from "../schema.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** Chats listed under an open project; the rest are a click away on its page. */
 const SIDEBAR_CHATS = 5;
@@ -68,7 +69,7 @@ export function ProjectsSidebarGroup({
     >
       <SidebarGroup>
         <SidebarGroupLabel render={<CollapsibleTrigger />}>
-          Projects
+          {m.projects_sidebar_title()}
           <HugeiconsIcon
             icon={ArrowRight01Icon}
             strokeWidth={2}
@@ -128,7 +129,11 @@ function ProjectItem({
       </SidebarMenuButton>
       <SidebarMenuAction
         render={<CollapsibleTrigger />}
-        aria-label={open ? `Hide chats in ${project.name}` : `Show chats in ${project.name}`}
+        aria-label={
+          open
+            ? m.projects_sidebar_hide_chats({ name: project.name })
+            : m.projects_sidebar_show_chats({ name: project.name })
+        }
       >
         <HugeiconsIcon
           icon={ArrowRight01Icon}
@@ -165,7 +170,7 @@ function ProjectChats({
         <SidebarMenuItem>
           {/* A row's height and inset, so it lines up with chat titles. */}
           <span className="text-muted-foreground flex h-9 items-center px-3 text-sm">
-            No chats yet
+            {m.projects_sidebar_no_chats()}
           </span>
         </SidebarMenuItem>
       ) : null}
@@ -175,12 +180,14 @@ function ProjectChats({
             isActive={chat.id === activeConversationId}
             render={<Link to="/chat/$conversationId" params={{ conversationId: chat.id }} />}
           >
-            <span>{chat.title ?? "New chat"}</span>
+            <span>{chat.title ?? m.projects_sidebar_new_chat()}</span>
           </SidebarMenuButton>
           <ConversationMenu
             conversation={{ id: chat.id, title: chat.title, projectId }}
             actions={actions}
-            trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
+            trigger={
+              <SidebarMenuAction showOnHover aria-label={m.projects_sidebar_chat_actions()} />
+            }
           >
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </ConversationMenu>
@@ -189,7 +196,7 @@ function ProjectChats({
       {rows.length > SIDEBAR_CHATS ? (
         <SidebarMenuItem>
           <SidebarMenuButton render={<Link to="/projects/$projectId" params={{ projectId }} />}>
-            <span className="text-muted-foreground">All chats</span>
+            <span className="text-muted-foreground">{m.projects_sidebar_all_chats()}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : null}
