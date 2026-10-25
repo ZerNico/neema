@@ -305,7 +305,7 @@ export const observePart = (
         deps.repo.completeToolCall(call).pipe(Effect.tap(noteSettled(call))),
       settleToolCall: (call) => deps.repo.settleToolCall(call).pipe(Effect.tap(noteSettled(call))),
     };
-    const { fence, config, model, imageOutput } = ctx;
+    const { fence, model, imageOutput } = ctx;
     const {
       documents,
       authority,
@@ -656,7 +656,8 @@ export const observePart = (
           return;
         }
         if (family === "skill") {
-          const entry = config.skills?.find((skill) => skill.skillId === args["skillId"]);
+          // The whole offer, so an ambient or builtin load is named from its start.
+          const entry = tools.skillManifest.find((skill) => skill.skillId === args["skillId"]);
           yield* start({
             family: "skill",
             name: part.name as typeof SkillToolName.Type,

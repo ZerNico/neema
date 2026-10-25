@@ -507,9 +507,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
             const args = part.params as { queries?: string[]; urls?: string[] };
             if (isSkill) {
               const params = part.params as Record<string, unknown>;
-              const entry = deps.config.skills?.find(
-                (skill) => skill.skillId === params["skillId"],
-              );
+              const entry = skillManifest.find((skill) => skill.skillId === params["skillId"]);
               yield* deps.emit({
                 v: 1,
                 family: "skill",

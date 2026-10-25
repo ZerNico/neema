@@ -1578,10 +1578,25 @@ describe("conversational agent authoring", () => {
         : reply();
     };
     try {
+      const answers: string[] = [];
       for (const content of ["Set up a morning digest.", "Weekdays only.", "Thanks."]) {
         const sent = await turn(content);
         await collectDraftTurn(sent.assistantMessageId);
+        answers.push(sent.assistantMessageId);
       }
+      // A builtin is in no pinned selection, yet the live row names it from its start.
+      const starts = (
+        await runtime.runPromise(ChatRepo.use((repo) => repo.chunksAfter(answers[0]!, 0)))
+      )
+        .filter((chunk) => chunk.kind === "tool")
+        .map((chunk) => JSON.parse(chunk.delta) as Record<string, unknown>)
+        .filter((envelope) => envelope.family === "skill" && envelope.phase === "start");
+      expect(starts).toEqual([
+        expect.objectContaining({
+          skillId: SCHEDULE_AUTHORING_SKILL.id,
+          skillName: SCHEDULE_AUTHORING_SKILL.name,
+        }),
+      ]);
       // One load, then two turns that answer straight away.
       expect(prompts).toHaveLength(4);
       const [, loadedNow, later, latest] = prompts;
