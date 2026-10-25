@@ -8,16 +8,10 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
+import { user } from "~/db/schema/index.ts";
 import { activeAccountOf } from "~/modules/auth/server/account-eligibility.ts";
 import { Db, type DbTx } from "~/server/db.ts";
-import {
-  ALL_CAPABILITIES,
-  CAPABILITY_KEYS,
-  effectiveCapabilities,
-  type Capabilities,
-  type Capability,
-} from "../policy.ts";
+import { CAPABILITY_KEYS, type Capabilities, type Capability } from "../policy.ts";
 export type { Capability, Capabilities } from "../policy.ts";
 
 const NO_CAPABILITIES = Object.fromEntries(
@@ -38,20 +32,7 @@ export function capabilityAllowedSql(
     userId instanceof Column
       ? sql`${sql.identifier(getTableName(getColumnTable(userId)))}.${sql.identifier(userId.name)}`
       : userId;
-  const keys: Capability[] =
-    key === "agentsUse"
-      ? [key, "agentsCreate"]
-      : key === "knowledgeUse"
-        ? [key, "knowledgeCreate"]
-        : key === "skillsUse"
-          ? [key, "skillsCreate"]
-          : key === "projectsUse"
-            ? [key, "projectsCreate"]
-            : [key];
-  const allowed = (column: SQL) =>
-    sql`(${column} ->> ${keys[0]})::boolean${
-      keys[1] ? sql` or (${column} ->> ${keys[1]})::boolean` : sql``
-    }`;
+  const allowed = (column: SQL) => sql`(${column} ->> ${key})::boolean`;
   // An owner's shared work stays usable only while they could use the app
   // themselves: a ban or a reversed approval suspends it, as losing Create does.
   const ownerActive =
@@ -97,28 +78,22 @@ export class FeaturePolicy extends Context.Service<
     FeaturePolicy,
     Effect.gen(function* () {
       const db = yield* Db;
+      // Every key through `capabilityAllowedSql`, in one query, so the list
+      // and each single check can never disagree.
       const forUser = Effect.fn("FeaturePolicy.forUser")(function* (userId: string, tx?: DbTx) {
-        const rows = yield* (tx ?? db)
-          .select({
-            role: user.role,
-            capabilities: groups.capabilities,
-            defaults: defaultCapabilities.capabilities,
-          })
+        const [row] = yield* (tx ?? db)
+          .select(
+            Object.fromEntries(
+              CAPABILITY_KEYS.map((key) => [key, capabilityAllowedSql(userId, key)]),
+            ),
+          )
           .from(user)
-          .innerJoin(defaultCapabilities, eq(defaultCapabilities.id, 1))
-          .leftJoin(groupMembers, eq(groupMembers.userId, user.id))
-          .leftJoin(groups, eq(groups.id, groupMembers.groupId))
           .where(eq(user.id, userId))
           .pipe(Effect.orDie);
-        if (!rows.length) return NO_CAPABILITIES;
-        if (rows[0]!.role === "admin") return ALL_CAPABILITIES;
-        if (!rows[0]!.capabilities) return effectiveCapabilities(rows[0]!.defaults);
+        if (!row) return NO_CAPABILITIES;
         const result = { ...NO_CAPABILITIES };
-        for (const row of rows) {
-          if (!row.capabilities) continue;
-          for (const key of CAPABILITY_KEYS) result[key] ||= row.capabilities[key];
-        }
-        return effectiveCapabilities(result);
+        for (const key of CAPABILITY_KEYS) result[key] = row[key] === true;
+        return result;
       });
       const can = Effect.fn("FeaturePolicy.can")(function* (
         userId: string,

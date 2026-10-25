@@ -1,0 +1,71 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "9f23a809-97db-447c-b8b4-5ccf45dbb7d4",
+  "prevIds": [
+    "703a4046-c9de-49ef-a334-23ea976c91f8"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "default_capabilities"
+      ],
+      "writes": [
+        "s|ck|public.default_capabilities.default_capabilities_create_requires_use",
+        "n|ck|public.default_capabilities.default_capabilities_create_requires_use",
+        "e|ck|public.default_capabilities.default_capabilities_create_requires_use",
+        "n|con|public.default_capabilities.default_capabilities_create_requires_use"
+      ],
+      "reads": [
+        "n|tbl|public.default_capabilities",
+        "n|sch|public",
+        "n|col|public.default_capabilities.capabilities"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "groups"
+      ],
+      "writes": [
+        "s|ck|public.groups.groups_create_requires_use",
+        "n|ck|public.groups.groups_create_requires_use",
+        "e|ck|public.groups.groups_create_requires_use",
+        "n|con|public.groups.groups_create_requires_use"
+      ],
+      "reads": [
+        "n|tbl|public.groups",
+        "n|sch|public",
+        "n|col|public.groups.capabilities"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "default_capabilities",
+        "name": "default_capabilities_create_requires_use",
+        "value": "(not coalesce((\"capabilities\" ->> 'agentsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'agentsUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'knowledgeCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'knowledgeUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'skillsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'skillsUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'projectsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'projectsUse')::boolean, false))",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "groups",
+        "name": "groups_create_requires_use",
+        "value": "(not coalesce((\"capabilities\" ->> 'agentsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'agentsUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'knowledgeCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'knowledgeUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'skillsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'skillsUse')::boolean, false)) and (not coalesce((\"capabilities\" ->> 'projectsCreate')::boolean, false) or coalesce((\"capabilities\" ->> 'projectsUse')::boolean, false))",
+        "entityType": "checks"
+      }
+    }
+  ]
+}

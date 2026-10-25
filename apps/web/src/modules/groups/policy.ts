@@ -27,21 +27,18 @@ export const ALL_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITY_KEYS.map((key) => [key, true]),
 ) as Capabilities;
 
-export function validCapabilities(value: Capabilities): boolean {
-  return (
-    (!value.agentsCreate || value.agentsUse) &&
-    (!value.knowledgeCreate || value.knowledgeUse) &&
-    (!value.skillsCreate || value.skillsUse) &&
-    (!value.projectsCreate || value.projectsUse)
-  );
-}
+/**
+ * Each Create and the Use it requires. Every write refuses Create without Use
+ * and a check constraint holds stored rows to it, so readers take each key as
+ * it is and never infer one from another.
+ */
+export const CREATE_REQUIRES_USE = [
+  ["agentsCreate", "agentsUse"],
+  ["knowledgeCreate", "knowledgeUse"],
+  ["skillsCreate", "skillsUse"],
+  ["projectsCreate", "projectsUse"],
+] as const satisfies ReadonlyArray<readonly [Capability, Capability]>;
 
-export function effectiveCapabilities(value: Capabilities): Capabilities {
-  return {
-    ...value,
-    agentsUse: value.agentsUse || value.agentsCreate,
-    knowledgeUse: value.knowledgeUse || value.knowledgeCreate,
-    skillsUse: value.skillsUse || value.skillsCreate,
-    projectsUse: value.projectsUse || value.projectsCreate,
-  };
+export function validCapabilities(value: Capabilities): boolean {
+  return CREATE_REQUIRES_USE.every(([create, use]) => !value[create] || value[use]);
 }

@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -8,7 +10,11 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
-import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts";
+import {
+  ALL_CAPABILITIES,
+  CREATE_REQUIRES_USE,
+  type Capabilities,
+} from "~/modules/groups/policy.ts";
 import { user } from "./auth.ts";
 import { models } from "./providers.ts";
 
@@ -17,18 +23,34 @@ import { models } from "./providers.ts";
  * than a column on `user`, since Better Auth owns that table's shape.
  */
 
-export const groups = pgTable("groups", {
-  id: text().primaryKey(),
-  name: text().notNull().unique(),
-  capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+/** Create without Use is refused on write; this holds a hand-edited row to it too. */
+const createRequiresUse = sql.raw(
+  CREATE_REQUIRES_USE.map(
+    ([create, use]) =>
+      `(not coalesce(("capabilities" ->> '${create}')::boolean, false) or coalesce(("capabilities" ->> '${use}')::boolean, false))`,
+  ).join(" and "),
+);
 
-export const defaultCapabilities = pgTable("default_capabilities", {
-  id: integer().primaryKey(),
-  capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
-});
+export const groups = pgTable(
+  "groups",
+  {
+    id: text().primaryKey(),
+    name: text().notNull().unique(),
+    capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  () => [check("groups_create_requires_use", createRequiresUse)],
+);
+
+export const defaultCapabilities = pgTable(
+  "default_capabilities",
+  {
+    id: integer().primaryKey(),
+    capabilities: jsonb().$type<Capabilities>().notNull().default(ALL_CAPABILITIES),
+  },
+  () => [check("default_capabilities_create_requires_use", createRequiresUse)],
+);
 
 export const groupMembers = pgTable(
   "group_members",

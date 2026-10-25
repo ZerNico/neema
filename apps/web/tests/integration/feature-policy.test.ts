@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { PgClient } from "@effect/sql-pg";
 import { readableBy } from "~/modules/sharing/server/resources.ts";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { uuidv7 } from "uuidv7";
@@ -13,7 +14,7 @@ import {
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
-import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
+import { ALL_CAPABILITIES, CAPABILITY_KEYS } from "~/modules/groups/policy.ts";
 import { capabilityAllowedSql, FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -229,5 +230,58 @@ describe("feature policy", () => {
       ),
     );
     expect(allowed?.allowed).toBe(true);
+  });
+
+  it("refuses a hand-edited Create without Use, after normalising rows from before", async () => {
+    const member = await run(makeUser());
+    const migration = (folder: string) =>
+      readFileSync(new URL(`../../drizzle/${folder}/migration.sql`, import.meta.url), "utf8")
+        .split("--> statement-breakpoint")
+        .map((statement) => sql.raw(statement));
+    const exec = (statement: SQL) =>
+      run(Effect.flatMap(Db, (db) => db.execute(statement).pipe(Effect.orDie)));
+    const handEdited = sql`update default_capabilities set capabilities = capabilities
+      || '{"agentsUse": false, "agentsCreate": true}'::jsonb where id = 1`;
+    await expect(exec(handEdited)).rejects.toThrow(/^Failed query: update default_capabilities/);
+    expect((await run(GroupRepo.use((repo) => repo.getDefaultCapabilities()))).agentsCreate).toBe(
+      true,
+    );
+    expect((await run(GroupRepo.use((repo) => repo.getDefaultCapabilities()))).agentsUse).toBe(
+      true,
+    );
+
+    // As a row was before the constraint: readers took Create to imply Use.
+    await exec(
+      sql`alter table default_capabilities drop constraint default_capabilities_create_requires_use`,
+    );
+    await exec(sql`alter table groups drop constraint groups_create_requires_use`);
+    await exec(handEdited);
+    for (const statement of migration("20261025183233_capabilities_create_implies_use"))
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Statements run in the migration's order.
+      await exec(statement);
+    for (const statement of migration("20261025183243_capabilities_create_requires_use_check"))
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Statements run in the migration's order.
+      await exec(statement);
+    const capabilities = await run(FeaturePolicy.use((policy) => policy.forUser(member)));
+    expect([capabilities.agentsUse, capabilities.agentsCreate]).toEqual([true, true]);
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
+  });
+
+  it("lists exactly what each single check answers", async () => {
+    const member = await run(makeUser());
+    const defaults = { ...ALL_CAPABILITIES, memory: false, skillsCreate: false };
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(defaults)));
+    const listed = await run(FeaturePolicy.use((policy) => policy.forUser(member)));
+    const single = await run(
+      FeaturePolicy.use((policy) =>
+        Effect.all(CAPABILITY_KEYS.map((key) => policy.can(member, key))),
+      ),
+    );
+    expect(listed).toEqual(defaults);
+    expect(CAPABILITY_KEYS.map((key) => listed[key])).toEqual(single);
+    expect(await run(FeaturePolicy.use((policy) => policy.forUser("missing")))).toEqual(
+      Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, false])),
+    );
+    await run(GroupRepo.use((repo) => repo.updateDefaultCapabilities(ALL_CAPABILITIES)));
   });
 });
