@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /**
  * Upload was refused before anything was stored. `reason` is safe to show the
@@ -8,7 +9,7 @@ export class AttachmentRejected extends Schema.TaggedError<AttachmentRejected>()
   "AttachmentRejected",
   {
     cause: Schema.Literals(["size", "type", "content", "name", "count"]),
-    reason: Schema.String,
+    reason: Localized,
   },
 ) {}
 
@@ -45,5 +46,5 @@ export class DocumentParseError extends Schema.TaggedError<DocumentParseError>()
 /** The selected model cannot take this attachment and nothing can convert it. */
 export class AttachmentUnsupported extends Schema.TaggedError<AttachmentUnsupported>()(
   "AttachmentUnsupported",
-  { fileName: Schema.String, reason: Schema.String },
+  { fileName: Schema.String, reason: Localized },
 ) {}

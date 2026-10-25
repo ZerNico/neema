@@ -13,6 +13,8 @@ import { canAccessAttachment } from "./policy.ts";
 import { AttachmentRepo, type AttachmentAssociation } from "./repo.ts";
 import { validateAttachment } from "./validation.ts";
 import { sha256Hex } from "./sha256.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 // Uploads that were never sent (tab closed, draft abandoned) are swept once a
 // day's grace has passed. The sweep also runs at startup so a restart does not
@@ -323,7 +325,7 @@ export const attachmentWriter = (repo: AttachmentRepo["Service"], store: BlobSto
     if (input.allowedKinds && !input.allowedKinds.includes(validated.kind))
       return yield* new AttachmentRejected({
         cause: "type",
-        reason: "upload a PDF or text document",
+        reason: localized(m.attachments_error_pdf_or_text),
       });
 
     if (input.association) yield* repo.admitAssociation(input.association);

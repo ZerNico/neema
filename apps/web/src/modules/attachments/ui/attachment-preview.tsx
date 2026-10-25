@@ -28,6 +28,8 @@ import type { DetailPanelRequest } from "~/ui/detail-panel-state.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { commentMessage } from "~/modules/chat/comment-message.ts";
 import { FileCommentContext, type SendFileComment } from "./file-comment.ts";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 /** Each Office family's preview; the compiler keeps the table complete. */
 const OFFICE_PREVIEWS = {
@@ -129,7 +131,7 @@ export function AttachmentPreviewDialog({
                   {sidebar ? (
                     <PreviewAction
                       icon={PanelRightIcon}
-                      label="Open in sidebar"
+                      label={m.attachments_preview_open_sidebar()}
                       onClick={() => {
                         sidebar.open(filePanelRequest(target, comment));
                         onOpenChange(false);
@@ -141,7 +143,7 @@ export function AttachmentPreviewDialog({
                   ) : (
                     <PreviewAction
                       icon={LinkSquare02Icon}
-                      label="Open original"
+                      label={m.attachments_preview_open_original()}
                       href={target.url}
                     />
                   )}
@@ -150,7 +152,7 @@ export function AttachmentPreviewDialog({
             </div>
           </div>
           {target.size === undefined ? null : (
-            <DialogDescription>{formatFileSize(target.size)}</DialogDescription>
+            <DialogDescription>{formatFileSize(target.size, getLocale())}</DialogDescription>
           )}
         </DialogHeader>
         <PreviewToolbarContext value={toolbar}>
@@ -168,7 +170,7 @@ function DownloadAction({ target }: { target: AttachmentPreviewTarget }) {
   return (
     <PreviewAction
       icon={Download01Icon}
-      label="Download"
+      label={m.common_download()}
       href={target.url}
       download={target.fileName}
     />
@@ -224,7 +226,7 @@ export function FilePreviewBody({
       onComment={onComment}
     />
   ) : target.unsupported || target.kind === "file" ? (
-    <p className="text-muted-foreground text-sm">There’s no preview for this kind of file.</p>
+    <p className="text-muted-foreground text-sm">{m.attachments_preview_unavailable()}</p>
   ) : target.kind === "image" ? (
     <img
       src={target.url}
@@ -296,10 +298,10 @@ function TextPreview({
   }, [url]);
 
   if (state.status === "loading") {
-    return <Spinner aria-label="Loading preview" className="text-muted-foreground" />;
+    return <Spinner aria-label={m.attachments_preview_loading()} className="text-muted-foreground" />;
   }
   if (state.status === "error") {
-    return <FieldError>Could not load this file.</FieldError>;
+    return <FieldError>{m.attachments_preview_load_failed()}</FieldError>;
   }
 
   // A markdown file is the one kind with two genuinely different readings, so
@@ -308,7 +310,7 @@ function TextPreview({
   const markdown = language === "markdown" && state.text.length <= RENDER_CHAR_CAP;
 
   const toggle = markdown ? (
-    <ViewToggle preview={rendered} sourceLabel="Source" onChange={setRendered} />
+    <ViewToggle preview={rendered} sourceLabel={m.attachments_preview_source()} onChange={setRendered} />
   ) : null;
 
   return (
@@ -337,9 +339,7 @@ function TextPreview({
       )}
       {state.truncated || shortened ? (
         <p className="text-muted-foreground text-xs">
-          {linkable
-            ? "Truncated preview. “Open original” has the whole file."
-            : "Shortened to fit."}
+          {linkable ? m.attachments_preview_truncated_linked() : m.attachments_preview_shortened()}
         </p>
       ) : null}
     </div>

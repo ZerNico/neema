@@ -1,12 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { MAX_ATTACHMENT_BYTES, textLanguage } from "../constants.ts";
+import { formatFileSize, MAX_ATTACHMENT_BYTES, textLanguage } from "../constants.ts";
 import {
   buildTextFence,
   sanitizeFileName,
   sniffBinaryMediaType,
   validateAttachment,
 } from "./validation.ts";
+import { english } from "~/i18n/localized.ts";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 const text = (value: string) => new TextEncoder().encode(value);
@@ -133,6 +134,9 @@ describe("validateAttachment", () => {
       }),
     );
     expect(oversized.cause).toBe("size");
+    // Worded for whoever reads the refusal, not fixed in English.
+    expect(english(oversized.reason)).toBe("Files must be 20 MB or smaller.");
+    expect(oversized.reason("de")).toBe("Dateien dürfen höchstens 20 MB groß sein.");
   });
 
   it("accepts a file exactly at the cap", async () => {
@@ -182,5 +186,13 @@ describe("buildTextFence", () => {
     expect(textLanguage("x.constructor")).toBe("");
     expect(textLanguage("x.__proto__")).toBe("");
     expect(textLanguage("x.ts")).toBe("typescript");
+  });
+});
+
+describe("formatFileSize", () => {
+  it("stays English for the model and follows the reader's locale on a page", () => {
+    expect(formatFileSize(1536 * 1024)).toBe("1.5 MB");
+    expect(formatFileSize(1536 * 1024, "de")).toBe("1,5 MB");
+    expect(formatFileSize(1023 * 1024 + 900, "en")).toBe("1024 KB");
   });
 });

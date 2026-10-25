@@ -9,6 +9,8 @@ import { withoutImageMetadata } from "~/modules/attachments/image-metadata.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 /**
  * What all of one send's files may weigh, decoded. One file as large as the
@@ -63,7 +65,10 @@ export const uploadFiles = Effect.fn("mcp.uploadFiles")(function* (
 ) {
   // The feature governs what a person uploads, wherever from.
   if (!(yield* FeaturePolicy.use((policy) => policy.can(userId, "attachments"))))
-    return yield* new AttachmentRejected({ cause: "type", reason: "files are unavailable" });
+    return yield* new AttachmentRejected({
+      cause: "type",
+      reason: localized(m.attachments_error_files_unavailable),
+    });
   const attachments = yield* AttachmentService;
   // What a person sends keeps the picture, not where and when it was taken.
   const sent = files.map((file) => ({

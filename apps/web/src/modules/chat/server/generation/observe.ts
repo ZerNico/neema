@@ -80,6 +80,7 @@ import { json } from "./json.ts";
 import type { RoundEnv } from "./round.ts";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import type { DbTx } from "~/server/db.ts";
+import { english } from "~/i18n/localized.ts";
 
 /**
  * What a call's row keeps of its arguments. Content in its own deletable row
@@ -384,7 +385,8 @@ export const observePart = (
           .pipe(Effect.result);
         return accepted._tag === "Success"
           ? ({ attachment: accepted.success.attachment } as const)
-          : ({ reason: accepted.failure.reason } as const);
+          : // The reason goes into the tool result, which the model reads in English.
+            ({ reason: english(accepted.failure.reason) } as const);
       });
     switch (part.type) {
       case "file": {

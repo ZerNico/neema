@@ -11,6 +11,8 @@ import {
 } from "../constants.ts";
 import type { AttachmentKind } from "../constants.ts";
 import { AttachmentRejected } from "../errors.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 const startsWith = (bytes: Uint8Array, signature: ReadonlyArray<number>, offset = 0): boolean =>
   bytes.length >= offset + signature.length &&
@@ -110,12 +112,15 @@ export const validateAttachment = Effect.fn("attachments.validateAttachment")(fu
   const fileName = sanitizeFileName(input.fileName);
 
   if (input.bytes.length === 0) {
-    return yield* new AttachmentRejected({ cause: "content", reason: "The file is empty." });
+    return yield* new AttachmentRejected({
+      cause: "content",
+      reason: localized(m.attachments_error_empty),
+    });
   }
   if (input.bytes.length > MAX_ATTACHMENT_BYTES) {
     return yield* new AttachmentRejected({
       cause: "size",
-      reason: `Files must be ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB or smaller.`,
+      reason: localized(m.attachments_error_too_large, { size: MAX_ATTACHMENT_BYTES / (1024 * 1024) }),
     });
   }
 

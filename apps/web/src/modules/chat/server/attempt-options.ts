@@ -23,6 +23,8 @@ import { researchAvailable } from "./research/tool.ts";
 import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 /** What a person submits with a message: retry and resume reuse the saved ones. */
 type SubmittedChoices = {
@@ -193,7 +195,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
       if (kind === "image" && !capabilities.vision) {
         return yield* new AttachmentUnsupported({
           fileName: row.fileName,
-          reason: "this model cannot read images",
+          reason: localized(m.attachments_error_model_no_images),
         });
       }
       if (kind === "pdf" && !capabilities.files) {
@@ -201,8 +203,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
         if (!parsing.configured || !parsing.enabled) {
           return yield* new AttachmentUnsupported({
             fileName: row.fileName,
-            reason:
-              "this model cannot read PDFs and document parsing is disabled. Enable it in admin settings or pick a model that accepts files",
+            reason: localized(m.attachments_error_model_no_pdfs),
           });
         }
       }

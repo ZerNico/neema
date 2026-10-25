@@ -7,6 +7,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import type { OfficeFile } from "./office-preview.ts";
 import { usePreviewJson } from "./use-preview-json.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** An authorized, server-rendered PPTX source; never inferred from a download URL. */
 export type PresentationSource = OfficeFile;
@@ -73,19 +74,17 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
     return (
       <SlideFrame
         aspectRatio={16 / 9}
-        footer={<span className="text-muted-foreground text-xs">Loading slides…</span>}
+        footer={<span className="text-muted-foreground text-xs">{m.attachments_slides_loading()}</span>}
       >
-        <Spinner aria-label="Loading slides" className={centered} />
+        <Spinner aria-label={m.attachments_slides_loading_label()} className={centered} />
       </SlideFrame>
     );
   if (state.status === "error")
     return (
-      <FieldError>
-        Could not load this presentation. Download the original to open it elsewhere.
-      </FieldError>
+      <FieldError>{m.attachments_slides_load_failed()}</FieldError>
     );
   if (count === 0)
-    return <p className="text-muted-foreground text-sm">This presentation has no slides.</p>;
+    return <p className="text-muted-foreground text-sm">{m.attachments_slides_empty()}</p>;
   const image = `${base}?slide=${state.slideIds[selected]!}`;
   return (
     <SlideFrame
@@ -95,19 +94,19 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
           <Button
             size="icon-sm"
             variant="outline"
-            aria-label="Previous slide"
+            aria-label={m.attachments_slides_previous()}
             disabled={selected === 0}
             onClick={() => setSelected((index) => index - 1)}
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} />
           </Button>
           <span className="text-muted-foreground text-xs">
-            Slide {selected + 1} of {count}
+            {m.attachments_slides_position({ current: selected + 1, count })}
           </span>
           <Button
             size="icon-sm"
             variant="outline"
-            aria-label="Next slide"
+            aria-label={m.attachments_slides_next()}
             disabled={selected === count - 1}
             onClick={() => setSelected((index) => index + 1)}
           >
@@ -118,15 +117,13 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
     >
       {failedSlide === image ? (
         <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
-          <FieldError>
-            Could not load this slide. Download the original to open it elsewhere.
-          </FieldError>
+          <FieldError>{m.attachments_slides_slide_failed()}</FieldError>
         </div>
       ) : (
         <img
           key={image}
           src={image}
-          alt={`Slide ${selected + 1} of ${count}`}
+          alt={m.attachments_slides_position({ current: selected + 1, count })}
           onLoad={() => setLoadedSlide(image)}
           onError={() => setFailedSlide(image)}
           className={cn(
@@ -136,7 +133,7 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
         />
       )}
       {loadedSlide !== image && failedSlide !== image ? (
-        <Spinner aria-label="Loading slide" className={centered} />
+        <Spinner aria-label={m.attachments_slides_slide_loading()} className={centered} />
       ) : null}
     </SlideFrame>
   );

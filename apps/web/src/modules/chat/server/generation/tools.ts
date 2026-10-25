@@ -89,6 +89,7 @@ import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
 import type { GenerationDeps } from "./deps.ts";
 import type { GenerationSink } from "./sink.ts";
 import type { DbTx } from "~/server/db.ts";
+import { english } from "~/i18n/localized.ts";
 
 /** Faces one answer's loaded skills may add to its previews. */
 const SKILL_FONT_FACES = 24;
@@ -421,7 +422,7 @@ export const prepareGenerationTools = (
               keptFiles.keep(fence, file).pipe(
                 Effect.andThen(Effect.sync(() => workspace.markKept(file.ref))),
                 Effect.catchTag("AttachmentRejected", (error) =>
-                  Effect.logWarning(`working file ${file.name} not kept: ${error.reason}`),
+                  Effect.logWarning(`working file ${file.name} not kept: ${english(error.reason)}`),
                 ),
               ),
             { discard: true },

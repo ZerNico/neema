@@ -37,6 +37,7 @@ import { appName } from "../app-name.ts";
 import { chatUrl } from "./chats.ts";
 import { defineTool, refused, result, type McpToolContext } from "./define.ts";
 import type { TurnRequestState } from "../request-state.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
 
 /** Clients give up on a request after a minute unless progress keeps it alive. */
 export const DEFAULT_WAIT_SECONDS = 45;
@@ -350,8 +351,8 @@ export const explainRefusal = (error: { readonly _tag: string }) => {
     case "ProjectNotAvailable":
       return "That project isn't available. Call list_projects.";
     case "AttachmentRejected":
-      return "reason" in error
-        ? `A file was refused: ${String(error.reason)}.`
+      return "reason" in error && typeof error.reason === "function"
+        ? `A file was refused: ${english(error.reason as Localized)}.`
         : "A file was refused.";
     case "AttachmentUnsupported":
       return "This chat's model can't read one of these files. Pick another model with modelId.";

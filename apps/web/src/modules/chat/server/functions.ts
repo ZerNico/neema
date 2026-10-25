@@ -306,7 +306,7 @@ export const steerQueuedMessage = createServerFn({ method: "POST" })
           status: 400,
           body: (locale) =>
             m.chat_error_steer_file_unreadable(
-              { fileName: error.fileName, reason: error.reason },
+              { fileName: error.fileName, reason: error.reason(locale) },
               { locale },
             ),
         }),

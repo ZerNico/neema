@@ -12,6 +12,8 @@ import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 /** The subset of an upload / stored attachment a chip renders. */
 export interface AttachmentChipItem {
@@ -70,21 +72,21 @@ export function AttachmentChip({
 }) {
   const status = item.status ?? "complete";
   const uploading = status === "uploading" || status === "importing";
-  const problem = status === "error" ? (item.error ?? "Upload failed.") : (warning ?? null);
+  const problem = status === "error" ? (item.error ?? m.attachments_chip_upload_failed()) : (warning ?? null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const subtitle =
     problem ??
     (uploading
       ? status === "importing"
-        ? "Adding…"
-        : "Uploading…"
+        ? m.attachments_chip_adding()
+        : m.attachments_chip_uploading()
       : item.location === "workspace"
         ? // A sent import earns its size beside the label once the bridge
           // answers; before that (and for the composer) the home is the fact.
           item.size > 0
-          ? `Workspace · ${formatFileSize(item.size)}`
-          : "Workspace"
-        : formatFileSize(item.size));
+          ? m.attachments_chip_workspace_size({ size: formatFileSize(item.size, getLocale()) })
+          : m.attachments_chip_workspace()
+        : formatFileSize(item.size, getLocale()));
 
   const body = (
     <>
@@ -184,7 +186,7 @@ export function AttachmentChip({
             exists would recreate the chip's DOM mid-upload. */}
         <button
           type="button"
-          aria-label={`Preview ${item.fileName}`}
+          aria-label={m.attachments_chip_preview({ fileName: item.fileName })}
           onClick={
             preview ? () => setPreviewOpen(true) : onOpenPreview ? () => onOpenPreview() : undefined
           }
@@ -203,7 +205,7 @@ export function AttachmentChip({
           <Button
             size="icon"
             variant="ghost"
-            aria-label={`Remove ${item.fileName}`}
+            aria-label={m.attachments_chip_remove({ fileName: item.fileName })}
             onClick={onRemove}
             className="text-muted-foreground hover:text-foreground -mr-1 size-5 shrink-0"
           >

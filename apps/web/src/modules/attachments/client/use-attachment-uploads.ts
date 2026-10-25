@@ -11,6 +11,8 @@ import {
 } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { deleteAttachment, uploadAttachment } from "../server/functions.ts";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * One chip in the composer. `localId` is stable across the upload's lifetime so
@@ -170,7 +172,7 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
       const room = MAX_ATTACHMENTS_PER_MESSAGE - itemsRef.current.length;
       const accepted = incoming.slice(0, Math.max(room, 0));
       if (accepted.length < incoming.length) {
-        setNotice(`You can attach at most ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
+        setNotice(m.attachments_upload_too_many({ count: MAX_ATTACHMENTS_PER_MESSAGE }));
       }
       if (accepted.length === 0) return;
 
@@ -197,7 +199,9 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
           attachment: null,
           existing: false,
           error: oversized
-            ? `Too large. The limit is ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`
+            ? m.attachments_upload_too_large({
+                limit: formatFileSize(MAX_ATTACHMENT_BYTES, getLocale()),
+              })
             : null,
         };
       });
@@ -221,7 +225,7 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
             if (cancelled.current.delete(item.localId)) return;
             patch(item.localId, {
               status: "error",
-              error: error instanceof Error ? error.message : "Upload failed.",
+              error: error instanceof Error ? error.message : m.attachments_upload_failed(),
             });
             drainQueue();
           },

@@ -24,6 +24,8 @@ import {
   type GenerationIdentity,
 } from "./generation-fence.ts";
 import type { DbTx } from "~/server/db.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 /**
  * The next free position among everything the message holds. Answer files and
@@ -49,7 +51,7 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
     if (!(IMAGE_MEDIA_TYPES as ReadonlyArray<string>).includes(mediaType))
       return yield* new AttachmentRejected({
         cause: "type",
-        reason: "The model returned an unsupported image type.",
+        reason: localized(m.attachments_error_generated_type),
       });
     if (
       typeof data === "string" &&
@@ -61,18 +63,18 @@ export const decodeGeneratedImage = (mediaType: string, data: string | Uint8Arra
     )
       return yield* new AttachmentRejected({
         cause: "content",
-        reason: "The model returned an invalid or oversized image.",
+        reason: localized(m.attachments_error_generated_invalid),
       });
     const bytes = typeof data === "string" ? Buffer.from(data, "base64") : data;
     if (bytes.length === 0 || bytes.length > ASSISTANT_FILE_LIMITS.bytes)
       return yield* new AttachmentRejected({
         cause: "size",
-        reason: "The generated image exceeds the supported size.",
+        reason: localized(m.attachments_error_generated_too_large),
       });
     if (sniffBinaryMediaType(bytes) !== mediaType)
       return yield* new AttachmentRejected({
         cause: "content",
-        reason: "The generated image does not match its declared type.",
+        reason: localized(m.attachments_error_generated_mismatch),
       });
     return bytes;
   });
@@ -142,9 +144,11 @@ export const acceptGeneratedFile = (
             )
               return yield* new AttachmentRejected({
                 cause: "size",
-                reason: image
-                  ? "This answer already holds as many images as one message may carry."
-                  : "This answer already holds as many files as one message may carry.",
+                reason: localized(
+                  image
+                    ? m.attachments_error_answer_images_full
+                    : m.attachments_error_answer_files_full,
+                ),
               });
           }),
         after: (tx, attachment) =>
@@ -261,7 +265,7 @@ export const acceptSearchImage = (
           )
             return yield* new AttachmentRejected({
               cause: "size",
-              reason: "This answer already holds as many images as it may.",
+              reason: localized(m.attachments_error_answer_search_images_full),
             });
         }),
       after: (tx, attachment) =>

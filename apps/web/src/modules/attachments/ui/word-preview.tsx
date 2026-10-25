@@ -3,6 +3,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import type { OfficeFile } from "./office-preview.ts";
 import { usePreviewJson } from "./use-preview-json.ts";
+import { m } from "~/paraglide/messages.js";
 
 interface Run {
   readonly text: string;
@@ -85,11 +86,11 @@ function Pictures({ pictures }: { pictures: ReadonlyArray<Picture> }) {
         // oxlint-disable-next-line react/no-array-index-key -- pictures have no identity beyond their order
         key={index}
         role="img"
-        aria-label={picture.alt || "Picture"}
+        aria-label={picture.alt || m.attachments_word_picture()}
         className="bg-paper-foreground/5 text-paper-foreground/60 inline-flex max-w-full items-center justify-center rounded-sm text-xs"
         style={{ width: Math.min(picture.width, 600), height: Math.min(picture.height, 400) }}
       >
-        Picture
+        {m.attachments_word_picture()}
       </span>
     ),
   );
@@ -184,9 +185,9 @@ function Paragraph({ block }: { block: Extract<Block, { type: "paragraph" }> }) 
 
 function Contents({ block }: { block: Extract<Block, { type: "tableOfContents" }> }) {
   return (
-    <nav aria-label="Table of contents" className="bg-paper-foreground/5 space-y-1 rounded-md p-3">
+    <nav aria-label={m.attachments_word_toc()} className="bg-paper-foreground/5 space-y-1 rounded-md p-3">
       <p className="text-paper-foreground/60 text-xs">
-        Table of contents · Word adds page numbers when it opens the file
+        {m.attachments_word_toc_note()}
       </p>
       {block.entries.length ? (
         block.entries.map((entry, index) => (
@@ -199,7 +200,7 @@ function Contents({ block }: { block: Extract<Block, { type: "tableOfContents" }
           </p>
         ))
       ) : (
-        <p className="text-paper-foreground/60">No headings yet.</p>
+        <p className="text-paper-foreground/60">{m.attachments_word_toc_empty()}</p>
       )}
     </nav>
   );
@@ -212,9 +213,7 @@ export function WordPreview({ source }: { source: OfficeFile }) {
 
   if (state.status === "error")
     return (
-      <FieldError>
-        Could not load this document. Download the original to open it elsewhere.
-      </FieldError>
+      <FieldError>{m.attachments_word_load_failed()}</FieldError>
     );
   const preview = state.status === "ready" ? state.preview : null;
   const hidden =
@@ -231,13 +230,13 @@ export function WordPreview({ source }: { source: OfficeFile }) {
       <div className="bg-paper text-paper-foreground relative max-h-[60vh] min-h-40 overflow-auto rounded-xl border p-6">
         {!preview ? (
           <Spinner
-            aria-label="Loading document"
+            aria-label={m.attachments_word_loading()}
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
           />
         ) : preview.blocks.length === 0 ? (
-          <p className="text-paper-foreground/60 text-sm">This document is empty.</p>
+          <p className="text-paper-foreground/60 text-sm">{m.attachments_word_empty()}</p>
         ) : (
-          <article aria-label="Document preview" className="space-y-2 text-sm leading-relaxed">
+          <article aria-label={m.attachments_word_preview()} className="space-y-2 text-sm leading-relaxed">
             {preview.blocks.map((block, index) =>
               block.type === "tableOfContents" ? (
                 // oxlint-disable-next-line react/no-array-index-key -- blocks are a fixed, ordered snapshot
@@ -281,14 +280,12 @@ export function WordPreview({ source }: { source: OfficeFile }) {
       {preview && (preview.truncated || hidden > 0) ? (
         <p className="text-muted-foreground text-xs">
           {[
-            preview.truncated ? "Showing the start of this document." : null,
-            hidden > 0
-              ? `${hidden === 1 ? "A picture isn’t" : `${hidden} pictures aren’t`} shown here.`
-              : null,
+            preview.truncated ? m.attachments_word_truncated() : null,
+            hidden > 0 ? m.attachments_word_pictures_hidden({ count: hidden }) : null,
+            m.attachments_word_download_hint(),
           ]
             .filter(Boolean)
-            .join(" ")}{" "}
-          Download the original for everything.
+            .join(" ")}
         </p>
       ) : null}
     </div>

@@ -10,6 +10,8 @@ import { AttachmentService } from "./service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { AttachmentRejected } from "../errors.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -20,12 +22,12 @@ const standard = Schema.toStandardSchemaV1;
 export const readUpload = (data: FormData) => {
   const file = data.get("file");
   if (!(file instanceof File)) {
-    throw refusal(400, "Expected a file");
+    throw refusal(400, localized(m.attachments_error_expected_file));
   }
   // Bodies past every family's limit are refused before parsing (body-limit.ts);
   // this is the attachment's own, smaller one.
   if (file.size > MAX_ATTACHMENT_BYTES) {
-    throw refusal(413, "File is too large");
+    throw refusal(413, localized(m.attachments_error_file_too_large));
   }
   return file;
 };
@@ -48,7 +50,7 @@ export const uploadAttachment = createServerFn({ method: "POST" })
         )
           return yield* new AttachmentRejected({
             cause: "type",
-            reason: "attachments are unavailable",
+            reason: localized(m.attachments_error_unavailable),
           });
         yield* StorageQuota.use((quota) => quota.admit(context.session.user.id, [bytes]));
         return yield* AttachmentService.use((service) =>
