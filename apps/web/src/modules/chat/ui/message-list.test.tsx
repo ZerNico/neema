@@ -286,6 +286,7 @@ describe("MessageBubble chronological body", () => {
           files: [
             {
               v: 1,
+              source: "native" as const,
               attachment: {
                 id: "deck-file",
                 fileName: "Q3.pptx",
@@ -2229,6 +2230,7 @@ describe("MessageBubble actions", () => {
 describe("generated image replies", () => {
   const image = {
     v: 1 as const,
+    source: "native" as const,
     attachment: {
       id: "generated-private",
       fileName: "generated.png",

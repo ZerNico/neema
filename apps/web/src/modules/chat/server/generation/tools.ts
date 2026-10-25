@@ -62,7 +62,6 @@ import {
 import { IMAGE_TOOL } from "~/modules/images/tool-schema.ts";
 import {
   ASSISTANT_FILE_LIMITS as ANSWER_FILE_LIMITS,
-  assistantFileSource,
   isGeneratedImage,
 } from "../../assistant-output.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
@@ -608,7 +607,7 @@ export const prepareGenerationTools = (
         : null;
     // One budget for the answer's generated images, the model's own included.
     const imageBudget = makeImageBudget(
-      ownFiles.filter((file) => isGeneratedImage(assistantFileSource(file))).length,
+      ownFiles.filter((file) => isGeneratedImage(file.source)).length,
       ANSWER_FILE_LIMITS.images,
     );
     const imageTool = imageModel

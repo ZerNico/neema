@@ -267,6 +267,7 @@ describe("projectAssistantBody", () => {
 describe("generated image body ordering", () => {
   const image = (id: string, callIndex: number, textOffset = 0) => ({
     v: 1 as const,
+    source: "native" as const,
     attachment: {
       id,
       fileName: `${id}.png`,
@@ -425,6 +426,7 @@ describe("projectAssistantBody steers", () => {
     });
     const file = {
       v: 1 as const,
+      source: "native" as const,
       attachment: {
         id: "deck",
         fileName: "Deck.pptx",
@@ -614,6 +616,7 @@ describe("image calls", () => {
   });
   const file = (id: string, toolCallId?: string) => ({
     v: 1 as const,
+    source: toolCallId ? ("tool" as const) : ("native" as const),
     attachment: attachment(id),
     textOffset: 0,
     turnIndex: 0,

@@ -16,7 +16,6 @@ import {
   type AssistantFileSource,
   type AssistantOutput,
   ASSISTANT_FILE_LIMITS,
-  assistantFileSource,
   isGeneratedImage,
 } from "../assistant-output.ts";
 import {
@@ -125,15 +124,13 @@ export const acceptGeneratedFile = (
             output = yield* lockGenerationOutput(tx, input.fence);
             previous = output?.files ?? [];
             const image = isGeneratedImage(input.source);
-            const sameKind = previous.filter(
-              (item) => isGeneratedImage(assistantFileSource(item)) === image,
-            );
+            const sameKind = previous.filter((item) => isGeneratedImage(item.source) === image);
             // The tool's images were counted against everything stored when their
             // slots were granted, so a model's own image competes only with its own:
             // in either order, both are kept.
             const counted =
               input.source === "native"
-                ? sameKind.filter((item) => assistantFileSource(item) === "native")
+                ? sameKind.filter((item) => item.source === "native")
                 : sameKind;
             if (
               (!input.reserved &&

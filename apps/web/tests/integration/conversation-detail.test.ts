@@ -620,6 +620,62 @@ describe("loadConversationDetail", () => {
     );
   });
 
+  it("backfills who made each stored file from whether a tool returned it", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const thread = yield* seedThread(userId, "Files");
+        const db = yield* Db;
+        const file = (id: string, origin?: string) => ({
+          v: 1,
+          attachment: { id, fileName: `${id}.png`, size: 1, mediaType: "image/png", kind: "image" },
+          textOffset: 0,
+          turnIndex: 0,
+          eventIndex: 1,
+          callIndex: 0,
+          ...(origin ? { origin: { toolCallId: origin } } : {}),
+        });
+        const output = {
+          v: 1,
+          files: [
+            file("own"),
+            file("returned", "call-1"),
+            { ...file("drawn"), source: "image-tool" },
+          ],
+        };
+        yield* db.execute(
+          `update messages set assistant_output = '${JSON.stringify(output)}'::jsonb where id = '${thread.assistantId}'` as never,
+        );
+        yield* db.execute(
+          `insert into message_chunks (message_id, seq, kind, delta) values ('${thread.assistantId}', 1, 'file', '${JSON.stringify(file("chunk", "call-2"))}')` as never,
+        );
+        const migration = readFileSync(
+          new URL(
+            "../../drizzle/20261025115100_assistant_file_source/migration.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        );
+        for (const statement of migration.split("--> statement-breakpoint"))
+          yield* db.execute(statement as never);
+        const [row] = yield* db
+          .select({ output: messages.assistantOutput })
+          .from(messages)
+          .where(eq(messages.id, thread.assistantId));
+        expect(row?.output?.files.map((stored) => [stored.attachment.id, stored.source])).toEqual([
+          ["own", "native"],
+          ["returned", "tool"],
+          ["drawn", "image-tool"],
+        ]);
+        const [chunk] = yield* db
+          .select({ delta: messageChunks.delta })
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, thread.assistantId));
+        expect(JSON.parse(chunk!.delta)).toMatchObject({ source: "tool" });
+      }),
+    );
+  });
+
   it("fails before reading anything for a conversation the caller does not own", async () => {
     const owner = await run(makeUser());
     const stranger = await run(makeUser());

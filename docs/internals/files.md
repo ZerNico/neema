@@ -62,8 +62,8 @@ declared type, and only the kinds we understand are shown or handed to a model.
   must choose its kind.
 - An answer's own files carry a `source`: `native` for a model's image output, `image-tool`
   for `generate_image`, `tool` for everything else a tool delivers. Generated images and other
-  files are bounded apart, one byte ceiling over both, and `assistantFileSource` reads a file
-  stored before the field from its origin. See [images](images.md).
+  files are bounded apart, one byte ceiling over both. Every stored file and file chunk carries
+  it; a migration filled it in from each file's origin. See [images](images.md).
 - An image's pixel size is read from its header when its blob is registered and travels on the
   attachment as `dimensions`, so a reader holds the image's box before the bytes arrive and
   nothing below it moves. A blob stored before that gains its size the next time its bytes are

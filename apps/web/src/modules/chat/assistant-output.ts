@@ -22,8 +22,7 @@ const Offset = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /**
  * One file an assistant answer produced, anchored to the text it appeared in.
  * `origin` names the tool call that returned it; absent for a model's own
- * image output. `source` is absent on files stored before it existed, which
- * `assistantFileSource` reads from `origin`.
+ * image output.
  */
 export const AssistantFile = Schema.Struct({
   v: Schema.Literal(1),
@@ -33,15 +32,10 @@ export const AssistantFile = Schema.Struct({
   eventIndex: Offset,
   callIndex: Offset,
   origin: Schema.optional(Schema.Struct({ toolCallId: Schema.String })),
-  source: Schema.optional(Schema.Literals(["native", "image-tool", "tool"])),
+  source: Schema.Literals(["native", "image-tool", "tool"]),
 });
 export type AssistantFile = typeof AssistantFile.Type;
-export type AssistantFileSource = NonNullable<AssistantFile["source"]>;
-
-/** Who made a file, legacy rows included: no origin was the model's own image. */
-export const assistantFileSource = (
-  file: Pick<AssistantFile, "source" | "origin">,
-): AssistantFileSource => file.source ?? (file.origin ? "tool" : "native");
+export type AssistantFileSource = AssistantFile["source"];
 
 /** Generated images count against their own bound, everything else against the files'. */
 export const isGeneratedImage = (source: AssistantFileSource) => source !== "tool";

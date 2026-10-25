@@ -467,6 +467,7 @@ describe("ordinary image attempt identity", () => {
     turnIndex: 0,
     eventIndex: 1,
     callIndex: 0,
+    source: "native",
   };
   it("deduplicates ref-only file chunks and clears them for same-message retries", () => {
     const client = new QueryClient();

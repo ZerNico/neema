@@ -507,6 +507,7 @@ describe("assistant image replay", () => {
   const imageRow = row({ messageId: "answer", mediaType: "image/png", fileName: "generated.png" });
   const image = {
     v: 1 as const,
+    source: "native" as const,
     attachment: {
       id: imageRow.id,
       fileName: imageRow.fileName,
@@ -1256,6 +1257,7 @@ describe("resumedRounds", () => {
       files: [
         {
           v: 1,
+          source: "native" as const,
           attachment: {
             id: "attachment-9",
             fileName: "deck.pptx",
