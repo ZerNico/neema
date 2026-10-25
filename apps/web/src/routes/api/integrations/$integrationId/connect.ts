@@ -8,6 +8,8 @@ import { oauthCookies } from "~/modules/integrations/server/oauth.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { runtime } from "~/server/runtime.ts";
 import { reportFailure, settingsPath, signInCookie, withSearch } from "./-sign-in.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 /**
  * Starts an OAuth connection in whatever browser opened it. The desktop app
@@ -34,6 +36,8 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
         const returnTo = safeRedirect(url.searchParams.get("returnTo"));
         // An account to reconnect; the service checks it is this person's own.
         const connectionId = url.searchParams.get("account") ?? undefined;
+        // Read here, inside the request: the effects below run on fibers that do not carry it.
+        const locale = getLocale();
         const failed = async (error: string, tell: string) => {
           await reportFailure(tell, returnTo, error);
           return new Response(null, {
@@ -53,8 +57,8 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
         if (asked !== current.session.user.id)
           return failed(
             asked
-              ? "This browser is signed in here as someone else. Sign in as yourself, then try again."
-              : "Start connecting again from the app.",
+              ? m.app_integration_error_other_account({}, { locale })
+              : m.app_integration_error_start_again({}, { locale }),
             asked ?? current.session.user.id,
           );
         const started = await runtime.runPromise(
@@ -72,7 +76,9 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
               Effect.succeed({
                 ok: false as const,
                 error:
-                  "reason" in error ? error.reason : "That integration is not available to you.",
+                  "reason" in error
+                    ? error.reason
+                    : m.app_integration_error_unavailable({}, { locale }),
               }),
             ),
           ),
