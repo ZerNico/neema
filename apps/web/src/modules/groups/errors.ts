@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 export class GroupNotFound extends Schema.TaggedError<GroupNotFound>()("GroupNotFound", {
   groupId: Schema.String,
@@ -24,5 +25,5 @@ export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()("Ca
 /** A capability set that cannot hold, such as Create without Use. */
 export class CapabilitiesRejected extends Schema.TaggedError<CapabilitiesRejected>()(
   "CapabilitiesRejected",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}

@@ -11,6 +11,8 @@ import { Db } from "~/server/db.ts";
 import { defaultCapabilities, groupMembers, groups, user } from "~/db/schema/index.ts";
 import { validCapabilities, type Capabilities } from "../policy.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type GroupRow = typeof groups.$inferSelect;
 export type GroupWithCount = GroupRow & { memberCount: number };
@@ -128,7 +130,9 @@ export class GroupRepo extends Context.Service<
         updateGroupCapabilities: Effect.fn("GroupRepo.updateGroupCapabilities")(
           function* (groupId, capabilities) {
             if (!validCapabilities(capabilities))
-              return yield* new CapabilitiesRejected({ reason: "Create requires Use" });
+              return yield* new CapabilitiesRejected({
+                reason: localized(m.groups_error_create_requires_use),
+              });
             const rows = yield* db
               .update(groups)
               .set({ capabilities, updatedAt: new Date() })
@@ -152,7 +156,9 @@ export class GroupRepo extends Context.Service<
         updateDefaultCapabilities: Effect.fn("GroupRepo.updateDefaultCapabilities")(
           function* (capabilities) {
             if (!validCapabilities(capabilities))
-              return yield* new CapabilitiesRejected({ reason: "Create requires Use" });
+              return yield* new CapabilitiesRejected({
+                reason: localized(m.groups_error_create_requires_use),
+              });
             const rows = yield* db
               .update(defaultCapabilities)
               .set({ capabilities })
