@@ -139,6 +139,22 @@
   "agents_settings_web_search_default": "Web search by default",
   "agents_start_chat": "Start chat",
   "agents_title": "Agents",
+  "api_keys_error_limit": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "You can have {count} key. Revoke it first.",
+        "countPlural=*": "You can have {count} keys. Revoke one first."
+      }
+    }
+  ],
+  "api_keys_error_not_allowed": "Your account can’t make API keys.",
   "app_auth_back_to_sign_in": "Back to sign in",
   "app_auth_email": "Email",
   "app_auth_email_required": "Enter your email.",

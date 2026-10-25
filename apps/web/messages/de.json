@@ -139,6 +139,22 @@
   "agents_settings_web_search_default": "Websuche standardmäßig an",
   "agents_start_chat": "Chat starten",
   "agents_title": "Agenten",
+  "api_keys_error_limit": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Du kannst {count} Schlüssel haben. Widerrufe ihn zuerst.",
+        "countPlural=*": "Du kannst {count} Schlüssel haben. Widerrufe zuerst einen."
+      }
+    }
+  ],
+  "api_keys_error_not_allowed": "Mit deinem Konto kannst du keine API-Schlüssel erstellen.",
   "app_auth_back_to_sign_in": "Zurück zur Anmeldung",
   "app_auth_email": "E-Mail",
   "app_auth_email_required": "Gib deine E-Mail-Adresse ein.",

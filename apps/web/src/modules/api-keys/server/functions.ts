@@ -3,6 +3,8 @@ import { Effect, Schema } from "effect";
 import { mcpResource } from "~/modules/auth/server/auth.ts";
 import { requireOwnSession, requireSession } from "~/modules/auth/server/middleware.ts";
 import { apiKeysAllowed } from "~/modules/mcp-server/server/access.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MAX_API_KEYS, NewApiKey } from "../schema.ts";
@@ -28,13 +30,14 @@ export const createApiKey = createServerFn({ method: "POST" })
   .validator(standard(NewApiKey))
   .handler(async ({ data, context }) => {
     const { user } = context.session;
-    if (!(await mayUseApiKeys(user.id))) throw refusal(403, "Your account can’t make API keys.");
+    if (!(await mayUseApiKeys(user.id)))
+      throw refusal(403, localized(m.api_keys_error_not_allowed));
     const created = await runServerFn(
       ApiKeys.use((keys) => keys.create(user.id, data)).pipe(
         Effect.catchTag("ApiKeyLimitReached", () => Effect.succeed(null)),
       ),
     );
-    if (!created) throw refusal(409, `You can have ${MAX_API_KEYS} keys. Revoke one first.`);
+    if (!created) throw refusal(409, localized(m.api_keys_error_limit, { count: MAX_API_KEYS }));
     return created;
   });
 
