@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Alert02Icon, CheckmarkBadge01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation } from "@tanstack/react-query";
@@ -22,12 +23,12 @@ export type ConsentRequest = Awaited<ReturnType<typeof getConsentRequest>>;
 
 const REFUSALS = {
   "not-allowed": {
-    title: "Can’t connect apps",
-    body: "Your account isn’t allowed to connect apps. Ask an admin of this instance.",
+    title: m.mcp_server_refusal_not_allowed_title,
+    body: m.mcp_server_refusal_not_allowed_body,
   },
   invalid: {
-    title: "This request has expired",
-    body: "Go back to the app and connect again.",
+    title: m.mcp_server_refusal_invalid_title,
+    body: m.mcp_server_refusal_invalid_body,
   },
 } as const;
 
@@ -37,7 +38,7 @@ const decide = async (body: { accept: boolean; scope?: string; oauth_query: stri
     method: "POST",
     body,
   });
-  if (error || !data?.url) throw new Error(error?.message ?? "Could not finish connecting.");
+  if (error || !data?.url) throw new Error(error?.message ?? m.mcp_server_consent_failed());
   window.location.assign(data.url);
 };
 
@@ -56,8 +57,8 @@ export function ConsentPage({
       <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>{refusal.title}</CardTitle>
-            <CardDescription>{refusal.body}</CardDescription>
+            <CardTitle>{refusal.title()}</CardTitle>
+            <CardDescription>{refusal.body()}</CardDescription>
           </CardHeader>
         </Card>
       </AuthScreen>
@@ -93,25 +94,29 @@ function ConsentForm({
     <AuthScreen>
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Connect {client.name}</CardTitle>
-          <CardDescription>It will act as {account}.</CardDescription>
+          <CardTitle>{m.mcp_server_consent_title({ name: client.name })}</CardTitle>
+          <CardDescription>{m.mcp_server_consent_acts_as({ account })}</CardDescription>
           {client.verifiedHost ? (
             <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
               <HugeiconsIcon icon={CheckmarkBadge01Icon} strokeWidth={2} className="size-4" />
-              Registered by {client.verifiedHost}
+              {m.mcp_server_consent_registered_by({ host: client.verifiedHost })}
             </p>
           ) : (
             <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
               <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-4" />
-              The app named itself. Only connect apps you started.
+              {m.mcp_server_consent_unverified()}
             </p>
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <ScopePicker idPrefix="consent" scopes={scopes} picked={picked} onChange={setPicked} />
           <p className="text-muted-foreground text-xs">
-            {redirectHost ? `Returns to ${redirectHost}. ` : ""}
-            {offline ? "Stays connected until you remove it in Settings." : ""}
+            {[
+              redirectHost ? m.mcp_server_consent_returns({ host: redirectHost }) : null,
+              offline ? m.mcp_server_consent_offline() : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </p>
           {error ? <FieldError>{error.message}</FieldError> : null}
         </CardContent>
@@ -122,14 +127,14 @@ function ConsentForm({
             disabled={busy}
             onClick={() => deny.mutate()}
           >
-            Cancel
+            {m.common_cancel()}
           </PendingButton>
           <PendingButton
             pending={allow.isPending}
             disabled={busy || picked.length === 0}
             onClick={() => allow.mutate()}
           >
-            Allow
+            {m.mcp_server_consent_allow()}
           </PendingButton>
         </CardFooter>
       </Card>

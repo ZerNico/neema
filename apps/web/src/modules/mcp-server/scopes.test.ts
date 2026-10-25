@@ -21,4 +21,10 @@ describe("accessSummary", () => {
   it("reads a read-only grant", () => {
     expect(accessSummary(["chats:read", "memory:read"])).toBe("Can see chats and memory");
   });
+
+  it("reads in German, with German nouns and word order", () => {
+    expect(accessSummary(["chats:write", "documents:read", "skills:read"], "de")).toBe(
+      "Kann Chats ändern und Dokumente und Skills sehen",
+    );
+  });
 });

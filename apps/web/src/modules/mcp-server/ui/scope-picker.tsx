@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { FieldSet } from "~/ui/field-set.tsx";
 import { Checkbox } from "~/ui/primitives/checkbox";
 import { Field, FieldLabel, FieldLegend } from "~/ui/primitives/field";
@@ -36,7 +37,7 @@ export function ScopePicker({
                 }
               />
               <FieldLabel id={`${id}-label`} htmlFor={id}>
-                {MCP_SCOPE_LABELS[scope]}
+                {MCP_SCOPE_LABELS[scope]()}
               </FieldLabel>
             </Field>
           );
@@ -46,11 +47,11 @@ export function ScopePicker({
   return (
     <>
       {group(
-        "Can see",
+        m.mcp_server_scopes_can_see(),
         scopes.filter((scope) => !scope.endsWith(":write")),
       )}
       {group(
-        "Can change",
+        m.mcp_server_scopes_can_change(),
         scopes.filter((scope) => scope.endsWith(":write")),
       )}
     </>
