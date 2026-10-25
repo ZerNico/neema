@@ -1,8 +1,13 @@
+import { IMPERSONATING_BODY } from "./identity.ts";
+
 /** Our refusal of a new account, as the OAuth callback forwards it. */
 export const SIGNUP_CLOSED = "signup_closed";
 
 /** A password sign-in to an account that only signs in through its provider. */
 export const SIGN_IN_WITH_PROVIDER = "sign_in_with_provider";
+
+/** Anything an admin acting as someone may not do, a link among them. */
+export const IMPERSONATING = "impersonating";
 
 /**
  * Better Auth returns a failed OAuth sign-in to this URL with an `error` code
@@ -13,6 +18,7 @@ export const loginErrorURL = (callbackURL: string) =>
 
 const MESSAGES: Record<string, string> = {
   [SIGNUP_CLOSED]: "This sign-in can’t create new accounts here.",
+  [IMPERSONATING]: IMPERSONATING_BODY,
   // Better Auth's reason when an account with the address exists but was never
   // proven, so merging into it would hand it to whoever typed the address.
   account_not_linked:

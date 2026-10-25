@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { requireOwnSession, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   PatchScheduleDraftInput,
@@ -29,8 +29,9 @@ export const patchScheduleDraft = createServerFn({ method: "POST" })
       ),
     ),
   );
+/** Saving is what creates or rewrites the schedule, so it needs the person themselves. */
 export const saveScheduleDraft = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(Schema.toStandardSchemaV1(ScheduleDraftRevisionInput))
   .handler(({ context, data }) =>
     runServerFn(

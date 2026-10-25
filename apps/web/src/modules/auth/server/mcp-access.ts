@@ -29,8 +29,9 @@ const audienceOf = (aud: unknown): string[] =>
 
 /**
  * The app's own rules around `@better-auth/mcp`. Nobody the app would not let
- * in, who may not connect apps, or who acts as someone else can authorize an
- * app. Bearer tokens are checked in-process.
+ * in, or who may not connect apps, can authorize an app; an admin acting as
+ * someone is refused before this, as everywhere in the auth instance. Bearer
+ * tokens are checked in-process.
  */
 export const mcpAccess = ({
   allowed,
@@ -48,9 +49,7 @@ export const mcpAccess = ({
             const current = await getSessionFromCtx(ctx);
             // Signed out: authorize sends the person to sign in, consent refuses itself.
             if (!current) return;
-            const session = current.session as typeof current.session & { impersonatedBy?: string };
-            const refused = Boolean(session.impersonatedBy) || !(await allowed(current.user.id));
-            if (!refused) return;
+            if (await allowed(current.user.id)) return;
             // A stored consent would otherwise mint a code the gate then
             // refuses, and the app would ask again forever. The consent page
             // says why instead.

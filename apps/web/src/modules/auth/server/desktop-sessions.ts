@@ -52,8 +52,6 @@ const StoredTicket = Schema.Struct({
 const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(StoredTicket));
 const encodeStored = Schema.encodeSync(Schema.fromJsonString(StoredTicket));
 
-const impersonated = (session: Record<string, unknown>) => Boolean(session.impersonatedBy);
-
 const sameHash = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -81,10 +79,10 @@ export const desktopSessions = ({
         "/desktop/ticket",
         { method: "POST", body: TicketBody, use: [sessionMiddleware] },
         async (ctx) => {
-          const { session, user } = ctx.context.session;
-          // An admin acting as someone else must not leave that person a
-          // 90-day session, and an unapproved account may not use the app yet.
-          if (impersonated(session) || !(await approved(user.id))) {
+          const { user } = ctx.context.session;
+          // An unapproved account may not use the app yet. Impersonation is
+          // refused for every endpoint but a few in the auth instance's hook.
+          if (!(await approved(user.id))) {
             throw new APIError("FORBIDDEN", { message: "This account cannot add a desktop." });
           }
           const ticket = generateTicket();
@@ -164,12 +162,8 @@ export const desktopSessions = ({
         async (ctx) => {
           const { session, user } = ctx.context.session;
           // Only a session minted by the shell (its stored UA carries the
-          // product token) gets the long lease, and never while impersonating.
-          if (
-            !hasDesktopMarker(session.userAgent) ||
-            impersonated(session) ||
-            !(await approved(user.id))
-          ) {
+          // product token) gets the long lease.
+          if (!hasDesktopMarker(session.userAgent) || !(await approved(user.id))) {
             throw new APIError("FORBIDDEN", { message: "Only the desktop app can do this." });
           }
           const updated = await ctx.context.internalAdapter.updateSession(session.token, {
@@ -218,7 +212,7 @@ export const desktopSessions = ({
         { method: "POST", body: RevokeBody, use: [sensitiveSessionMiddleware] },
         async (ctx) => {
           const { session, user } = ctx.context.session;
-          if (impersonated(session) || !(await approved(user.id))) {
+          if (!(await approved(user.id))) {
             throw new APIError("FORBIDDEN", { message: "This account cannot sign out devices." });
           }
           if (ctx.body.id === session.id) {

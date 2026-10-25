@@ -1,6 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
+import {
+  requireAdmin,
+  requireOwnSession,
+  requireSession,
+} from "~/modules/auth/server/middleware.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
@@ -81,7 +85,7 @@ export const listPersonalServers = createServerFn({ method: "GET" })
   );
 
 export const savePersonalServer = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(standard(SavePersonalServerInput))
   .handler(({ context, data }) =>
     runServerFn(
@@ -252,7 +256,7 @@ export const listMyIntegrations = createServerFn({ method: "GET" })
   );
 
 export const connectIntegrationApiKey = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(standard(ConnectApiKeyInput))
   .handler(({ context, data }) =>
     runServerFn(
@@ -271,7 +275,7 @@ export const connectIntegrationApiKey = createServerFn({ method: "POST" })
 
 /** Turns on an integration that needs no account of one's own. */
 export const connectIntegrationOpen = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(standard(IntegrationIdInput))
   .handler(({ context, data }) =>
     runServerFn(

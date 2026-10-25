@@ -9,9 +9,6 @@ import { ConnectedApps } from "./connected-apps.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-const isImpersonated = (session: object) =>
-  "impersonatedBy" in session && Boolean(session.impersonatedBy);
-
 const hostOf = (value: string | null) => {
   if (!value) return null;
   try {
@@ -30,8 +27,7 @@ export const getConsentRequest = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .validator(standard(Schema.Struct({ query: Schema.String })))
   .handler(async ({ data, context }) => {
-    const { session, user } = context.session;
-    if (isImpersonated(session)) return { state: "impersonating" as const };
+    const { user } = context.session;
     const auth = await currentAuth();
     if (!(await verifyOAuthQueryParams(data.query, (await auth.$context).secret))) {
       return { state: "invalid" as const };

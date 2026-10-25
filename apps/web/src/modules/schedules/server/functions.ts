@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { requireOwnSession, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { ScheduleSettings } from "../schema.ts";
 import { ScheduleService } from "./service.ts";
@@ -54,8 +54,12 @@ export const listScheduleRuns = createServerFn({ method: "GET" })
       ),
     ),
   );
+/**
+ * A schedule keeps firing as its owner long after the session that set it up,
+ * so creating, rewriting and resuming one need the person themselves.
+ */
 export const createSchedule = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(Schema.toStandardSchemaV1(ScheduleSettings))
   .handler(({ context, data }) =>
     runServerFn(
@@ -63,7 +67,7 @@ export const createSchedule = createServerFn({ method: "POST" })
     ),
   );
 export const updateSchedule = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(Schema.toStandardSchemaV1(UpdateScheduleInput))
   .handler(({ context, data }) =>
     runServerFn(
@@ -83,7 +87,7 @@ export const pauseSchedule = createServerFn({ method: "POST" })
     ),
   );
 export const resumeSchedule = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(Schema.toStandardSchemaV1(ScheduleIdInput))
   .handler(({ context, data }) =>
     runServerFn(

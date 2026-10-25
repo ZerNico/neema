@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { mayConnectApps, mcpResource } from "~/modules/auth/server/auth.ts";
-import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { requireOwnSession, requireSession } from "~/modules/auth/server/middleware.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
@@ -15,9 +15,6 @@ const mayUseApiKeys = async (userId: string) =>
   (await mayConnectApps(userId)) &&
   runServerFn(Effect.flatMap(FeaturePolicy, (policy) => policy.can(userId, "apiKeys")));
 
-const isImpersonated = (session: object) =>
-  "impersonatedBy" in session && Boolean(session.impersonatedBy);
-
 export const listApiKeys = createServerFn({ method: "GET" })
   .middleware([requireSession])
   .handler(async ({ context }) => {
@@ -30,12 +27,10 @@ export const listApiKeys = createServerFn({ method: "GET" })
   });
 
 export const createApiKey = createServerFn({ method: "POST" })
-  .middleware([requireSession])
+  .middleware([requireOwnSession])
   .validator(standard(NewApiKey))
   .handler(async ({ data, context }) => {
-    const { session, user } = context.session;
-    // A key outlives the session that made it: nobody makes one as someone else.
-    if (isImpersonated(session)) throw refusal(403, "Stop acting as them before making a key.");
+    const { user } = context.session;
     if (!(await mayUseApiKeys(user.id))) throw refusal(403, "Your account can’t make API keys.");
     const created = await runServerFn(
       ApiKeys.use((keys) => keys.create(user.id, data)).pipe(

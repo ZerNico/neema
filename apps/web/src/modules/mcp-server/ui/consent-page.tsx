@@ -21,10 +21,6 @@ import { ScopePicker } from "./scope-picker.tsx";
 export type ConsentRequest = Awaited<ReturnType<typeof getConsentRequest>>;
 
 const REFUSALS = {
-  impersonating: {
-    title: "You’re acting as someone else",
-    body: "Stop acting as them before connecting an app to their account.",
-  },
   "not-allowed": {
     title: "Can’t connect apps",
     body: "Your account isn’t allowed to connect apps. Ask an admin of this instance.",

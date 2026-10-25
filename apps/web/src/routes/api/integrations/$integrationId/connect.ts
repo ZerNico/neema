@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { IMPERSONATING_BODY, isImpersonated } from "~/modules/auth/identity.ts";
 import { safeRedirect } from "~/modules/auth/redirect.ts";
 import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { appOrigin } from "~/modules/integrations/server/functions.ts";
@@ -45,6 +46,9 @@ export const Route = createFileRoute("/api/integrations/$integrationId/connect")
         // The desktop app signs in in the system browser, which may hold someone
         // else's session here: their account would land with them, not the asker.
         // So every link names who asked, and one that names nobody starts nothing.
+        // A connection outlasts the session: an admin acting as someone makes none.
+        if (isImpersonated(current.session.session))
+          return failed(IMPERSONATING_BODY, current.session.user.id);
         const asked = url.searchParams.get("as");
         if (asked !== current.session.user.id)
           return failed(

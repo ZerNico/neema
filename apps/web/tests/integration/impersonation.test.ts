@@ -5,7 +5,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { relations } from "~/db/relations.ts";
-import { session, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
+import { account, session, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
+import { IMPERSONATING } from "~/modules/auth/oauth-errors.ts";
 import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { createAppAuth, type ImpersonationEvent } from "~/modules/auth/server/config.ts";
 import { Db } from "~/server/db.ts";
@@ -85,6 +86,16 @@ beforeAll(async () => {
     baseURL: origin,
     secret: "isolated-auth-test-secret-at-least-32-characters",
     purgeUserFiles: async () => {},
+    // A provider of each kind, so a refused link is refused by us and not for want of one.
+    oauthProviders: [
+      {
+        kind: "builtin",
+        id: "google",
+        trustEmails: false,
+        clientId: "google-client",
+        clientSecret: "google-secret",
+      },
+    ],
     signup: {
       admit: async ({ emailVerified }) => ({ allowed: true, emailVerified }),
       verified: async () => {},
@@ -177,6 +188,44 @@ describe("native administrator eligibility", () => {
       .set({ banExpires: new Date(0) })
       .where(eq(user.id, adminId));
     expect((await admin.request(`/admin/get-user?id=${targetId}`)).status).toBe(200);
+  });
+});
+
+describe("nothing that outlives an impersonated session", () => {
+  it("refuses linking, unlinking and every other lasting change, and says why", async () => {
+    expect((await admin.start(targetId)).status).toBe(200);
+    const [own] = await db.select().from(account).where(eq(account.userId, targetId));
+    const attempts = [
+      // The admin’s own Google account would otherwise sign in as the person. OpenID
+      // Connect entries link through the same endpoint, as generic-oauth registers them.
+      ["/link-social", { provider: "google", callbackURL: "/settings" }],
+      ["/unlink-account", { accountId: own!.id }],
+      ["/update-user", { name: "Renamed" }],
+      ["/desktop/ticket", {}],
+      ["/revoke-other-sessions", {}],
+    ] as const;
+    for (const [path, body] of attempts) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each endpoint against the same impersonated session.
+      const refused = await admin.request(path, body);
+      expect(refused.status, path).toBe(403);
+      expect(refused.body.code, path).toBe(IMPERSONATING);
+    }
+    expect(await db.select().from(account).where(eq(account.userId, targetId))).toHaveLength(1);
+    const [row] = await db.select().from(user).where(eq(user.id, targetId));
+    expect(row?.name).toBe("target");
+  });
+
+  it("still reads, signs out and goes back", async () => {
+    expect((await admin.start(targetId)).status).toBe(200);
+    expect((await admin.identity()).body.user.id).toBe(targetId);
+    expect((await admin.request("/list-accounts")).status).toBe(200);
+    expect((await admin.request("/desktop/devices")).status).toBe(200);
+    expect((await admin.stop()).status).toBe(200);
+    // Back as themselves, the same endpoints answer the admin as usual.
+    expect((await admin.request("/update-user", { name: "Admin" })).status).toBe(200);
+    expect((await admin.start(targetId)).status).toBe(200);
+    expect((await admin.request("/sign-out", {})).status).toBe(200);
+    expect((await admin.identity()).body).toBeNull();
   });
 });
 

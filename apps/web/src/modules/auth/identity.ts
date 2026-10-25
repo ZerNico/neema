@@ -20,6 +20,16 @@ export function projectSessionIdentity(
   return identity;
 }
 
+/** Whether an admin is acting as this session's person rather than the person themselves. */
+export const isImpersonated = (session: object) =>
+  "impersonatedBy" in session && Boolean(session.impersonatedBy);
+
+/**
+ * The refusal of anything that would outlast an impersonated session: a key,
+ * a linked login, a desktop, a connected app or service, a schedule.
+ */
+export const IMPERSONATING_BODY = "Stop impersonating first. This would outlast your session.";
+
 export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | null) {
   return a?.userId === b?.userId && a?.impersonatedBy === b?.impersonatedBy;
 }

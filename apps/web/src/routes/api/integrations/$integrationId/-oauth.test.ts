@@ -61,7 +61,10 @@ const call = async (route: typeof Connect | typeof Callback, url: string, cookie
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.session.mockResolvedValue({ approved: true, session: { user: { id: "person" } } });
+  mocks.session.mockResolvedValue({
+    approved: true,
+    session: { user: { id: "person" }, session: {} },
+  });
   mocks.begin.mockReturnValue(
     Effect.succeed({ url: "https://wiki.example/authorize?x=1", state: "s-123" }),
   );
@@ -154,6 +157,21 @@ describe("starting an OAuth connection", () => {
     );
     await call(Connect, "https://chat.example/api/integrations/wiki/connect?as=person");
     expect(mocks.begin).toHaveBeenCalled();
+  });
+
+  it("starts nothing for an admin acting as the person", async () => {
+    mocks.session.mockResolvedValue({
+      approved: true,
+      session: { user: { id: "person" }, session: { impersonatedBy: "admin" } },
+    });
+    const response = await call(
+      Connect,
+      "https://chat.example/api/integrations/wiki/connect?as=person&returnTo=%2Fintegrations%2Fconnected%3Fattempt%3Da-1",
+    );
+    expect(mocks.begin).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toMatch(
+      /^\/integrations\/connected\?attempt=a-1&error=Stop\+impersonating/,
+    );
   });
 
   it("starts nothing from a link that names nobody, and tells the app why", async () => {

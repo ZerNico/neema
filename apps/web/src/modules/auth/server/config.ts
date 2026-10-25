@@ -17,7 +17,8 @@ import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
 import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
-import { SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
+import { IMPERSONATING_BODY, isImpersonated } from "../identity.ts";
+import { IMPERSONATING, SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
 import { passwordLoginForced } from "./password-login.ts";
@@ -173,6 +174,24 @@ export const signsInThrough = (
   const method = methodFromContext(context);
   return typeof method === "string" && exclusive.some((p) => p.id === method);
 };
+
+/**
+ * All an admin acting as someone may reach here: reading, signing out and
+ * going back. Anything else could leave the person something that outlives
+ * the hour, such as a linked login, a desktop session or a consented app.
+ * Chat runs through server functions, which need nothing from this list.
+ */
+const WHILE_IMPERSONATING = new Set([
+  "/get-session",
+  // Settings reads these to render.
+  "/list-accounts",
+  "/desktop/devices",
+  "/sign-out",
+  "/admin/stop-impersonating",
+  // Pages Better Auth serves itself.
+  "/ok",
+  "/error",
+]);
 
 const PASSWORD_PATHS = [
   "/sign-in/email",
@@ -409,6 +428,11 @@ export function createAppAuth({
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (!WHILE_IMPERSONATING.has(ctx.path)) {
+          const current = await getAuthoritativeSessionFromCtx(ctx);
+          if (current && isImpersonated(current.session))
+            throw new APIError("FORBIDDEN", { code: IMPERSONATING, message: IMPERSONATING_BODY });
+        }
         if (ctx.path === "/unlink-account") {
           // The account row's own id, which is what Better Auth unlinks by.
           const leaving = String((ctx.body as { accountId?: unknown } | undefined)?.accountId);
@@ -452,23 +476,17 @@ export function createAppAuth({
         if (!ctx.path.startsWith("/admin/")) return;
         const session = await getAuthoritativeSessionFromCtx(ctx);
         if (!session) return; // Native endpoint owns unauthenticated errors.
+        // Only stopping reaches here while impersonating, and restoration
+        // stays usable after suspension, but grants no new authority.
+        if (ctx.path !== stopPath && !(await signup.approved(session.user.id))) {
+          throw new APIError("FORBIDDEN", {
+            message: "This account cannot administer the instance.",
+          });
+        }
+        if (ctx.path !== startPath && ctx.path !== stopPath) return;
         const impersonatedBy = (
           session.session as typeof session.session & { impersonatedBy?: string }
         ).impersonatedBy;
-        // Restoration stays usable after suspension, but grants no new authority.
-        if (ctx.path !== stopPath) {
-          if (!(await signup.approved(impersonatedBy ?? session.user.id))) {
-            throw new APIError("FORBIDDEN", {
-              message: "This account cannot administer the instance.",
-            });
-          }
-        }
-        if (ctx.path !== startPath && ctx.path !== stopPath) return;
-        if (ctx.path === startPath && impersonatedBy) {
-          throw new APIError("FORBIDDEN", {
-            message: "Stop impersonating before starting another session.",
-          });
-        }
         const operation: Operation =
           ctx.path === startPath
             ? {

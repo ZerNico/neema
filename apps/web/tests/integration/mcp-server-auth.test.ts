@@ -382,6 +382,36 @@ describe("MCP authorization", () => {
     expect(refused.status).toBe(403);
   });
 
+  it("authorizes no app for an admin acting as someone", async () => {
+    const provider = await connectApp();
+    const target = new Browser();
+    const created = await target.request("/api/auth/sign-up/email", {
+      body: {
+        name: "Target",
+        email: "target@example.test",
+        password: "isolated-test-password-123",
+      },
+    });
+    const targetId = ((await created.json()) as { user: { id: string } }).user.id;
+    const started = await browser.request("/api/auth/admin/impersonate-user", {
+      body: { userId: targetId },
+    });
+    expect(started.status).toBe(200);
+    const again = new Provider();
+    again.info = provider.info;
+    expect(await authorize(again, { serverUrl: resource, fetchFn: route })).toBe("REDIRECT");
+    const url = new URL(again.authorizationUrl!);
+    const authorized = await browser.request(url.pathname + url.search);
+    expect(authorized.status).toBe(403);
+    const refused = await browser.request("/api/auth/oauth2/consent", {
+      body: { accept: true, oauth_query: url.search.slice(1) },
+    });
+    expect(refused.status).toBe(403);
+    expect(await db.select().from(oauthConsent).where(eq(oauthConsent.userId, targetId))).toEqual(
+      [],
+    );
+  });
+
   it("ends access at once when the person disconnects the app", async () => {
     const provider = await connectApp();
     const [app] = await runtime.runPromise(ConnectedApps.use((apps) => apps.list(userId)));

@@ -91,3 +91,14 @@ new. Nothing is instance-wide except the domain list, verification, and the boot
   hand them a password, and the connection cannot be unlinked.
 - Switching the provider off lifts all of this, and so does `AUTH_PASSWORD_LOGIN=force`, so an
   admin bound to a broken identity provider still has a way back.
+
+## Acting as someone
+
+- An admin impersonating a person gets an hour, logged at start and stop. Nothing that outlives
+  that hour may be made in it: a linked login (linking allows a different address, so the admin's
+  own Google account would sign in as the person afterwards, unlogged), a desktop session, a
+  consented app, an API key, an integration connection, a schedule.
+- Better Auth's `before` hook refuses an impersonated session on every endpoint outside a short
+  allowlist (reading the session and accounts, signing out, stopping). An allowlist, so a new
+  endpoint is refused until it is named. Server functions and routes that make lasting grants
+  use `requireOwnSession`; chat itself uses `requireSession`, which lets the admin act as them.
