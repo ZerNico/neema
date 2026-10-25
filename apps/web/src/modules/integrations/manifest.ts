@@ -221,9 +221,11 @@ const TOOL_PREFIX = "int_";
 
 /**
  * An integration's id: chosen once, carried by tool names (`int_<id>__…`, 64
- * characters at most) and the OAuth callback path, so short and plain.
+ * characters at most) and the OAuth callback path, so short and plain. Forty
+ * characters leave a shipped type's longest tool name room; a listed server's
+ * keys are cut to what is left.
  */
-export const INTEGRATION_ID = /^[a-z][a-z0-9-]{1,23}$/;
+export const INTEGRATION_ID = /^[a-z][a-z0-9-]{1,39}$/;
 
 /**
  * Both halves are slugs, so the name stays within the common 64-character

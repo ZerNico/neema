@@ -17,15 +17,17 @@ type. The type is reached only through `integration_configs.kind`, with
 `findIntegrationType(kind)` and `findAdapterType(kind)`: an id is never looked up as a type,
 so the two cannot be confused once an admin adds a second Outline.
 
-The server picks the id at creation: the type's kind, numbered from the second one on
-(`jira`, `jira-2`), within `INTEGRATION_ID`. Nobody chooses it and it never changes, because
-it is in every model-facing tool name, which providers cap at 64 characters, in the OAuth
+The server picks the id at creation: the type's kind, or for an MCP server the slug of its
+preset or name (a person's own server adds a tag of theirs), numbered from the second one on
+(`jira`, `jira-2`). Creation refuses one outside `INTEGRATION_ID`, at most 40 characters and
+starting with a letter, which leaves a shipped type's longest tool name room inside 64. Nobody
+chooses it and it never changes, because it is in every model-facing tool name, in the OAuth
 callback path registered with the service, and in stored rows. Renaming it would break sign-in
-until the admin re-registered the callback, and old tool calls would replay under names
-nothing offers, while the name already covers everything people and the model read. Not
-deriving it from the name keeps a rename from leaving a misleading id behind. The name is free to
-change and unique ignoring case, since an `@` mention picks an integration by name. Tool
-descriptions lead with the name, so the model can tell two of one type apart.
+until the admin re-registered the callback, and old tool calls would replay under names nothing
+offers, while the name already covers everything people and the model read. So a renamed server
+keeps the id its first name gave it. The name is free to change and unique ignoring case, since
+an `@` mention picks an integration by name. Tool descriptions lead with the name, so the model
+can tell two of one type apart.
 Integrations that existed before types were split kept their ids (the type's), so nothing
 stored was rewritten. The client reads ids it only has as references (a tool row, a
 citation, an agent's attachments) through one directory of every integration's id, type and

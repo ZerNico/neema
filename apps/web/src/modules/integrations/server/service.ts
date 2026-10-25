@@ -89,7 +89,7 @@ export interface CallPermissions {
 const personalServerId = (name: string, userId: string) => {
   const base = idFromName(name, "mcp").slice(0, 22).replace(/-+$/, "");
   const tag = createHash("sha256").update(userId).digest("hex").slice(0, 6);
-  // Room left for the `-2` a clash among one's own servers adds, inside the 32 an id may have.
+  // Room left for the `-2` a clash among one’s own servers adds, inside the 40 an id may have.
   return `${/^[a-z]/.test(base) ? base : `mcp-${base}`.slice(0, 22)}-${tag}`;
 };
 

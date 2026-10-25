@@ -37,7 +37,7 @@ describe("integration catalog", () => {
     for (const manifest of INTEGRATION_TYPES)
       expect(INTEGRATION_ID.test(`${manifest.kind}-999`)).toBe(true);
     // The longest id the pattern allows, with every shipped tool.
-    const id = "a".repeat(24);
+    const id = "a".repeat(40);
     expect(INTEGRATION_ID.test(id)).toBe(true);
     expect(INTEGRATION_ID.test(`${id}a`)).toBe(false);
     for (const manifest of INTEGRATION_TYPES)

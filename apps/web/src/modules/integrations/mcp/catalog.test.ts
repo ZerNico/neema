@@ -19,7 +19,7 @@ describe("access from annotations", () => {
 
 describe("model-facing keys", () => {
   it("keeps a clean name, cleans the rest and always fits 64 characters", () => {
-    const id = "a".repeat(24);
+    const id = "a".repeat(40);
     expect(INTEGRATION_ID.test(id)).toBe(true);
     const long = `search_${"x".repeat(80)}`;
     const keys = assignKeys(id, ["search", "get.page", "get/page", long], new Map());

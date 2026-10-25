@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { INTEGRATION_ID } from "../manifest.ts";
 import { idFromName } from "./repo.ts";
 
 describe("idFromName", () => {
@@ -12,6 +13,12 @@ describe("idFromName", () => {
   });
 
   it("never ends on a dash when cut", () => {
-    expect(idFromName(`${"a".repeat(39)} b`, "mcp")).toBe("a".repeat(39));
+    expect(idFromName(`${"a".repeat(35)} b`, "mcp")).toBe("a".repeat(35));
+  });
+
+  it("always fits the id pattern, with room for a number", () => {
+    expect(idFromName("3D Tools", "mcp")).toBe("mcp-3d-tools");
+    for (const name of ["3D Tools", "x".repeat(80), "🚀", "Ab"])
+      expect(INTEGRATION_ID.test(`${idFromName(name, "mcp")}-999`)).toBe(true);
   });
 });

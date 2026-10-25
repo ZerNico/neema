@@ -1,5 +1,5 @@
 import { leaseFor } from "~/server/sql.ts";
-import type { ToolSetting } from "../manifest.ts";
+import { INTEGRATION_ID, type ToolSetting } from "../manifest.ts";
 import { and, asc, count, desc, eq, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { IntegrationNotAvailable, type CredentialIdentity } from "../errors.ts";
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
@@ -89,16 +89,21 @@ const freeId = (base: string, taken: ReadonlyArray<string>) => {
   return `${base}-${n}`;
 };
 
-/** A name as an id: `DeepWiki` reads `deepwiki`, and one with no letters to keep falls back. */
-export const idFromName = (name: string, fallback: string) =>
-  name
+/**
+ * A name as an id: `DeepWiki` reads `deepwiki`, and one with no letters to keep
+ * falls back. Short enough for the number a second one takes (`-999`), and
+ * starting with a letter, as `INTEGRATION_ID` wants.
+ */
+export const idFromName = (name: string, fallback: string) => {
+  const slug = name
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/, "") || fallback;
+    .replace(/^-+|-+$/g, "");
+  const led = !slug ? fallback : /^[a-z]/.test(slug) ? slug : `${fallback}-${slug}`;
+  return led.slice(0, 36).replace(/-+$/, "");
+};
 
 /**
  * Who may connect: everyone signed in when the audience is the instance,
@@ -518,6 +523,9 @@ export class IntegrationRepo extends Context.Service<
               input.idBase ?? input.kind,
               taken.map((row) => row.id),
             );
+            // Every tool name and callback path is built from it; one that does not fit is our bug.
+            if (!INTEGRATION_ID.test(id))
+              return yield* Effect.die(new Error(`integration id out of pattern: ${id}`));
             const rows = yield* db
               .insert(integrationConfigs)
               .values({
