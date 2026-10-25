@@ -813,6 +813,32 @@ describe("MessageBubble", () => {
     expect(screen.getByText(content)).toHaveClass("whitespace-pre-wrap", "wrap-anywhere");
   });
 
+  it("says above an answer what of its agent it ran without", () => {
+    render(
+      <MessageBubble
+        message={{
+          id: "dropped",
+          role: "assistant",
+          content: "Answer without it",
+          reasoning: "",
+          reasoningSeen: false,
+          toolActivities: [],
+          status: "complete",
+          agentUnavailable: [
+            { kind: "skill", name: "Review" },
+            { kind: "collection", name: null },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("One of the agent’s collections is no longer available")).toBeVisible();
+    const named = screen.getByText("The agent’s skill “Review” is no longer available");
+    expect(
+      named.compareDocumentPosition(screen.getByText("Answer without it")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("shows thinking indicator for empty streaming messages", () => {
     render(
       <MessageBubble

@@ -1,4 +1,5 @@
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
+import { agentUnavailableLines, type AgentUnavailable } from "./agent-unavailable.ts";
 import { findTags, tagWords } from "../tags.ts";
 import { MessageTagText } from "./message-tag.tsx";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
@@ -223,6 +224,8 @@ export interface DisplayMessage {
   desktopRoots?: ReadonlyArray<{ name: string; path: string }> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
+  /** What of its agent this answer ran without, shown above it. */
+  agentUnavailable?: ReadonlyArray<AgentUnavailable>;
   /**
    * Day heading to draw above this message. Set only on the message that opens
    * a local calendar day, and absent on a message whose date will not parse.
@@ -1190,6 +1193,15 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className="flex w-full justify-start">
       <div className="text-foreground w-full max-w-full text-base leading-relaxed md:text-sm">
+        {message.agentUnavailable?.length ? (
+          <div className="mb-2">
+            {agentUnavailableLines(message.agentUnavailable).map((line) => (
+              <p key={line} className="text-muted-foreground text-xs">
+                {line}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {sources.length > 0 && (!streaming || message.content.length > 0) ? (
           <AssistantSourcePanel messageId={message.id} sources={sources} bind={bindSourcePanel} />
         ) : null}

@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "7f3a1fc2-8a16-4d3a-ab97-a13bdbd0a871",
+  "prevIds": [
+    "e669789b-898f-4143-9f4c-ebdd7780d4f0"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "agent_unavailable"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.agent_unavailable",
+        "n|col|public.message_generation_config.agent_unavailable",
+        "e|col|public.message_generation_config.agent_unavailable"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_generation_config",
+        "name": "agent_unavailable",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

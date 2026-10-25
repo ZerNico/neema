@@ -130,6 +130,17 @@ export type ResolvedAgentConfig = {
 };
 
 /**
+ * One of an agent's dependencies an attempt ran without, because it was gone
+ * or no longer usable by the sender. The name only while the sender may
+ * still read the resource; otherwise null, and the line stays generic.
+ */
+export type UnavailableAgentDependency = {
+  kind: "collection" | "skill" | "customTool" | "integration";
+  id: string;
+  name: string | null;
+};
+
+/**
  * Fixed live association. No row means plain chat; a null FK is a deletion
  * tombstone that blocks new attempts without hiding historical messages.
  */
@@ -158,6 +169,11 @@ export const messageGenerationConfig = pgTable(
       .references(() => messages.id, { onDelete: "cascade" }),
     agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
     resolvedAgent: jsonb("resolved_agent").$type<ResolvedAgentConfig>(),
+    /** What of the agent this attempt ran without; the answer says so. */
+    agentUnavailable: jsonb("agent_unavailable")
+      .$type<UnavailableAgentDependency[]>()
+      .notNull()
+      .default([]),
     /** The project this attempt ran in, as it stood then; null outside a project. */
     resolvedProject: jsonb("resolved_project").$type<ResolvedProject>(),
     /**

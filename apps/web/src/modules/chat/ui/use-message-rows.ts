@@ -21,6 +21,16 @@ export function useMessageRows(data: ConversationRows) {
       ),
     [data.generations],
   );
+  // What of its agent each answer ran without, keyed by the answer itself.
+  const agentUnavailableByMessage = useMemo(
+    () =>
+      new Map(
+        (data.generations ?? []).flatMap((row) =>
+          row.agentUnavailable?.length ? [[row.messageId, row.agentUnavailable] as const] : [],
+        ),
+      ),
+    [data.generations],
+  );
   const attachmentsByMessage = useMemo(() => {
     const grouped = new Map<string, MessageAttachment[]>();
     for (const attachment of data.attachments) {
@@ -161,6 +171,7 @@ export function useMessageRows(data: ConversationRows) {
   }, [data.generations, data.messages]);
   return {
     machinesByMessage,
+    agentUnavailableByMessage,
     attachmentsByMessage,
     steersByAnswer,
     uiStatesByMessage,

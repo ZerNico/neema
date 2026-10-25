@@ -828,7 +828,7 @@ describe("knowledge-backed generations", () => {
   });
 
   it.each(
-    (["delete", "unshare", "dependency"] as const).flatMap((change) =>
+    (["delete", "unshare"] as const).flatMap((change) =>
       [false, true].map((researchEnabled) => ({ change, researchEnabled })),
     ),
   )(
@@ -855,12 +855,7 @@ describe("knowledge-backed generations", () => {
       await settle(later.assistantMessageId);
       if (change === "delete")
         await run(Effect.flatMap(AgentRepo, (repo) => repo.remove(owner, agentId)));
-      else if (change === "unshare")
-        await exec(`delete from agent_user_grants where agent_id = '${agentId}'`);
-      else {
-        const hidden = await collectionWith(owner, [["Hidden", "Private dependency."]]);
-        await editAgent(owner, agentId, [hidden.collectionId]);
-      }
+      else await exec(`delete from agent_user_grants where agent_id = '${agentId}'`);
       const before = (
         await exec(
           `select * from messages where conversation_id = '${first.conversationId}' order by id`,
@@ -887,9 +882,7 @@ describe("knowledge-backed generations", () => {
       const runs = await readRuns();
       const config = await configRow(first.assistantMessageId);
       const userMessage = before.find((message) => message.role === "user")!;
-      const expected = {
-        _tag: change === "dependency" ? "KnowledgeNotAvailable" : "AgentNotAvailable",
-      };
+      const expected = { _tag: "AgentNotAvailable" };
       expect(
         await run(Effect.flip(retry(recipient, first.conversationId, first.assistantMessageId))),
       ).toMatchObject(expected);
@@ -1424,7 +1417,7 @@ describe("knowledge-backed generations", () => {
     });
   });
 
-  it("fails an unavailable agent or collection before any row is written", async () => {
+  it("fails an unavailable agent or a picked collection before any row is written, and drops an agent's", async () => {
     const owner = await createUser();
     const stranger = await createUser();
     const { collectionId } = await collectionWith(owner, [["Note", "Private."]]);
@@ -1467,15 +1460,25 @@ describe("knowledge-backed generations", () => {
           ),
         ),
       );
+    // Picking it yourself fails, as does picking it beside the agent that brings it.
     expect(await sendAs({ collectionIds: [collectionId] })).toMatchObject({
       _tag: "KnowledgeNotAvailable",
     });
-    expect(await sendAs({ agentId })).toMatchObject({ _tag: "KnowledgeNotAvailable" });
+    expect(await sendAs({ agentId, collectionIds: [collectionId] })).toMatchObject({
+      _tag: "KnowledgeNotAvailable",
+    });
     expect(await sendAs({ agentId: uuidv7() })).toMatchObject({ _tag: "AgentNotAvailable" });
     expect(
       (await exec(`select count(*)::int as total from conversations where user_id = '${stranger}'`))
         .rows[0],
     ).toEqual({ total: 0 });
+    // The agent's own collection is left out and recorded instead.
+    const sent = await send({ userId: stranger, agentId });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await configRow(sent.assistantMessageId)).toMatchObject({
+      collection_ids: [],
+      knowledge_mode: "none",
+    });
   });
 
   it("retries with the collection as it is now, and refuses once it is gone", async () => {
@@ -2121,4 +2124,151 @@ describe("portable skill generation attempts", () => {
       expect(await snapshot()).toEqual(before);
     },
   );
+});
+
+describe("an agent's dependency the sender can no longer use", () => {
+  const unavailableOf = async (messageId: string) =>
+    (
+      await exec(
+        `select agent_unavailable from message_generation_config where message_id = '${messageId}'`,
+      )
+    ).rows[0]!.agent_unavailable;
+  const display = (messageId: string) =>
+    run(Effect.flatMap(ChatRepo, (repo) => repo.listGenerationDisplay([messageId]))).then(
+      (rows) => rows[0]?.agentUnavailable,
+    );
+  const shared = async () => {
+    const owner = await createUser();
+    const recipient = await createUser();
+    const agentId = await makeAgent(owner);
+    await exec(
+      `insert into agent_user_grants (agent_id, user_id) values ('${agentId}', '${recipient}')`,
+    );
+    return { owner, recipient, agentId };
+  };
+
+  it("drops a collection the sender cannot read, says so on every display path, and keeps it on retry", async () => {
+    const { owner, recipient, agentId } = await shared();
+    const hidden = await collectionWith(owner, [["Hidden", "Private dependency."]]);
+    await editAgent(owner, agentId, [hidden.collectionId]);
+    const sent = await send({ userId: recipient, agentId });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await configRow(sent.assistantMessageId)).toMatchObject({
+      collection_ids: [],
+      resolved_agent: { collectionIds: [hidden.collectionId] },
+    });
+    // Unreadable, so nameless: the line must not disclose what it was called.
+    expect(await unavailableOf(sent.assistantMessageId)).toEqual([
+      { kind: "collection", id: hidden.collectionId, name: null },
+    ]);
+    expect(await display(sent.assistantMessageId)).toEqual([{ kind: "collection", name: null }]);
+    await run(retry(recipient, sent.conversationId, sent.assistantMessageId));
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await display(sent.assistantMessageId)).toEqual([{ kind: "collection", name: null }]);
+    const branch = await run(
+      ChatService.use((chat) =>
+        chat.branchConversation({
+          userId: recipient,
+          conversationId: sent.conversationId,
+          messageId: sent.assistantMessageId,
+        }),
+      ),
+    );
+    const cloned = (
+      await exec(
+        `select id from messages where conversation_id = '${branch.conversationId}' and role = 'assistant'`,
+      )
+    ).rows[0]!;
+    expect(await display(String(cloned.id))).toEqual([{ kind: "collection", name: null }]);
+    // Sharing it back brings it back, and the line goes with the next attempt.
+    await exec(
+      `insert into knowledge_collection_user_grants (collection_id, user_id) values ('${hidden.collectionId}', '${recipient}')`,
+    );
+    const next = await send({ userId: recipient, conversationId: sent.conversationId });
+    expect(await settle(next.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await unavailableOf(next.assistantMessageId)).toEqual([]);
+    expect(await display(next.assistantMessageId)).toBeUndefined();
+  });
+
+  it("drops a skill that was unshared or deleted", async () => {
+    const { owner, recipient, agentId } = await shared();
+    const skillId = await saveGuidance(owner, "Owner-only guidance");
+    await exec(
+      `insert into agent_skills (agent_id, skill_id, position) values ('${agentId}', '${skillId}', 0)`,
+    );
+    const unshared = await send({ userId: recipient, agentId });
+    expect(await settle(unshared.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await skillConfig(unshared.assistantMessageId)).toMatchObject({ skills: [] });
+    expect(await unavailableOf(unshared.assistantMessageId)).toEqual([
+      { kind: "skill", id: skillId, name: null },
+    ]);
+    // Its owner still loads it, until it is deleted.
+    const own = await send({ userId: owner, agentId });
+    expect(await settle(own.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await unavailableOf(own.assistantMessageId)).toEqual([]);
+    await run(Effect.flatMap(SkillService, (service) => service.remove(owner, skillId)));
+    const deleted = await send({ userId: owner, agentId });
+    expect(await settle(deleted.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await unavailableOf(deleted.assistantMessageId)).toEqual([
+      { kind: "skill", id: skillId, name: null },
+    ]);
+  });
+
+  it("drops a disabled custom tool by name and an unshared one without", async () => {
+    const owner = await createUser();
+    const agentId = await makeAgent(owner);
+    const module = async (name: string, audience: "instance" | "private") => {
+      const id = uuidv7();
+      const slug = `m_${id.slice(-12).replaceAll("-", "")}`;
+      await exec(
+        `insert into custom_tools (id, slug, name, audience, source, compiled, functions, version) values ('${id}', '${slug}', '${name}', '${audience}', 'source', 'compiled', '[{"key":"lookup","name":"Lookup","description":"Look up a value.","modelName":"custom_${slug}__lookup","parametersSchema":{"type":"object","properties":{}}}]', 'v1')`,
+      );
+      return { id, slug };
+    };
+    const disabled = await module("Ledger", "instance");
+    const unshared = await module("Secret", "private");
+    await exec(
+      `insert into agent_custom_tools (agent_id, tool_id, position) values ('${agentId}', '${disabled.id}', 0), ('${agentId}', '${unshared.id}', 1)`,
+    );
+    await exec(`update custom_tools set enabled = false where id = '${disabled.id}'`);
+    let offered: string[] = [];
+    script = (input) => {
+      offered = Object.keys(input.toolkit?.tools ?? {}).filter((name) =>
+        name.startsWith("custom_"),
+      );
+      return Stream.make(text("done"), finish());
+    };
+    const sent = await send({ userId: owner, agentId });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(offered).toEqual([]);
+    expect(await unavailableOf(sent.assistantMessageId)).toEqual([
+      { kind: "customTool", id: disabled.id, name: "Ledger" },
+      { kind: "customTool", id: unshared.id, name: null },
+    ]);
+    expect(await display(sent.assistantMessageId)).toEqual([
+      { kind: "customTool", name: "Ledger" },
+      { kind: "customTool", name: null },
+    ]);
+  });
+
+  it("drops a switched-off integration by name and an unshared one without", async () => {
+    const owner = await createUser();
+    const agentId = await makeAgent(owner);
+    const [off, unshared] = [uuidv7(), uuidv7()];
+    await exec(
+      `insert into integration_configs (id, kind, name, enabled, audience) values ('${off}', 'outline', 'Wiki ${off.slice(-6)}', false, 'instance'), ('${unshared}', 'outline', 'Hidden ${unshared.slice(-6)}', true, 'private')`,
+    );
+    await exec(
+      `insert into agent_integrations (agent_id, integration_id, position) values ('${agentId}', '${off}', 0), ('${agentId}', '${unshared}', 1)`,
+    );
+    const sent = await send({ userId: owner, agentId });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await configRow(sent.assistantMessageId)).toMatchObject({
+      resolved_agent: { integrationIds: [off, unshared] },
+    });
+    expect(await unavailableOf(sent.assistantMessageId)).toEqual([
+      { kind: "integration", id: off, name: `Wiki ${off.slice(-6)}` },
+      { kind: "integration", id: unshared, name: null },
+    ]);
+  });
 });

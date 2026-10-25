@@ -68,6 +68,7 @@ export function useChatDisplay({
 }) {
   const {
     machinesByMessage,
+    agentUnavailableByMessage,
     attachmentsByMessage,
     steersByAnswer,
     uiStatesByMessage,
@@ -237,6 +238,9 @@ export function useChatDisplay({
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
+        ...(agentUnavailableByMessage.has(message.id)
+          ? { agentUnavailable: agentUnavailableByMessage.get(message.id)! }
+          : {}),
         ...(skillsByUserMessage.has(message.id)
           ? { skills: skillsByUserMessage.get(message.id)! }
           : {}),
@@ -288,6 +292,7 @@ export function useChatDisplay({
     workspaceFilesByUserMessage,
     desktopRootsByMessage,
     machinesByMessage,
+    agentUnavailableByMessage,
     answerStamps,
     questionResponses,
     attachmentsByMessage,

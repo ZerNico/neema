@@ -100,12 +100,21 @@ whatever agent the conversation is associated with.
   create a group grant. Allowing one kind never covers another. The sharing transaction holds
   that membership row `FOR SHARE` through insertion so disabling/removal serializes with grants. Admins may share to any group or publish
   instance-wide, but never another owner's resource.
-- An agent grant never grants its collections or model — checked separately, and losing a
-  selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
-  An agent's integrations likewise grant nothing: each sender uses their own connection, and
-  a sender without one is simply not offered the tools. Saving checks them like the rest,
-  against the author: on and usable by them (`integrationUsableBy`). The detail shows each
-  as available or not for its reader, named only when it is.
+- An agent grant never grants its collections, skills, custom tools, integrations or model;
+  each is checked separately for the sender in the attempt's one read of the agent. What the
+  sender picked themselves must all be usable or the turn fails (`KnowledgeNotAvailable`,
+  `SkillNotAvailable`): they chose it, so answering without it would be a silent partial answer.
+  What the agent brings and the sender can no longer use (deleted, unshared, switched off) is
+  left out instead, and recorded on the attempt (`agent_unavailable`), which the generation
+  display projects, so the answer says so in a short line live (the attempt's detail refetch),
+  on reload and in a branch alike. Failing every turn of
+  every chat using the agent for one lost dependency made the agent unusable for the one thing
+  the line already discloses. The line names the item only while the sender may still read it,
+  so a lost share never reveals what it was called. An agent's integrations use each sender's
+  own connection, and a sender without one is simply not offered the tools, with no line.
+  Saving checks integrations like the rest, against the author: on and usable by them
+  (`integrationUsableBy`). The detail shows each as available or not for its reader, named
+  only when it is.
   Agent instructions are a system-role `<agent-instructions>` block after application policy
   and memory, behind one line saying they cannot override that policy and grant nothing.
   Their own closing tag is neutralized; see `system-prompt.ts`.
@@ -124,8 +133,7 @@ whatever agent the conversation is associated with.
   `searchEnabled` follows. Omitting them keeps the saved selection; retry always does, having
   no submission. A question shows and an edit seeds from `standalone_collection_ids` minus the
   turn's agent's own, never the effective `collection_ids`: reseeding the agent's would rewrite
-  what the turn ran with. An edit that changes collections must skip the plain-chat replay
-  shortcut in `resolver`, because a new collection set needs a rebuilt manifest.
+  what the turn ran with.
 - Editing is not a mode: an open editor disables nothing, another message's Edit switches to it
   (the abandoned draft goes with its unmounted row), and sending from the composer ends the
   edit. Every path that abandons an edit has to release its uploads, not just forget which

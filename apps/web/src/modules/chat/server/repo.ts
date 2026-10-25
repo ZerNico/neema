@@ -51,7 +51,7 @@ import {
   workTurnReservations,
 } from "~/db/schema/index.ts";
 import { deleteMark, ownedConversation, ownedConversationById } from "./owned-conversation.ts";
-import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
+import type { ResolvedAgentConfig, UnavailableAgentDependency } from "~/db/schema/agents.ts";
 import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
@@ -118,6 +118,8 @@ export type EditContent =
 export interface GenerationConfig {
   readonly agentId: string | null;
   readonly resolvedAgent: ResolvedAgentConfig | null;
+  /** The agent's dependencies this attempt ran without, empty or absent for none. */
+  readonly agentUnavailable?: ReadonlyArray<UnavailableAgentDependency>;
   readonly resolvedProject?: ResolvedProject | null;
   readonly standaloneCollectionIds: ReadonlyArray<string>;
   readonly collectionIds: ReadonlyArray<string>;
@@ -706,6 +708,8 @@ export class ChatRepo extends Context.Service<
          * without the server ever storing one.
          */
         desktopRoots?: ReadonlyArray<string>;
+        /** What of its agent the answer ran without; the answer says so. */
+        agentUnavailable?: ReadonlyArray<Omit<UnavailableAgentDependency, "id">>;
       }>
     >;
     updateConversation(
@@ -1510,6 +1514,7 @@ export class ChatRepo extends Context.Service<
               desktopMachineName: messageGenerationConfig.desktopMachineName,
               workspaceFiles: messageGenerationConfig.workspaceFiles,
               desktopFolders: messageGenerationConfig.desktopFolders,
+              agentUnavailable: messageGenerationConfig.agentUnavailable,
             })
             .from(messageGenerationConfig)
             .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
@@ -1523,23 +1528,40 @@ export class ChatRepo extends Context.Service<
                 row.skills.length > 0 ||
                 row.desktopMachineId !== null ||
                 row.workspaceFiles.length > 0 ||
-                (row.desktopFolders?.length ?? 0) > 0,
+                (row.desktopFolders?.length ?? 0) > 0 ||
+                row.agentUnavailable.length > 0,
             )
-            .map(({ desktopMachineId, desktopMachineName, desktopFolders, ...row }) =>
-              Object.assign(
-                {},
-                row,
-                {
-                  desktopMachine:
-                    desktopMachineId === null
-                      ? null
-                      : { id: desktopMachineId, name: desktopMachineName },
-                },
-                // Browser-sent attempts (and work chats with no folder) store null.
-                desktopFolders && desktopFolders.length > 0
-                  ? { desktopRoots: [...desktopFolders] }
-                  : {},
-              ),
+            .map(
+              ({
+                desktopMachineId,
+                desktopMachineName,
+                desktopFolders,
+                agentUnavailable,
+                ...row
+              }) =>
+                Object.assign(
+                  {},
+                  row,
+                  {
+                    desktopMachine:
+                      desktopMachineId === null
+                        ? null
+                        : { id: desktopMachineId, name: desktopMachineName },
+                  },
+                  // Browser-sent attempts (and work chats with no folder) store null.
+                  desktopFolders && desktopFolders.length > 0
+                    ? { desktopRoots: [...desktopFolders] }
+                    : {},
+                  // Ids stay on the server: the line needs only the kind and a name.
+                  agentUnavailable.length > 0
+                    ? {
+                        agentUnavailable: agentUnavailable.map(({ kind, name }) => ({
+                          kind,
+                          name,
+                        })),
+                      }
+                    : {},
+                ),
             );
         }),
 

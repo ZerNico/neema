@@ -1,0 +1,1 @@
+ALTER TABLE "message_generation_config" ADD COLUMN "agent_unavailable" jsonb DEFAULT '[]' NOT NULL;

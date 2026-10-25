@@ -45,6 +45,7 @@ const toConfig = (
 ): GenerationConfig => ({
   agentId: row.agentId,
   resolvedAgent: row.resolvedAgent,
+  agentUnavailable: row.agentUnavailable,
   resolvedProject: row.resolvedProject,
   standaloneCollectionIds: row.standaloneCollectionIds,
   collectionIds: row.collectionIds,
@@ -168,6 +169,7 @@ export const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       messageId,
       agentId: config.agentId,
       resolvedAgent: config.resolvedAgent,
+      agentUnavailable: [...(config.agentUnavailable ?? [])],
       resolvedProject: config.resolvedProject ?? null,
       standaloneCollectionIds: [...config.standaloneCollectionIds],
       standaloneSkillIds: [...(config.standaloneSkillIds ?? [])],

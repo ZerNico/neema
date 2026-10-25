@@ -1,5 +1,15 @@
+import { and, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import type { ResolvedAgentConfig } from "~/db/schema/agents.ts";
+import type { ResolvedAgentConfig, UnavailableAgentDependency } from "~/db/schema/agents.ts";
+import {
+  customTools,
+  integrationConfigs,
+  knowledgeCollections,
+  skills,
+} from "~/db/schema/index.ts";
+import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
+import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { KnowledgeRejected } from "~/modules/knowledge/errors.ts";
@@ -65,7 +75,94 @@ export const fitsDirectContext = (input: {
 /** One coherent live agent contribution, private to this attempt. */
 export interface AgentSelection {
   readonly resolvedAgent: ResolvedAgentConfig;
+  /** Dependencies of that revision the sender cannot use now; the attempt runs without them. */
+  readonly unavailable: ReadonlyArray<UnavailableAgentDependency>;
 }
+
+type Probe = { id: string; name: string; usable: boolean; readable: boolean };
+
+const probe = (ids: ReadonlyArray<string>, query: () => Effect.Effect<Probe[], unknown>) =>
+  ids.length ? query().pipe(Effect.orDie) : Effect.succeed([] as Probe[]);
+
+const missing = (
+  kind: UnavailableAgentDependency["kind"],
+  ids: ReadonlyArray<string>,
+  rows: ReadonlyArray<Probe>,
+) =>
+  ids.flatMap((id): UnavailableAgentDependency[] => {
+    const row = rows.find((candidate) => candidate.id === id);
+    if (row?.usable) return [];
+    return [{ kind, id, name: row?.readable ? row.name : null }];
+  });
+
+/**
+ * Which of an agent's dependencies the sender cannot use right now, in the
+ * agent's order. A name is kept only where the sender may still read the
+ * resource, so a lost share never discloses what it was called.
+ */
+const unavailableDependencies = Effect.fn("chat.unavailableAgentDependencies")(function* (
+  tx: DbTx,
+  userId: string,
+  agent: Pick<
+    ResolvedAgentConfig,
+    "collectionIds" | "skillIds" | "customToolIds" | "integrationIds"
+  >,
+) {
+  const collections = yield* probe(agent.collectionIds, () =>
+    tx
+      .select({
+        id: knowledgeCollections.id,
+        name: knowledgeCollections.name,
+        usable: sql<boolean>`${readableBy("collection", userId)}`,
+        readable: sql<boolean>`${readableBy("collection", userId)}`,
+      })
+      .from(knowledgeCollections)
+      .where(inArray(knowledgeCollections.id, [...agent.collectionIds])),
+  );
+  const skillRows = yield* probe(agent.skillIds, () =>
+    tx
+      .select({
+        id: skills.id,
+        name: skills.name,
+        // The attempt pins the current revision, so a skill without one cannot load.
+        usable: sql<boolean>`${and(
+          readableBy("skill", userId),
+          sql`exists(select 1 from skill_revisions r where r.skill_id = ${skills.id} and r.revision = ${skills.revision})`,
+        )}`,
+        readable: sql<boolean>`${readableBy("skill", userId)}`,
+      })
+      .from(skills)
+      .where(inArray(skills.id, [...agent.skillIds])),
+  );
+  const tools = yield* probe(agent.customToolIds, () =>
+    tx
+      .select({
+        id: customTools.id,
+        name: customTools.name,
+        usable: sql<boolean>`${customTools.enabled} and ${customToolUsableBy(userId)}`,
+        readable: sql<boolean>`${customToolUsableBy(userId)}`,
+      })
+      .from(customTools)
+      .where(inArray(customTools.id, [...agent.customToolIds])),
+  );
+  const integrations = yield* probe(agent.integrationIds, () =>
+    tx
+      .select({
+        id: integrationConfigs.id,
+        name: integrationConfigs.name,
+        usable: sql<boolean>`${integrationConfigs.enabled} and ${integrationUsableBy(userId)}`,
+        readable: sql<boolean>`${integrationUsableBy(userId)}`,
+      })
+      .from(integrationConfigs)
+      .where(inArray(integrationConfigs.id, [...agent.integrationIds])),
+  );
+  return [
+    ...missing("collection", agent.collectionIds, collections),
+    ...missing("skill", agent.skillIds, skillRows),
+    ...missing("customTool", agent.customToolIds, tools),
+    ...missing("integration", agent.integrationIds, integrations),
+  ];
+});
 
 /**
  * Resolves an agent's current configuration. Reading inside the attempt's
@@ -82,6 +179,7 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
   const stored = yield* agents.get(input.userId, input.agentId, input.tx);
   if (!stored) return yield* new AgentNotAvailable({ agentId: input.agentId });
   return {
+    unavailable: yield* unavailableDependencies(input.tx, input.userId, stored),
     resolvedAgent: {
       agentId: stored.row.id,
       configRevision: stored.row.configRevision,
@@ -117,9 +215,10 @@ const desktopGenerationConfig = (desktop: DesktopSubmission | undefined) => ({
  * Resolves what an attempt will run with from its current agent contribution
  * and the original standalone collections chosen in the composer.
  *
- * An agent grant is never a grant to its dependencies: the collections are
- * authorized here, separately, and losing any of them fails the whole
- * selection instead of quietly answering from the part that remains.
+ * An agent grant is never a grant to its dependencies. What the sender
+ * picked themselves must all be usable, or the attempt fails; what the agent
+ * brings and the sender can no longer use is left out and recorded, so the
+ * answer can say what it ran without.
  */
 export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGeneration")(
   function* (input: {
@@ -143,8 +242,14 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
   }) {
     const knowledge = yield* KnowledgeRepo;
     const resolvedAgent = input.agent?.resolvedAgent ?? null;
+    const unavailable = input.agent?.unavailable ?? [];
+    const usable = (kind: UnavailableAgentDependency["kind"], ids: ReadonlyArray<string>) =>
+      ids.filter((id) => !unavailable.some((entry) => entry.kind === kind && entry.id === id));
     const collectionIds = [
-      ...new Set([...(resolvedAgent?.collectionIds ?? []), ...(input.collectionIds ?? [])]),
+      ...new Set([
+        ...usable("collection", resolvedAgent?.collectionIds ?? []),
+        ...(input.collectionIds ?? []),
+      ]),
     ];
     if (collectionIds.length > KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
       return yield* new KnowledgeRejected({ reason: "select at most five knowledge collections" });
@@ -170,13 +275,14 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       input.tx,
       input.userId,
       input.skillIds ?? [],
-      resolvedAgent?.skillIds ?? [],
+      usable("skill", resolvedAgent?.skillIds ?? []),
     );
     return {
       standaloneSkillIds: [...(input.skillIds ?? [])],
       skills: skillManifest,
       agentId: resolvedAgent?.agentId ?? null,
       resolvedAgent,
+      agentUnavailable: unavailable,
       standaloneCollectionIds: [...(input.collectionIds ?? [])],
       collectionIds,
       manifest,
