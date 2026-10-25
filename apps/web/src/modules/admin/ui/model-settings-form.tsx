@@ -330,7 +330,7 @@ export function ModelSettingsFields({
           ) : null}
           <div className="grid gap-2 sm:grid-cols-2">
             {visibleCapabilities.map((capability) => {
-              const label = draft.type === "embedding" ? "Image input" : capability.label;
+              const label = draft.type === "embedding" ? "Image input" : capability.label();
               const switchId = `${id}-capability-${capability.key}`;
               return (
                 <FieldLabel key={capability.key} htmlFor={switchId}>

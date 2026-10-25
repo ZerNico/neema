@@ -38,6 +38,8 @@ import {
 } from "@chat/model-client";
 import { supportsImageOutput } from "../provider-presets.ts";
 import { KeyCipher } from "./crypto.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type ModelRow = typeof models.$inferSelect;
 export type ModelAccess = ModelRow["access"];
@@ -207,7 +209,9 @@ export class ProviderRepo extends Context.Service<
             !imageFamiliesFor(provider.preset).some((family) => family.id === settings.imageFamily)
           )
             return yield* new UnhostedImageFamily({
-              reason: `This provider does not host ${settings.imageFamily} image models.`,
+              reason: localized(m.providers_error_unhosted_family, {
+                family: settings.imageFamily ?? "",
+              }),
             });
         });
 
@@ -300,8 +304,8 @@ export class ProviderRepo extends Context.Service<
             .from(models)
             .orderBy(asc(models.displayName))
             .pipe(Effect.orDie);
-          if (filter?.providerId) rows = rows.filter((m) => m.providerId === filter.providerId);
-          if (filter?.enabledOnly) rows = rows.filter((m) => m.enabled);
+          if (filter?.providerId) rows = rows.filter((row) => row.providerId === filter.providerId);
+          if (filter?.enabledOnly) rows = rows.filter((row) => row.enabled);
           return rows;
         }),
 
@@ -377,7 +381,7 @@ export class ProviderRepo extends Context.Service<
             Effect.mapError(
               () =>
                 new InvalidDefaultModelOrder({
-                  reason: `Choose up to ${MAX_DEFAULT_MODELS} distinct model IDs.`,
+                  reason: localized(m.providers_error_order_limit, { max: MAX_DEFAULT_MODELS }),
                 }),
             ),
           );
@@ -401,10 +405,11 @@ export class ProviderRepo extends Context.Service<
                     selected.some((model) => model.type !== type)
                   ) {
                     return yield* new InvalidDefaultModelOrder({
-                      reason:
+                      reason: localized(
                         type === "image"
-                          ? "Some models are no longer image models. Refresh the list and try again."
-                          : "Some models are no longer available for chat. Refresh the list and try again.",
+                          ? m.providers_error_order_not_image
+                          : m.providers_error_order_not_chat,
+                      ),
                     });
                   }
                 }
@@ -444,7 +449,7 @@ export class ProviderRepo extends Context.Service<
               .pipe(Effect.orDie);
             if (rows[0]?.type !== "chat")
               return yield* new InvalidUtilityModel({
-                reason: "That model is no longer available for chat. Refresh and try again.",
+                reason: localized(m.providers_error_utility_not_chat),
               });
           }
           yield* db

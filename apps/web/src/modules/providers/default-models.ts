@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /** The whole chat catalog is ordered, and an aggregator can bring hundreds. */
 export const MAX_DEFAULT_MODELS = 1000;
@@ -9,18 +10,18 @@ export const DefaultModelIds = Schema.Array(
 
 export class InvalidDefaultModelOrder extends Schema.TaggedError<InvalidDefaultModelOrder>()(
   "InvalidDefaultModelOrder",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 export class InvalidUtilityModel extends Schema.TaggedError<InvalidUtilityModel>()(
   "InvalidUtilityModel",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 /** An image model whose family its provider cannot serve. */
 export class UnhostedImageFamily extends Schema.TaggedError<UnhostedImageFamily>()(
   "UnhostedImageFamily",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 /**

@@ -3,6 +3,7 @@ import type { ModelCapabilities } from "../model-config.ts";
 import { cn } from "~/ui/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { CAPABILITY_META } from "./capability-meta.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type Capabilities = ModelCapabilities;
 
@@ -32,18 +33,15 @@ export function CapabilityIcons({
   return (
     <span className={cn("text-muted-foreground flex items-center gap-1", className)}>
       {active.map((meta) => {
-        const c =
-          audience === "user"
-            ? {
-                ...meta,
-                label:
-                  meta.key === "vision"
-                    ? "Reads images"
-                    : meta.key === "files"
-                      ? "Reads files"
-                      : meta.label,
-              }
-            : meta;
+        const c = {
+          ...meta,
+          label:
+            audience === "user" && meta.key === "vision"
+              ? m.providers_capability_reads_images()
+              : audience === "user" && meta.key === "files"
+                ? m.providers_capability_reads_files()
+                : meta.label(),
+        };
         return (
           <Tooltip key={c.key}>
             <TooltipTrigger render={<span role="img" aria-label={c.label} />} tabIndex={-1}>

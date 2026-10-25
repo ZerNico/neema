@@ -1,4 +1,5 @@
 import { SearchableSelect } from "~/ui/searchable-select.tsx";
+import { m } from "~/paraglide/messages.js";
 
 /** The one thing every admin model dropdown needs to say about a row. */
 export interface ModelSelectOption {
@@ -20,8 +21,8 @@ export function ModelSelect({
   models,
   value,
   onChange,
-  placeholder = "Choose a model",
-  emptyPlaceholder = "No models available",
+  placeholder = m.providers_select_placeholder(),
+  emptyPlaceholder = m.providers_select_empty(),
   disabled = false,
   id,
   "aria-label": ariaLabel,
@@ -49,8 +50,8 @@ export function ModelSelect({
       onChange={onChange}
       placeholder={placeholder}
       emptyPlaceholder={emptyPlaceholder}
-      searchPlaceholder="Search models…"
-      noMatches="No models match"
+      searchPlaceholder={m.providers_select_search()}
+      noMatches={m.providers_select_no_matches()}
       disabled={disabled}
       {...(id ? { id } : {})}
       {...(ariaLabel ? { "aria-label": ariaLabel } : {})}

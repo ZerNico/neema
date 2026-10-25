@@ -31,7 +31,8 @@ describe("CapabilityIcons", () => {
 
 it("labels image generation with an image icon, independently of vision", () => {
   const capability = CAPABILITY_META.find((item) => item.key === "imageOutput");
-  expect(capability).toMatchObject({ label: "Image generation", icon: Image01Icon });
+  expect(capability?.label()).toBe("Image generation");
+  expect(capability?.icon).toBe(Image01Icon);
   expect(capability?.icon).not.toBe(ViewIcon);
   render(<CapabilityIcons capabilities={{ ...capabilities, imageOutput: true }} />);
   expect(screen.getByRole("img", { name: "Image generation" })).toBeVisible();
