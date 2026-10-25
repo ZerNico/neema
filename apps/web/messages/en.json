@@ -291,13 +291,8 @@
   "browser_element_named": "the “{name}” {role}",
   "browser_element_unnamed": [
     {
-      "declarations": [
-        "input role",
-        "input vowel"
-      ],
-      "selectors": [
-        "vowel"
-      ],
+      "declarations": ["input role", "input vowel"],
+      "selectors": ["vowel"],
       "match": {
         "vowel=yes": "an {role}",
         "vowel=*": "a {role}"
@@ -338,13 +333,8 @@
   "browser_running_reload": "Reloading the page",
   "browser_running_save": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Saving a file",
         "countPlural=other": "Saving {count} files"
@@ -1283,13 +1273,8 @@
   "integrations_activity_refused": "{label}: not done",
   "integrations_activity_results": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} result",
         "countPlural=other": "{count} results"
@@ -1322,13 +1307,8 @@
   "integrations_admin_delete_description": "Chats, agents and schedules stop using it. Past answers keep what it found.",
   "integrations_admin_delete_description_people": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} person loses their connection, and chats, agents and schedules stop using it. Past answers keep what it found.",
         "countPlural=other": "{count} people lose their connections, and chats, agents and schedules stop using it. Past answers keep what it found."
@@ -1345,14 +1325,8 @@
   "integrations_admin_enabled_label": "{name} on",
   "integrations_admin_failing": [
     {
-      "declarations": [
-        "input count",
-        "input error",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input error", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} account could not list its tools: {error}",
         "countPlural=other": "{count} accounts could not list its tools: {error}"
@@ -1365,13 +1339,8 @@
   "integrations_admin_on": "On",
   "integrations_admin_people_connected": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} person connected",
         "countPlural=other": "{count} people connected"
@@ -1398,14 +1367,8 @@
   "integrations_approval_change_account": "This will change with your {service} account “{account}”.",
   "integrations_approval_contact": [
     {
-      "declarations": [
-        "input service",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input service", "input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account.",
         "countPlural=other": "This will contact these {count} people from your {service} account."
@@ -1420,9 +1383,7 @@
         "input count",
         "local countPlural = count: plural"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account “{account}”.",
         "countPlural=other": "This will contact these {count} people from your {service} account “{account}”."
@@ -1481,13 +1442,8 @@
   "integrations_connect_ready_no_tools": "It lists no tools to your account yet.",
   "integrations_connect_ready_tools": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} tool. Reads run, changes ask first.",
         "countPlural=other": "{count} tools. Reads run, changes ask first."
@@ -1503,13 +1459,8 @@
   "integrations_connect_use_key_instead": "Use {noun} instead",
   "integrations_count_schedules": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} schedule",
         "countPlural=other": "{count} schedules"
@@ -1518,13 +1469,8 @@
   ],
   "integrations_count_sources": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} knowledge source",
         "countPlural=other": "{count} knowledge sources"
@@ -1550,14 +1496,8 @@
   "integrations_disconnect": "Disconnect",
   "integrations_disconnect_affected": [
     {
-      "declarations": [
-        "input count",
-        "input things",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input things", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay.",
         "countPlural=other": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay."
@@ -1647,13 +1587,8 @@
   "integrations_error_source_stale": "This source is no longer current.",
   "integrations_error_sources_mirror": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} knowledge source mirrors it. Remove it first.",
         "countPlural=other": "{count} knowledge sources mirror it. Remove them first."
@@ -1860,13 +1795,8 @@
   "integrations_server_setup_title": "Set up {name}",
   "integrations_server_tool_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} tool",
         "countPlural=other": "{count} tools"
@@ -1897,13 +1827,8 @@
   "integrations_sources_edit_label": "Edit what is synced from {title}",
   "integrations_sources_elsewhere": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page already synced by another source",
         "countPlural=other": "{count} pages already synced by another source"
@@ -1927,13 +1852,8 @@
   "integrations_sources_over_limit": "{count} over the collection limit",
   "integrations_sources_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page",
         "countPlural=other": "{count} pages"
@@ -1944,13 +1864,8 @@
   "integrations_sources_paused_owner": "Paused: the owner’s {name} account is disconnected. Pages already synced stay searchable.",
   "integrations_sources_picked": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page picked",
         "countPlural=other": "{count} pages picked"
@@ -1959,14 +1874,8 @@
   ],
   "integrations_sources_picked_excluded": [
     {
-      "declarations": [
-        "input count",
-        "input excluded",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input excluded", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page picked, {excluded} left out",
         "countPlural=other": "{count} pages picked, {excluded} left out"
@@ -1982,13 +1891,8 @@
   "integrations_sources_retry_nothing": "Nothing needed preparing again.",
   "integrations_sources_retry_started": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Preparing search again for {count} page.",
         "countPlural=other": "Preparing search again for {count} pages."
@@ -2016,13 +1920,8 @@
   "integrations_sources_where_label": "Where to sync from",
   "integrations_status_accounts": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} account",
         "countPlural=other": "{count} accounts"
@@ -2034,13 +1933,8 @@
   "integrations_status_signed_out": "Signed out",
   "integrations_status_signed_out_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} signed out",
         "countPlural=other": "{count} signed out"
@@ -2052,14 +1946,8 @@
   "integrations_sync_error_owner": "The collection’s owner can no longer sync it.",
   "integrations_sync_gone": [
     {
-      "declarations": [
-        "input count",
-        "input titles",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input titles", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "“{titles}” can no longer be found or opened, so its pages were removed. Edit the selection to drop it.",
         "countPlural=other": "“{titles}” can no longer be found or opened, so their pages were removed. Edit the selection to drop them."
@@ -2071,13 +1959,8 @@
   "integrations_synced_failed": "Couldn’t prepare",
   "integrations_synced_filter": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Filter {count} page…",
         "countPlural=other": "Filter {count} pages…"
