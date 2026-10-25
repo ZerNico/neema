@@ -11,9 +11,11 @@ import { Db } from "~/server/db.ts";
 import { PresentationError } from "../errors.ts";
 import { BUNDLED_FONTS, FONT_LIMITS } from "../limits.ts";
 import { googleFontFamily, type GoogleFontFamily } from "../google-fonts.ts";
-import { readFontFile, type FontFace } from "./font-file.ts";
+import { readFontFile, type FontFace, type FontRefusal } from "./font-file.ts";
 import { GoogleFontSource } from "./google-font-source.ts";
 import { PresentationWorkers } from "./runtime.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized, Localized as LocalizedSchema, type Localized } from "~/i18n/localized.ts";
 
 /** A failed fetch is remembered this long, so an offline server does not stall every edit. */
 const FETCH_RETRY_MS = 10 * 60 * 1000;
@@ -22,8 +24,21 @@ const FETCHED_FONT_TTL_DAYS = 14;
 const SWEEP_EVERY = Duration.hours(6);
 
 export class FontRejected extends Schema.TaggedError<FontRejected>()("FontRejected", {
-  reason: Schema.String,
+  reason: LocalizedSchema,
 }) {}
+
+/** What an admin reads for a font the parser refused, by the refusal's code. */
+const FONT_REFUSALS: Record<FontRefusal, Localized> = {
+  invalid_font: localized(m.presentations_font_error_damaged),
+  not_a_font: localized(m.presentations_font_error_not_a_font),
+  font_collection: localized(m.presentations_font_error_collection),
+  web_font: localized(m.presentations_font_error_web_font),
+  variable_font: localized(m.presentations_font_error_variable_cff2),
+};
+const fontRefusal = (error: unknown) =>
+  error instanceof PresentationError && error.code in FONT_REFUSALS
+    ? FONT_REFUSALS[error.code as FontRefusal]
+    : localized(m.presentations_font_error_unusable);
 
 export interface FontRecord {
   readonly id: string;
@@ -67,7 +82,7 @@ const record = (row: typeof presentationFonts.$inferSelect): FontRecord => ({
   createdAt: row.createdAt,
 });
 
-const reject = (reason: string) => Effect.fail(new FontRejected({ reason }));
+const reject = (reason: Localized) => Effect.fail(new FontRejected({ reason }));
 
 /**
  * Font faces an admin uploaded, shared by every presentation render. A face is
@@ -185,15 +200,14 @@ export class PresentationFonts extends Context.Service<
       }) {
         if (bytes.length > FONT_LIMITS.fileBytes)
           return yield* reject(
-            `Fonts must be under ${megabytes(FONT_LIMITS.fileBytes)} MB per file.`,
+            localized(m.presentations_font_error_file_too_large, {
+              size: megabytes(FONT_LIMITS.fileBytes),
+            }),
           );
         const info = yield* Effect.try({
           try: () => readFontFile(bytes),
           catch: (error) =>
-            new FontRejected({
-              reason:
-                error instanceof PresentationError ? error.message : "This is not a usable font.",
-            }),
+            new FontRejected({ reason: fontRefusal(error) }),
         });
         const [usage] = yield* db
           .select({
@@ -209,10 +223,14 @@ export class PresentationFonts extends Context.Service<
           )
           .pipe(Effect.orDie);
         if ((usage?.count ?? 0) >= FONT_LIMITS.faces)
-          return yield* reject(`At most ${FONT_LIMITS.faces} font faces can be uploaded.`);
+          return yield* reject(
+            localized(m.presentations_font_error_too_many, { count: FONT_LIMITS.faces }),
+          );
         if ((usage?.bytes ?? 0) + bytes.length > FONT_LIMITS.totalBytes)
           return yield* reject(
-            `Uploaded fonts are limited to ${megabytes(FONT_LIMITS.totalBytes)} MB in total.`,
+            localized(m.presentations_font_error_total_too_large, {
+              size: megabytes(FONT_LIMITS.totalBytes),
+            }),
           );
         const sha256 = createHash("sha256").update(bytes).digest("hex");
         const fresh = !existsSync(cachePath(sha256, info.format));
@@ -222,7 +240,7 @@ export class PresentationFonts extends Context.Service<
         yield* Effect.tryPromise({
           try: () => workers.run({ kind: "font", path }),
           catch: () =>
-            new FontRejected({ reason: "The renderer could not draw text with this font." }),
+            new FontRejected({ reason: localized(m.presentations_font_error_render) }),
         }).pipe(
           Effect.tapError(() =>
             fresh ? Effect.promise(() => rm(path, { force: true })) : Effect.void,
@@ -479,7 +497,9 @@ export class PresentationFonts extends Context.Service<
             .pipe(Effect.orDie);
           if (!row)
             return yield* Effect.fail(
-              new FontRejected({ reason: "This font's licence does not allow embedding it." }),
+              new FontRejected({
+                reason: localized(m.presentations_font_error_embed_forbidden),
+              }),
             );
           yield* Ref.set(cached, null);
         }),

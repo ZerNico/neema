@@ -1,7 +1,7 @@
 import { Delete02Icon, TextFontIcon, Upload01Icon, Upload04Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { useRef } from "react";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -18,17 +18,19 @@ import {
   uploadPresentationFont,
 } from "../server/font-functions.ts";
 import { presentationFontsQuery } from "../client/queries.ts";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 type Font = Awaited<ReturnType<typeof listPresentationFonts>>[number];
 
 const styleLabel = (font: Font) =>
   font.bold && font.italic
-    ? "Bold italic"
+    ? m.presentations_fonts_style_bold_italic()
     : font.bold
-      ? "Bold"
+      ? m.presentations_fonts_style_bold()
       : font.italic
-        ? "Italic"
-        : "Regular";
+        ? m.presentations_fonts_style_italic()
+        : m.presentations_fonts_style_regular();
 
 function FontItem({ font }: { font: Font }) {
   const queryClient = useQueryClient();
@@ -36,12 +38,12 @@ function FontItem({ font }: { font: Font }) {
   const remove = useMutation({
     mutationFn: () => deletePresentationFont({ data: { id: font.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: presentationFontsQuery.queryKey }),
-    onError: (error) => toastError("Could not remove the font.", error),
+    onError: (error) => toastError(m.presentations_fonts_error_remove(), error),
   });
   const embed = useMutation({
     mutationFn: (next: boolean) => setPresentationFontEmbed({ data: { id: font.id, embed: next } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: presentationFontsQuery.queryKey }),
-    onError: (error) => toastError("Could not change embedding.", error),
+    onError: (error) => toastError(m.presentations_fonts_error_embed(), error),
   });
   return (
     <li className="flex min-w-0 items-center gap-2 text-sm">
@@ -53,17 +55,21 @@ function FontItem({ font }: { font: Font }) {
       />
       <span className="truncate">{font.family}</span>
       <span className="text-muted-foreground truncate text-xs">
-        {styleLabel(font)} · {formatFileSize(font.byteSize)}
-        {font.embeddable ? "" : " · licence forbids embedding"}
+        {(font.embeddable
+          ? m.presentations_fonts_meta
+          : m.presentations_fonts_meta_no_embedding)({
+          style: styleLabel(font),
+          size: formatFileSize(font.byteSize, getLocale()),
+        })}
       </span>
       {font.embeddable ? (
         <div className="text-muted-foreground ml-auto flex shrink-0 items-center gap-2 text-xs">
-          <span aria-hidden>Embed in decks</span>
+          <span aria-hidden>{m.presentations_fonts_embed()}</span>
           <Switch
             checked={embed.isPending ? embed.variables : font.embed}
             disabled={embed.isPending}
             onCheckedChange={(next) => embed.mutate(next)}
-            aria-label={`Embed ${font.family} ${styleLabel(font)} in decks`}
+            aria-label={m.presentations_fonts_embed_label({ family: font.family, style: styleLabel(font) })}
           />
         </div>
       ) : null}
@@ -71,14 +77,16 @@ function FontItem({ font }: { font: Font }) {
         variant="ghost"
         size="icon-sm"
         className={font.embeddable ? undefined : "ml-auto"}
-        aria-label={`Remove ${font.family} ${styleLabel(font)}`}
+        aria-label={m.presentations_fonts_remove_label({ family: font.family, style: styleLabel(font) })}
         pending={remove.isPending}
         onClick={() => {
           void confirm({
-            title: `Remove “${font.family}” ${styleLabel(font).toLowerCase()}?`,
-            description:
-              "Previews fall back to a standard font for this style. Decks that use it keep naming it.",
-            confirmLabel: "Remove font",
+            title: m.presentations_fonts_remove_title({
+              family: font.family,
+              style: styleLabel(font).toLowerCase(),
+            }),
+            description: m.presentations_fonts_remove_description(),
+            confirmLabel: m.presentations_fonts_remove_confirm(),
           }).then((confirmed) => {
             if (confirmed) remove.mutate();
           });
@@ -108,7 +116,7 @@ export function PresentationFontsRow() {
         try {
           await uploadPresentationFont({ data });
         } catch (error) {
-          toastError(`Could not add the font “${file.name}”.`, error);
+          toastError(m.presentations_fonts_error_add({ fileName: file.name }), error);
         }
       }
     },
@@ -126,9 +134,9 @@ export function PresentationFontsRow() {
       <ListRow className="flex-col items-stretch gap-3">
         <div className="flex items-start gap-3">
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Fonts</span>
+            <span className="text-sm font-medium">{m.presentations_fonts_title()}</span>
             <span className="text-muted-foreground text-xs">
-              Fonts the assistant can use in slides. Drop .ttf or .otf files here, one per style.
+              {m.presentations_fonts_description()}
             </span>
           </div>
           <input
@@ -152,23 +160,20 @@ export function PresentationFontsRow() {
             onClick={() => input.current?.click()}
           >
             <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} />
-            Upload
+            {m.presentations_fonts_upload()}
           </PendingButton>
         </div>
         {fonts.length ? (
-          <ul className="flex flex-col gap-1" aria-label="Uploaded fonts">
+          <ul className="flex flex-col gap-1" aria-label={m.presentations_fonts_list()}>
             {fonts.map((font) => (
               <FontItem key={font.id} font={font} />
             ))}
           </ul>
         ) : (
-          <p className="text-muted-foreground text-xs">
-            None yet. Decks use Calibri, Cambria, Arial, Times New Roman and Courier New
-            equivalents.
-          </p>
+          <p className="text-muted-foreground text-xs">{m.presentations_fonts_empty()}</p>
         )}
       </ListRow>
-      <m.div
+      <motion.div
         aria-hidden={!dragging}
         inert
         initial={false}
@@ -178,9 +183,9 @@ export function PresentationFontsRow() {
       >
         <span className="text-foreground flex items-center gap-2 text-sm font-medium">
           <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} className="size-4" aria-hidden />
-          Drop fonts to add them
+          {m.presentations_fonts_drop()}
         </span>
-      </m.div>
+      </motion.div>
     </div>
   );
 }

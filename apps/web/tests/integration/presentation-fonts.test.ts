@@ -17,6 +17,7 @@ import {
 import { PresentationWorkers } from "~/modules/presentations/server/runtime.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { english } from "~/i18n/localized.ts";
 
 const bundled = join(
   dirname(createRequire(import.meta.url).resolve("@office-kit/pptx-preview/package.json")),
@@ -113,14 +114,15 @@ it("rejects files that are not usable fonts with a reason", async () => {
       })
       .pipe(Effect.flip),
   );
-  expect(junk.reason).toMatch(/not a TrueType or OpenType/);
+  expect(english(junk.reason)).toMatch(/not a TrueType or OpenType/);
+  expect(junk.reason("de")).toBe("Das ist keine TrueType- oder OpenType-Schrift.");
   // Valid tables around glyph data the renderer cannot use fail the trial render.
   const broken = face("Carlito-Regular.ttf");
   broken.fill(0, 2000, broken.length);
   const failed = await run(
     fonts.upload({ fileName: "broken.ttf", bytes: broken, userId: admin }).pipe(Effect.flip),
   );
-  expect(failed.reason).toBeTruthy();
+  expect(english(failed.reason)).toBeTruthy();
   expect((await run(fonts.list())).some((font) => font.fileName === "broken.ttf")).toBe(false);
 });
 

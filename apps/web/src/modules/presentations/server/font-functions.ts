@@ -5,6 +5,8 @@ import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { FONT_LIMITS } from "../limits.ts";
 import { megabytes, PresentationFonts } from "./fonts.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 
 export const listPresentationFonts = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
@@ -24,9 +26,14 @@ export const uploadPresentationFont = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ data, context }) => {
     const file = data.get("file");
-    if (!(file instanceof File)) throw refusal(400, "Expected a font file");
+    if (!(file instanceof File)) throw refusal(400, localized(m.presentations_font_error_expected_file));
     if (file.size > FONT_LIMITS.fileBytes)
-      throw refusal(413, `Fonts must be under ${megabytes(FONT_LIMITS.fileBytes)} MB per file.`);
+      throw refusal(
+        413,
+        localized(m.presentations_font_error_file_too_large, {
+          size: megabytes(FONT_LIMITS.fileBytes),
+        }),
+      );
     const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await runServerFn(
       PresentationFonts.use((fonts) =>

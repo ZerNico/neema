@@ -36,9 +36,11 @@ const printable = (text: string) =>
   text.length > 0 &&
   text.length <= 100 &&
   ![...text].some((character) => character.charCodeAt(0) < 32 || '<>&"'.includes(character));
-const invalid = (message: string): never => {
-  throw new PresentationError("invalid_font", message);
+/** `code` names the refusals an uploader can act on, so the upload can word them for its reader. */
+const invalid = (message: string, code: FontRefusal = "invalid_font"): never => {
+  throw new PresentationError(code, message);
 };
+export type FontRefusal = "invalid_font" | "not_a_font" | "font_collection" | "web_font" | "variable_font";
 
 /**
  * Reads the name, OS/2 and head tables of a single TrueType or OpenType font.
@@ -49,6 +51,7 @@ export function readFontFile(bytes: Uint8Array): FontFileInfo {
   if (bytes.length < 12 || bytes.length > FONT_LIMITS.fileBytes)
     return invalid(
       `A font file must be a TrueType or OpenType file under ${Math.round(FONT_LIMITS.fileBytes / 1024 / 1024)} MB.`,
+      "not_a_font",
     );
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4));
@@ -59,10 +62,16 @@ export function readFontFile(bytes: Uint8Array): FontFileInfo {
       : signature === "OTTO"
         ? ("otf" as const)
         : signature === "ttcf"
-          ? invalid("Font collections (.ttc) aren't supported; upload each face as .ttf or .otf.")
+          ? invalid(
+              "Font collections (.ttc) aren't supported; upload each face as .ttf or .otf.",
+              "font_collection",
+            )
           : signature === "wOFF" || signature === "wOF2"
-            ? invalid("Web fonts (.woff) aren't supported; upload the .ttf or .otf version.")
-            : invalid("This is not a TrueType or OpenType font.");
+            ? invalid(
+                "Web fonts (.woff) aren't supported; upload the .ttf or .otf version.",
+                "web_font",
+              )
+            : invalid("This is not a TrueType or OpenType font.", "not_a_font");
   const count = view.getUint16(4);
   if (count < 1 || count > 200 || 12 + count * 16 > bytes.length)
     return invalid("The font's table directory is malformed.");
@@ -144,7 +153,7 @@ type Tables = ReadonlyMap<string, { readonly offset: number; readonly length: nu
  * are pathological is refused before it can reach a preview.
  */
 function checkOutlines(view: DataView, tables: Tables, format: "ttf" | "otf") {
-  if (tables.has("CFF2")) return invalid("Variable CFF2 fonts aren't supported.");
+  if (tables.has("CFF2")) return invalid("Variable CFF2 fonts aren't supported.", "variable_font");
   const maxp = tables.get("maxp");
   if (!maxp || maxp.length < 6) return invalid("The font has no glyph count.");
   const glyphs = view.getUint16(maxp.offset + 4);
