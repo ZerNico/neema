@@ -44,7 +44,6 @@ import {
   type ResolveError,
   type WorkTurnReservationRow,
 } from "./repo.ts";
-import { StreamEngine } from "./streaming.ts";
 import { resumeFirstTurn } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { ConversationSweepInterval, QueueSweepInterval } from "./generation-fence.ts";
@@ -432,7 +431,6 @@ function makeChatService() {
     const db = yield* Db;
     const repo = yield* ChatRepo;
     const providers = yield* ProviderRepo;
-    const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const policy = yield* FeaturePolicy;
     // A new answer is a new message that is streaming: lists move the chat up
@@ -462,7 +460,7 @@ function makeChatService() {
       stopGeneration: lifecycle.stopGeneration,
       announceStarted,
     });
-    const { drainQueue } = queue;
+    const { startAttempt } = queue;
 
     const reserveWorkTurn = Effect.fn("ChatService.reserveWorkTurn")(function* (input: {
       id: string;
@@ -621,27 +619,17 @@ function makeChatService() {
         yield* announceStarted(input.userId, turn.conversation.id, turn.assistant.id);
 
       if (turn.activatedNow)
-        yield* engine.startGeneration({
+        yield* startAttempt({
           desktop: input.desktop,
           deviceSessionId: input.deviceSessionId,
           userId: input.userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,
-          generationId: turn.assistant.generationId ?? undefined,
+          generationId: turn.assistant.generationId,
           modelId: input.modelId,
-          searchEnabled: turn.config.searchEnabled,
           timeZone: input.timeZone,
           openDocument: input.openDocument,
-          // Queued messages start only after an answer ends cleanly, so a stop
-          // or a failure leaves the rest of the queue for the person to decide on.
-          onSettled: ({ status }) =>
-            (input.onSettled ?? Effect.void).pipe(
-              Effect.andThen(
-                status === "complete"
-                  ? drainQueue(input.userId, turn.conversation.id)
-                  : Effect.void,
-              ),
-            ),
+          onSettled: input.onSettled,
         });
 
       // Only a brand-new conversation has a pending title. Forked after the
@@ -813,40 +801,39 @@ function makeChatService() {
       const model = yield* providers.getModel(input.modelId);
       if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
       const searchAvailable = yield* searchToolEnabled;
-      const { claimed, orphanedKeys, generationId, searchEnabled } =
-        yield* repo.resetMessageForRetry({
-          expectedMessages: input.expectedMessages,
+      const { claimed, orphanedKeys, generationId } = yield* repo.resetMessageForRetry({
+        expectedMessages: input.expectedMessages,
+        userId: input.userId,
+        messageId: input.assistantMessageId,
+        modelId: input.modelId,
+        deleteMessageIds: input.deleteMessageIds,
+        invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
+        resolve: resolver({
           userId: input.userId,
-          messageId: input.assistantMessageId,
-          modelId: input.modelId,
-          deleteMessageIds: input.deleteMessageIds,
-          invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
-          resolve: resolver({
-            userId: input.userId,
-            model,
-            searchAvailable,
-            imageModelId: input.imageModelId,
-            desktop: input.desktop,
-            ...(input.edit
-              ? {
-                  attempt: "edit",
-                  searchEnabled: input.edit.searchEnabled,
-                  researchEnabled: input.edit.researchEnabled,
-                  reasoningEffort: input.edit.reasoningEffort,
-                  ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
-                  ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
-                }
-              : { attempt: "retry" }),
-          }),
+          model,
+          searchAvailable,
+          imageModelId: input.imageModelId,
+          desktop: input.desktop,
           ...(input.edit
             ? {
-                edit: {
-                  ...input.edit,
-                  conversationId: input.conversationId,
-                },
+                attempt: "edit",
+                searchEnabled: input.edit.searchEnabled,
+                researchEnabled: input.edit.researchEnabled,
+                reasoningEffort: input.edit.reasoningEffort,
+                ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
+                ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
               }
-            : {}),
-        });
+            : { attempt: "retry" }),
+        }),
+        ...(input.edit
+          ? {
+              edit: {
+                ...input.edit,
+                conversationId: input.conversationId,
+              },
+            }
+          : {}),
+      });
       // Only after the commit: a rollback must never orphan live rows' bytes.
       yield* attachmentService.deleteBlobs(orphanedKeys);
       if (!claimed || generationId === undefined) return null;
@@ -858,7 +845,7 @@ function makeChatService() {
         status: "streaming",
       });
 
-      yield* engine.startGeneration({
+      yield* startAttempt({
         desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
@@ -866,11 +853,8 @@ function makeChatService() {
         messageId: input.assistantMessageId,
         generationId,
         modelId: input.modelId,
-        searchEnabled: searchEnabled!,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
-        onSettled: ({ status }) =>
-          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
 
       return { assistantMessageId: input.assistantMessageId, generationId };
@@ -1092,7 +1076,7 @@ function makeChatService() {
         messageId: message.id,
         status: "streaming",
       });
-      yield* engine.startGeneration({
+      yield* startAttempt({
         desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
@@ -1100,12 +1084,9 @@ function makeChatService() {
         messageId: message.id,
         generationId: claim.generationId,
         modelId,
-        searchEnabled: claim.searchEnabled,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
         resume: true,
-        onSettled: ({ status }) =>
-          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
       return { assistantMessageId: message.id };
     });
@@ -1330,19 +1311,16 @@ function makeChatService() {
         conversationId: input.conversationId,
         messageId: created.message.id,
       });
-      yield* engine.startGeneration({
+      yield* startAttempt({
         desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,
         messageId: created.message.id,
-        generationId: created.message.generationId ?? undefined,
+        generationId: created.message.generationId,
         modelId: input.modelId,
-        searchEnabled: created.config.searchEnabled,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
-        onSettled: ({ status }) =>
-          status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
       });
 
       return { assistantMessageId: created.message.id };

@@ -237,7 +237,7 @@ export const prepareGenerationTools = (
           urlReader,
           indexer,
           authority,
-          requestSearch: input.searchEnabled,
+          requestSearch: config.searchEnabled,
           owner: input.userId,
         })
       : null;
@@ -257,7 +257,7 @@ export const prepareGenerationTools = (
     const imageResolver: ImageResolver | null =
       interactiveUi.images && fence && Option.isSome(imageAttachments)
         ? yield* makeImageResolver({
-            searchOn: permissions.webSearch && input.searchEnabled,
+            searchOn: permissions.webSearch && config.searchEnabled,
             settled: new Set(
               Object.keys((resuming && currentMessage?.assistantOutput?.images) || {}),
             ),

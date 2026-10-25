@@ -682,7 +682,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
             return {
               claimed: true,
               generationId,
-              searchEnabled: config.searchEnabled,
               orphanedKeys: orphanedKeys as ReadonlyArray<string>,
             };
           }),
@@ -819,7 +818,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
             return {
               claimed: true as const,
               generationId,
-              searchEnabled: config.searchEnabled,
             };
           }),
         )

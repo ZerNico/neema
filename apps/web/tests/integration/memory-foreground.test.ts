@@ -1,5 +1,5 @@
 import { EmptyWebSearch } from "./unused-services.ts";
-import { plainResolve } from "./plain-resolve.ts";
+import { plainResolve, setAttemptSearch } from "./plain-resolve.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response as AiResponse } from "effect/ai";
@@ -496,13 +496,13 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
         });
       }
 
+      yield* setAttemptSearch(turn.assistant.id, searchEnabled);
       yield* engine.startGeneration({
-        generationId: turn.assistant.generationId ?? undefined,
+        generationId: turn.assistant.generationId!,
         userId,
         conversationId: turn.conversation.id,
         messageId: turn.assistant.id,
         modelId,
-        searchEnabled,
       });
       const events = Array.from(
         yield* engine.subscribe(turn.assistant.id, 0).pipe(Stream.runCollect),
@@ -689,12 +689,11 @@ describe("StreamEngine durable clarification handoff", () => {
           },
         });
         yield* engine.startGeneration({
-          generationId: turn.assistant.generationId ?? undefined,
+          generationId: turn.assistant.generationId!,
           userId: result.userId,
           conversationId: turn.conversation.id,
           messageId: turn.assistant.id,
           modelId,
-          searchEnabled: false,
         });
         yield* engine.subscribe(turn.assistant.id, 0).pipe(Stream.runCollect);
         return {
@@ -986,12 +985,11 @@ describe("StreamEngine temporary chats", () => {
             attachmentIds: [],
           });
           yield* engine.startGeneration({
-            generationId: turn.assistant.generationId ?? undefined,
+            generationId: turn.assistant.generationId!,
             userId,
             conversationId: turn.conversation.id,
             messageId: turn.assistant.id,
             modelId,
-            searchEnabled: false,
           });
           const events = Array.from(
             yield* engine.subscribe(turn.assistant.id, 0).pipe(Stream.runCollect),

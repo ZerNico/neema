@@ -36,7 +36,7 @@ export const SettledCheckInterval = Context.Reference<Duration.Duration>(
   { defaultValue: () => Duration.seconds(15) },
 );
 
-type StartGenerationInput = GenerationInput & {
+export type StartGenerationInput = GenerationInput & {
   /**
    * Invoked inside the generation fiber once it reaches a terminal status.
    * The engine cannot reach the chat service, so queue dispatch arrives
@@ -288,15 +288,13 @@ export class StreamEngine extends Context.Service<
       ) {
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
-        if (!input.generationId || message?.generationId !== input.generationId) return;
-        const fence: GenerationIdentity | null = input.generationId
-          ? {
-              userId: input.userId,
-              conversationId: input.conversationId,
-              messageId: input.messageId,
-              generationId: input.generationId,
-            }
-          : null;
+        if (message?.generationId !== input.generationId) return;
+        const fence: GenerationIdentity = {
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          generationId: input.generationId,
+        };
         const owner: ExternalOwner | null =
           input.desktop && input.generationId
             ? {

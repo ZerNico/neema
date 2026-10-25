@@ -28,8 +28,8 @@ export interface GenerationInput {
   conversationId: string;
   messageId: string;
   modelId: string;
-  searchEnabled: boolean;
-  generationId?: string | undefined;
+  /** The attempt's own generation; a stale one finds its row moved on and stops. */
+  generationId: string;
   /**
    * The sending app's report, folder paths included. Never stored: the paths
    * exist for this attempt's prompt and tool traffic alone.

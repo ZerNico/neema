@@ -14,7 +14,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ChatRepo, type ResolveError } from "./repo.ts";
-import { StreamEngine } from "./streaming.ts";
+import { StreamEngine, type StartGenerationInput } from "./streaming.ts";
 import type { AttemptOptions } from "./attempt-options.ts";
 import type { DesktopSubmission } from "../schema.ts";
 import type { makeConversationLifecycle } from "./conversation-lifecycle.ts";
@@ -266,19 +266,16 @@ export const makeQueueService = (deps: {
         if (!outcome.promoted) return { started: false };
         yield* announceStarted(input.userId, input.conversationId, outcome.assistant.id);
         yield* queueChanged(input.userId, input.conversationId);
-        yield* engine.startGeneration({
+        yield* startAttempt({
           userId: input.userId,
           conversationId: input.conversationId,
           messageId: outcome.assistant.id,
-          generationId: outcome.assistant.generationId ?? undefined,
+          generationId: outcome.assistant.generationId,
           modelId: outcome.entry.input.modelId,
-          searchEnabled: outcome.config.searchEnabled,
           timeZone: outcome.entry.input.timeZone,
           openDocument: outcome.entry.input.openDocument,
           desktop: input.desktop,
           deviceSessionId: input.deviceSessionId,
-          onSettled: ({ status }) =>
-            status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
         });
         return { started: true };
       }).pipe(
@@ -337,6 +334,36 @@ export const makeQueueService = (deps: {
       return yield* dispatchQueuedMessage({ ...input, force: true });
     });
 
+    /**
+     * Starts an answer's generation. Once it completes cleanly the next queued
+     * message starts; a stop or a failure leaves the queue to the person.
+     * `onSettled` runs first, however the answer ended.
+     */
+    const startAttempt = (
+      input: Omit<StartGenerationInput, "generationId" | "onSettled"> & {
+        generationId: string | null | undefined;
+        onSettled?: Effect.Effect<void> | undefined;
+      },
+    ) =>
+      Effect.gen(function* () {
+        // Every answer row is written with its generation; only rows older
+        // than the column lack one, and those never start again.
+        if (!input.generationId)
+          return yield* Effect.die(new Error("An answer started without a generation"));
+        yield* engine.startGeneration({
+          ...input,
+          generationId: input.generationId,
+          onSettled: ({ status }) =>
+            (input.onSettled ?? Effect.void).pipe(
+              Effect.andThen(
+                status === "complete"
+                  ? drainQueue(input.userId, input.conversationId)
+                  : Effect.void,
+              ),
+            ),
+        });
+      });
+
     /** Dispatch that never fails its caller; the reason is already on the entry. */
     const drainQueue = (userId: string, conversationId: string): Effect.Effect<void> =>
       Effect.suspend(() => dispatchQueuedMessage({ userId, conversationId })).pipe(
@@ -354,6 +381,7 @@ export const makeQueueService = (deps: {
       dispatchQueuedMessage,
       sendQueuedNow,
       drainQueue,
+      startAttempt,
       startQueueSweeper,
     };
   });

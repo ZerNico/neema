@@ -1025,7 +1025,6 @@ export class ChatRepo extends Context.Service<
         claimed: boolean;
         orphanedKeys: ReadonlyArray<string>;
         generationId?: string | undefined;
-        searchEnabled?: boolean | undefined;
       },
       AttachmentNotAvailable | ResolveError | ConversationBusy
     >;
@@ -1040,7 +1039,7 @@ export class ChatRepo extends Context.Service<
       modelId: string;
       resolve: ResolveGeneration;
     }): Effect.Effect<
-      { claimed: false } | { claimed: true; generationId: string; searchEnabled: boolean },
+      { claimed: false } | { claimed: true; generationId: string },
       ResolveError | ConversationBusy
     >;
     createAssistantForEdit(

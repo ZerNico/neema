@@ -1,5 +1,5 @@
 import { EmptyWebSearch } from "./unused-services.ts";
-import { plainResolve } from "./plain-resolve.ts";
+import { plainResolve, setAttemptSearch } from "./plain-resolve.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
@@ -852,11 +852,8 @@ const generate = Effect.fn("test.generate")(function* (input: {
   const { searchEnabled = false, ...generation } = input;
   const repo = yield* ChatRepo;
   const message = yield* repo.getMessage(input.messageId);
-  yield* engine.startGeneration({
-    ...generation,
-    searchEnabled,
-    generationId: message?.generationId ?? undefined,
-  });
+  yield* setAttemptSearch(input.messageId, searchEnabled);
+  yield* engine.startGeneration({ ...generation, generationId: message!.generationId! });
   yield* engine.subscribe(input.messageId, 0).pipe(Stream.runDrain);
 });
 

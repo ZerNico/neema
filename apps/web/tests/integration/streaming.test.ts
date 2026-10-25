@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { plainResolve } from "./plain-resolve.ts";
+import { plainResolve, setAttemptSearch } from "./plain-resolve.ts";
 import { createHash } from "node:crypto";
 import {
   Deferred,
@@ -4659,9 +4659,8 @@ describe("queued turns", () => {
       userId: seed.userId,
       conversationId: seed.conversation.id,
       messageId: seed.assistant.id,
-      generationId: seed.assistant.generationId ?? undefined,
+      generationId: seed.assistant.generationId!,
       modelId: textModelId,
-      searchEnabled: false,
     });
     yield* waitForAnswer(seed.assistant.id);
     authoringScript = null;
@@ -4759,7 +4758,7 @@ describe("queued turns", () => {
             ) as Stream.Stream<ChatStreamPart>;
           };
           return yield* Effect.gen(function* () {
-            yield* engine.startGeneration({ ...fence, modelId: textModelId, searchEnabled: false });
+            yield* engine.startGeneration({ ...fence, modelId: textModelId });
             yield* Deferred.await(boundary);
             if (reason === "banned")
               yield* db
@@ -4931,9 +4930,8 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           modelId: textModelId,
-          searchEnabled: false,
         });
         yield* waitForAnswer(seed.assistant.id);
         authoringScript = null;
@@ -4976,9 +4974,8 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           modelId: textModelId,
-          searchEnabled: false,
         });
         yield* waitForAnswer(seed.assistant.id);
         authoringScript = null;
@@ -5035,9 +5032,8 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           modelId: imageModelId,
-          searchEnabled: false,
         });
         yield* waitForAnswer(seed.assistant.id);
         const continuation = streamPrompts.at(-1)!.content;
@@ -5210,9 +5206,8 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           modelId: textModelId,
-          searchEnabled: false,
         });
         yield* waitForAnswer(seed.assistant.id);
         const queue = yield* repo.listQueue(seed.conversation.id);
@@ -5272,9 +5267,8 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           modelId: textModelId,
-          searchEnabled: false,
         });
         yield* Deferred.await(reached);
         // The parked answer stays parked; only Stop may end it.
@@ -5574,12 +5568,11 @@ describe("resumable streaming pipeline", () => {
           scope: "history",
         });
         yield* engine.startGeneration({
-          generationId: seed.assistant.generationId ?? undefined,
+          generationId: seed.assistant.generationId!,
           userId: seed.userId,
           conversationId: seed.conversation.id,
           messageId: seed.assistant.id,
           modelId: "fake",
-          searchEnabled: false,
         });
         const events = yield* engine
           .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -5621,12 +5614,11 @@ describe("resumable streaming pipeline", () => {
           const db = yield* Db;
           const seed = yield* setupConversation;
           yield* engine.startGeneration({
-            generationId: seed.assistant.generationId ?? undefined,
+            generationId: seed.assistant.generationId!,
             userId: seed.userId,
             conversationId: seed.conversation.id,
             messageId: seed.assistant.id,
             modelId: "fake",
-            searchEnabled: false,
             desktop: {
               executorId: "test-executor",
               folders: [],
@@ -5729,12 +5721,11 @@ describe("resumable streaming pipeline", () => {
           const engine = yield* StreamEngine;
           const seed = yield* setupConversation;
           yield* engine.startGeneration({
-            generationId: seed.assistant.generationId ?? undefined,
+            generationId: seed.assistant.generationId!,
             userId: seed.userId,
             conversationId: seed.conversation.id,
             messageId: seed.assistant.id,
             modelId: "fake",
-            searchEnabled: false,
           });
           yield* engine.subscribe(seed.assistant.id, 0).pipe(Stream.runDrain);
         }),
@@ -5821,12 +5812,11 @@ describe("resumable streaming pipeline", () => {
             const release = yield* Deferred.make<void>();
             hold = { after: 2, reached, release };
             yield* engine.startGeneration({
-              generationId: seed.assistant.generationId ?? undefined,
+              generationId: seed.assistant.generationId!,
               userId: seed.userId,
               conversationId: seed.conversation.id,
               messageId: seed.assistant.id,
               modelId: "fake",
-              searchEnabled: false,
             });
             const events = yield* engine.subscribe(seed.assistant.id, 0).pipe(
               Stream.tap((event) =>
@@ -5872,12 +5862,11 @@ describe("resumable streaming pipeline", () => {
         const { userId, conversation, assistant } = yield* setupConversation;
 
         yield* engine.startGeneration({
-          generationId: assistant.generationId ?? undefined,
+          generationId: assistant.generationId!,
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
           modelId: "fake",
-          searchEnabled: false,
         });
 
         // Live subscriber from the start
@@ -5926,12 +5915,11 @@ describe("resumable streaming pipeline", () => {
         hold = { after: 3, reached, release };
 
         yield* engine.startGeneration({
-          generationId: assistant.generationId ?? undefined,
+          generationId: assistant.generationId!,
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
           modelId: "fake",
-          searchEnabled: false,
         });
 
         // Subscribed before the stop so the terminal event is observed live,
@@ -6074,7 +6062,7 @@ describe("resumable streaming pipeline", () => {
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
-          generationId: assistant.generationId ?? undefined,
+          generationId: assistant.generationId!,
         });
         const settled = yield* repo.getMessage(assistant.id);
         const toolCalls = yield* repo.listToolCalls([assistant.id]);
@@ -6180,12 +6168,11 @@ describe("resumable streaming pipeline", () => {
           }).pipe(Effect.andThen(Deferred.interrupt(release))),
         );
         yield* engine.startGeneration({
-          generationId: assistant.generationId ?? undefined,
+          generationId: assistant.generationId!,
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
           modelId: "fake",
-          searchEnabled: false,
         });
         yield* Deferred.await(reached);
         // Wait for the buffered chunks to land first: while any remain, a
@@ -7316,9 +7303,8 @@ describe("generated image streaming", () => {
                 userId,
                 conversationId: conversation.id,
                 messageId: message.id,
-                generationId: message.generationId ?? undefined,
+                generationId: message.generationId!,
                 modelId: imageModelId,
-                searchEnabled: false,
               })
               .pipe(
                 Effect.andThen(
@@ -7438,9 +7424,8 @@ describe("generated image streaming", () => {
           userId,
           conversationId: conversation.id,
           messageId: assistant.id,
-          generationId: assistant.generationId ?? undefined,
+          generationId: assistant.generationId!,
           modelId: imageModelId,
-          searchEnabled: false,
         });
         const live = Array.from(
           yield* engine
@@ -7506,13 +7491,13 @@ describe("ui block images", () => {
     Effect.gen(function* () {
       const engine = yield* StreamEngine;
       const seed = yield* setupConversation;
+      yield* setAttemptSearch(seed.assistant.id, searchEnabled);
       yield* engine.startGeneration({
         userId: seed.userId,
         conversationId: seed.conversation.id,
         messageId: seed.assistant.id,
-        generationId: seed.assistant.generationId ?? undefined,
+        generationId: seed.assistant.generationId!,
         modelId: textModelId,
-        searchEnabled,
       });
       const events = yield* engine
         .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -7635,9 +7620,8 @@ describe("ui block maps", () => {
             userId: seed.userId,
             conversationId: seed.conversation.id,
             messageId: seed.assistant.id,
-            generationId: seed.assistant.generationId ?? undefined,
+            generationId: seed.assistant.generationId!,
             modelId: textModelId,
-            searchEnabled: false,
           });
           const events = yield* engine
             .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -7679,9 +7663,8 @@ describe("ui block maps", () => {
               userId: seed.userId,
               conversationId: seed.conversation.id,
               messageId: seed.assistant.id,
-              generationId: seed.assistant.generationId ?? undefined,
+              generationId: seed.assistant.generationId!,
               modelId: textModelId,
-              searchEnabled: false,
             });
             yield* engine
               .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -7718,9 +7701,8 @@ describe("interactive answers setting", () => {
         userId: seed.userId,
         conversationId: seed.conversation.id,
         messageId: seed.assistant.id,
-        generationId: seed.assistant.generationId ?? undefined,
+        generationId: seed.assistant.generationId!,
         modelId: textModelId,
-        searchEnabled: false,
       });
       yield* engine
         .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -7793,9 +7775,8 @@ describe("terminal response validation", () => {
               userId,
               conversationId: conversation.id,
               messageId: assistant.id,
-              generationId: assistant.generationId ?? undefined,
+              generationId: assistant.generationId!,
               modelId: textModelId,
-              searchEnabled: false,
             });
             const events = yield* engine
               .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
@@ -7864,9 +7845,8 @@ describe("terminal response validation", () => {
               userId,
               conversationId: conversation.id,
               messageId: assistant.id,
-              generationId: assistant.generationId ?? undefined,
+              generationId: assistant.generationId!,
               modelId: imageModelId,
-              searchEnabled: false,
             });
             const events = yield* engine
               .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
@@ -7948,9 +7928,8 @@ for (const presented of [true, false]) {
             userId,
             conversationId: conversation.id,
             messageId: assistant.id,
-            generationId: assistant.generationId ?? undefined,
+            generationId: assistant.generationId!,
             modelId: imageModelId,
-            searchEnabled: false,
           });
           const events = yield* engine
             .subscribe(assistant.id, 0, assistant.generationId ?? undefined)
@@ -8421,7 +8400,7 @@ describe("custom tool calls", () => {
             userId,
             conversationId,
             messageId: assistantMessageId,
-            generationId: assistant!.generationId ?? undefined,
+            generationId: assistant!.generationId!,
           });
           expect(stopped).toBe(true);
           yield* Effect.flatMap(StreamEngine, (engine) =>
