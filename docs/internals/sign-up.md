@@ -66,9 +66,11 @@ new. Nothing is instance-wide except the domain list, verification, and the boot
 - `auth_settings.password_login` off refuses every password endpoint (sign-in, sign-up, reset)
   in a `before` hook, read per request. Setup is the exception, since the first account has
   nothing else to sign in with.
-- An admin can only turn it off while their own account has a linked provider that is enabled.
-  While it is off, nobody can unlink their last account on an enabled provider, and an admin
-  cannot switch off or delete the last enabled provider.
+- One rule guards every change that could lock someone out (`keepsWayIn`): turning passwords
+  off, switching off or deleting a provider, and unlinking an account are refused when the
+  person making the change would be left with no way in, which is a password of their own while
+  passwords are on, or an account on an enabled provider. Whether other people keep a way in is
+  the admin's call.
 - `AUTH_PASSWORD_LOGIN=force` keeps password sign-in on and lifts the verification requirement,
   for the day the identity provider or the mail server breaks. Every reader of the requirement
   asks `verificationRequired()`, never the stored flag, so admission, email lookups and the

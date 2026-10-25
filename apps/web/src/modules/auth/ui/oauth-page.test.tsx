@@ -115,9 +115,9 @@ const pick = async (user: ReturnType<typeof userEvent.setup>, field: string, opt
 
 beforeEach(() => {
   vi.clearAllMocks();
-  saveBuiltin.mockResolvedValue({ ok: true } as never);
-  saveOidc.mockResolvedValue({ ok: true } as never);
-  setEnabled.mockResolvedValue({ ok: true } as never);
+  saveBuiltin.mockResolvedValue({} as never);
+  saveOidc.mockResolvedValue({} as never);
+  setEnabled.mockResolvedValue(undefined as never);
   remove.mockResolvedValue(undefined as never);
   saveSettings.mockResolvedValue(undefined as never);
 });

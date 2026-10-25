@@ -11,7 +11,7 @@ import { cimd } from "@better-auth/cimd";
 import { mcp as mcpProvider } from "@better-auth/mcp";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
@@ -21,6 +21,7 @@ import { SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
 import { passwordLoginForced } from "./password-login.ts";
+import { NO_WAY_IN } from "./way-in.ts";
 import {
   resetPasswordMail,
   verifyEmailMail,
@@ -125,6 +126,8 @@ export interface SignupGate {
   passwordAllowed: () => Promise<boolean>;
   /** Whether an existing account may use the app; missing approvals are reconciled first. */
   approved: (userId: string) => Promise<boolean>;
+  /** Whether this person could still sign in after unlinking that account row. */
+  keepsWayIn: (userId: string, change: { unlinking: string }) => Promise<boolean>;
 }
 
 const openSignup: SignupGate = {
@@ -133,6 +136,7 @@ const openSignup: SignupGate = {
   verified: async () => {},
   passwordAllowed: async () => true,
   approved: async () => true,
+  keepsWayIn: async () => true,
 };
 
 /**
@@ -406,8 +410,9 @@ export function createAppAuth({
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === "/unlink-account") {
-          // Leaving an exclusive provider would hand the account back to a password.
+          // The account row's own id, which is what Better Auth unlinks by.
           const leaving = String((ctx.body as { accountId?: unknown } | undefined)?.accountId);
+          // Leaving an exclusive provider would hand the account back to a password.
           const [bound] = await db
             .select({ id: schema.account.id })
             .from(schema.account)
@@ -422,28 +427,10 @@ export function createAppAuth({
             .where(eq(schema.account.id, leaving));
           if (bound)
             throw new APIError("FORBIDDEN", { message: "This sign-in can’t be disconnected." });
-        }
-        if (ctx.path === "/unlink-account" && !(await signup.passwordAllowed())) {
-          // Without passwords, the last account on an enabled provider is the only way back in.
           const session = await getAuthoritativeSessionFromCtx(ctx);
-          if (!session) return;
-          // The account row's own id, which is what Better Auth unlinks by.
-          const leaving = String((ctx.body as { accountId?: unknown } | undefined)?.accountId);
-          const [left] = await db
-            .select({ n: count() })
-            .from(schema.account)
-            .innerJoin(
-              schema.oauthProviders,
-              and(
-                eq(schema.oauthProviders.id, schema.account.providerId),
-                eq(schema.oauthProviders.enabled, true),
-              ),
-            )
-            .where(and(eq(schema.account.userId, session.user.id), ne(schema.account.id, leaving)));
-          if ((left?.n ?? 0) === 0)
-            throw new APIError("FORBIDDEN", {
-              message: "Connect another sign-in first. Passwords are turned off.",
-            });
+          if (!session) return; // The endpoint owns unauthenticated errors.
+          if (!(await signup.keepsWayIn(session.user.id, { unlinking: leaving })))
+            throw new APIError("FORBIDDEN", { message: NO_WAY_IN });
           return;
         }
         if (PASSWORD_PATHS.some((path) => ctx.path.startsWith(path))) {

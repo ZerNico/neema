@@ -156,6 +156,7 @@ beforeAll(async () => {
       admit: async ({ emailVerified }) => ({ allowed: true, emailVerified }),
       verified: async () => {},
       passwordAllowed: async () => true,
+      keepsWayIn: async () => true,
       record: async () => {},
       approved: async (userId) => !pending.has(userId),
     },

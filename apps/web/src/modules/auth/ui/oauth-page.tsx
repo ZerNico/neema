@@ -7,7 +7,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { toast } from "sonner";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
@@ -69,13 +68,7 @@ export function OAuthPage() {
   const toggle = useMutation({
     mutationFn: (input: { id: string; enabled: boolean }) =>
       setOAuthProviderEnabled({ data: input }),
-    onSuccess: async (result) => {
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      await invalidate();
-    },
+    onSuccess: invalidate,
     onError: (error) => toastError("Could not update the provider.", error),
   });
 

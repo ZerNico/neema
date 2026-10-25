@@ -28,6 +28,7 @@ import { createAppAuth, type AuthMail } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { makeSignupGate } from "~/modules/auth/server/signup-gate.ts";
 import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
+import { keepsWayIn, NO_WAY_IN, type WayInChange } from "~/modules/auth/server/way-in.ts";
 import type { AuthSettings, SignupMode } from "~/modules/auth/signup.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
@@ -694,6 +695,74 @@ describe("each way in", () => {
     );
     expect(allowed.status).toBe(200);
     expect(await db.select().from(account).where(eq(account.providerId, "work"))).toHaveLength(0);
+  });
+});
+
+describe("keeping the acting person a way in", () => {
+  const link = async (userId: string, providerId: string) => {
+    const id = uuidv7();
+    await db.insert(account).values({
+      id,
+      accountId: `${providerId}-subject`,
+      providerId,
+      userId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return id;
+  };
+  const keeps = (userId: string, change: WayInChange) =>
+    runtime.runPromise(keepsWayIn(userId, change));
+
+  it("refuses passwords off to an admin whose only provider is switched off", async () => {
+    const founder = (await signUp("founder")).body.user.id as string;
+    await addProvider("old", "approval");
+    await link(founder, "old");
+    expect(await keeps(founder, { passwordLogin: false })).toBe(true);
+    await runtime.runPromise(Effect.flatMap(OAuthRepo, (repo) => repo.setEnabled("old", false)));
+    expect(await keeps(founder, { passwordLogin: false })).toBe(false);
+  });
+
+  it("refuses switching off or deleting the admin's own provider while another sits unused", async () => {
+    const founder = (await signUp("founder")).body.user.id as string;
+    await addProvider("mine", "approval");
+    await addProvider("unused", "approval");
+    await link(founder, "mine");
+    await configure({ passwordLogin: false });
+    expect(await keeps(founder, { providerOff: "mine" })).toBe(false);
+    expect(await keeps(founder, { providerOff: "unused" })).toBe(true);
+    // Passwords on, the founder's own password is a way back.
+    await configure({ passwordLogin: true });
+    expect(await keeps(founder, { providerOff: "mine" })).toBe(true);
+    // A password is no way in for an account that has none.
+    await db.delete(account).where(eq(account.providerId, "credential"));
+    expect(await keeps(founder, { providerOff: "mine" })).toBe(false);
+
+    process.env.AUTH_PASSWORD_LOGIN = "force";
+    try {
+      expect(await keeps(founder, { providerOff: "mine" })).toBe(true);
+    } finally {
+      delete process.env.AUTH_PASSWORD_LOGIN;
+    }
+  });
+
+  it("refuses unlinking the account's own provider while another sits unused", async () => {
+    const founder = (await signUp("founder")).body.user.id as string;
+    await addProvider("mine", "approval");
+    await addProvider("unused", "approval");
+    const mine = await link(founder, "mine");
+    const { cookie } = await signIn("founder@example.test");
+    await configure({ passwordLogin: false });
+    const unlink = await auth.handler(
+      new Request(`${origin}/api/auth/unlink-account`, {
+        method: "POST",
+        headers: { origin, cookie, "content-type": "application/json" },
+        body: JSON.stringify({ accountId: mine }),
+      }),
+    );
+    expect(unlink.status).toBe(403);
+    expect((await unlink.json()).message).toBe(NO_WAY_IN);
+    expect(await db.select().from(account).where(eq(account.id, mine))).toHaveLength(1);
   });
 });
 

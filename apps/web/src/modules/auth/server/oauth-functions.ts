@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { publicUrl } from "~/server/public-url.ts";
-import { runtime } from "~/server/runtime.ts";
+import { refuse } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   findBuiltin,
@@ -12,46 +12,29 @@ import {
   SetOAuthProviderEnabledInput,
 } from "../oauth.ts";
 import { invalidateAuth } from "./auth.ts";
-import { passwordLoginForced } from "./password-login.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo, type UpsertOAuthProvider } from "./oauth-repo.ts";
-import { SignupRepo } from "./signup-repo.ts";
-import { refuse } from "~/server/refusal.ts";
+import { requireWayIn } from "./way-in.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-const LAST_WAY_IN = "Turn on password sign-in before switching off the last provider.";
-
-/** With passwords off, the last enabled provider is everyone's only way in. */
-const isLastWayIn = (id: string) =>
-  Effect.gen(function* () {
-    if (passwordLoginForced()) return false;
-    if ((yield* Effect.flatMap(SignupRepo, (repo) => repo.settings())).passwordLogin) return false;
-    const providers = yield* Effect.flatMap(OAuthRepo, (repo) => repo.list());
-    return !providers.some((p) => p.enabled && p.id !== id);
-  });
-
-const save = (input: UpsertOAuthProvider) =>
-  runtime
-    .runPromise(
-      Effect.gen(function* () {
-        const repo = yield* OAuthRepo;
-        if (!input.enabled && (yield* isLastWayIn(input.id)))
-          return { ok: false as const, error: LAST_WAY_IN };
-        if (input.enabled && !input.secret) {
-          const stored = (yield* repo.list()).find((p) => p.id === input.id);
-          if (!stored?.secretConfigured) {
-            return { ok: false as const, error: "Enter the client secret before enabling this." };
-          }
-        }
-        const provider = yield* repo.upsert(input);
-        return { ok: true as const, provider };
-      }),
-    )
-    .then((result) => {
-      if (result.ok) invalidateAuth();
-      return result;
-    });
+/** Every refusal here is thrown, so the page reads each one from the error alone. */
+const save = async (actorId: string, input: UpsertOAuthProvider) => {
+  const provider = await runServerFn(
+    Effect.gen(function* () {
+      const repo = yield* OAuthRepo;
+      if (!input.enabled) yield* requireWayIn(actorId, { providerOff: input.id });
+      if (input.enabled && !input.secret) {
+        const stored = (yield* repo.list()).find((p) => p.id === input.id);
+        if (!stored?.secretConfigured)
+          return yield* refuse(400, "Enter the client secret before enabling this.");
+      }
+      return yield* repo.upsert(input);
+    }),
+  );
+  invalidateAuth();
+  return provider;
+};
 
 /**
  * The callback URL rides along because every provider console asks for it and
@@ -69,15 +52,15 @@ export const listOAuthProviders = createServerFn({ method: "GET" })
 export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SaveBuiltinProviderInput))
-  .handler(({ data }) => {
+  .handler(({ data, context }) => {
     const builtin = findBuiltin(data.id);
-    if (!builtin) return Promise.resolve({ ok: false as const, error: "Unknown provider." });
+    if (!builtin) return runServerFn(refuse(400, "Unknown provider."));
     const config: Record<string, JsonValue> = {};
     // Only the field this provider actually reads is stored, so switching
     // catalogue entries cannot leave another provider's setting behind.
     if (builtin.field?.key === "tenantId" && data.tenantId) config.tenantId = data.tenantId;
     if (builtin.field?.key === "issuer" && data.issuer) config.issuer = data.issuer;
-    return save({
+    return save(context.session.user.id, {
       id: builtin.id,
       kind: "builtin",
       label: builtin.label,
@@ -94,14 +77,10 @@ export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
 export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SaveOidcProviderInput))
-  .handler(({ data }) => {
-    if (findBuiltin(data.id)) {
-      return Promise.resolve({
-        ok: false as const,
-        error: `"${data.id}" is reserved for the built-in provider.`,
-      });
-    }
-    return save({
+  .handler(({ data, context }) => {
+    if (findBuiltin(data.id))
+      return runServerFn(refuse(400, `"${data.id}" is reserved for the built-in provider.`));
+    return save(context.session.user.id, {
       id: data.id,
       kind: "oidc",
       label: data.label,
@@ -118,36 +97,29 @@ export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
 export const setOAuthProviderEnabled = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(SetOAuthProviderEnabledInput))
-  .handler(({ data }) =>
-    runtime
-      .runPromise(
-        Effect.gen(function* () {
-          const repo = yield* OAuthRepo;
-          const stored = (yield* repo.list()).find((p) => p.id === data.id);
-          if (!stored) return { ok: false as const, error: "That provider is gone." };
-          if (!data.enabled && (yield* isLastWayIn(data.id)))
-            return { ok: false as const, error: LAST_WAY_IN };
-          if (data.enabled && !stored.secretConfigured) {
-            return { ok: false as const, error: "Add the client secret before enabling this." };
-          }
-          yield* repo.setEnabled(data.id, data.enabled);
-          return { ok: true as const };
-        }),
-      )
-      .then((result) => {
-        if (result.ok) invalidateAuth();
-        return result;
+  .handler(async ({ data, context }) => {
+    await runServerFn(
+      Effect.gen(function* () {
+        const repo = yield* OAuthRepo;
+        const stored = (yield* repo.list()).find((p) => p.id === data.id);
+        if (!stored) return yield* refuse(409, "That provider is gone.");
+        if (!data.enabled) yield* requireWayIn(context.session.user.id, { providerOff: data.id });
+        if (data.enabled && !stored.secretConfigured)
+          return yield* refuse(400, "Add the client secret before enabling this.");
+        yield* repo.setEnabled(data.id, data.enabled);
       }),
-  );
+    );
+    invalidateAuth();
+  });
 
 export const deleteOAuthProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(OAuthProviderId))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     await runServerFn(
       Effect.gen(function* () {
-        if (yield* isLastWayIn(data.id)) return yield* refuse(409, LAST_WAY_IN);
-        yield* Effect.flatMap(OAuthRepo, (repo) => repo.remove(data.id));
+        yield* requireWayIn(context.session.user.id, { providerOff: data.id });
+        yield* OAuthRepo.use((repo) => repo.remove(data.id));
       }),
     );
     invalidateAuth();

@@ -89,6 +89,7 @@ beforeAll(async () => {
       admit: async ({ emailVerified }) => ({ allowed: true, emailVerified }),
       verified: async () => {},
       passwordAllowed: async () => true,
+      keepsWayIn: async () => true,
       record: async ({ userId }) => {
         await db.insert(userApprovals).values({ userId, status: "approved" });
       },

@@ -1,9 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
-import { account, oauthProviders } from "~/db/schema/index.ts";
 import { MailService } from "~/modules/notifications/server/mail.ts";
-import { Db } from "~/server/db.ts";
 import { refuse } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
@@ -18,6 +15,7 @@ import { passwordLoginForced, verificationRequired } from "./password-login.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
+import { requireWayIn } from "./way-in.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -74,9 +72,9 @@ export const getAuthSettings = createServerFn({ method: "GET" })
   );
 
 /**
- * Turning password sign-in off is refused to an admin who could not sign in
- * any other way, since the next sign-out would lock them out. The operator's
- * way back beyond that is `AUTH_PASSWORD_LOGIN=force`.
+ * Turning password sign-in off is refused to an admin it would lock out, as
+ * switching off a provider and unlinking are. The operator's way back beyond
+ * that is `AUTH_PASSWORD_LOGIN=force`.
  */
 export const saveAuthSettings = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -92,23 +90,8 @@ export const saveAuthSettings = createServerFn({ method: "POST" })
           if (!context.session.user.emailVerified)
             return yield* refuse(409, "Verify your own email under Profile first");
         }
-        if (current.passwordLogin && !data.passwordLogin && !passwordLoginForced()) {
-          const db = yield* Db;
-          const [linked] = yield* db
-            .select({ id: account.id })
-            .from(account)
-            .innerJoin(oauthProviders, eq(oauthProviders.id, account.providerId))
-            .where(
-              and(eq(account.userId, context.session.user.id), eq(oauthProviders.enabled, true)),
-            )
-            .limit(1)
-            .pipe(Effect.orDie);
-          if (!linked)
-            return yield* refuse(
-              409,
-              "Connect a sign-in provider to your account before turning off passwords",
-            );
-        }
+        if (current.passwordLogin && !data.passwordLogin)
+          yield* requireWayIn(context.session.user.id, { passwordLogin: false });
         yield* Effect.flatMap(SignupRepo, (repo) => repo.saveSettings(data));
       }),
     );

@@ -22,6 +22,7 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
+import { readServerError } from "~/server-error.ts";
 import { findBuiltin, OIDC_DEFAULT_SCOPES, type OAuthBuiltin } from "../oauth.ts";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
@@ -147,15 +148,12 @@ export function OAuthProviderDialog({
             },
           });
     },
-    onSuccess: async (result) => {
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "oauth"] });
       onOpenChange(false);
     },
-    onError: () => setError("Could not save the provider."),
+    onError: (failure) =>
+      setError(readServerError(failure).reason ?? "Could not save the provider."),
   });
 
   return (

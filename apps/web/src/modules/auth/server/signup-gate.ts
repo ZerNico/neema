@@ -4,6 +4,7 @@ import { passwordLoginForced, verificationRequired } from "./password-login.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
+import { keepsWayIn } from "./way-in.ts";
 import { Db } from "~/server/db.ts";
 import { emailDomain, type AuthSettings, type SignupMode } from "../signup.ts";
 
@@ -98,4 +99,6 @@ export const makeSignupGate = (run: Run): SignupGate => ({
         ),
 
   approved: (userId) => run(accountEligible(userId)),
+
+  keepsWayIn: (userId, change) => run(keepsWayIn(userId, change)),
 });
