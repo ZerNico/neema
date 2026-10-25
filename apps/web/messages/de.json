@@ -208,8 +208,13 @@
   "custom_tools_editor_function": "Funktion",
   "custom_tools_editor_function_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} Funktion:",
         "countPlural=*": "{count} Funktionen:"
@@ -227,8 +232,13 @@
   "custom_tools_editor_parameter_schema": "Parameterschema",
   "custom_tools_editor_problem_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} Problem",
         "countPlural=*": "{count} Probleme"
@@ -259,8 +269,13 @@
   "custom_tools_error_slug_taken": "Der Slug {slug} wird schon verwendet.",
   "custom_tools_list_dependency_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} Abhängigkeit",
         "countPlural=*": "{count} Abhängigkeiten"
@@ -273,8 +288,13 @@
   "custom_tools_list_empty_title": "Noch keine Module",
   "custom_tools_list_function_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} Funktion",
         "countPlural=*": "{count} Funktionen"
@@ -907,7 +927,137 @@
   "spreadsheets_preview_sheet_failed": "Das Tabellenblatt konnte nicht geladen werden. Lade das Original herunter, um es anderswo zu öffnen.",
   "spreadsheets_preview_sheets": "Tabellenblatt",
   "spreadsheets_preview_truncated": "Angezeigt wird der Anfang des Tabellenblatts.",
+  "tools_error_research_needs_search": "Die Recherche braucht die Websuche, die du nicht nutzen darfst",
+  "tools_error_research_not_permitted": "Du darfst die Recherche nicht nutzen",
+  "tools_error_url_reader_off": "Das Lesen verlinkter Seiten ist ausgeschaltet",
+  "tools_error_web_search_not_configured": "Die Websuche ist nicht eingerichtet",
+  "tools_error_web_search_not_permitted": "Du darfst die Websuche nicht nutzen",
+  "tools_error_web_search_off": "Die Websuche ist ausgeschaltet",
   "tools_error_web_search_unavailable": "Websuche nicht verfügbar: {reason}",
+  "tools_field_between": "Zwischen {min} und {max}.",
+  "tools_field_invalid": "Ungültig",
+  "tools_field_whole_number": "Gib eine ganze Zahl ein.",
+  "tools_image_description": "Lässt das Modell mit dem Bildmodell zeichnen, das jede Person wählt. Bildmodelle fügst du unter Anbieter hinzu.",
+  "tools_image_error_update": "Die Einstellung für die Bildgenerierung konnte nicht geändert werden.",
+  "tools_image_label": "Bilder erstellen und bearbeiten",
+  "tools_image_title": "Bildgenerierung",
+  "tools_image_toggle": "Bildgenerierung aktiviert",
+  "tools_interactive_description": "Lässt das Modell mit Rechnern, Diagrammen, Zeichnungen und anderen Bedienelementen antworten, die man direkt nutzen kann.",
+  "tools_interactive_error_update": "Die Einstellung für interaktive Antworten konnte nicht geändert werden.",
+  "tools_interactive_images_description": "Sucht per Websuche Bilder für interaktive Antworten.",
+  "tools_interactive_images_label": "Bilder",
+  "tools_interactive_images_toggle": "Bilder in interaktiven Antworten",
+  "tools_interactive_label": "Interaktive Antworten",
+  "tools_interactive_title": "Interaktive Antworten",
+  "tools_interactive_toggle": "Interaktive Antworten aktiviert",
+  "tools_maps_description": "Sucht Orte und Routen für Antworten und zeichnet sie in interaktive Antworten.",
+  "tools_maps_error_save": "Die Kartendienste konnten nicht gespeichert werden.",
+  "tools_maps_error_update": "Die Einstellung für Karten konnte nicht geändert werden.",
+  "tools_maps_geocoder": "Ortssuche",
+  "tools_maps_label": "Karten",
+  "tools_maps_routing": "Routenplanung",
+  "tools_maps_style_dark": "Kartenstil dunkel",
+  "tools_maps_style_light": "Kartenstil hell",
+  "tools_maps_title": "Karten",
+  "tools_maps_toggle": "Karten aktiviert",
+  "tools_maps_url_invalid": "Gib eine URL ein, die mit https:// beginnt.",
+  "tools_memory_description": "Lässt Modelle nutzen, was sie über eine Person gespeichert haben, und im Chat Neues speichern. Ihre eigenen Erinnerungen kann jede Person auch dann verwalten, wenn das aus ist.",
+  "tools_memory_error_update": "Die Einstellung für Erinnerungen konnte nicht geändert werden.",
+  "tools_memory_label": "Erinnerungen des Assistenten",
+  "tools_memory_title": "Erinnerungen",
+  "tools_memory_toggle": "Erinnerungen aktiviert",
+  "tools_office_description": "Lässt das Modell PowerPoint-Präsentationen, Excel-Arbeitsmappen und Word-Dokumente erstellen und ändern, seine Arbeit prüfen und die Datei liefern.",
+  "tools_office_error_update": "Die Einstellung für Office-Dateien konnte nicht geändert werden.",
+  "tools_office_label": "Office-Dateien erstellen und bearbeiten",
+  "tools_office_title": "Office-Dateien",
+  "tools_office_toggle": "Office-Dateien aktiviert",
+  "tools_page_description": "Web-Tools, Erinnerungen, Office-Dateien, interaktive Antworten und Karten für Chats.",
+  "tools_page_title": "Tools",
+  "tools_providers_add": "Anbieter hinzufügen",
+  "tools_providers_api_key": "API-Schlüssel",
+  "tools_providers_base_url": "Basis-URL",
+  "tools_providers_bearer_token": "Bearer-Token",
+  "tools_providers_clear_secret": "Entfernen",
+  "tools_providers_description": "Suchen beginnen oben und gehen nur dann weiter nach unten, wenn ein Anbieter ausfällt. Mehrere derselben Art gehen auch, z. B. zwei Schlüssel, um Gratiskontingente zu kombinieren.",
+  "tools_providers_dialog_add": "Anbieter hinzufügen",
+  "tools_providers_dialog_add_title": "Suchanbieter hinzufügen",
+  "tools_providers_dialog_description": "Schlüssel werden verschlüsselt gespeichert und nie wieder angezeigt.",
+  "tools_providers_dialog_edit_title": "{name} bearbeiten",
+  "tools_providers_edit_label": "{name} bearbeiten",
+  "tools_providers_empty": "Füge einen Anbieter hinzu, um die Websuche einzuschalten.",
+  "tools_providers_error_clear": "Das Token konnte nicht entfernt werden.",
+  "tools_providers_error_kind_fixed": "Die Art eines Anbieters lässt sich nicht ändern. Füge stattdessen einen neuen Anbieter hinzu.",
+  "tools_providers_error_list_changed": "Die Anbieterliste hat sich geändert. Lade neu und versuch es noch mal.",
+  "tools_providers_error_order": "Die Reihenfolge konnte nicht gespeichert werden.",
+  "tools_providers_error_remove": "Der Anbieter konnte nicht entfernt werden.",
+  "tools_providers_error_save": "Der Anbieter konnte nicht gespeichert werden.",
+  "tools_providers_error_secret_needed": "Dieser Anbieter braucht einen API-Schlüssel. Gib einen neuen ein, statt ihn zu entfernen.",
+  "tools_providers_error_secret_required": "Gib den API-Schlüssel ein.",
+  "tools_providers_error_test": "Der Anbieter konnte nicht getestet werden.",
+  "tools_providers_error_update": "Der Anbieter konnte nicht aktualisiert werden.",
+  "tools_providers_get_key": "Einen Schlüssel bekommst du bei {host}.",
+  "tools_providers_keep_secret": "Lass das Feld leer, um den gespeicherten zu behalten.",
+  "tools_providers_kind": "Anbieter",
+  "tools_providers_name_description": "Unterscheidet mehrere Anbieter derselben Art.",
+  "tools_providers_note_brave": "Für das Gratisguthaben von Brave musst du öffentlich angeben, dass die Ergebnisse von Brave stammen.",
+  "tools_providers_note_searxng": "Deine eigene Instanz. Ihre JSON-Ausgabe muss in settings.yml aktiviert sein.",
+  "tools_providers_reason_auth": "Schlüssel abgelehnt",
+  "tools_providers_reason_quota": "Guthaben aufgebraucht",
+  "tools_providers_reason_rate_limited": "Ratenlimit erreicht",
+  "tools_providers_reason_rejected": "Letzte Anfrage abgelehnt",
+  "tools_providers_reason_unavailable": "Antwortet nicht",
+  "tools_providers_remove_description": "Sein gespeicherter Schlüssel wird mit gelöscht.",
+  "tools_providers_remove_label": "{name} entfernen",
+  "tools_providers_remove_title": "„{name}“ entfernen?",
+  "tools_providers_secret_unchanged": "Unverändert",
+  "tools_providers_status_cooling": "{reason}, bis {time} als Letztes versucht",
+  "tools_providers_status_off": "Aus",
+  "tools_providers_test": "Testen",
+  "tools_providers_test_failed": "Hat nicht funktioniert: {error}",
+  "tools_providers_test_works": [
+    {
+      "declarations": [
+        "input count",
+        "input latency",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Funktioniert: {count} Ergebnis in {latency} ms.",
+        "countPlural=*": "Funktioniert: {count} Ergebnisse in {latency} ms."
+      }
+    }
+  ],
+  "tools_providers_title": "Anbieter",
+  "tools_providers_toggle": "{name} aktiviert",
+  "tools_scans_error_api_key": "Gib einen API-Schlüssel für den OCR-Dienst ein.",
+  "tools_scans_error_base_url": "Gib die Basis-URL des OCR-Dienstes ein. Sie muss mit https:// beginnen.",
+  "tools_scans_error_platform": "Dieser Server kann gescannte Seiten auf seiner Plattform nicht selbst lesen.",
+  "tools_scans_error_vision_model": "Wähle ein aktiviertes, öffentliches Modell, das Bilder sehen kann.",
+  "tools_scans_test_api_key": "Gib einen API-Schlüssel ein.",
+  "tools_scans_test_base_url": "Gib eine Basis-URL ein, die mit https:// beginnt.",
+  "tools_scans_test_not_read": "Der Dienst hat geantwortet, die Beispielseite aber nicht gelesen.",
+  "tools_source_document_excerpt": "Dokumentauszug",
+  "tools_source_page": "Seite {page}",
+  "tools_url_reader_char_cap": "Zeichenlimit pro Seite",
+  "tools_url_reader_description": "Lässt das Modell Links aus deinen Nachrichten und Suchergebnissen öffnen und lesen, was auf der Seite steht.",
+  "tools_url_reader_error_save": "Die Einstellungen des URL-Lesers konnten nicht gespeichert werden.",
+  "tools_url_reader_error_update": "Die Einstellung für den URL-Leser konnte nicht geändert werden.",
+  "tools_url_reader_label": "Verlinkte Seiten lesen",
+  "tools_url_reader_title": "URL-Leser",
+  "tools_url_reader_toggle": "URL-Leser aktiviert",
+  "tools_web_search_description": "Liefert Titel und Ausschnitte von den Anbietern unten. Jedes Chatmodell kann die Websuche nutzen.",
+  "tools_web_search_error_save": "Die Einstellungen der Websuche konnten nicht gespeichert werden.",
+  "tools_web_search_error_update": "Die Einstellung für die Websuche konnte nicht geändert werden.",
+  "tools_web_search_label": "Websuche",
+  "tools_web_search_max_results": "Maximale Ergebnisse pro Suchanfrage",
+  "tools_web_search_max_results_description": "Manche Anbieter liefern höchstens zehn pro Anfrage.",
+  "tools_web_search_research_queries": "Suchanfragen pro Recherche",
+  "tools_web_search_research_queries_description": "Eine Obergrenze für die ganze Recherche, kein Ziel. Gilt ab der nächsten gestarteten Recherche.",
+  "tools_web_search_title": "Websuche",
+  "tools_web_search_toggle": "Websuche aktiviert",
   "ui_color_hex": "Hex-Farbe",
   "ui_color_hue": "Farbton",
   "ui_color_saturation": "Sättigung und Helligkeit",

@@ -1,11 +1,14 @@
 import type { AnyFieldApi } from "@tanstack/react-form";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { m } from "~/paraglide/messages.js";
 
 const fieldErrors = (field: AnyFieldApi) =>
   field.state.meta.errors.map((e: unknown) => ({
     message:
-      typeof e === "string" ? e : ((e as { message?: string } | undefined)?.message ?? "Invalid"),
+      typeof e === "string"
+        ? e
+        : ((e as { message?: string } | undefined)?.message ?? m.tools_field_invalid()),
   }));
 
 /** Number input with min/max, since TextField only covers text-like controls. */

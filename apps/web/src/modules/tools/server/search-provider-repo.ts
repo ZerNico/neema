@@ -4,6 +4,8 @@ import { uuidv7 } from "uuidv7";
 import { searchProviders } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { Db } from "~/server/db.ts";
+import { Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import {
   SearchProviderSettings,
   type CreateSearchProviderInput,
@@ -21,7 +23,7 @@ export type PublicSearchProvider = Omit<Row, "secretCiphertext" | "config" | "ki
 
 export class InvalidSearchProvider extends Schema.TaggedError<InvalidSearchProvider>()(
   "InvalidSearchProvider",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 const decodeSettings = Schema.decodeUnknownEffect(SearchProviderSettings);
@@ -124,7 +126,9 @@ export class SearchProviderRepo extends Context.Service<
         create: Effect.fn("SearchProviderRepo.create")(function* (input) {
           const secret = input.secret?.trim() ?? "";
           if (needsSecret(input.settings) && !secret)
-            return yield* new InvalidSearchProvider({ reason: "Enter the API key." });
+            return yield* new InvalidSearchProvider({
+              reason: localized(m.tools_providers_error_secret_required),
+            });
           const secretCiphertext = secret ? yield* cipher.encrypt(secret) : null;
           const row = yield* keepTyped(
             db.transaction((tx) =>
@@ -156,13 +160,13 @@ export class SearchProviderRepo extends Context.Service<
           if (!row) return null;
           if (input.settings && input.settings.kind !== row.kind)
             return yield* new InvalidSearchProvider({
-              reason: "A provider’s kind can’t change. Add a new provider instead.",
+              reason: localized(m.tools_providers_error_kind_fixed),
             });
           const settings = input.settings ?? (yield* settingsOf(row));
           const secret = input.secret?.trim() ?? "";
           if (input.clearSecret && needsSecret(settings))
             return yield* new InvalidSearchProvider({
-              reason: "This provider needs an API key. Enter a new one instead of clearing it.",
+              reason: localized(m.tools_providers_error_secret_needed),
             });
           const secretCiphertext = input.clearSecret
             ? null
@@ -202,7 +206,7 @@ export class SearchProviderRepo extends Context.Service<
                   ids.some((id) => !known.has(id))
                 ) {
                   return yield* new InvalidSearchProvider({
-                    reason: "The provider list changed. Refresh and try again.",
+                    reason: localized(m.tools_providers_error_list_changed),
                   });
                 }
                 if (ids.length === 0) return;

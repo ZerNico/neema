@@ -1,5 +1,5 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
-import { Context, Effect, Layer, Schema, type Scope } from "effect";
+import { Context, Effect, Layer, type Scope } from "effect";
 import { Tool } from "effect/ai";
 import {
   RESEARCH_SEARCH_BUDGET,
@@ -10,6 +10,7 @@ import {
   type WebToolResult as Result,
 } from "../schema.ts";
 import { ToolsRepo } from "./repo.ts";
+import { ToolUnavailable } from "./tool-unavailable.ts";
 import { SearchProviders, type SearchFailed } from "./search-providers/chain.ts";
 import type { ImageHit, SearchHit } from "./search-providers/types.ts";
 import type { SourceIndexer } from "./source-indexer.ts";
@@ -17,10 +18,7 @@ import type { UrlAuthority } from "./url-authority.ts";
 import { canonicalUserUrl } from "./user-urls.ts";
 import { makeGenerationCache } from "./generation-cache.ts";
 
-export class ToolUnavailable extends Schema.TaggedError<ToolUnavailable>()("ToolUnavailable", {
-  tool: Schema.String,
-  reason: Schema.String,
-}) {}
+export { ToolUnavailable };
 
 const MAX_MERGED_RESULTS = 20;
 

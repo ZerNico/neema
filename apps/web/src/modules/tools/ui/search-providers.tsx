@@ -46,6 +46,8 @@ import {
   updateSearchProvider,
 } from "../server/functions.ts";
 import { searchProvidersQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 type Provider = Awaited<ReturnType<typeof listSearchProviders>>[number];
 type TestResult =
@@ -53,16 +55,13 @@ type TestResult =
   | { ok: false; error: string };
 
 // Free tiers change too often to quote here; the link is where to check.
-const KINDS: Record<SearchProviderKind, { label: string; keyUrl?: string; note?: string }> = {
-  searxng: {
-    label: "SearXNG",
-    note: "Your own instance. Its JSON output must be enabled in settings.yml.",
-  },
+const KINDS: Record<SearchProviderKind, { label: string; keyUrl?: string; note?: () => string }> = {
+  searxng: { label: "SearXNG", note: m.tools_providers_note_searxng },
   tavily: { label: "Tavily", keyUrl: "https://app.tavily.com" },
   brave: {
     label: "Brave Search",
     keyUrl: "https://api-dashboard.search.brave.com",
-    note: "Brave’s free credit requires saying publicly that results come from Brave.",
+    note: m.tools_providers_note_brave,
   },
   exa: { label: "Exa", keyUrl: "https://dashboard.exa.ai" },
   serper: { label: "Serper", keyUrl: "https://serper.dev" },
@@ -72,21 +71,24 @@ const KINDS: Record<SearchProviderKind, { label: string; keyUrl?: string; note?:
 const kindItems = SEARCH_PROVIDER_KINDS.map((kind) => ({ value: kind, label: KINDS[kind].label }));
 
 const REASONS = {
-  auth: "Key rejected",
-  quota: "Credits used up",
-  rate_limited: "Rate limited",
-  unavailable: "Not responding",
-  rejected: "Last query refused",
+  auth: m.tools_providers_reason_auth,
+  quota: m.tools_providers_reason_quota,
+  rate_limited: m.tools_providers_reason_rate_limited,
+  unavailable: m.tools_providers_reason_unavailable,
+  rejected: m.tools_providers_reason_rejected,
 } as const;
 
 const clock = (at: number) =>
-  new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
 
 /** What this server last saw of a provider, in a few words. */
 const statusOf = (provider: Provider) => {
-  if (!provider.enabled) return "Off";
+  if (!provider.enabled) return m.tools_providers_status_off();
   if (provider.coolingDownUntil && provider.lastError)
-    return `${REASONS[provider.lastError.reason]}, tried last until ${clock(provider.coolingDownUntil)}`;
+    return m.tools_providers_status_cooling({
+      reason: REASONS[provider.lastError.reason](),
+      time: clock(provider.coolingDownUntil),
+    });
   return null;
 };
 
@@ -117,7 +119,7 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
     mutationKey,
     scope: { id: mutationKey.join(":") },
     mutationFn: (ids: string[]) => setSearchProviderOrder({ data: { ids } }),
-    onError: (error) => toastError("Could not save the order.", error),
+    onError: (error) => toastError(m.tools_providers_error_order(), error),
     onSettled: async () => {
       if (queryClient.isMutating({ mutationKey }) > 1) return;
       await refresh();
@@ -136,12 +138,12 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
   const toggle = useMutation({
     mutationFn: (input: { id: string; enabled: boolean }) => updateSearchProvider({ data: input }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not update the provider.", error),
+    onError: (error) => toastError(m.tools_providers_error_update(), error),
   });
   const remove = useMutation({
     mutationFn: (id: string) => deleteSearchProvider({ data: { id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not remove the provider.", error),
+    onError: (error) => toastError(m.tools_providers_error_remove(), error),
   });
 
   return (
@@ -149,18 +151,15 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
       <ListRow className="flex-col items-stretch gap-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col">
-            <span className="text-sm font-medium">Providers</span>
-            <span className="text-muted-foreground text-xs">
-              Searches start at the top and move down only when a provider fails. Several of one
-              kind work too, for example two keys to combine free tiers.
-            </span>
+            <span className="text-sm font-medium">{m.tools_providers_title()}</span>
+            <span className="text-muted-foreground text-xs">{m.tools_providers_description()}</span>
           </div>
           <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-            Add provider
+            {m.tools_providers_add()}
           </Button>
         </div>
         {order.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Add a provider to turn on web search.</p>
+          <p className="text-muted-foreground text-sm">{m.tools_providers_empty()}</p>
         ) : (
           <SortableList onMove={move} className="divide-y overflow-hidden rounded-md border">
             {order.map((provider, index) => {
@@ -197,7 +196,7 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      aria-label={`Edit ${provider.label}`}
+                      aria-label={m.tools_providers_edit_label({ name: provider.label })}
                       onClick={() => setEditing(provider)}
                     >
                       <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
@@ -205,12 +204,12 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      aria-label={`Remove ${provider.label}`}
+                      aria-label={m.tools_providers_remove_label({ name: provider.label })}
                       onClick={async () => {
                         const confirmed = await confirm({
-                          title: `Remove ${provider.label}?`,
-                          description: "Its stored key is deleted with it.",
-                          confirmLabel: "Remove",
+                          title: m.tools_providers_remove_title({ name: provider.label }),
+                          description: m.tools_providers_remove_description(),
+                          confirmLabel: m.common_remove(),
                         });
                         if (confirmed) remove.mutate(provider.id);
                       }}
@@ -221,7 +220,7 @@ export function SearchProviderRows({ onChanged }: { onChanged: () => Promise<unk
                       checked={provider.enabled}
                       onCheckedChange={(enabled) => toggle.mutate({ id: provider.id, enabled })}
                       disabled={toggle.isPending}
-                      aria-label={`${provider.label} enabled`}
+                      aria-label={m.tools_providers_toggle({ name: provider.label })}
                     />
                   </div>
                 </SortableItem>
@@ -256,6 +255,21 @@ const settingsOf = (draft: Draft) =>
   draft.kind === "searxng"
     ? { kind: "searxng" as const, baseUrl: draft.baseUrl.trim() }
     : { kind: draft.kind };
+
+/** "Get a key at host." with the host as a link, wherever the sentence puts it. */
+function KeyLink({ url }: { url: string }) {
+  const mark = "\u0000";
+  const [before = "", after = ""] = m.tools_providers_get_key({ host: mark }).split(mark);
+  return (
+    <>
+      {before}
+      <a href={url} target="_blank" rel="noreferrer">
+        {new URL(url).host}
+      </a>
+      {after}{" "}
+    </>
+  );
+}
 
 /** Add and edit are one dialog; only the kind is fixed once saved. */
 function SearchProviderDialog({
@@ -315,7 +329,7 @@ function SearchProviderDialog({
       onOpenChange(false);
     },
     onError: (failure) =>
-      setError(readServerError(failure).reason ?? "Could not save the provider."),
+      setError(readServerError(failure).reason ?? m.tools_providers_error_save()),
   });
   const clearSecret = useMutation({
     mutationFn: () => updateSearchProvider({ data: { id: provider!.id, clearSecret: true } }),
@@ -323,7 +337,7 @@ function SearchProviderDialog({
       await onSaved();
       onOpenChange(false);
     },
-    onError: (failure) => toastError("Could not clear the token.", failure),
+    onError: (failure) => toastError(m.tools_providers_error_clear(), failure),
   });
   const test = useMutation({
     mutationFn: () => {
@@ -337,7 +351,7 @@ function SearchProviderDialog({
       });
     },
     onSuccess: setTestResult,
-    onError: (failure) => toastError("Could not test the provider.", failure),
+    onError: (failure) => toastError(m.tools_providers_error_test(), failure),
   });
   const busy = save.isPending || clearSecret.isPending;
 
@@ -351,8 +365,12 @@ function SearchProviderDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{provider ? `Edit ${provider.label}` : "Add search provider"}</DialogTitle>
-          <DialogDescription>Keys are encrypted at rest and never shown again.</DialogDescription>
+          <DialogTitle>
+            {provider
+              ? m.tools_providers_dialog_edit_title({ name: provider.label })
+              : m.tools_providers_dialog_add_title()}
+          </DialogTitle>
+          <DialogDescription>{m.tools_providers_dialog_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -365,7 +383,7 @@ function SearchProviderDialog({
           <FieldGroup>
             {provider ? null : (
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-kind`}>Provider</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-kind`}>{m.tools_providers_kind()}</FieldLabel>
                 <Select
                   value={draft.kind}
                   onValueChange={(next) => {
@@ -393,21 +411,22 @@ function SearchProviderDialog({
               </Field>
             )}
             <Field>
-              <FieldLabel htmlFor={`${fieldId}-label`}>Name</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-label`}>{m.common_name()}</FieldLabel>
               <Input
                 id={`${fieldId}-label`}
                 value={draft.label}
                 onChange={(event) => patch({ label: event.target.value })}
                 disabled={busy}
               />
-              <FieldDescription>Tells apart several providers of one kind.</FieldDescription>
+              <FieldDescription>{m.tools_providers_name_description()}</FieldDescription>
             </Field>
             {hosted ? null : (
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-url`}>Base URL</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-url`}>{m.tools_providers_base_url()}</FieldLabel>
                 <Input
                   id={`${fieldId}-url`}
                   type="url"
+                  // oxlint-disable-next-line i18n/no-literal-text -- an example address
                   placeholder="http://localhost:8081"
                   value={draft.baseUrl}
                   onChange={(event) => patch({ baseUrl: event.target.value })}
@@ -418,10 +437,10 @@ function SearchProviderDialog({
             <Field>
               <FieldLabel htmlFor={`${fieldId}-secret`}>
                 {hosted ? (
-                  "API key"
+                  m.tools_providers_api_key()
                 ) : (
                   <>
-                    Bearer token <OptionalMark />
+                    {m.tools_providers_bearer_token()} <OptionalMark />
                   </>
                 )}
               </FieldLabel>
@@ -430,7 +449,9 @@ function SearchProviderDialog({
                   id={`${fieldId}-secret`}
                   type="password"
                   autoComplete="off"
-                  placeholder={provider?.secretConfigured ? "Unchanged" : undefined}
+                  placeholder={
+                    provider?.secretConfigured ? m.tools_providers_secret_unchanged() : undefined
+                  }
                   value={draft.secret}
                   onChange={(event) => patch({ secret: event.target.value })}
                   disabled={busy}
@@ -444,23 +465,15 @@ function SearchProviderDialog({
                     disabled={save.isPending}
                     onClick={() => clearSecret.mutate()}
                   >
-                    Clear
+                    {m.tools_providers_clear_secret()}
                   </PendingButton>
                 ) : null}
               </div>
               {provider?.secretConfigured || kind.keyUrl || kind.note ? (
                 <FieldDescription>
-                  {provider?.secretConfigured ? "Leave empty to keep the stored one. " : ""}
-                  {kind.keyUrl ? (
-                    <>
-                      Get a key at{" "}
-                      <a href={kind.keyUrl} target="_blank" rel="noreferrer">
-                        {new URL(kind.keyUrl).host}
-                      </a>
-                      .{" "}
-                    </>
-                  ) : null}
-                  {kind.note ?? ""}
+                  {provider?.secretConfigured ? `${m.tools_providers_keep_secret()} ` : ""}
+                  {kind.keyUrl ? <KeyLink url={kind.keyUrl} /> : null}
+                  {kind.note?.() ?? ""}
                 </FieldDescription>
               ) : null}
             </Field>
@@ -471,8 +484,11 @@ function SearchProviderDialog({
               className={cn("text-xs", testResult.ok ? "text-success" : "text-destructive")}
             >
               {testResult.ok
-                ? `Works: ${testResult.resultCount} results in ${testResult.latencyMs}ms.`
-                : `Didn’t work: ${testResult.error}`}
+                ? m.tools_providers_test_works({
+                    count: testResult.resultCount,
+                    latency: testResult.latencyMs,
+                  })
+                : m.tools_providers_test_failed({ error: testResult.error })}
             </p>
           ) : null}
           {error ? <FieldError>{error}</FieldError> : null}
@@ -486,11 +502,13 @@ function SearchProviderDialog({
                 test.mutate();
               }}
             >
-              Test
+              {m.tools_providers_test()}
             </PendingButton>
-            <DialogClose render={<Button variant="outline" disabled={busy} />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="outline" disabled={busy} />}>
+              {m.common_cancel()}
+            </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!complete || busy}>
-              {provider ? "Save" : "Add provider"}
+              {provider ? m.common_save() : m.tools_providers_dialog_add()}
             </PendingButton>
           </DialogFooter>
         </form>

@@ -71,7 +71,10 @@ import type {
 } from "~/modules/sharing/errors.ts";
 import type { SkillConflict, SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import type { InvalidSearchProvider } from "~/modules/tools/server/search-provider-repo.ts";
-import type { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
+import {
+  type ToolUnavailable,
+  unavailableReason,
+} from "~/modules/tools/server/tool-unavailable.ts";
 
 /**
  * How a server function answers a failure it expected: a status and a body the
@@ -255,10 +258,7 @@ const refusals: RefusalTable = {
   SkillNotAvailable: notFound,
   SkillRejected: because(400),
   StorageFull: because(413),
-  ToolUnavailable: (error) => ({
-    status: 400,
-    body: localized(m.tools_error_web_search_unavailable, { reason: error.reason }),
-  }),
+  ToolUnavailable: (error) => ({ status: 400, body: unavailableReason(error) }),
   UnhostedImageFamily: because(400),
   UsageLimitReached: because(429),
   WorkDesktopRequired: () => ({

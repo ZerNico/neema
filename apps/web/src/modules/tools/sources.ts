@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { DocumentLocation, DocumentSource, Source, WebSource } from "./source-schema.ts";
 
 export const isWebSource = (source: Source): source is WebSource => source.kind === "web";
@@ -20,9 +21,9 @@ export function sourceTarget(source: SourceReference): string {
 
 export function documentLocationLabel(source: DocumentSource): string {
   return (
-    [source.page === null ? "" : `Page ${source.page}`, source.headingPath]
+    [source.page === null ? "" : m.tools_source_page({ page: source.page }), source.headingPath]
       .filter(Boolean)
-      .join(" · ") || "Document excerpt"
+      .join(" · ") || m.tools_source_document_excerpt()
   );
 }
 

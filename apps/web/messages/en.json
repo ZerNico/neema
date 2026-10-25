@@ -208,8 +208,13 @@
   "custom_tools_editor_function": "Function",
   "custom_tools_editor_function_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} function:",
         "countPlural=*": "{count} functions:"
@@ -227,8 +232,13 @@
   "custom_tools_editor_parameter_schema": "Parameter schema",
   "custom_tools_editor_problem_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} problem",
         "countPlural=*": "{count} problems"
@@ -259,8 +269,13 @@
   "custom_tools_error_slug_taken": "The slug {slug} is already in use.",
   "custom_tools_list_dependency_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} dependency",
         "countPlural=*": "{count} dependencies"
@@ -273,8 +288,13 @@
   "custom_tools_list_empty_title": "No modules yet",
   "custom_tools_list_function_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} function",
         "countPlural=*": "{count} functions"
@@ -907,7 +927,137 @@
   "spreadsheets_preview_sheet_failed": "Could not load this sheet. Download the original to open it elsewhere.",
   "spreadsheets_preview_sheets": "Sheet",
   "spreadsheets_preview_truncated": "Showing the start of this sheet.",
+  "tools_error_research_needs_search": "Deep research needs web search, which you can’t use",
+  "tools_error_research_not_permitted": "You can’t use deep research",
+  "tools_error_url_reader_off": "Reading linked pages is turned off",
+  "tools_error_web_search_not_configured": "Web search is not set up",
+  "tools_error_web_search_not_permitted": "You can’t use web search",
+  "tools_error_web_search_off": "Web search is turned off",
   "tools_error_web_search_unavailable": "Web search unavailable: {reason}",
+  "tools_field_between": "Between {min} and {max}.",
+  "tools_field_invalid": "Invalid",
+  "tools_field_whole_number": "Enter a whole number.",
+  "tools_image_description": "Lets the model draw with the image model each person picks. Add image models under Providers.",
+  "tools_image_error_update": "Could not update image generation.",
+  "tools_image_label": "Create and edit images",
+  "tools_image_title": "Image generation",
+  "tools_image_toggle": "Image generation enabled",
+  "tools_interactive_description": "Lets the model answer with calculators, charts, drawings and other controls the reader can use.",
+  "tools_interactive_error_update": "Could not update interactive answers.",
+  "tools_interactive_images_description": "Finds pictures for interactive answers with web search.",
+  "tools_interactive_images_label": "Images",
+  "tools_interactive_images_toggle": "Images in interactive answers",
+  "tools_interactive_label": "Interactive answers",
+  "tools_interactive_title": "Interactive answers",
+  "tools_interactive_toggle": "Interactive answers enabled",
+  "tools_maps_description": "Looks up places and routes for answers, and draws them in interactive answers.",
+  "tools_maps_error_save": "Could not save the map services.",
+  "tools_maps_error_update": "Could not update maps.",
+  "tools_maps_geocoder": "Place search",
+  "tools_maps_label": "Maps",
+  "tools_maps_routing": "Routing",
+  "tools_maps_style_dark": "Dark map style",
+  "tools_maps_style_light": "Light map style",
+  "tools_maps_title": "Maps",
+  "tools_maps_toggle": "Maps enabled",
+  "tools_maps_url_invalid": "Enter a URL starting with https://.",
+  "tools_memory_description": "Let models use what they have saved about someone, and save more as they chat. People can still manage their own memories while this is off.",
+  "tools_memory_error_update": "Could not update memory.",
+  "tools_memory_label": "Assistant memory",
+  "tools_memory_title": "Memory",
+  "tools_memory_toggle": "Memory enabled",
+  "tools_office_description": "Lets the model make and change PowerPoint decks, Excel workbooks and Word documents, check its work and deliver the file.",
+  "tools_office_error_update": "Could not update Office files.",
+  "tools_office_label": "Create and edit Office files",
+  "tools_office_title": "Office files",
+  "tools_office_toggle": "Office files enabled",
+  "tools_page_description": "Web tools, memory, Office files, interactive answers and maps available in chats.",
+  "tools_page_title": "Tools",
+  "tools_providers_add": "Add provider",
+  "tools_providers_api_key": "API key",
+  "tools_providers_base_url": "Base URL",
+  "tools_providers_bearer_token": "Bearer token",
+  "tools_providers_clear_secret": "Clear",
+  "tools_providers_description": "Searches start at the top and move down only when a provider fails. Several of one kind work too, for example two keys to combine free tiers.",
+  "tools_providers_dialog_add": "Add provider",
+  "tools_providers_dialog_add_title": "Add search provider",
+  "tools_providers_dialog_description": "Keys are encrypted at rest and never shown again.",
+  "tools_providers_dialog_edit_title": "Edit {name}",
+  "tools_providers_edit_label": "Edit {name}",
+  "tools_providers_empty": "Add a provider to turn on web search.",
+  "tools_providers_error_clear": "Could not clear the token.",
+  "tools_providers_error_kind_fixed": "A provider’s kind can’t change. Add a new provider instead.",
+  "tools_providers_error_list_changed": "The provider list changed. Refresh and try again.",
+  "tools_providers_error_order": "Could not save the order.",
+  "tools_providers_error_remove": "Could not remove the provider.",
+  "tools_providers_error_save": "Could not save the provider.",
+  "tools_providers_error_secret_needed": "This provider needs an API key. Enter a new one instead of clearing it.",
+  "tools_providers_error_secret_required": "Enter the API key.",
+  "tools_providers_error_test": "Could not test the provider.",
+  "tools_providers_error_update": "Could not update the provider.",
+  "tools_providers_get_key": "Get a key at {host}.",
+  "tools_providers_keep_secret": "Leave empty to keep the stored one.",
+  "tools_providers_kind": "Provider",
+  "tools_providers_name_description": "Tells apart several providers of one kind.",
+  "tools_providers_note_brave": "Brave’s free credit requires saying publicly that results come from Brave.",
+  "tools_providers_note_searxng": "Your own instance. Its JSON output must be enabled in settings.yml.",
+  "tools_providers_reason_auth": "Key rejected",
+  "tools_providers_reason_quota": "Credits used up",
+  "tools_providers_reason_rate_limited": "Rate limited",
+  "tools_providers_reason_rejected": "Last query refused",
+  "tools_providers_reason_unavailable": "Not responding",
+  "tools_providers_remove_description": "Its stored key is deleted with it.",
+  "tools_providers_remove_label": "Remove {name}",
+  "tools_providers_remove_title": "Remove {name}?",
+  "tools_providers_secret_unchanged": "Unchanged",
+  "tools_providers_status_cooling": "{reason}, tried last until {time}",
+  "tools_providers_status_off": "Off",
+  "tools_providers_test": "Test",
+  "tools_providers_test_failed": "Didn’t work: {error}",
+  "tools_providers_test_works": [
+    {
+      "declarations": [
+        "input count",
+        "input latency",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Works: {count} result in {latency}ms.",
+        "countPlural=*": "Works: {count} results in {latency}ms."
+      }
+    }
+  ],
+  "tools_providers_title": "Providers",
+  "tools_providers_toggle": "{name} enabled",
+  "tools_scans_error_api_key": "Enter an API key for the OCR service.",
+  "tools_scans_error_base_url": "Enter the OCR service’s base URL, starting with https://.",
+  "tools_scans_error_platform": "This server’s platform can’t read scanned pages itself.",
+  "tools_scans_error_vision_model": "Choose an enabled, public model that can see images.",
+  "tools_scans_test_api_key": "Enter an API key.",
+  "tools_scans_test_base_url": "Enter a base URL starting with https://.",
+  "tools_scans_test_not_read": "The service answered, but did not read the sample page.",
+  "tools_source_document_excerpt": "Document excerpt",
+  "tools_source_page": "Page {page}",
+  "tools_url_reader_char_cap": "Per-page character cap",
+  "tools_url_reader_description": "Lets the model open links from your messages and search results and read what is on the page.",
+  "tools_url_reader_error_save": "Could not save the URL reader settings.",
+  "tools_url_reader_error_update": "Could not update the URL reader.",
+  "tools_url_reader_label": "Read linked pages",
+  "tools_url_reader_title": "URL reader",
+  "tools_url_reader_toggle": "URL reader enabled",
+  "tools_web_search_description": "Returns titles and snippets from the providers below. Every chat model can use web search.",
+  "tools_web_search_error_save": "Could not save the web search settings.",
+  "tools_web_search_error_update": "Could not update web search.",
+  "tools_web_search_label": "Web search",
+  "tools_web_search_max_results": "Max results per query",
+  "tools_web_search_max_results_description": "Some providers return at most ten per request.",
+  "tools_web_search_research_queries": "Search queries per research run",
+  "tools_web_search_research_queries_description": "A ceiling for the whole research run, not a goal it aims for. Takes effect on the next run started.",
+  "tools_web_search_title": "Web search",
+  "tools_web_search_toggle": "Web search enabled",
   "ui_color_hex": "Hex colour",
   "ui_color_hue": "Hue",
   "ui_color_saturation": "Saturation and brightness",

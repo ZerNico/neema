@@ -8,6 +8,7 @@ import {
   InvalidSearchProvider,
   SearchProviderRepo,
 } from "~/modules/tools/server/search-provider-repo.ts";
+import { english } from "~/i18n/localized.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -81,7 +82,7 @@ describe("SearchProviderRepo", () => {
     const missing = await runFailure(
       SearchProviderRepo.use((repo) => repo.create({ label: "T", settings: { kind: "tavily" } })),
     );
-    expect(missing.reason).toBe("Enter the API key.");
+    expect(english(missing.reason)).toBe("Enter the API key.");
     const created = await create("T");
     const cleared = await runFailure(
       SearchProviderRepo.use((repo) => repo.update({ id: created.id, clearSecret: true })),

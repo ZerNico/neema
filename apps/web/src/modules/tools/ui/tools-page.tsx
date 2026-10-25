@@ -24,22 +24,26 @@ import {
   imageGenerationToolQuery,
 } from "../client/queries.ts";
 import { readInteractiveUi, readMaps, type MapServices } from "~/modules/genui/settings.ts";
+import { m } from "~/paraglide/messages.js";
 
-const WebSearchForm = Schema.Struct({
-  maxResults: integerBetween(1, 20),
-  researchMaxSearchQueries: integerBetween(RESEARCH_SEARCH_BUDGET.min, RESEARCH_SEARCH_BUDGET.max),
-});
+// Built where they are used: their messages are read in the page's locale.
+const webSearchForm = () =>
+  Schema.Struct({
+    maxResults: integerBetween(1, 20),
+    researchMaxSearchQueries: integerBetween(
+      RESEARCH_SEARCH_BUDGET.min,
+      RESEARCH_SEARCH_BUDGET.max,
+    ),
+  });
 
-const UrlReaderForm = Schema.Struct({
-  perPageCharCap: integerBetween(1000, 20000),
-});
+const urlReaderForm = () =>
+  Schema.Struct({
+    perPageCharCap: integerBetween(1000, 20000),
+  });
 
 export function ToolsPage() {
   return (
-    <Page
-      title="Tools"
-      description="Web tools, memory, Office files, interactive answers and maps available in chats."
-    >
+    <Page title={m.tools_page_title()} description={m.tools_page_description()}>
       <MemorySection />
       <WebSearchSection />
       <UrlReaderSection />
@@ -61,25 +65,22 @@ function MemorySection() {
         queryClient.invalidateQueries({ queryKey: ["admin", "tools"] }),
         queryClient.invalidateQueries({ queryKey: ["memory"] }),
       ]),
-    onError: (error) => toastError("Could not update memory.", error),
+    onError: (error) => toastError(m.tools_memory_error_update(), error),
   });
 
   return (
-    <Section title="Memory">
+    <Section title={m.tools_memory_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Assistant memory</span>
-            <span className="text-muted-foreground text-xs">
-              Let models use what they have saved about someone, and save more as they chat. People
-              can still manage their own memories while this is off.
-            </span>
+            <span className="text-sm font-medium">{m.tools_memory_label()}</span>
+            <span className="text-muted-foreground text-xs">{m.tools_memory_description()}</span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="Memory enabled"
+            aria-label={m.tools_memory_toggle()}
           />
         </ListRow>
       </ListCard>
@@ -95,10 +96,11 @@ function WebSearchSection() {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "web_search", enabled } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not update web search.", error),
+    onError: (error) => toastError(m.tools_web_search_error_update(), error),
   });
 
   const { justSaved, markSaved } = useSaveStatus();
+  const searchForm = webSearchForm();
   const form = useAppForm({
     defaultValues: {
       maxResults: String(config.maxResults ?? 8),
@@ -106,7 +108,7 @@ function WebSearchSection() {
         config.researchMaxSearchQueries ?? RESEARCH_SEARCH_BUDGET.default,
       ),
     },
-    validators: { onSubmit: Schema.toStandardSchemaV1(WebSearchForm) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(searchForm) },
     onSubmit: async ({ value }) => {
       try {
         await updateToolSettings({
@@ -117,7 +119,7 @@ function WebSearchSection() {
           },
         });
       } catch {
-        toast.error("Could not save the web search settings.");
+        toast.error(m.tools_web_search_error_save());
         return;
       }
       markSaved();
@@ -127,21 +129,20 @@ function WebSearchSection() {
   });
 
   return (
-    <Section title="Web search">
+    <Section title={m.tools_web_search_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Web search</span>
+            <span className="text-sm font-medium">{m.tools_web_search_label()}</span>
             <span className="text-muted-foreground text-xs">
-              Returns titles and snippets from the providers below. Every chat model can use web
-              search.
+              {m.tools_web_search_description()}
             </span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="Web search enabled"
+            aria-label={m.tools_web_search_toggle()}
           />
         </ListRow>
 
@@ -163,8 +164,8 @@ function WebSearchSection() {
               {(field) => (
                 <NumberField
                   field={field}
-                  label="Max results per query"
-                  description="Some providers return at most ten per request."
+                  label={m.tools_web_search_max_results()}
+                  description={m.tools_web_search_max_results_description()}
                   min={1}
                   max={20}
                 />
@@ -173,14 +174,14 @@ function WebSearchSection() {
             <form.Field
               name="researchMaxSearchQueries"
               validators={{
-                onSubmit: Schema.toStandardSchemaV1(WebSearchForm.fields.researchMaxSearchQueries),
+                onSubmit: Schema.toStandardSchemaV1(searchForm.fields.researchMaxSearchQueries),
               }}
             >
               {(field) => (
                 <NumberField
                   field={field}
-                  label="Search queries per research run"
-                  description="A ceiling for the whole research run, not a goal it aims for. Takes effect on the next run started."
+                  label={m.tools_web_search_research_queries()}
+                  description={m.tools_web_search_research_queries_description()}
                   min={RESEARCH_SEARCH_BUDGET.min}
                   max={RESEARCH_SEARCH_BUDGET.max}
                   step={1}
@@ -190,7 +191,7 @@ function WebSearchSection() {
             <FormActions>
               <form.AppForm>
                 <form.SubmitButton size="sm">
-                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                  <SaveLabel justSaved={justSaved}>{m.common_save()}</SaveLabel>
                 </form.SubmitButton>
               </form.AppForm>
               <SaveStatus justSaved={justSaved} />
@@ -214,20 +215,20 @@ function UrlReaderSection() {
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "read_url", enabled } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not update the URL reader.", error),
+    onError: (error) => toastError(m.tools_url_reader_error_update(), error),
   });
 
   const { justSaved, markSaved } = useSaveStatus();
   const form = useAppForm({
     defaultValues: { perPageCharCap: String(config.perPageCharCap ?? 12000) },
-    validators: { onSubmit: Schema.toStandardSchemaV1(UrlReaderForm) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(urlReaderForm()) },
     onSubmit: async ({ value }) => {
       try {
         await updateToolSettings({
           data: { tool: "read_url", perPageCharCap: Number(value.perPageCharCap) },
         });
       } catch {
-        toast.error("Could not save the URL reader settings.");
+        toast.error(m.tools_url_reader_error_save());
         return;
       }
       markSaved();
@@ -237,21 +238,20 @@ function UrlReaderSection() {
   });
 
   return (
-    <Section title="URL reader">
+    <Section title={m.tools_url_reader_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Read linked pages</span>
+            <span className="text-sm font-medium">{m.tools_url_reader_label()}</span>
             <span className="text-muted-foreground text-xs">
-              Lets the model open links from your messages and search results and read what is on
-              the page.
+              {m.tools_url_reader_description()}
             </span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="URL reader enabled"
+            aria-label={m.tools_url_reader_toggle()}
           />
         </ListRow>
         <ListRow className="flex-col items-stretch gap-3">
@@ -271,7 +271,7 @@ function UrlReaderSection() {
                 {(field) => (
                   <NumberField
                     field={field}
-                    label="Per-page character cap"
+                    label={m.tools_url_reader_char_cap()}
                     min={1000}
                     max={20000}
                     step={1000}
@@ -282,7 +282,7 @@ function UrlReaderSection() {
             <FormActions>
               <form.AppForm>
                 <form.SubmitButton size="sm">
-                  <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+                  <SaveLabel justSaved={justSaved}>{m.common_save()}</SaveLabel>
                 </form.SubmitButton>
               </form.AppForm>
               <SaveStatus justSaved={justSaved} />
@@ -305,25 +305,22 @@ function OfficeFilesSection() {
     mutationFn: (enabled: boolean) =>
       updateToolSettings({ data: { tool: "office_files", enabled } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: officeFilesToolQuery.queryKey }),
-    onError: (error) => toastError("Could not update Office files.", error),
+    onError: (error) => toastError(m.tools_office_error_update(), error),
   });
 
   return (
-    <Section title="Office files">
+    <Section title={m.tools_office_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Create and edit Office files</span>
-            <span className="text-muted-foreground text-xs">
-              Lets the model make and change PowerPoint decks, Excel workbooks and Word documents,
-              check its work and deliver the file.
-            </span>
+            <span className="text-sm font-medium">{m.tools_office_label()}</span>
+            <span className="text-muted-foreground text-xs">{m.tools_office_description()}</span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="Office files enabled"
+            aria-label={m.tools_office_toggle()}
           />
         </ListRow>
         <PresentationFontsRow />
@@ -347,25 +344,22 @@ function ImageGenerationSection() {
         queryClient.invalidateQueries({ queryKey: imageGenerationToolQuery.queryKey }),
         queryClient.invalidateQueries({ queryKey: ["image-models"] }),
       ]),
-    onError: (error) => toastError("Could not update image generation.", error),
+    onError: (error) => toastError(m.tools_image_error_update(), error),
   });
 
   return (
-    <Section title="Image generation">
+    <Section title={m.tools_image_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Create and edit images</span>
-            <span className="text-muted-foreground text-xs">
-              Lets the model draw with the image model each person picks. Add image models under
-              Providers.
-            </span>
+            <span className="text-sm font-medium">{m.tools_image_label()}</span>
+            <span className="text-muted-foreground text-xs">{m.tools_image_description()}</span>
           </div>
           <Switch
             checked={tool.enabled}
             onCheckedChange={(checked) => toggle.mutate(checked)}
             disabled={toggle.isPending}
-            aria-label="Image generation enabled"
+            aria-label={m.tools_image_toggle()}
           />
         </ListRow>
       </ListCard>
@@ -384,40 +378,39 @@ function InteractiveUiSection() {
     mutationFn: (patch: { enabled?: boolean; images?: boolean }) =>
       updateToolSettings({ data: { tool: "interactive_ui", ...patch } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
-    onError: (error) => toastError("Could not update interactive answers.", error),
+    onError: (error) => toastError(m.tools_interactive_error_update(), error),
   });
 
   const settings = readInteractiveUi(tool);
   return (
-    <Section title="Interactive answers">
+    <Section title={m.tools_interactive_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Interactive answers</span>
+            <span className="text-sm font-medium">{m.tools_interactive_label()}</span>
             <span className="text-muted-foreground text-xs">
-              Lets the model answer with calculators, charts, drawings and other controls the reader
-              can use.
+              {m.tools_interactive_description()}
             </span>
           </div>
           <Switch
             checked={settings.enabled}
             onCheckedChange={(checked) => update.mutate({ enabled: checked })}
             disabled={update.isPending}
-            aria-label="Interactive answers enabled"
+            aria-label={m.tools_interactive_toggle()}
           />
         </ListRow>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Images</span>
+            <span className="text-sm font-medium">{m.tools_interactive_images_label()}</span>
             <span className="text-muted-foreground text-xs">
-              Finds pictures for interactive answers with web search.
+              {m.tools_interactive_images_description()}
             </span>
           </div>
           <Switch
             checked={settings.images}
             onCheckedChange={(checked) => update.mutate({ images: checked })}
             disabled={update.isPending || !settings.enabled}
-            aria-label="Images in interactive answers"
+            aria-label={m.tools_interactive_images_toggle()}
           />
         </ListRow>
       </ListCard>
@@ -435,25 +428,23 @@ function MapsSection() {
   const update = useMutation({
     mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "maps", enabled } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: mapsToolQuery.queryKey }),
-    onError: (error) => toastError("Could not update maps.", error),
+    onError: (error) => toastError(m.tools_maps_error_update(), error),
   });
 
   const settings = readMaps(tool);
   return (
-    <Section title="Maps">
+    <Section title={m.tools_maps_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Maps</span>
-            <span className="text-muted-foreground text-xs">
-              Looks up places and routes for answers, and draws them in interactive answers.
-            </span>
+            <span className="text-sm font-medium">{m.tools_maps_label()}</span>
+            <span className="text-muted-foreground text-xs">{m.tools_maps_description()}</span>
           </div>
           <Switch
             checked={settings.enabled}
             onCheckedChange={(checked) => update.mutate(checked)}
             disabled={update.isPending}
-            aria-label="Maps enabled"
+            aria-label={m.tools_maps_toggle()}
           />
         </ListRow>
         {settings.enabled ? <MapServicesRow services={settings.services} /> : null}
@@ -462,12 +453,17 @@ function MapsSection() {
   );
 }
 
-const MapServicesForm = Schema.Struct({
-  styleLight: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  styleDark: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  geocoder: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-  routing: Schema.String.check(Schema.isPattern(/^https:\/\/\S+$/)),
-});
+const mapServicesForm = () => {
+  const serviceUrl = Schema.String.check(
+    Schema.isPattern(/^https:\/\/\S+$/, { message: m.tools_maps_url_invalid() }),
+  );
+  return Schema.Struct({
+    styleLight: serviceUrl,
+    styleDark: serviceUrl,
+    geocoder: serviceUrl,
+    routing: serviceUrl,
+  });
+};
 
 /** Where maps get their tiles, places and routes. The public OpenStreetMap services by default. */
 function MapServicesRow({ services }: { services: MapServices }) {
@@ -476,12 +472,12 @@ function MapServicesRow({ services }: { services: MapServices }) {
   const defaults = { ...services };
   const form = useAppForm({
     defaultValues: defaults,
-    validators: { onSubmit: Schema.toStandardSchemaV1(MapServicesForm) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(mapServicesForm()) },
     onSubmit: async ({ value }) => {
       try {
         await updateToolSettings({ data: { tool: "maps", ...value } });
       } catch {
-        toast.error("Could not save the map services.");
+        toast.error(m.tools_maps_error_save());
         return;
       }
       markSaved();
@@ -501,22 +497,22 @@ function MapServicesRow({ services }: { services: MapServices }) {
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <form.AppField name="styleLight">
-            {(field) => <field.TextField label="Light map style" type="url" />}
+            {(field) => <field.TextField label={m.tools_maps_style_light()} type="url" />}
           </form.AppField>
           <form.AppField name="styleDark">
-            {(field) => <field.TextField label="Dark map style" type="url" />}
+            {(field) => <field.TextField label={m.tools_maps_style_dark()} type="url" />}
           </form.AppField>
           <form.AppField name="geocoder">
-            {(field) => <field.TextField label="Place search" type="url" />}
+            {(field) => <field.TextField label={m.tools_maps_geocoder()} type="url" />}
           </form.AppField>
           <form.AppField name="routing">
-            {(field) => <field.TextField label="Routing" type="url" />}
+            {(field) => <field.TextField label={m.tools_maps_routing()} type="url" />}
           </form.AppField>
         </div>
         <FormActions>
           <form.AppForm>
             <form.SubmitButton size="sm">
-              <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+              <SaveLabel justSaved={justSaved}>{m.common_save()}</SaveLabel>
             </form.SubmitButton>
           </form.AppForm>
           <SaveStatus justSaved={justSaved} />

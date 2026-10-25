@@ -4,6 +4,9 @@ import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.t
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { refuse } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import {
   CreateSearchProviderInput,
   SearchProviderOrderInput,
@@ -248,23 +251,21 @@ export const updateScanReading = createServerFn({ method: "POST" })
         let scans;
         if (data.scans.mode === "model") {
           const approved = yield* readVisionConnection(db, data.scans.modelId);
-          if (!approved)
-            return yield* refuse(400, "Choose an enabled, public model that can see images.");
+          if (!approved) return yield* refuse(400, localized(m.tools_scans_error_vision_model));
           scans = { mode: "model" as const, modelId: data.scans.modelId, approved };
         } else if (data.scans.mode === "mistral") {
           const baseUrl = mistralBaseUrl(data.scans.baseUrl);
-          if (!baseUrl)
-            return yield* refuse(400, "Enter the OCR service’s base URL, starting with https://.");
+          if (!baseUrl) return yield* refuse(400, localized(m.tools_scans_error_base_url));
           scans = { mode: "mistral" as const, baseUrl };
         } else scans = data.scans;
         if (
           scans.mode === "local" &&
           (yield* (yield* OcrModels).status(scans.quality)).state === "unsupported"
         )
-          return yield* refuse(400, "This server’s platform can’t read scanned pages itself.");
+          return yield* refuse(400, localized(m.tools_scans_error_platform));
         if (data.scans.mode === "mistral" && !data.secret?.trim()) {
           const current = yield* repo.getDocumentParser();
-          if (!current?.secret) return yield* refuse(400, "Enter an API key for the OCR service.");
+          if (!current?.secret) return yield* refuse(400, localized(m.tools_scans_error_api_key));
         }
         yield* repo.updateTool("document_parser", {
           config: { scans },
@@ -295,16 +296,18 @@ const samplePdf = Effect.promise(async () => {
 export const testMistralOcr = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(TestScanReaderInput))
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    // Read while still in the request: the effect's fibers do not carry it.
+    const locale = getLocale();
+    return runServerFn(
       Effect.gen(function* () {
         const repo = yield* ToolsRepo;
         const typed = data.secret?.trim();
         const key = typed ? Redacted.make(typed) : (yield* repo.getDocumentParser())?.secret;
-        if (!key) return { ok: false as const, error: "Enter an API key." };
+        if (!key) return { ok: false as const, error: m.tools_scans_test_api_key({}, { locale }) };
         const baseUrl = mistralBaseUrl(data.baseUrl);
         if (!baseUrl)
-          return { ok: false as const, error: "Enter a base URL starting with https://." };
+          return { ok: false as const, error: m.tools_scans_test_base_url({}, { locale }) };
         const started = Date.now();
         const result = yield* mistralOcr({ baseUrl, key, pdf: yield* samplePdf }).pipe(
           Effect.result,
@@ -315,8 +318,8 @@ export const testMistralOcr = createServerFn({ method: "POST" })
           ? { ok: true as const, latencyMs: Date.now() - started }
           : {
               ok: false as const,
-              error: "The service answered, but did not read the sample page.",
+              error: m.tools_scans_test_not_read({}, { locale }),
             };
       }),
-    ),
-  );
+    );
+  });
