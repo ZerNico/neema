@@ -1748,8 +1748,6 @@ describe("conversational agent authoring", () => {
         ChatService.use((service) =>
           service.sendMessage({
             ...answerInput(seed),
-            searchEnabled: false,
-            researchEnabled: false,
           }),
         ),
       );
@@ -3443,12 +3441,15 @@ describe("structured answer persistence and edits", () => {
           conversationId: seed.conversation.id,
           messageId: turn.userMessage.id,
           modelId: textModelId,
-          searchEnabled: false,
-          researchEnabled: false,
           attachmentIds: [],
         };
         const ordinary = yield* service
-          .editMessage({ ...input, content: "unrelated text" })
+          .editMessage({
+            ...input,
+            content: "unrelated text",
+            searchEnabled: false,
+            researchEnabled: false,
+          })
           .pipe(Effect.flip);
         const invalid = yield* service
           .editMessage({
@@ -3835,16 +3836,12 @@ describe("atomic question answers", () => {
           .sendMessage({
             ...answerInput(seed),
             modelId: uuidv7(),
-            searchEnabled: false,
-            researchEnabled: false,
           })
           .pipe(Effect.flip);
         const before = yield* repo.listMessages(seed.conversation.id);
         const reply = yield* service.sendMessage({
           ...answerInput(seed),
           modelId: visionModelId,
-          searchEnabled: false,
-          researchEnabled: false,
           timeZone: "Europe/Berlin",
         });
         yield* engine.subscribe(reply.assistantMessageId, 0).pipe(Stream.runCollect);
@@ -7217,8 +7214,6 @@ describe("reasoning effort attempts", () => {
               modelId,
               questionResponse: { callId, response: { kind: "skip" } },
               attachmentIds: [],
-              searchEnabled: false,
-              researchEnabled: false,
               reasoningEffort,
             });
           const inherited = yield* answer(yield* ask(sent.assistantMessageId));
@@ -9457,8 +9452,6 @@ describe("local tools on the user's machine", () => {
             .where(eq(conversations.id, seed.conversation.id));
           const sent = yield* service.sendMessage({
             ...answerInput(seed),
-            searchEnabled: false,
-            researchEnabled: false,
             desktop: {
               executorId: "answer-session",
               folders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
@@ -9478,8 +9471,6 @@ describe("local tools on the user's machine", () => {
             messageId: answer.id,
             modelId: textModelId,
             attachmentIds: [],
-            searchEnabled: false,
-            researchEnabled: false,
             questionResponse: {
               kind: "answers",
               answers: [{ selected: [], custom: "Current choice" }],

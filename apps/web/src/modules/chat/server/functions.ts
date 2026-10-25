@@ -371,8 +371,6 @@ export const answerQuestion = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversation: { kind: "existing", id: data.conversationId },
           modelId: data.modelId,
-          searchEnabled: data.searchEnabled,
-          researchEnabled: data.researchEnabled,
           desktop: data.desktop,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,

@@ -35,6 +35,12 @@ type Attempt =
   | { attempt: "retry" }
   /** Continues the answer from its saved choices, and keeps the image model it drew with. */
   | { attempt: "resume" }
+  /**
+   * Answers an `ask_user` batch, or edits that answer: a reply to the asking
+   * attempt, so it keeps that attempt's search and research and submits no
+   * toggles of its own; only the reasoning effort is the person's.
+   */
+  | { attempt: "answer"; reasoningEffort?: ReasoningEffort | null | undefined }
   | ({
       /**
        * A queued message was valid when it was queued, so a reasoning effort
@@ -52,7 +58,14 @@ type Attempt =
     } & SubmittedChoices);
 
 const submittedChoices = (attempt: Attempt): SubmittedChoices | null =>
-  attempt.attempt === "retry" || attempt.attempt === "resume" ? null : attempt;
+  attempt.attempt === "retry" || attempt.attempt === "resume" || attempt.attempt === "answer"
+    ? null
+    : attempt;
+
+const submittedEffort = (attempt: Attempt) =>
+  attempt.attempt === "answer"
+    ? attempt.reasoningEffort
+    : submittedChoices(attempt)?.reasoningEffort;
 
 const integrationGrantsOf = (attempt: Attempt) =>
   attempt.attempt === "scheduled" ? attempt.integrationGrants : null;
@@ -95,7 +108,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
     function* (input: {
       userId: string;
       modelId: string;
-      searchEnabled: boolean;
+      searchEnabled?: boolean | undefined;
       attachmentIds: ReadonlyArray<string>;
       researchEnabled?: boolean | undefined;
       reasoningEffort?: ReasoningEffort | null | undefined;
@@ -267,27 +280,27 @@ export const makeAttemptOptions = Effect.gen(function* () {
         const allowedSearch = yield* policy.can(input.userId, "webSearch", tx);
         const allowedResearch = yield* policy.can(input.userId, "deepResearch", tx);
         const submitted = submittedChoices(input);
-        const searchEnabled = !submitted
-          ? continuation
-            ? continuation.searchEnabled && input.searchAvailable
-            : yield* Effect.die("Retry requires a saved generation configuration")
-          : input.attempt === "edit"
-            ? submitted.searchEnabled && input.searchAvailable
-            : (continuation?.searchEnabled ?? submitted.searchEnabled);
-        // Same three cases as search. The third matters most here: the tool
-        // cannot ask anything itself, so a clarification round would
-        // otherwise answer into a turn that can no longer research.
-        const researchEnabled = !submitted
-          ? (continuation?.researchEnabled ?? false)
-          : input.attempt === "edit"
-            ? submitted.researchEnabled
-            : (continuation?.researchEnabled ?? submitted.researchEnabled);
+        // Retry, resume and an answer keep the saved choices; an answer's are
+        // the asking attempt's, which matters most for research: the tool
+        // cannot ask anything itself, so the reply must still be able to use it.
+        const { searchEnabled, researchEnabled } = submitted
+          ? {
+              searchEnabled:
+                submitted.searchEnabled && (input.attempt !== "edit" || input.searchAvailable),
+              researchEnabled: submitted.researchEnabled,
+            }
+          : continuation
+            ? {
+                searchEnabled: continuation.searchEnabled && input.searchAvailable,
+                researchEnabled: continuation.researchEnabled,
+              }
+            : yield* Effect.die("An attempt that keeps saved choices needs a saved configuration");
         const savedEffort = continuation?.reasoningEffort ?? null;
-        const submittedEffort = submitted?.reasoningEffort;
-        const chosenEffort = submittedEffort !== undefined ? submittedEffort : savedEffort;
+        const effort = submittedEffort(input);
+        const chosenEffort = effort !== undefined ? effort : savedEffort;
         const supportedEffort =
           chosenEffort === null || (yield* supportsReasoningEffort(input.model, chosenEffort));
-        if (!supportedEffort && submittedEffort != null && input.attempt !== "queued")
+        if (!supportedEffort && effort != null && input.attempt !== "queued")
           return yield* new InvalidMessage({
             reason: "This model does not support the selected reasoning effort.",
           });

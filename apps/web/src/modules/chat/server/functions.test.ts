@@ -129,8 +129,6 @@ const boundaries = [
           callId: "question",
           response: { kind: "answers", answers: [{ selected: [0], custom: "" }] },
           modelId: "model",
-          searchEnabled: false,
-          researchEnabled: false,
         },
       }),
   },

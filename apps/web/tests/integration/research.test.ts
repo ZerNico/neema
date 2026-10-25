@@ -900,9 +900,7 @@ describe("deep research as a tool call", () => {
             conversation: { kind: "existing", id: input.conversationId },
             modelId,
             questionResponse: { callId: call.id, response: { kind: "skip" } },
-            searchEnabled: false,
             // What the answering surface sends: it has no toggle of its own.
-            researchEnabled: false,
             attachmentIds: [],
           }),
         );
@@ -922,6 +920,57 @@ describe("deep research as a tool call", () => {
         ).toBe(true);
       }),
     );
+  });
+
+  it("keeps the offer when the answer to a clarification is edited", async () => {
+    hostAsksFirst = true;
+    const input = await runtime.runPromise(seed);
+    const first = await runtime.runPromise(send(input.userId, input.conversationId));
+    await runtime.runPromise(collect(first.assistantMessageId));
+    const answered = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const call = (yield* repo.listToolCalls([first.assistantMessageId])).find(
+          (row) => row.toolName === "ask_user",
+        )!;
+        return yield* ChatService.use((service) =>
+          service.sendMessage({
+            userId: input.userId,
+            conversation: { kind: "existing", id: input.conversationId },
+            modelId,
+            questionResponse: { callId: call.id, response: { kind: "skip" } },
+            attachmentIds: [],
+          }),
+        );
+      }),
+    );
+    await runtime.runPromise(collect(answered.assistantMessageId));
+    const reply = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        return (yield* repo.listMessages(input.conversationId)).findLast(
+          (message) => message.role === "user",
+        )!;
+      }),
+    );
+    // Edit answers submits no toggles: the edited answer keeps the asking turn's offer.
+    const edited = await runtime.runPromise(
+      ChatService.use((service) =>
+        service.editMessage({
+          userId: input.userId,
+          conversationId: input.conversationId,
+          messageId: reply.id,
+          modelId,
+          questionResponse: { kind: "skip" },
+          attachmentIds: [],
+        }),
+      ),
+    );
+    await runtime.runPromise(collect(edited.assistantMessageId));
+    const config = await runtime.runPromise(
+      ChatRepo.use((repo) => repo.getGenerationConfig(edited.assistantMessageId)),
+    );
+    expect(config.researchEnabled).toBe(true);
   });
 
   it("refuses a brief too short to investigate without starting a run", async () => {

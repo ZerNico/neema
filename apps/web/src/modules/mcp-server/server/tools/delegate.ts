@@ -493,9 +493,13 @@ export const sendMessage = defineTool({
                 },
             modelId,
             attachmentIds,
-            ...(args.answer ? { questionResponse: args.answer } : { content: args.content! }),
-            searchEnabled,
-            researchEnabled: args.research ?? false,
+            ...(args.answer
+              ? { questionResponse: args.answer }
+              : {
+                  content: args.content!,
+                  searchEnabled,
+                  researchEnabled: args.research ?? false,
+                }),
             timeZone: args.timeZone ?? "UTC",
             ...(!chat && agent ? { agentId: agent.row.id } : {}),
             origin: {

@@ -59,12 +59,46 @@ import {
 
 // Omit on the whole input would flatten the content/question-response union;
 // keep the discriminant intact by omitting from the plain fields only.
+/**
+ * A message with the composer's toggles, or an answer to an `ask_user` batch,
+ * which keeps the asking attempt's and submits none.
+ */
+type SendContent =
+  | { content: string; questionResponse?: never; searchEnabled: boolean; researchEnabled: boolean }
+  | {
+      content?: never;
+      questionResponse: Extract<TurnContent, { questionResponse: object }>["questionResponse"];
+      searchEnabled?: never;
+      researchEnabled?: never;
+    };
+
+/**
+ * What an edit submits: new text with the composer's toggles and selection, or
+ * new answers to an `ask_user` batch, which keep the asking attempt's.
+ */
+type EditChoices =
+  | {
+      content: string;
+      questionResponse?: never;
+      searchEnabled: boolean;
+      researchEnabled: boolean;
+      /** Omitted keeps the attempt's saved selection; sent replaces it. */
+      skillIds?: ReadonlyArray<string> | undefined;
+      collectionIds?: ReadonlyArray<string> | undefined;
+    }
+  | {
+      content?: never;
+      questionResponse: Extract<EditContent, { questionResponse: object }>["questionResponse"];
+      searchEnabled?: never;
+      researchEnabled?: never;
+      skillIds?: never;
+      collectionIds?: never;
+    };
+
 type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveIntegrationChoices"> &
-  TurnContent & {
+  SendContent & {
     /** Integration toggles made in the composer before this chat existed. */
     integrationChoices?: ReadonlyArray<{ connectionId: string; enabled: boolean }> | undefined;
-    searchEnabled: boolean;
-    researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null | undefined;
     /** What the desktop app reports about the machine this send came from. */
     desktop?: DesktopSubmission | undefined;
@@ -285,22 +319,17 @@ export class ChatService extends Context.Service<
       ConversationNotFound | MessageNotFound | BranchNotAllowed | ConversationBusy
     >;
     editMessage(
-      input: EditContent & {
+      input: EditChoices & {
         userId: string;
         conversationId: string;
         messageId: string;
         modelId: string;
-        searchEnabled: boolean;
-        researchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null | undefined;
         desktop?: DesktopSubmission | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
         attachmentIds: ReadonlyArray<string>;
-        /** Omitted keeps the attempt's saved selection; sent replaces it. */
-        skillIds?: ReadonlyArray<string> | undefined;
-        collectionIds?: ReadonlyArray<string> | undefined;
         /** The composer's image model; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
       },
@@ -558,12 +587,16 @@ function makeChatService() {
               )
           : undefined,
         resolve: resolver({
-          attempt: "send",
+          ...(input.questionResponse
+            ? { attempt: "answer", reasoningEffort: input.reasoningEffort }
+            : {
+                attempt: "send",
+                searchEnabled: input.searchEnabled,
+                researchEnabled,
+                reasoningEffort: input.reasoningEffort,
+              }),
           userId: input.userId,
           imageModelId: input.imageModelId,
-          searchEnabled: input.searchEnabled,
-          researchEnabled,
-          reasoningEffort: input.reasoningEffort,
           desktop: input.desktop,
           workspaceFiles,
           model,
@@ -788,14 +821,10 @@ function makeChatService() {
       openDocument?: OpenDocument | undefined;
       deleteMessageIds: ReadonlyArray<string>;
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-      edit?: EditContent & {
+      edit?: EditChoices & {
         messageId: string;
         attachmentIds: ReadonlyArray<string>;
-        searchEnabled: boolean;
-        researchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null | undefined;
-        skillIds?: ReadonlyArray<string> | undefined;
-        collectionIds?: ReadonlyArray<string> | undefined;
       };
     }) {
       const model = yield* providers.getModel(input.modelId);
@@ -814,16 +843,18 @@ function makeChatService() {
           searchAvailable,
           imageModelId: input.imageModelId,
           desktop: input.desktop,
-          ...(input.edit
-            ? {
-                attempt: "edit",
-                searchEnabled: input.edit.searchEnabled,
-                researchEnabled: input.edit.researchEnabled,
-                reasoningEffort: input.edit.reasoningEffort,
-                ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
-                ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
-              }
-            : { attempt: "retry" }),
+          ...(!input.edit
+            ? { attempt: "retry" }
+            : input.edit.questionResponse
+              ? { attempt: "answer", reasoningEffort: input.edit.reasoningEffort }
+              : {
+                  attempt: "edit",
+                  searchEnabled: input.edit.searchEnabled,
+                  researchEnabled: input.edit.researchEnabled,
+                  reasoningEffort: input.edit.reasoningEffort,
+                  ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
+                  ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
+                }),
         }),
         ...(input.edit
           ? {
@@ -1169,13 +1200,11 @@ function makeChatService() {
     });
 
     const editMessage = Effect.fn("ChatService.editMessage")(function* (
-      input: EditContent & {
+      input: EditChoices & {
         userId: string;
         conversationId: string;
         messageId: string;
         modelId: string;
-        searchEnabled: boolean;
-        researchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null | undefined;
         /** What the desktop app reports about the machine this edit came from. */
         desktop?: DesktopSubmission | undefined;
@@ -1183,9 +1212,6 @@ function makeChatService() {
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
         attachmentIds: ReadonlyArray<string>;
-        /** Omitted keeps the attempt's saved selection; sent replaces it. */
-        skillIds?: ReadonlyArray<string> | undefined;
-        collectionIds?: ReadonlyArray<string> | undefined;
         /** The composer's image model; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
       },
@@ -1229,10 +1255,6 @@ function makeChatService() {
         return yield* new InvalidMessage({ reason: "message is empty" });
       }
       const { researchEnabled } = yield* validateGenerationOptions(input);
-      const edit: EditContent = input.questionResponse
-        ? { questionResponse: input.questionResponse }
-        : { content: input.content };
-
       // A question and its answer are created together, so an edit always has
       // an answer to regenerate.
       if (!assistant)
@@ -1261,13 +1283,17 @@ function makeChatService() {
         invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
         edit: {
           messageId: message.id,
-          ...edit,
           attachmentIds: input.attachmentIds,
-          searchEnabled: input.searchEnabled,
-          researchEnabled,
           reasoningEffort: input.reasoningEffort,
-          ...(input.skillIds ? { skillIds: input.skillIds } : {}),
-          ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
+          ...(input.questionResponse
+            ? { questionResponse: input.questionResponse }
+            : {
+                content: input.content,
+                searchEnabled: input.searchEnabled,
+                researchEnabled,
+                ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+                ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
+              }),
         },
       });
       if (!restarted) {

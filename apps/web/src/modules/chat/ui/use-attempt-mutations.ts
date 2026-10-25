@@ -202,12 +202,8 @@ export function useAttemptMutations({
           conversationId,
           ...input,
           modelId: effectiveModelId!,
-          searchEnabled,
+          // Search and research are the asking attempt's, kept by the server.
           reasoningEffort,
-          // The composer's research toggle belongs to a send, and no other
-          // surface offers it. An answer to a clarification still keeps the
-          // offer: the server inherits it from the attempt that asked.
-          researchEnabled: false,
           ...(await work.attemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
@@ -324,29 +320,44 @@ export function useAttemptMutations({
       input: {
         messageId: string;
         modelId: string;
-        searchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null;
-        researchEnabled?: boolean;
         attachmentIds: ReadonlyArray<string>;
         releaseUploads?: () => void;
-        skillIds?: ReadonlyArray<string>;
-        collectionIds?: ReadonlyArray<string>;
       } & (
-        | { content: string; questionResponse?: never }
+        | {
+            content: string;
+            questionResponse?: never;
+            searchEnabled: boolean;
+            researchEnabled?: boolean;
+            skillIds?: ReadonlyArray<string>;
+            collectionIds?: ReadonlyArray<string>;
+          }
+        // New answers keep the asking attempt's search and research.
         | { questionResponse: QuestionResponse; content?: never }
       ),
     ) => {
-      const { releaseUploads: _releaseUploads, ...editFields } = input;
+      const shared = {
+        conversationId,
+        messageId: input.messageId,
+        modelId: input.modelId,
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+        attachmentIds: input.attachmentIds,
+        ...(await work.attemptFields()),
+        timeZone: browserTimeZone(),
+        ...documentFocus(),
+      };
       return editMessage({
-        data: {
-          conversationId,
-          ...(input.content !== undefined ? imagePick : {}),
-          researchEnabled: false,
-          ...editFields,
-          ...(await work.attemptFields()),
-          timeZone: browserTimeZone(),
-          ...documentFocus(),
-        },
+        data: input.questionResponse
+          ? { ...shared, questionResponse: input.questionResponse }
+          : {
+              ...shared,
+              ...imagePick,
+              content: input.content,
+              searchEnabled: input.searchEnabled,
+              researchEnabled: input.researchEnabled ?? false,
+              ...(input.skillIds ? { skillIds: input.skillIds } : {}),
+              ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
+            },
       });
     },
     onSuccess: async (_result, input) => {
@@ -526,7 +537,6 @@ export function useAttemptMutations({
         messageId: activeEditingMessage.id,
         questionResponse,
         modelId: effectiveModelId,
-        searchEnabled,
         reasoningEffort,
         attachmentIds: [],
       });
