@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { plainResolve } from "./plain-resolve.ts";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
@@ -71,6 +72,7 @@ const startConversation = Effect.fn("test.startConversation")(function* (
 ) {
   const repo = yield* ChatRepo;
   const turn = yield* repo.createTurn({
+    resolve: plainResolve,
     userId,
     conversation: { kind: "new", id: uuidv7(), mode: "chat" },
     modelId,

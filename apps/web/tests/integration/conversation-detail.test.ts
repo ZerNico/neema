@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { plainResolve } from "./plain-resolve.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
 import { eq, inArray } from "drizzle-orm";
@@ -195,6 +196,7 @@ describe("attempt snapshot reads", () => {
           yield* Deferred.await(captured);
           const oldGeneration = (yield* repo.getMessage(thread.assistantId))!.generationId;
           const retried = yield* repo.resetMessageForRetry({
+            resolve: plainResolve,
             userId,
             messageId: thread.assistantId,
             modelId,

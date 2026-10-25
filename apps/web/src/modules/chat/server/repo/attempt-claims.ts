@@ -30,7 +30,7 @@ import {
   QuestionUnavailable,
 } from "../../errors.ts";
 import { lockAccount } from "~/modules/auth/server/account-eligibility.ts";
-import { readDefaults, resolveAttempt, readConfig, writeConfig } from "./generation-config.ts";
+import { readDefaults, readConfig, writeConfig } from "./generation-config.ts";
 import { queueOrder, readQueueGate } from "./queue.ts";
 import { freshLease, joinChunks } from "./generation-writes.ts";
 import { turnMessagesOf, questionForMessage, questionContent } from "./questions.ts";
@@ -344,7 +344,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               : conversationCreated
                 ? { agent: null, ...fresh }
                 : yield* readDefaults(tx, conversation.id);
-            const config = yield* resolveAttempt(tx, defaults, input.resolve, continuation);
+            const config = yield* input.resolve(tx, defaults, continuation);
             if (input.saveIntegrationChoices)
               yield* input.saveIntegrationChoices(tx, conversation.id);
             if (association)
@@ -488,10 +488,9 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               .delete(conversationQueueEntries)
               .where(eq(conversationQueueEntries.id, entry.id))
               .pipe(Effect.orDie);
-            const config = yield* resolveAttempt(
+            const config = yield* input.resolve(entry)(
               tx,
               yield* readDefaults(tx, conversation.id),
-              input.resolve(entry),
             );
             const [assistant] = yield* tx
               .insert(messages)
@@ -570,10 +569,9 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               ? yield* editedContent(tx, current, input.edit.messageId, input.edit)
               : null;
             const previous = yield* readConfig(tx, input.messageId);
-            const config = yield* resolveAttempt(
+            const config = yield* input.resolve(
               tx,
               yield* readDefaults(tx, target.conversationId),
-              input.resolve,
               previous,
             );
             const generationId = uuidv7();
@@ -740,10 +738,9 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               (tail.status !== "error" && tail.status !== "aborted")
             )
               return lost;
-            const config = yield* resolveAttempt(
+            const config = yield* input.resolve(
               tx,
               yield* readDefaults(tx, target.conversationId),
-              input.resolve,
               yield* readConfig(tx, input.messageId),
             );
             const chunks = yield* tx
@@ -869,11 +866,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
             )
               return null;
             const edited = yield* editedContent(tx, current, input.userMessageId, input);
-            const config = yield* resolveAttempt(
-              tx,
-              yield* readDefaults(tx, input.conversationId),
-              input.resolve,
-            );
+            const config = yield* input.resolve(tx, yield* readDefaults(tx, input.conversationId));
             const claimed = yield* tx
               .update(messages)
               .set({ ...edited, editedAt: new Date() })

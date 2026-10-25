@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { plainResolve } from "./plain-resolve.ts";
 import { createHash } from "node:crypto";
 import {
   Deferred,
@@ -554,6 +555,7 @@ const setupQuestion = Effect.gen(function* () {
   return { ...seed, callId, expectedMessages: yield* repo.listMessages(seed.conversation.id) };
 });
 const answerInput = (seed: Effect.Success<typeof setupQuestion>) => ({
+  resolve: plainResolve,
   userId: seed.userId,
   conversation: { kind: "existing" as const, id: seed.conversation.id },
   modelId: textModelId,
@@ -564,6 +566,7 @@ const answerInput = (seed: Effect.Success<typeof setupQuestion>) => ({
   },
 });
 const retryInput = (seed: Effect.Success<typeof setupQuestion>) => ({
+  resolve: plainResolve,
   userId: seed.userId,
   messageId: seed.assistant.id,
   modelId: textModelId,
@@ -3428,6 +3431,7 @@ describe("structured answer persistence and edits", () => {
           })
           .where(eq(messages.id, turn.userMessage.id));
         return yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           userId: seed.userId,
           messageId: turn.assistant.id,
           modelId: textModelId,
@@ -3457,6 +3461,7 @@ describe("structured answer persistence and edits", () => {
           .set({ questionResponse: { v: 99 } })
           .where(eq(messages.id, turn.userMessage.id));
         yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           userId: seed.userId,
           messageId: turn.assistant.id,
           modelId: textModelId,
@@ -3525,6 +3530,7 @@ describe("atomic question answers", () => {
             action === "normal send"
               ? repo
                   .createTurn({
+                    resolve: plainResolve,
                     userId: seed.userId,
                     conversation: { kind: "existing", id: seed.conversation.id },
                     modelId: textModelId,
@@ -3581,6 +3587,7 @@ describe("atomic question answers", () => {
         });
         const rewind = yield* repo.resetMessageForRetry(retryInput(seed));
         const edit = yield* repo.createAssistantForEdit({
+          resolve: plainResolve,
           userId: seed.userId,
           conversationId: seed.conversation.id,
           userMessageId: seed.userMessage.id,
@@ -6039,6 +6046,7 @@ describe("resumable streaming pipeline", () => {
         const stillLive = yield* repo.getMessage(assistant.id);
         const busy = yield* repo
           .createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversation.id },
             modelId: textModelId,
@@ -6064,6 +6072,7 @@ describe("resumable streaming pipeline", () => {
         const settled = yield* repo.getMessage(assistant.id);
         const toolCalls = yield* repo.listToolCalls([assistant.id]);
         const next = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "existing", id: conversation.id },
           modelId: textModelId,
@@ -6236,6 +6245,7 @@ describe("resumable streaming pipeline", () => {
 
         const turn = (content: string) =>
           repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversation.id },
             modelId: null as never,
@@ -6286,6 +6296,7 @@ describe("resumable streaming pipeline", () => {
         });
 
         const restart = {
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(conversation.id),
           userId,
           messageId: assistant.id,
@@ -6335,6 +6346,7 @@ describe("resumable streaming pipeline", () => {
         });
 
         const edit = {
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(conversation.id),
           userId,
           conversationId: conversation.id,
@@ -6440,8 +6452,10 @@ describe("scheduled turns", () => {
             researchEnabled: false,
             collectionIds: [],
             skillIds: [],
+            integrationGrants: [],
             timeZone: "UTC",
             target: { kind: "new" },
+            onSettled: Effect.void,
           });
           yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runDrain);
           const [run] = yield* db
@@ -6503,9 +6517,12 @@ describe("scheduled turns", () => {
           cron: "0 7 * * 1-5",
           timezone: "Europe/Berlin",
         });
+        const runId = uuidv7();
+        yield* db.insert(scheduleRuns).values({ id: runId, scheduleId, status: "pending" });
         const turn = yield* chat.runScheduledTurn({
           userId: seed.userId,
           scheduleId,
+          scheduleRunId: runId,
           prompt: "Summarize yesterday.",
           // A saved model that no longer exists: the fire falls back rather
           // than failing an unattended schedule.
@@ -6516,8 +6533,10 @@ describe("scheduled turns", () => {
           researchEnabled: false,
           collectionIds: [],
           skillIds: [],
+          integrationGrants: [],
           timeZone: "Europe/Berlin",
           target: { kind: "new" },
+          onSettled: Effect.void,
         });
         yield* engine.subscribe(turn.assistantMessageId, 0).pipe(Stream.runDrain);
         const [conversation] = yield* db
@@ -6600,8 +6619,10 @@ describe("scheduled turns", () => {
               researchEnabled: false,
               collectionIds: [],
               skillIds: [],
+              integrationGrants: [],
               timeZone: "Europe/Berlin",
               target: { kind: "existing", conversationId: seed.conversation.id },
+              onSettled: Effect.void,
             });
           });
         const first = yield* fire();
@@ -6659,6 +6680,8 @@ describe("scheduled turns into a work chat", () => {
           .runScheduledTurn({
             userId: seed.userId,
             scheduleId: uuidv7(),
+            // Refused before anything is written, so the run need not exist.
+            scheduleRunId: uuidv7(),
             prompt: "Tidy the repo.",
             modelId: textModelId,
             agentId: null,
@@ -6666,8 +6689,10 @@ describe("scheduled turns into a work chat", () => {
             researchEnabled: false,
             collectionIds: [],
             skillIds: [],
+            integrationGrants: [],
             timeZone: "UTC",
             target: { kind: "existing", conversationId: seed.conversation.id },
+            onSettled: Effect.void,
           })
           .pipe(Effect.flip);
       }),
@@ -7268,6 +7293,7 @@ describe("generated image streaming", () => {
           const initialId = initial!.assistantOutput!.files[0]!.attachment.id;
 
           const edit = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversation.id },
             modelId: imageModelId,
@@ -7313,6 +7339,7 @@ describe("generated image streaming", () => {
           ).toBe(editedId);
 
           const followup = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversation.id },
             modelId: imageModelId,

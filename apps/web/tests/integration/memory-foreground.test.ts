@@ -1,4 +1,5 @@
 import { EmptyWebSearch } from "./unused-services.ts";
+import { plainResolve } from "./plain-resolve.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response as AiResponse } from "effect/ai";
@@ -451,6 +452,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
         });
       }
       const turn = yield* repo.createTurn({
+        resolve: plainResolve,
         userId,
         conversation: { kind: "new", id: uuidv7(), mode: "chat" },
         modelId,
@@ -655,6 +657,7 @@ describe("StreamEngine durable clarification handoff", () => {
       ChatRepo.use((repo) =>
         repo
           .createTurn({
+            resolve: plainResolve,
             userId: result.userId,
             conversation: { kind: "existing", id: result.turn.conversation.id },
             modelId,
@@ -675,6 +678,7 @@ describe("StreamEngine durable clarification handoff", () => {
         const repo = yield* ChatRepo;
         const engine = yield* StreamEngine;
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId: result.userId,
           conversation: { kind: "existing", id: result.turn.conversation.id },
           modelId,
@@ -974,6 +978,7 @@ describe("StreamEngine temporary chats", () => {
           conversation: Parameters<typeof repo.createTurn>[0]["conversation"],
         ) {
           const turn = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation,
             modelId,

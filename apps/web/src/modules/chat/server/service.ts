@@ -383,7 +383,7 @@ export class ChatService extends Context.Service<
     runScheduledTurn(input: {
       userId: string;
       scheduleId: string;
-      scheduleRunId?: string;
+      scheduleRunId: string;
       prompt: string;
       modelId: string | null;
       agentId: string | null;
@@ -392,11 +392,11 @@ export class ChatService extends Context.Service<
       researchEnabled: boolean;
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
-      integrationGrants?: ReadonlyArray<IntegrationGrant>;
+      integrationGrants: ReadonlyArray<IntegrationGrant>;
       timeZone: string;
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
       /** Runs once the fire's answer has ended, however it ended. */
-      onSettled?: Effect.Effect<void>;
+      onSettled: Effect.Effect<void>;
     }): Effect.Effect<
       { conversationId: string; assistantMessageId: string },
       | ModelNotFound
@@ -663,7 +663,7 @@ function makeChatService() {
     const runScheduledTurn = Effect.fn("ChatService.runScheduledTurn")(function* (input: {
       userId: string;
       scheduleId: string;
-      scheduleRunId?: string;
+      scheduleRunId: string;
       prompt: string;
       modelId: string | null;
       agentId: string | null;
@@ -674,14 +674,14 @@ function makeChatService() {
       collectionIds: ReadonlyArray<string>;
       skillIds: ReadonlyArray<string>;
       /** Consent given when the schedule was saved; the fire asks nobody. */
-      integrationGrants?: ReadonlyArray<IntegrationGrant>;
+      integrationGrants: ReadonlyArray<IntegrationGrant>;
       timeZone: string;
       /**
        * A fresh chat, tagged with the schedule and its agent; or an existing
        * chat, which keeps its own agent (one cannot change after creation).
        */
       target: { kind: "new" } | { kind: "existing"; conversationId: string };
-      onSettled?: Effect.Effect<void>;
+      onSettled: Effect.Effect<void>;
     }) {
       if (input.prompt.trim() === "")
         return yield* new InvalidMessage({ reason: "message is empty" });
@@ -719,7 +719,7 @@ function makeChatService() {
           attachmentIds: [],
           ...(agentId !== undefined ? { associateAgentId: agentId } : {}),
           ...(target.kind === "new" ? { scheduleId: input.scheduleId } : {}),
-          ...(input.scheduleRunId ? { scheduleRunId: input.scheduleRunId } : {}),
+          scheduleRunId: input.scheduleRunId,
           resolve: resolver({
             attempt: "scheduled",
             userId: input.userId,
@@ -731,9 +731,8 @@ function makeChatService() {
             imageModelId: input.imageModelId ?? null,
             collectionIds: input.collectionIds,
             skillIds: input.skillIds,
-            // Always set on a fire, empty included: an empty grant list means
-            // this unattended turn is offered no integration at all.
-            integrationGrants: input.integrationGrants ?? [],
+            // An empty grant list offers this unattended turn no integration at all.
+            integrationGrants: input.integrationGrants,
           }),
         });
       const turn = yield* fire(

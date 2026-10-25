@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { plainResolve } from "./plain-resolve.ts";
 import { eq } from "drizzle-orm";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -1406,6 +1407,7 @@ describe("saved ui block state", () => {
         };
         yield* repo.saveUiState(save);
         yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(conversation.id),
           userId,
           messageId: assistant.id,

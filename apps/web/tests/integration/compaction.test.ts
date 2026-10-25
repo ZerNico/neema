@@ -1,4 +1,5 @@
 import { EmptyWebSearch } from "./unused-services.ts";
+import { plainResolve } from "./plain-resolve.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
@@ -302,6 +303,7 @@ const seedConversation = Effect.fn("test.seedConversation")(function* (
 ) {
   const repo = yield* ChatRepo;
   const first = yield* repo.createTurn({
+    resolve: plainResolve,
     userId,
     conversation: { kind: "new", id: uuidv7(), mode: "chat" },
     modelId,
@@ -315,6 +317,7 @@ const seedConversation = Effect.fn("test.seedConversation")(function* (
   });
   for (let turn = 1; turn < turns; turn++) {
     const next = yield* repo.createTurn({
+      resolve: plainResolve,
       userId,
       conversation: { kind: "existing", id: first.conversation.id },
       modelId,
@@ -463,6 +466,7 @@ describe("context compaction", () => {
         // More turns, so the next pass has to advance the boundary again.
         for (let turn = 8; turn < 14; turn++) {
           const next = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversationId },
             modelId,
@@ -593,6 +597,7 @@ describe("context compaction", () => {
             : history.messages[index + 1]!;
         const targetIndex = history.messages.indexOf(target);
         yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(conversationId),
           userId,
           messageId: target.id,
@@ -624,6 +629,7 @@ describe("context compaction", () => {
         const before = yield* repo.listCompactionEvents([messageId]);
 
         yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(conversationId),
           userId,
           messageId,
@@ -655,6 +661,7 @@ describe("context compaction", () => {
         // point, regardless of how tightly the planner sized the first tail.
         for (let turn = 8; turn < 10; turn++) {
           const next = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversationId },
             modelId,
@@ -868,6 +875,7 @@ describe("question history compaction", () => {
           const userId = yield* makeUser();
           const conversationId = yield* seedConversation(userId, 8);
           const asking = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversationId },
             modelId: smallModelId,
@@ -904,6 +912,7 @@ describe("question history compaction", () => {
             result: { v: 1, outcome: "presented", ...params },
           });
           const reply = yield* repo.createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: conversationId },
             modelId: smallModelId,
@@ -945,6 +954,7 @@ describe("question history compaction", () => {
 const askAgain = Effect.fn("test.askAgain")(function* (userId: string, conversationId: string) {
   const repo = yield* ChatRepo;
   const turn = yield* repo.createTurn({
+    resolve: plainResolve,
     userId,
     conversation: { kind: "existing", id: conversationId },
     modelId: smallModelId,
@@ -1132,6 +1142,7 @@ describe("compaction inside a generation", () => {
         const repo = yield* ChatRepo;
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: smallModelId,
@@ -1333,6 +1344,7 @@ describe("compaction inside a generation", () => {
         const repo = yield* ChatRepo;
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,
@@ -1426,6 +1438,7 @@ describe("compaction inside a generation", () => {
         const repo = yield* ChatRepo;
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,
@@ -1477,6 +1490,7 @@ describe("compaction inside a generation", () => {
         const repo = yield* ChatRepo;
         const userId = yield* makeUser();
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId: toolModelId,

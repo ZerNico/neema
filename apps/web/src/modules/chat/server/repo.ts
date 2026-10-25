@@ -303,8 +303,8 @@ export type TurnFields = {
   saveIntegrationChoices?:
     | ((tx: DbTx, conversationId: string) => Effect.Effect<void, IntegrationNotAvailable>)
     | undefined;
-  /** Absent means a plain generation; the service always supplies one. */
-  resolve?: ResolveGeneration | undefined;
+  /** Settles the attempt's configuration inside its transaction. */
+  resolve: ResolveGeneration;
   /** The connected app that sent this message, recorded on it for good. */
   origin?: { clientId: string; clientName: string } | undefined;
 };
@@ -1019,7 +1019,7 @@ export class ChatRepo extends Context.Service<
         conversationId: string;
         attachmentIds: ReadonlyArray<string>;
       };
-      resolve?: ResolveGeneration | undefined;
+      resolve: ResolveGeneration;
     }): Effect.Effect<
       {
         claimed: boolean;
@@ -1038,7 +1038,7 @@ export class ChatRepo extends Context.Service<
       userId: string;
       messageId: string;
       modelId: string;
-      resolve?: ResolveGeneration | undefined;
+      resolve: ResolveGeneration;
     }): Effect.Effect<
       { claimed: false } | { claimed: true; generationId: string; searchEnabled: boolean },
       ResolveError | ConversationBusy
@@ -1056,7 +1056,7 @@ export class ChatRepo extends Context.Service<
         /** See resetMessageForRetry. */
         invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
         /** The new answer is a new generation: it resolves against the conversation defaults. */
-        resolve?: ResolveGeneration | undefined;
+        resolve: ResolveGeneration;
       },
     ): Effect.Effect<
       { message: MessageRow; orphanedKeys: ReadonlyArray<string>; config: GenerationConfig } | null,

@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { plainResolve } from "./plain-resolve.ts";
 import { Deferred, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response, type Prompt } from "effect/ai";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
@@ -1525,6 +1526,7 @@ describe("ending a run", () => {
         const repo = yield* ChatRepo;
         const db = yield* Db;
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId: input.userId,
           conversation: { kind: "existing", id: input.conversationId },
           modelId,
@@ -1616,6 +1618,7 @@ describe("ending a run", () => {
         const repo = yield* ChatRepo;
         const db = yield* Db;
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId: input.userId,
           conversation: { kind: "existing", id: input.conversationId },
           modelId,
@@ -1650,6 +1653,7 @@ describe("ending a run", () => {
         expect((yield* repo.research!.get(runId))?.status).toBe("running");
         const snapshot = yield* repo.listMessages(input.conversationId);
         const retried = yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           userId: input.userId,
           messageId: turn.assistant.id,
           modelId,

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { plainResolve } from "./plain-resolve.ts";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -471,6 +472,7 @@ describe("attachment claiming", () => {
         const second = yield* upload(userId, "b.txt", "b");
 
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -484,6 +486,7 @@ describe("attachment claiming", () => {
         yield* finish(turn.assistant.id);
         const reclaim = yield* repo
           .createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "existing", id: turn.conversation.id },
             modelId,
@@ -520,6 +523,7 @@ describe("attachment claiming", () => {
 
         const error = yield* repo
           .createTurn({
+            resolve: plainResolve,
             userId: bob,
             conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId,
@@ -546,6 +550,7 @@ describe("attachment claiming", () => {
         const only = yield* upload(userId, "a.txt", "a");
         const error = yield* repo
           .createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId,
@@ -573,6 +578,7 @@ describe("attachment replacement on edit", () => {
         const added = yield* upload(userId, "added.txt", "added");
 
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -584,6 +590,7 @@ describe("attachment replacement on edit", () => {
 
         yield* finish(turn.assistant.id);
         const { orphanedKeys } = yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(turn.conversation.id),
           userId,
           messageId: turn.assistant.id,
@@ -631,6 +638,7 @@ describe("attachment replacement on edit", () => {
         const key = (yield* blobsOf(userId))[0]!.storageKey;
 
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -642,6 +650,7 @@ describe("attachment replacement on edit", () => {
         // Release just one of them.
         yield* finish(turn.assistant.id);
         const partial = yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(turn.conversation.id),
           userId,
           messageId: turn.assistant.id,
@@ -691,6 +700,7 @@ describe("attachment replacement on edit", () => {
 
         const hers = yield* upload(alice, "hers.txt", "alice bytes");
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId: alice,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -745,6 +755,7 @@ describe("attachment access policy", () => {
           .pipe(Effect.flip);
 
         yield* repo.createTurn({
+          resolve: plainResolve,
           userId: alice,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -799,6 +810,7 @@ describe("attachment access policy", () => {
           .pipe(Effect.flip);
 
         yield* repo.createTurn({
+          resolve: plainResolve,
           userId: alice,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -842,6 +854,7 @@ describe("attachment cleanup", () => {
         const claimed = yield* upload(userId, "claimed.txt", "claimed");
 
         yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -952,6 +965,7 @@ describe("generated assistant image transactions", () => {
         const service = yield* AttachmentService;
         const db = yield* Db;
         const turn = yield* repo.createTurn({
+          resolve: plainResolve,
           userId,
           conversation: { kind: "new", id: uuidv7(), mode: "chat" },
           modelId,
@@ -1016,6 +1030,7 @@ describe("generated assistant image transactions", () => {
           attachment: { ...image.attachment, id: clonedImage.attachment.id },
         });
         const retry = yield* repo.resetMessageForRetry({
+          resolve: plainResolve,
           expectedMessages: yield* repo.listMessages(turn.conversation.id),
           userId,
           messageId: turn.assistant.id,
@@ -1107,6 +1122,7 @@ describe("queued message files", () => {
         const deleted = yield* attachmentRepo.deleteUnclaimed(userId, file.id).pipe(Effect.flip);
         const sent = yield* repo
           .createTurn({
+            resolve: plainResolve,
             userId,
             conversation: { kind: "new", id: uuidv7(), mode: "chat" },
             modelId,
@@ -1163,6 +1179,7 @@ describe("queued message files", () => {
             [
               Effect.result(
                 repo.createTurn({
+                  resolve: plainResolve,
                   userId,
                   conversation: { kind: "new", id: uuidv7(), mode: "chat" },
                   modelId,

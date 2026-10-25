@@ -10,13 +10,7 @@ import {
   messageKnowledgeVersions,
 } from "~/db/schema/index.ts";
 import { readKeptWorkingFiles } from "../kept-working-files.ts";
-import type {
-  GenerationConfig,
-  DraftSummary,
-  ConversationDefaults,
-  ResolveError,
-  ResolveGeneration,
-} from "../repo.ts";
+import type { GenerationConfig, DraftSummary, ConversationDefaults } from "../repo.ts";
 import type { DbTx } from "~/server/db.ts";
 
 const draftSummary = (draft: {
@@ -141,19 +135,6 @@ export const readDefaults = Effect.fn("chat.readDefaults")(function* (
     imageModelId: conversation?.imageModelId ?? null,
   } satisfies ConversationDefaults;
 });
-
-/** Internal plain-chat helpers may omit a resolver; agent attempts never may. */
-export const resolveAttempt = (
-  tx: DbTx,
-  defaults: ConversationDefaults,
-  resolve: ResolveGeneration | undefined,
-  previous?: GenerationConfig,
-): Effect.Effect<GenerationConfig, ResolveError> => {
-  if (resolve) return resolve(tx, defaults, previous);
-  if (defaults.agent || previous?.skills?.length)
-    return Effect.die(new Error("Agent and skill attempts require live configuration resolution"));
-  return Effect.succeed(previous ?? PLAIN_GENERATION);
-};
 
 export const readConfig = Effect.fn("chat.readGenerationConfig")(function* (
   tx: Pick<DbTx, "select">,
