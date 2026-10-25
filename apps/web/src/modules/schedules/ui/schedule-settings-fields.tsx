@@ -137,7 +137,7 @@ export const ScheduleSettingsFields = withForm({
               // One row per account a run could act as, plus any granted one since lost.
               const rows = (integrations.data ?? []).flatMap((integration) => {
                 const several = integration.connections.length > 1;
-                const accounts = integration.connections
+                return integration.connections
                   .filter(
                     (account) =>
                       account.status === "active" ||
@@ -156,21 +156,12 @@ export const ScheduleSettingsFields = withForm({
                           ? "Turned off: runs will fail until it is back."
                           : "Not connected: runs will fail until you reconnect.",
                   }));
-                const lost = grants
-                  .filter(
-                    (grant) =>
-                      grant.integrationId === integration.id &&
-                      !integration.connections.some((account) => account.id === grant.connectionId),
-                  )
-                  .map((grant) => ({
-                    integration,
-                    connectionId: grant.connectionId,
-                    title: integration.name,
-                    detail: "Its account was disconnected: turn this off or runs will fail.",
-                  }));
-                return [...accounts, ...lost];
               });
-              if (rows.length === 0)
+              // Keyed by place in the saved list, which is all that tells two lost grants apart.
+              const lost = grants.flatMap((grant, place) =>
+                grant.connectionId === null ? [{ grant, key: `lost-${place}` }] : [],
+              );
+              if (rows.length === 0 && lost.length === 0)
                 return (
                   <p className="text-muted-foreground text-sm">
                     Connect a service in Settings → Integrations to let runs use it.
@@ -211,14 +202,44 @@ export const ScheduleSettingsFields = withForm({
                             <ToggleGroupItem value="write">Read and write</ToggleGroupItem>
                           </ToggleGroup>
                         </ListRow>
-                        {grant ? (
+                        {grant?.connectionId ? (
                           <ScheduleAllowanceFields
                             kind={integration.kind}
-                            grant={grant}
+                            grant={{ ...grant, connectionId: grant.connectionId }}
                             onChange={(next) => field.handleChange([...rest, next])}
                           />
                         ) : null}
                       </Fragment>
+                    );
+                  })}
+                  {lost.map(({ grant, key }) => {
+                    const integration = integrations.data?.find(
+                      (entry) => entry.id === grant.integrationId,
+                    );
+                    const title = integration?.name ?? "An integration";
+                    return (
+                      <ListRow key={key}>
+                        {integration ? (
+                          <IntegrationLogo integrationId={integration.id} variant="tile" />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{title}</p>
+                          <p className="text-muted-foreground truncate text-xs">
+                            Its account was disconnected: turn this off or runs will fail.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Turn off ${title}`}
+                          onClick={() =>
+                            field.handleChange(grants.filter((entry) => entry !== grant))
+                          }
+                        >
+                          Turn off
+                        </Button>
+                      </ListRow>
                     );
                   })}
                 </ListCard>

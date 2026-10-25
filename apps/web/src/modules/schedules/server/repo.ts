@@ -2,19 +2,27 @@ import { leaseFor } from "~/server/sql.ts";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, messages, scheduleRuns, schedules } from "~/db/schema/index.ts";
+import {
+  conversations,
+  messages,
+  scheduleIntegrationGrants,
+  scheduleRuns,
+  schedules,
+} from "~/db/schema/index.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
-import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import type { IntegrationGrant, ScheduleGrant } from "~/modules/integrations/grant.ts";
 import { answered, type SettledRun } from "../settled-run.ts";
 
 /** How long a scheduled run is held between its renewals. */
 const RUN_LEASE_SECONDS = 60;
 
-export type ScheduleRow = typeof schedules.$inferSelect;
+type ScheduleColumns = typeof schedules.$inferSelect;
+/** A schedule with its integration grants, ordered so a fire offers them alike each time. */
+export type ScheduleRow = ScheduleColumns & { integrationGrants: ScheduleGrant[] };
 type RunRow = typeof scheduleRuns.$inferSelect;
 
-export const toSummary = (row: ScheduleRow): ScheduleSummary => ({
+export const toSummary = (row: ScheduleColumns): ScheduleSummary => ({
   id: row.id,
   name: row.name,
   scheduleText: row.scheduleText,
@@ -25,13 +33,35 @@ export const toSummary = (row: ScheduleRow): ScheduleSummary => ({
   lastFiredAt: row.lastFiredAt?.toISOString() ?? null,
 });
 
+/** Puts a schedule's grants in place of what it had. */
+const replaceGrants = (tx: DbTx, scheduleId: string, grants: IntegrationGrant[]) =>
+  Effect.gen(function* () {
+    yield* tx
+      .delete(scheduleIntegrationGrants)
+      .where(eq(scheduleIntegrationGrants.scheduleId, scheduleId))
+      .pipe(Effect.orDie);
+    if (grants.length)
+      yield* tx
+        .insert(scheduleIntegrationGrants)
+        .values(
+          grants.map((grant) => ({
+            scheduleId,
+            connectionId: grant.connectionId,
+            integrationId: grant.integrationId,
+            access: grant.access,
+            allowances: grant.allowances ?? null,
+          })),
+        )
+        .pipe(Effect.orDie);
+  });
+
 const CLAIM_BATCH = 25;
 const SETTLE_BATCH = 50;
 
 export class ScheduleRepo extends Context.Service<
   ScheduleRepo,
   {
-    list(userId: string): Effect.Effect<ScheduleRow[]>;
+    list(userId: string): Effect.Effect<ScheduleColumns[]>;
     get(userId: string, scheduleId: string, tx?: DbTx): Effect.Effect<ScheduleRow | null>;
     insert(
       input: {
@@ -86,14 +116,16 @@ export class ScheduleRepo extends Context.Service<
           | "researchEnabled"
           | "collectionIds"
           | "skillIds"
-          | "integrationGrants"
           | "notify"
           | "chatMode"
           | "chatId"
           | "paused"
           | "nextFireAt"
         >
-      >,
+      > & {
+        /** Replaces every grant; absent keeps them. */
+        integrationGrants?: IntegrationGrant[];
+      },
       tx?: DbTx,
     ): Effect.Effect<ScheduleRow | null>;
     remove(userId: string, scheduleId: string): Effect.Effect<void>;
@@ -121,7 +153,7 @@ export class ScheduleRepo extends Context.Service<
      */
     claimDue(
       limit: number,
-      nextFor: (row: ScheduleRow, claimedAt: Date) => Date | null,
+      nextFor: (row: ScheduleColumns, claimedAt: Date) => Date | null,
     ): Effect.Effect<Array<ScheduleRow & { runId: string }>>;
     /**
      * Claims the runs that have ended and marks each settled, once: a run that
@@ -135,6 +167,41 @@ export class ScheduleRepo extends Context.Service<
     ScheduleRepo,
     Effect.gen(function* () {
       const db = yield* Db;
+      const inTx = <A>(tx: DbTx | undefined, work: (tx: DbTx) => Effect.Effect<A>) =>
+        tx ? work(tx) : db.transaction(work).pipe(Effect.orDie);
+      /** Each schedule with its grants, read on the same connection as the rows. */
+      const withGrants = (
+        reader: DbTx | typeof db,
+        rows: ReadonlyArray<ScheduleColumns>,
+      ): Effect.Effect<ScheduleRow[]> =>
+        Effect.gen(function* () {
+          if (rows.length === 0) return [];
+          const grants = yield* reader
+            .select()
+            .from(scheduleIntegrationGrants)
+            .where(
+              inArray(
+                scheduleIntegrationGrants.scheduleId,
+                rows.map((row) => row.id),
+              ),
+            )
+            .orderBy(
+              asc(scheduleIntegrationGrants.integrationId),
+              sql`${scheduleIntegrationGrants.connectionId} asc nulls last`,
+            )
+            .pipe(Effect.orDie);
+          return rows.map((row) => ({
+            ...row,
+            integrationGrants: grants
+              .filter((grant) => grant.scheduleId === row.id)
+              .map(({ connectionId, integrationId, access, allowances }) => ({
+                connectionId,
+                integrationId,
+                access,
+                ...(allowances ? { allowances } : {}),
+              })),
+          }));
+        });
       return ScheduleRepo.of({
         list: Effect.fn("ScheduleRepo.list")(function* (userId) {
           return yield* db
@@ -145,29 +212,38 @@ export class ScheduleRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
         get: Effect.fn("ScheduleRepo.get")(function* (userId, scheduleId, tx) {
-          const [row] = yield* (tx ?? db)
+          const reader = tx ?? db;
+          const rows = yield* reader
             .select()
             .from(schedules)
             .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
             .pipe(Effect.orDie);
+          const [row] = yield* withGrants(reader, rows);
           return row ?? null;
         }),
-        insert: Effect.fn("ScheduleRepo.insert")(function* (input, tx) {
-          const [row] = yield* (tx ?? db)
-            .insert(schedules)
-            .values({ id: uuidv7(), ...input })
-            .returning()
-            .pipe(Effect.orDie);
-          return row!;
+        insert: Effect.fn("ScheduleRepo.insert")(function* ({ integrationGrants, ...input }, tx) {
+          return yield* inTx(tx, (write) =>
+            Effect.gen(function* () {
+              const [row] = yield* write
+                .insert(schedules)
+                .values({ id: uuidv7(), ...input })
+                .returning()
+                .pipe(Effect.orDie);
+              yield* replaceGrants(write, row!.id, integrationGrants ?? []);
+              const [stored] = yield* withGrants(write, [row!]);
+              return stored!;
+            }),
+          );
         }),
         findByChat: Effect.fn("ScheduleRepo.findByChat")(function* (userId, chatId) {
-          const [row] = yield* db
+          const rows = yield* db
             .select()
             .from(schedules)
             .where(and(eq(schedules.userId, userId), eq(schedules.chatId, chatId)))
             .orderBy(asc(schedules.createdAt))
             .limit(1)
             .pipe(Effect.orDie);
+          const [row] = yield* withGrants(db, rows);
           return row ?? null;
         }),
         adoptChat: Effect.fn("ScheduleRepo.adoptChat")(function* (scheduleId, chatId, replacing) {
@@ -185,24 +261,36 @@ export class ScheduleRepo extends Context.Service<
             )
             .pipe(Effect.orDie);
         }),
-        update: Effect.fn("ScheduleRepo.update")(function* (userId, scheduleId, changes, tx) {
+        update: Effect.fn("ScheduleRepo.update")(function* (
+          userId,
+          scheduleId,
+          { integrationGrants, ...changes },
+          tx,
+        ) {
           const next = changes.nextFireAt;
           // A paused schedule has no next fire, whichever edit sets one.
           const nextFireAt =
             next instanceof Date && changes.paused === undefined
               ? sql`case when ${schedules.paused} then null else ${next.toISOString()}::timestamptz end`
               : next;
-          const [row] = yield* (tx ?? db)
-            .update(schedules)
-            .set({
-              ...changes,
-              ...(nextFireAt === undefined ? {} : { nextFireAt }),
-              updatedAt: new Date(),
-            })
-            .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
-            .returning()
-            .pipe(Effect.orDie);
-          return row ?? null;
+          return yield* inTx(tx, (write) =>
+            Effect.gen(function* () {
+              const [row] = yield* write
+                .update(schedules)
+                .set({
+                  ...changes,
+                  ...(nextFireAt === undefined ? {} : { nextFireAt }),
+                  updatedAt: new Date(),
+                })
+                .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
+                .returning()
+                .pipe(Effect.orDie);
+              if (!row) return null;
+              if (integrationGrants) yield* replaceGrants(write, row.id, integrationGrants);
+              const [stored] = yield* withGrants(write, [row]);
+              return stored ?? null;
+            }),
+          );
         }),
         remove: Effect.fn("ScheduleRepo.remove")(function* (userId, scheduleId) {
           yield* db
@@ -319,7 +407,7 @@ export class ScheduleRepo extends Context.Service<
                   .orderBy(schedules.nextFireAt)
                   .limit(limit)
                   .for("update", { skipLocked: true });
-                const claimed: Array<ScheduleRow & { runId: string }> = [];
+                const claimed: Array<ScheduleColumns & { runId: string }> = [];
                 for (const { schedule: row, claimedAt } of due) {
                   const next = nextFor(row, new Date(claimedAt));
                   const [updated] = yield* tx
@@ -339,7 +427,8 @@ export class ScheduleRepo extends Context.Service<
                     claimed.push({ ...updated, runId });
                   }
                 }
-                return claimed;
+                const loaded = yield* withGrants(tx, claimed);
+                return loaded.map((row, index) => ({ ...row, runId: claimed[index]!.runId }));
               }),
             )
             .pipe(Effect.orDie);

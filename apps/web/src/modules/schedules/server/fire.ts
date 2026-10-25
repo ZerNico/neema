@@ -1,4 +1,5 @@
 import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
+import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
@@ -33,7 +34,8 @@ export class ScheduleFire extends Context.Service<
       const integrations = yield* IntegrationService;
       const repo = yield* ScheduleRepo;
       const settlement = yield* ScheduleSettlement;
-      const turn = (row: ScheduleRow, runId: string, target: { conversationId: string } | null) =>
+      type Usable = ScheduleRow & { integrationGrants: IntegrationGrant[] };
+      const turn = (row: Usable, runId: string, target: { conversationId: string } | null) =>
         chat.runScheduledTurn({
           userId: row.userId,
           scheduleId: row.id,
@@ -53,7 +55,7 @@ export class ScheduleFire extends Context.Service<
         });
       // A fresh chat; in "same chat" mode it becomes the chat later fires use,
       // replacing the one this fire found gone (`row.chatId`), if any.
-      const fresh = (row: ScheduleRow, runId: string) =>
+      const fresh = (row: Usable, runId: string) =>
         turn(row, runId, null).pipe(
           Effect.tap((started) =>
             row.chatMode === "same"
@@ -61,7 +63,7 @@ export class ScheduleFire extends Context.Service<
               : Effect.void,
           ),
         );
-      const start = (row: ScheduleRow, runId: string) =>
+      const start = (row: Usable, runId: string) =>
         row.chatMode === "same" && row.chatId
           ? turn(row, runId, { conversationId: row.chatId }).pipe(
               Effect.retry({
@@ -77,20 +79,22 @@ export class ScheduleFire extends Context.Service<
           : fresh(row, runId);
       // A granted integration that cannot be used ends the run with a reason,
       // like a lost collection, rather than answering without it unannounced.
+      // Named by its integration, which the reason below looks up.
       const grantsUsable = (row: ScheduleRow) =>
-        Effect.forEach(row.integrationGrants, (grant) =>
-          integrations.session(row.userId, grant.connectionId).pipe(
-            Effect.asVoid,
-            // Named by its integration, which the reason below looks up.
-            Effect.mapError(
-              () => new IntegrationNotAvailable({ integrationId: grant.integrationId }),
-            ),
-          ),
+        Effect.forEach(row.integrationGrants, ({ connectionId, ...grant }) =>
+          connectionId === null
+            ? Effect.fail(new IntegrationNotAvailable({ integrationId: grant.integrationId }))
+            : integrations.session(row.userId, connectionId).pipe(
+                Effect.as({ ...grant, connectionId }),
+                Effect.mapError(
+                  () => new IntegrationNotAvailable({ integrationId: grant.integrationId }),
+                ),
+              ),
         );
       const fire: ScheduleFire["Service"] = (row, runId) =>
         grantsUsable(row)
           .pipe(
-            Effect.andThen(() => start(row, runId)),
+            Effect.andThen((integrationGrants) => start({ ...row, integrationGrants }, runId)),
             Effect.catchTag("IntegrationNotAvailable", (error) =>
               integrations.directory(row.userId).pipe(
                 Effect.flatMap((directory) =>

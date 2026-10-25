@@ -77,7 +77,7 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   existing chat rule. A fire that never started (no
   available model) records `status: 'error'` with `conversationId: null`.
 - Nobody is present to approve during a fire, so integrations are consented to up front:
-  `integration_grants` caps each one at read or read and write, and a fire is offered
+  `schedule_integration_grants` caps each account at read or read and write, and a fire is offered
   exactly those, refusing rather than asking for anything more. Contacting people (sending
   mail, inviting to events) needs an allowance listing the exact addresses, at most a few
   calls per run. Only the editor writes grants; see

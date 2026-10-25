@@ -74,7 +74,7 @@ const makeUser = Effect.fn("test.makeUser")(function* () {
 
 const insert = Effect.fn("test.insertSchedule")(function* (
   userId: string,
-  changes: Partial<ScheduleRow> = {},
+  changes: Partial<Omit<ScheduleRow, "integrationGrants">> = {},
 ) {
   const repo = yield* ScheduleRepo;
   return yield* repo.insert({

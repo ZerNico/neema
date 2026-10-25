@@ -34,8 +34,8 @@ citation, an agent's attachments) through one directory of every integration's i
 name; a deleted one falls back to its stored label.
 
 Deleting an integration refuses while a knowledge source mirrors it (a restricting foreign
-key), takes it out of schedules' grants in the same transaction, and lets foreign keys
-remove its connections, sharing, chat and agent settings and allowance counters. Past
+key), and lets foreign keys remove its connections, sharing, schedule grants, chat and agent
+settings and allowance counters. Past
 answers keep their rows and labels.
 
 ## Manifest and adapter
@@ -251,16 +251,19 @@ on the tool row ("Approved in Claude"), as the person made it there and not here
 
 ## Schedules decide in advance
 
-A schedule stores `integration_grants` (read, or read and write, per account of the owner's;
-a grant to one account never reaches their others). Only the
-editor sets them; a chat draft leaves them out, which keeps what is saved, because a model
-must not grant itself authority. A fire copies them into the generation config, where they
-replace the chat's choices entirely and nothing ever waits: anything beyond the grant is
-refused to the model. The fire first checks every granted account and ends the run as an
-error when one is gone, the way a lost collection does. A grant whose account was
-disconnected takes the owner's next account on that integration only while it is their only
-one there, as a knowledge source does; with several it waits for the owner to choose. A person retrying that answer later
-is present again, so a retry carries no grants.
+A schedule's grants are rows of `schedule_integration_grants`, one per account of the
+owner's, keyed by schedule and account, so one account can never hold two grants of different
+access (read, or read and write; a grant to one account never reaches their others). Only the
+editor sets them; a chat draft leaves them out, which keeps what is saved, because a model must
+not grant itself authority. A fire copies them into the generation config, where they replace
+the chat's choices entirely and nothing ever waits: anything beyond the grant is refused to the
+model. The fire first checks every granted account and ends the run as an error when one is
+gone, the way a lost collection does. Disconnecting an account leaves its grant without one
+(`on delete set null`), which the editor shows and a save refuses until the owner turns it off.
+Connecting again hands that grant to the owner's account only while it is their only one there,
+the schedule has no other grant waiting on that integration and the account holds none of its
+own, as a knowledge source does; otherwise it waits for the owner to choose. A person retrying
+that answer later is present again, so a retry carries no grants.
 
 An integration may declare **allowances** in its manifest: a way some calls reach people,
 the tools that do it, the kind of target and a cap per run. Outlook has two, "Send

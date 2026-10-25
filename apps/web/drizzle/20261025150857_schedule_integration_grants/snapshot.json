@@ -1,0 +1,411 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "b52d4a6c-1e51-496e-acde-3705d889ebb6",
+  "prevIds": [
+    "911177f1-a4c9-4de2-9dce-fa4ccb0c28d1"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "schedule_integration_grants"
+      ],
+      "writes": [
+        "s|tbl|public.schedule_integration_grants",
+        "n|tbl|public.schedule_integration_grants",
+        "e|tbl|public.schedule_integration_grants",
+        "n|rel|public.schedule_integration_grants",
+        "n|type|public.schedule_integration_grants"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "schedules",
+        "integration_grants"
+      ],
+      "writes": [
+        "s|col|public.schedules.integration_grants",
+        "n|col|public.schedules.integration_grants",
+        "e|col|public.schedules.integration_grants"
+      ],
+      "reads": [
+        "n|tbl|public.schedules",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "schedule_integration_grants",
+        "schedule_integration_grants_account_idx"
+      ],
+      "writes": [
+        "s|idx|public.schedule_integration_grants_account_idx",
+        "n|idx|public.schedule_integration_grants_account_idx",
+        "e|idx|public.schedule_integration_grants_account_idx",
+        "n|rel|public.schedule_integration_grants_account_idx"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.schedule_id",
+        "n|col|public.schedule_integration_grants.connection_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "schedule_integration_grants",
+        "schedule_integration_grants_connection_idx"
+      ],
+      "writes": [
+        "s|idx|public.schedule_integration_grants_connection_idx",
+        "n|idx|public.schedule_integration_grants_connection_idx",
+        "e|idx|public.schedule_integration_grants_connection_idx",
+        "n|rel|public.schedule_integration_grants_connection_idx"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.connection_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "schedule_integration_grants",
+        "schedule_integration_grants_integration_idx"
+      ],
+      "writes": [
+        "s|idx|public.schedule_integration_grants_integration_idx",
+        "n|idx|public.schedule_integration_grants_integration_idx",
+        "e|idx|public.schedule_integration_grants_integration_idx",
+        "n|rel|public.schedule_integration_grants_integration_idx"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.integration_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "schedule_integration_grants"
+      ],
+      "writes": [
+        "s|fk|public.schedule_integration_grants.schedule_integration_grants_schedule_id_schedules_id_fkey",
+        "n|fk|public.schedule_integration_grants.schedule_integration_grants_schedule_id_schedules_id_fkey",
+        "e|fk|public.schedule_integration_grants.schedule_integration_grants_schedule_id_schedules_id_fkey",
+        "n|con|public.schedule_integration_grants.schedule_integration_grants_schedule_id_schedules_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|tbl|public.schedules",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.schedule_id",
+        "n|col|public.schedules.id",
+        "e|uniqueness|public.schedules.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "schedule_integration_grants"
+      ],
+      "writes": [
+        "s|fk|public.schedule_integration_grants.schedule_integration_grants_7VUiEXTbTMJa_fkey",
+        "n|fk|public.schedule_integration_grants.schedule_integration_grants_7VUiEXTbTMJa_fkey",
+        "e|fk|public.schedule_integration_grants.schedule_integration_grants_7VUiEXTbTMJa_fkey",
+        "n|con|public.schedule_integration_grants.schedule_integration_grants_7VUiEXTbTMJa_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|tbl|public.integration_connections",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.connection_id",
+        "n|col|public.integration_connections.id",
+        "e|uniqueness|public.integration_connections.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "schedule_integration_grants"
+      ],
+      "writes": [
+        "s|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "n|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "e|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "n|con|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|tbl|public.integration_configs",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.integration_id",
+        "n|col|public.integration_configs.id",
+        "e|uniqueness|public.integration_configs.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "schedule_integration_grants",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "connection_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "integration_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "access",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "allowances",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_account_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "schedule_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "connection_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_connection_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "connection_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_integration_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "integration_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_schedule_id_schedules_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "schedule_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "schedules",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_7VUiEXTbTMJa_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "connection_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "integration_connections",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedule_integration_grants",
+        "name": "schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "integration_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "integration_configs",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"schedules\",\"integration_grants\"]"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import {
 } from "~/db/schema/index.ts";
 import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import { findIntegrationType } from "~/modules/integrations/catalog.ts";
-import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import type { IntegrationGrant, ScheduleGrant } from "~/modules/integrations/grant.ts";
 import { parseMailbox } from "~/modules/integrations/mailbox.ts";
 import { accountUsability } from "~/modules/integrations/server/credentials.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
@@ -41,9 +41,13 @@ export type ValidatedSchedule = Omit<
  * A grant's allowances in the form they are compared: write access, and at
  * least one exact address each, as the mailbox parser writes it. Whether the
  * integration's type declares them is checked with the integration itself,
- * in `checkScheduleResources`. Returns the reason otherwise.
+ * in `checkScheduleResources`. Returns the reason otherwise, also for a
+ * grant whose account is gone.
  */
-export const normalizeGrant = (grant: IntegrationGrant): IntegrationGrant | string => {
+export const normalizeGrant = (grant: ScheduleGrant): IntegrationGrant | string => {
+  // Kept on the schedule so the editor shows it; never saved again.
+  if (grant.connectionId === null)
+    return "an account this schedule used was disconnected: turn it off or connect it again";
   const entries = Object.entries(grant.allowances ?? {});
   const named = {
     connectionId: grant.connectionId,

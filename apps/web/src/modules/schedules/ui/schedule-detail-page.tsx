@@ -41,7 +41,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
-import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import type { ScheduleGrant } from "~/modules/integrations/grant.ts";
 
 /** Today's runs by clock time, older ones by day, like the chats list. */
 const runStamp = (date: Date) => {
@@ -65,7 +65,7 @@ const scheduleToSettings = (schedule: {
   skillIds: string[];
   chatMode: "new" | "same";
   chatId: string | null;
-  integrationGrants: ReadonlyArray<IntegrationGrant>;
+  integrationGrants: ReadonlyArray<ScheduleGrant>;
   notify: ScheduleNotify;
 }): ScheduleSettings => ({
   name: schedule.name,

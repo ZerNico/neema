@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
+import { integrationConfigs, integrationConnections } from "./integrations.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
 /**
@@ -37,15 +38,6 @@ export const schedules = pgTable(
     collectionIds: jsonb("collection_ids").$type<string[]>().notNull().default([]),
     skillIds: jsonb("skill_ids").$type<string[]>().notNull().default([]),
     /**
-     * Consent given up front, since nobody is present to approve during a
-     * fire: the most each integration may do. Anything beyond it is refused
-     * to the model, never waited on.
-     */
-    integrationGrants: jsonb("integration_grants")
-      .$type<IntegrationGrant[]>()
-      .notNull()
-      .default([]),
-    /**
      * `new` fires into a fresh chat each time; `same` keeps using `chatId`, and
      * a null `chatId` means the next fire creates that chat and stores it.
      */
@@ -75,6 +67,36 @@ export const schedules = pgTable(
       .where(sql`${t.nextFireAt} is not null`),
     // Deleting a chat clears `chat_id` on the schedules that use it.
     index("schedules_chat_idx").on(t.chatId),
+  ],
+);
+
+/**
+ * Consent a schedule gives up front, since nobody is present to approve
+ * during a fire: the most one of the owner's accounts may do. Anything beyond
+ * it is refused to the model, never waited on. Keyed by account, so one
+ * account never holds two grants with different access.
+ */
+export const scheduleIntegrationGrants = pgTable(
+  "schedule_integration_grants",
+  {
+    scheduleId: text("schedule_id")
+      .notNull()
+      .references(() => schedules.id, { onDelete: "cascade" }),
+    // Null once disconnected: a fire then ends with a reason, and the owner's
+    // next account there takes it only while it is their only one.
+    connectionId: text("connection_id").references(() => integrationConnections.id, {
+      onDelete: "set null",
+    }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+    access: text({ enum: ["read", "write"] }).notNull(),
+    allowances: jsonb().$type<NonNullable<IntegrationGrant["allowances"]>>(),
+  },
+  (t) => [
+    uniqueIndex("schedule_integration_grants_account_idx").on(t.scheduleId, t.connectionId),
+    index("schedule_integration_grants_connection_idx").on(t.connectionId),
+    index("schedule_integration_grants_integration_idx").on(t.integrationId),
   ],
 );
 

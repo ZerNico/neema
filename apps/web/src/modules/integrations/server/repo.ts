@@ -19,6 +19,7 @@ import {
   integrationUserGrants,
   knowledgeCollections,
   knowledgeSources,
+  scheduleIntegrationGrants,
   schedules,
   user,
 } from "~/db/schema/index.ts";
@@ -559,14 +560,6 @@ export class IntegrationRepo extends Context.Service<
                   .where(eq(knowledgeSources.integrationId, id));
                 if (sources && sources.value > 0)
                   return { deleted: false as const, sources: sources.value };
-                yield* tx
-                  .update(schedules)
-                  .set({
-                    integrationGrants: sql`coalesce((select jsonb_agg(grant_entry) from jsonb_array_elements(${schedules.integrationGrants}) as grant_entry where grant_entry->>'integrationId' <> ${id}), '[]'::jsonb)`,
-                  })
-                  .where(
-                    sql`${schedules.integrationGrants} @> ${JSON.stringify([{ integrationId: id }])}::jsonb`,
-                  );
                 yield* tx.delete(integrationConfigs).where(eq(integrationConfigs.id, id));
                 return { deleted: true as const };
               }),
@@ -828,15 +821,24 @@ export class IntegrationRepo extends Context.Service<
                 ),
               )
               .pipe(Effect.orDie);
+            // A schedule's lost grant moves only when it is the schedule's one lost grant
+            // there and this account holds none yet: one account never gets two grants.
             yield* db
-              .update(schedules)
-              .set({
-                integrationGrants: sql`(select jsonb_agg(case when grant_entry->>'integrationId' = ${input.integrationId} and not exists (select 1 from ${integrationConnections} where ${integrationConnections.id} = grant_entry->>'connectionId') then jsonb_set(grant_entry, '{connectionId}', to_jsonb(${saved.id}::text)) else grant_entry end) from jsonb_array_elements(${schedules.integrationGrants}) as grant_entry)`,
-              })
+              .update(scheduleIntegrationGrants)
+              .set({ connectionId: saved.id })
               .where(
                 and(
-                  eq(schedules.userId, input.userId),
-                  sql`${schedules.integrationGrants} @> ${JSON.stringify([{ integrationId: input.integrationId }])}::jsonb`,
+                  isNull(scheduleIntegrationGrants.connectionId),
+                  eq(scheduleIntegrationGrants.integrationId, input.integrationId),
+                  inArray(
+                    scheduleIntegrationGrants.scheduleId,
+                    db
+                      .select({ id: schedules.id })
+                      .from(schedules)
+                      .where(eq(schedules.userId, input.userId)),
+                  ),
+                  sql`not exists (select 1 from ${scheduleIntegrationGrants} lost where lost.schedule_id = ${scheduleIntegrationGrants.scheduleId} and lost.connection_id = ${saved.id})`,
+                  sql`(select count(*) from ${scheduleIntegrationGrants} lost where lost.schedule_id = ${scheduleIntegrationGrants.scheduleId} and lost.integration_id = ${input.integrationId} and lost.connection_id is null) = 1`,
                 ),
               )
               .pipe(Effect.orDie);
@@ -982,11 +984,12 @@ export class IntegrationRepo extends Context.Service<
             .pipe(Effect.orDie);
           const [scheduled] = yield* db
             .select({ total: count() })
-            .from(schedules)
+            .from(scheduleIntegrationGrants)
+            .innerJoin(schedules, eq(schedules.id, scheduleIntegrationGrants.scheduleId))
             .where(
               and(
                 eq(schedules.userId, userId),
-                sql`${schedules.integrationGrants} @> ${JSON.stringify([{ connectionId }])}::jsonb`,
+                eq(scheduleIntegrationGrants.connectionId, connectionId),
               ),
             )
             .pipe(Effect.orDie);

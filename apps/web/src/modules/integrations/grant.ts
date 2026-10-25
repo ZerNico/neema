@@ -32,3 +32,13 @@ export const IntegrationGrant = Schema.Struct({
   ),
 });
 export type IntegrationGrant = typeof IntegrationGrant.Type;
+
+/**
+ * A grant as a schedule keeps it: the account is null once it was
+ * disconnected, which the editor shows and a save or a fire refuses.
+ */
+export const ScheduleGrant = Schema.Struct({
+  ...IntegrationGrant.fields,
+  connectionId: Schema.NullOr(EntityId),
+});
+export type ScheduleGrant = typeof ScheduleGrant.Type;

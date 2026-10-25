@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IntegrationGrant } from "~/modules/integrations/grant.ts";
+import { ScheduleGrant } from "~/modules/integrations/grant.ts";
 import { EntityId } from "~/entity-id.ts";
 
 /** 5-field cron expression; the module's cron.ts validates it parses. */
@@ -39,9 +39,7 @@ export const ScheduleSettings = Schema.Struct({
    * nobody is present to approve then. Only the editor sets it; a draft
    * written in chat leaves it out, which keeps what is saved.
    */
-  integrationGrants: Schema.optionalKey(
-    Schema.Array(IntegrationGrant).check(Schema.isMaxLength(10)),
-  ),
+  integrationGrants: Schema.optionalKey(Schema.Array(ScheduleGrant).check(Schema.isMaxLength(10))),
   /**
    * When a run tells its owner: after every run, only when the answer decides
    * it is worth it, or never. Absent keeps what is saved, or `always` for a new

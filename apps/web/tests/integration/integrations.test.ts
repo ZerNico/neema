@@ -16,6 +16,7 @@ import {
   knowledgeDocumentVersions,
   knowledgeSources,
   conversationIntegrations,
+  scheduleIntegrationGrants,
   schedules,
   messages,
   user,
@@ -272,6 +273,46 @@ const saveAtCurrent = (
 
 const insert = <A>(f: (db: Db["Service"]) => Effect.Effect<A, unknown>) =>
   run(Effect.flatMap(Db, f));
+
+/** A schedule of the person's, with these grants. */
+const scheduleWith = async (
+  userId: string,
+  grants: ReadonlyArray<{ connectionId: string; integrationId: string; access: "read" | "write" }>,
+) => {
+  const scheduleId = uuidv7();
+  await insert((db) =>
+    db.insert(schedules).values({
+      id: scheduleId,
+      userId,
+      name: "Weekly",
+      prompt: "Summarize",
+      scheduleText: "Every Monday",
+      cron: "0 9 * * 1",
+      timezone: "UTC",
+    }),
+  );
+  if (grants.length)
+    await insert((db) =>
+      db
+        .insert(scheduleIntegrationGrants)
+        .values(grants.map((grant) => ({ scheduleId, ...grant }))),
+    );
+  return scheduleId;
+};
+
+/** A schedule's grants as stored, an account that is gone as null. */
+const grantsOf = (scheduleId: string) =>
+  insert((db) =>
+    db
+      .select({
+        connectionId: scheduleIntegrationGrants.connectionId,
+        integrationId: scheduleIntegrationGrants.integrationId,
+        access: scheduleIntegrationGrants.access,
+      })
+      .from(scheduleIntegrationGrants)
+      .where(eq(scheduleIntegrationGrants.scheduleId, scheduleId))
+      .orderBy(scheduleIntegrationGrants.access),
+  );
 
 beforeAll(async () => {
   await startOutline();
@@ -2398,28 +2439,10 @@ describe("several accounts of one integration", () => {
     const userId = await newUser();
     await connectKey(userId);
     const [ada] = await accountsOf(userId);
-    const scheduleId = uuidv7();
-    await insert((db) =>
-      db.insert(schedules).values({
-        id: scheduleId,
-        userId,
-        name: "Weekly",
-        prompt: "Summarize",
-        scheduleText: "Every Monday",
-        cron: "0 9 * * 1",
-        timezone: "UTC",
-        integrationGrants: [{ connectionId: ada!.id, integrationId: "outline", access: "read" }],
-      }),
-    );
-    const grantOf = async () =>
-      (
-        await insert((db) =>
-          db
-            .select({ grants: schedules.integrationGrants })
-            .from(schedules)
-            .where(eq(schedules.id, scheduleId)),
-        )
-      )[0]?.grants?.[0]?.connectionId;
+    const scheduleId = await scheduleWith(userId, [
+      { connectionId: ada!.id, integrationId: "outline", access: "read" },
+    ]);
+    const grantOf = async () => (await grantsOf(scheduleId))[0]?.connectionId;
 
     // Disconnected, then connected again as their only account: the grant follows.
     await service((s) => s.disconnect(userId, ada!.id));
@@ -2433,7 +2456,34 @@ describe("several accounts of one integration", () => {
     await service((s) => s.connectApiKey(userId, "outline", { key: "bo-key" }));
     await service((s) => s.disconnect(userId, again!.id));
     await connectKey(userId);
-    expect(await grantOf()).toBe(again!.id);
+    expect(await grantOf()).toBe(null);
+  });
+
+  it("never gives one account a second grant when it is reconnected", async () => {
+    const { userId, ada, bo } = await twoAccounts();
+    const scheduleId = await scheduleWith(userId, [
+      { connectionId: ada, integrationId: "outline", access: "write" },
+      { connectionId: bo, integrationId: "outline", access: "read" },
+    ]);
+    const home = (await outlineFor(userId))?.connections.find((account) => account.id === bo);
+    expect(home?.dependents).toEqual({ sources: 0, schedules: 1 });
+    // Ada's goes, leaving Home the only account; signing Home in again must not
+    // hand it Ada's write grant beside its own read one.
+    await service((s) => s.disconnect(userId, ada));
+    await service((s) => s.connectApiKey(userId, "outline", { key: "bo-key" }));
+    expect(await grantsOf(scheduleId)).toEqual([
+      { connectionId: bo, integrationId: "outline", access: "read" },
+      { connectionId: null, integrationId: "outline", access: "write" },
+    ]);
+    // And the key itself refuses a second grant for one account.
+    const second = await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(scheduleIntegrationGrants)
+          .values({ scheduleId, connectionId: bo, integrationId: "outline", access: "write" }),
+      ).pipe(Effect.exit),
+    );
+    expect(Exit.isFailure(second)).toBe(true);
   });
 
   it("refuses to reconnect an account as one already connected beside it", async () => {
@@ -2603,33 +2653,15 @@ describe("several integrations of one type", () => {
       "1 knowledge source mirrors it. Remove it first.",
     );
     await insert((db) => db.delete(knowledgeSources).where(eq(knowledgeSources.id, sourceId)));
-    const scheduleId = uuidv7();
     const accountA = await run(on(userId, "outline", Effect.succeed));
     const accountB = await run(on(userId, "outline-2", Effect.succeed));
-    await insert((db) =>
-      db.insert(schedules).values({
-        id: scheduleId,
-        userId,
-        name: "Weekly",
-        prompt: "Summarize",
-        scheduleText: "Every Monday",
-        cron: "0 9 * * 1",
-        timezone: "UTC",
-        integrationGrants: [
-          { connectionId: accountA, integrationId: "outline", access: "read" },
-          { connectionId: accountB, integrationId: "outline-2", access: "write" },
-        ],
-      }),
-    );
+    const scheduleId = await scheduleWith(userId, [
+      { connectionId: accountA, integrationId: "outline", access: "read" },
+      { connectionId: accountB, integrationId: "outline-2", access: "write" },
+    ]);
     await service((s) => s.deleteIntegration("outline-2"));
     // A schedule keeps its other grants and loses only the deleted one.
-    const [schedule] = await insert((db) =>
-      db
-        .select({ grants: schedules.integrationGrants })
-        .from(schedules)
-        .where(eq(schedules.id, scheduleId)),
-    );
-    expect(schedule?.grants).toEqual([
+    expect(await grantsOf(scheduleId)).toEqual([
       { connectionId: accountA, integrationId: "outline", access: "read" },
     ]);
     const left = await service((s) => s.listForUser(userId));
