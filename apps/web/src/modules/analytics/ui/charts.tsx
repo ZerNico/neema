@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import type { UsageByModel, UsageDay } from "../server/repo.ts";
 import { windowDays, type UsageWindow } from "../server/range.ts";
 import { formatDay, formatTokens } from "./format.ts";
+import { m } from "~/paraglide/messages.js";
 
 // Definition identity is the chart's update boundary, so every definition
 // below is memoized on its data. Colors come from the app's --chart-N tokens
@@ -53,19 +54,25 @@ export function TokensPerDayChart({
   window: UsageWindow;
 }) {
   const definition = useMemo(() => {
+    const series = {
+      input: m.analytics_series_input(),
+      cached: m.analytics_series_cached(),
+      output: m.analytics_series_output(),
+      reasoning: m.analytics_series_reasoning(),
+    };
     const rows = densify(daily, window).flatMap((row) => [
       {
         day: row.day,
-        series: "Input",
+        series: series.input,
         tokens: Math.max(row.inputTokens - row.cachedInputTokens, 0),
       },
-      { day: row.day, series: "Cached", tokens: row.cachedInputTokens },
+      { day: row.day, series: series.cached, tokens: row.cachedInputTokens },
       {
         day: row.day,
-        series: "Output",
+        series: series.output,
         tokens: Math.max(row.outputTokens - row.reasoningTokens, 0),
       },
-      { day: row.day, series: "Reasoning", tokens: row.reasoningTokens },
+      { day: row.day, series: series.reasoning, tokens: row.reasoningTokens },
     ]);
     return defineChart({
       marks: [
@@ -98,7 +105,7 @@ export function TokensPerDayChart({
       // The legend is HTML in the card header, since the built-in one spreads its
       // items across the full chart width (itemWidth = width / columns).
       color: {
-        domain: ["Input", "Cached", "Output", "Reasoning"],
+        domain: [series.input, series.cached, series.output, series.reasoning],
         range: ["var(--chart-1)", "var(--chart-3)", "var(--chart-2)", "var(--chart-4)"],
       },
       tooltip,
@@ -107,11 +114,7 @@ export function TokensPerDayChart({
 
   return (
     <div style={{ color: INK }} className="text-xs">
-      <Chart
-        definition={definition}
-        height={240}
-        ariaLabel="What used tokens per day: input, cached, output and reasoning"
-      />
+      <Chart definition={definition} height={240} ariaLabel={m.analytics_chart_tokens_label()} />
     </div>
   );
 }
@@ -150,7 +153,7 @@ export function MessagesPerDayChart({
 
   return (
     <div style={{ color: INK }} className="text-xs">
-      <Chart definition={definition} height={200} ariaLabel="Messages per day" />
+      <Chart definition={definition} height={200} ariaLabel={m.analytics_chart_messages()} />
     </div>
   );
 }
@@ -161,7 +164,9 @@ const MAX_MODEL_BARS = 8;
 export const modelLabels = (byModel: readonly UsageByModel[]) => {
   const current = new Set(byModel.filter((row) => row.linked).map((row) => row.modelName));
   return byModel.map((row) =>
-    !row.linked && current.has(row.modelName) ? `${row.modelName} (deleted)` : row.modelName,
+    !row.linked && current.has(row.modelName)
+      ? m.analytics_model_deleted({ name: row.modelName })
+      : row.modelName,
   );
 };
 
@@ -181,7 +186,7 @@ export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel
     const tail = rows.slice(MAX_MODEL_BARS);
     if (tail.length > 0) {
       shown.push({
-        model: `Other (${tail.length})`,
+        model: m.analytics_model_other({ count: tail.length }),
         tokens: tail.reduce((sum, row) => sum + row.tokens, 0),
       });
     }
@@ -206,7 +211,11 @@ export function TokensByModelChart({ byModel }: { byModel: readonly UsageByModel
   const height = Math.max(120, Math.min(byModel.length, MAX_MODEL_BARS + 1) * 36 + 40);
   return (
     <div style={{ color: INK }} className="text-xs">
-      <Chart definition={definition} height={height} ariaLabel="Total tokens by model" />
+      <Chart
+        definition={definition}
+        height={height}
+        ariaLabel={m.analytics_chart_by_model_label()}
+      />
     </div>
   );
 }

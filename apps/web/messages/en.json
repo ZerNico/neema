@@ -139,6 +139,86 @@
   "agents_settings_web_search_default": "Web search by default",
   "agents_start_chat": "Start chat",
   "agents_title": "Agents",
+  "analytics_chart_by_model": "By model",
+  "analytics_chart_by_model_label": "Total tokens by model",
+  "analytics_chart_messages": "Messages per day",
+  "analytics_chart_ran": "What ran",
+  "analytics_chart_tokens": "What used tokens",
+  "analytics_chart_tokens_label": "What used tokens per day: input, cached, output and reasoning",
+  "analytics_cost_partial": "At least {cost} (partial)",
+  "analytics_cost_per_million": "{cost}/M",
+  "analytics_cost_unknown": "Unknown",
+  "analytics_delta_new": "New",
+  "analytics_kind_chat": "chat",
+  "analytics_kind_image": "image",
+  "analytics_kind_summarizing": "summarizing",
+  "analytics_kind_title": "title",
+  "analytics_kpi_active_users": "Active users",
+  "analytics_kpi_cost": "Cost",
+  "analytics_kpi_cost_partial": "at least, some costs unknown",
+  "analytics_kpi_cost_per_million": "Cost per 1M tokens",
+  "analytics_kpi_failed": "Failed responses",
+  "analytics_kpi_failed_sub": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural",
+        "input failed",
+        "input stopped",
+        "input tries"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{failed} failed · {stopped} stopped · {tries} try",
+        "countPlural=*": "{failed} failed · {stopped} stopped · {tries} tries"
+      }
+    }
+  ],
+  "analytics_kpi_messages": "Messages",
+  "analytics_kpi_reused": "Reused text",
+  "analytics_kpi_reused_sub": "of what was sent",
+  "analytics_kpi_tokens": "Tokens",
+  "analytics_kpi_tokens_split": "{input} in / {output} out",
+  "analytics_model_deleted": "{name} (deleted)",
+  "analytics_model_other": "Other ({count})",
+  "analytics_point_delta": "{sign}{value}pp",
+  "analytics_range_apply": "Apply",
+  "analytics_range_custom": "Custom range…",
+  "analytics_range_last_30": "Last 30 days",
+  "analytics_range_last_7": "Last 7 days",
+  "analytics_range_last_90": "Last 90 days",
+  "analytics_range_last_days": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Last {count} day",
+        "countPlural=*": "Last {count} days"
+      }
+    }
+  ],
+  "analytics_range_other_year": "{range} {year}",
+  "analytics_range_same_year": "{range}, {year}",
+  "analytics_range_span": "{start} – {end}",
+  "analytics_range_utc": "Days run midnight to midnight, UTC",
+  "analytics_series_cache_write": "Cache write",
+  "analytics_series_cached": "Cached",
+  "analytics_series_input": "Input",
+  "analytics_series_output": "Output",
+  "analytics_series_reasoning": "Reasoning",
+  "analytics_table_cost": "Cost",
+  "analytics_table_images": "Images",
+  "analytics_table_messages": "Messages",
+  "analytics_table_model": "Model",
+  "analytics_table_tokens": "Tokens",
+  "analytics_table_user": "User",
   "api_keys_error_limit": [
     {
       "declarations": [

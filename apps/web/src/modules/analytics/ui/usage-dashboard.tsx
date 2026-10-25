@@ -36,11 +36,12 @@ import {
 } from "~/ui/primitives/table";
 import { Card, CardContent, CardHeader } from "~/ui/card.tsx";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
-const USAGE_RANGES: Array<{ value: UsageRangeDays; label: string }> = [
-  { value: 7, label: "Last 7 days" },
-  { value: 30, label: "Last 30 days" },
-  { value: 90, label: "Last 90 days" },
+const usageRanges = (): Array<{ value: UsageRangeDays; label: string }> => [
+  { value: 7, label: m.analytics_range_last_7() },
+  { value: 30, label: m.analytics_range_last_30() },
+  { value: 90, label: m.analytics_range_last_90() },
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -72,7 +73,8 @@ const PRESET_ROW =
 
 const rangeLabel = (range: UsageRangeEncoded): string =>
   range.kind === "preset"
-    ? (USAGE_RANGES.find((r) => r.value === range.days)?.label ?? `Last ${range.days} days`)
+    ? (usageRanges().find((r) => r.value === range.days)?.label ??
+      m.analytics_range_last_days({ count: range.days }))
     : formatRangeLabel(range.from, range.to);
 
 /** The one filter row, sitting above everything it scopes. */
@@ -134,25 +136,23 @@ export function UsageRangePicker({
             <div className="flex items-center justify-between gap-3">
               {/* Days run on UTC everywhere else; say so rather than let a
                   user near midnight wonder why a day looks light. */}
-              <span className="text-muted-foreground text-xs">
-                Days run midnight to midnight, UTC
-              </span>
+              <span className="text-muted-foreground text-xs">{m.analytics_range_utc()}</span>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={close}>
-                  Cancel
+                  {m.common_cancel()}
                 </Button>
                 {/* react-day-picker fills `from` and `to` on the first click,
                     so this is "nothing picked yet"; one click is a legitimate
                     one-day range and commits as such. */}
                 <Button size="sm" onClick={apply} disabled={!draft?.from || !draft.to}>
-                  Apply
+                  {m.analytics_range_apply()}
                 </Button>
               </div>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {USAGE_RANGES.map((preset) => (
+            {usageRanges().map((preset) => (
               <button
                 key={preset.value}
                 type="button"
@@ -172,7 +172,7 @@ export function UsageRangePicker({
             ))}
             <Separator className="my-1" />
             <button type="button" onClick={() => setCustom(new Date())} className={PRESET_ROW}>
-              Custom range…
+              {m.analytics_range_custom()}
             </button>
           </div>
         )}
@@ -272,10 +272,10 @@ const pointDelta = (current: number | null, previous: number | null): string | n
 /** Two-segment part-to-whole meter, a static split, so CSS, not a chart. */
 // Fixed segment order, so a kind keeps its colour whatever the counts do.
 const GENERATION_KINDS = [
-  { key: "chat", label: "chat", color: "var(--chart-1)" },
-  { key: "title", label: "title", color: "var(--chart-3)" },
-  { key: "compaction", label: "summarizing", color: "var(--chart-4)" },
-  { key: "image", label: "image", color: "var(--chart-2)" },
+  { key: "chat", label: m.analytics_kind_chat, color: "var(--chart-1)" },
+  { key: "title", label: m.analytics_kind_title, color: "var(--chart-3)" },
+  { key: "compaction", label: m.analytics_kind_summarizing, color: "var(--chart-4)" },
+  { key: "image", label: m.analytics_kind_image, color: "var(--chart-2)" },
 ] as const;
 
 function SplitMeter({
@@ -307,7 +307,7 @@ function SplitMeter({
               aria-hidden
             />
             <span className="text-foreground font-medium">{formatCount(counts[kind.key])}</span>
-            {kind.label}
+            {kind.label()}
             {total > 0 ? ` (${formatPercent(counts[kind.key] / total)})` : ""}
           </span>
         ))}
@@ -346,7 +346,7 @@ export function UsageOverview({
   const costKnown = summary.cost > 0 || summary.costComplete;
   const costValue = costKnown ? formatCost(summary.cost) : "–";
   const costSub =
-    !summary.costComplete && summary.cost > 0 ? "at least, some costs unknown" : undefined;
+    !summary.costComplete && summary.cost > 0 ? m.analytics_kpi_cost_partial() : undefined;
   // A delta between two floors is not a delta. Both sides must be complete.
   const bothCostsComplete = summary.costComplete && previousSummary.costComplete;
 
@@ -363,20 +363,23 @@ export function UsageOverview({
     <>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
         <StatTile
-          label="Messages"
+          label={m.analytics_kpi_messages()}
           value={formatCount(summary.messages)}
           delta={formatRelativeDelta(summary.messages, previousSummary.messages)}
           spark={series((day) => day.messages)}
         />
         <StatTile
-          label="Tokens"
+          label={m.analytics_kpi_tokens()}
           value={formatTokens(tokens)}
-          sub={`${formatTokens(summary.inputTokens)} in / ${formatTokens(summary.outputTokens)} out`}
+          sub={m.analytics_kpi_tokens_split({
+            input: formatTokens(summary.inputTokens),
+            output: formatTokens(summary.outputTokens),
+          })}
           delta={formatRelativeDelta(tokens, previousTokens)}
           spark={series((day) => day.inputTokens + day.outputTokens)}
         />
         <StatTile
-          label="Cost"
+          label={m.analytics_kpi_cost()}
           value={costValue}
           {...(costSub ? { sub: costSub } : {})}
           delta={bothCostsComplete ? formatRelativeDelta(summary.cost, previousSummary.cost) : null}
@@ -384,41 +387,46 @@ export function UsageOverview({
           {...(summary.costComplete ? { spark: series((day) => day.cost) } : {})}
         />
         <StatTile
-          label="Reused text"
+          label={m.analytics_kpi_reused()}
           value={cacheRate === null ? "–" : formatPercent(cacheRate)}
-          sub="of what was sent"
+          sub={m.analytics_kpi_reused_sub()}
           delta={pointDelta(cacheRate, previousCacheRate)}
         />
         <StatTile
-          label="Cost per 1M tokens"
+          label={m.analytics_kpi_cost_per_million()}
           value={
             summary.costComplete && tokens > 0 ? formatCostPerMillion(summary.cost, tokens) : "–"
           }
           delta={null}
         />
         <StatTile
-          label="Failed responses"
+          label={m.analytics_kpi_failed()}
           value={errorRate === null ? "–" : formatPercent(errorRate)}
-          sub={`${formatCount(summary.errorAttempts)} failed · ${formatCount(summary.abortedAttempts)} stopped · ${formatCount(summary.attempts)} tries`}
+          sub={m.analytics_kpi_failed_sub({
+            failed: formatCount(summary.errorAttempts),
+            stopped: formatCount(summary.abortedAttempts),
+            tries: formatCount(summary.attempts),
+            count: summary.attempts,
+          })}
           delta={pointDelta(errorRate, previousErrorRate)}
         />
         {showActiveUsers ? (
           <StatTile
-            label="Active users"
+            label={m.analytics_kpi_active_users()}
             value={formatCount(summary.activeUsers)}
             delta={formatRelativeDelta(summary.activeUsers, previousSummary.activeUsers)}
           />
         ) : null}
       </div>
       <ChartCard
-        title="What used tokens"
+        title={m.analytics_chart_tokens()}
         legend={
           <ChartLegend
             items={[
-              { label: "Input", colorVar: "--chart-1" },
-              { label: "Cached", colorVar: "--chart-3" },
-              { label: "Output", colorVar: "--chart-2" },
-              { label: "Reasoning", colorVar: "--chart-4" },
+              { label: m.analytics_series_input(), colorVar: "--chart-1" },
+              { label: m.analytics_series_cached(), colorVar: "--chart-3" },
+              { label: m.analytics_series_output(), colorVar: "--chart-2" },
+              { label: m.analytics_series_reasoning(), colorVar: "--chart-4" },
             ]}
           />
         }
@@ -427,11 +435,14 @@ export function UsageOverview({
         {/* The accessible companion: the stacked segments get small. */}
         <dl className="text-muted-foreground grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
           {[
-            ["Input", summary.inputTokens - summary.cachedInputTokens - summary.cacheWriteTokens],
-            ["Cached", summary.cachedInputTokens],
-            ["Cache write", summary.cacheWriteTokens],
-            ["Output", summary.outputTokens - summary.reasoningTokens],
-            ["Reasoning", summary.reasoningTokens],
+            [
+              m.analytics_series_input(),
+              summary.inputTokens - summary.cachedInputTokens - summary.cacheWriteTokens,
+            ],
+            [m.analytics_series_cached(), summary.cachedInputTokens],
+            [m.analytics_series_cache_write(), summary.cacheWriteTokens],
+            [m.analytics_series_output(), summary.outputTokens - summary.reasoningTokens],
+            [m.analytics_series_reasoning(), summary.reasoningTokens],
           ].map(([label, value]) => (
             <div key={String(label)} className="flex justify-between gap-2">
               <dt>{label}</dt>
@@ -442,10 +453,10 @@ export function UsageOverview({
           ))}
         </dl>
       </ChartCard>
-      <ChartCard title="Messages per day">
+      <ChartCard title={m.analytics_chart_messages()}>
         <MessagesPerDayChart daily={daily} window={scanned} />
       </ChartCard>
-      <ChartCard title="What ran">
+      <ChartCard title={m.analytics_chart_ran()}>
         <SplitMeter
           counts={{
             chat: summary.messages,
@@ -455,10 +466,16 @@ export function UsageOverview({
           }}
         />
       </ChartCard>
-      <ChartCard title="By model">
+      <ChartCard title={m.analytics_chart_by_model()}>
         <TokensByModelChart byModel={byModel} />
         <UsageTable
-          head={["Model", "Messages", "Images", "Tokens", "Cost"]}
+          head={[
+            m.analytics_table_model(),
+            m.analytics_table_messages(),
+            m.analytics_table_images(),
+            m.analytics_table_tokens(),
+            m.analytics_table_cost(),
+          ]}
           rows={byModel.map((row, index) => [
             modelNames[index]!,
             formatCount(row.messages),
@@ -521,12 +538,22 @@ export function UsageTable({
 }
 
 const groupedCost = ({ cost, costComplete }: Pick<UsageByModel, "cost" | "costComplete">) =>
-  costComplete ? formatCost(cost) : cost > 0 ? `At least ${formatCost(cost)} (partial)` : "Unknown";
+  costComplete
+    ? formatCost(cost)
+    : cost > 0
+      ? m.analytics_cost_partial({ cost: formatCost(cost) })
+      : m.analytics_cost_unknown();
 
 export function UsersTable({ byUser }: { byUser: readonly UsageByUser[] }) {
   return (
     <UsageTable
-      head={["User", "Messages", "Images", "Tokens", "Cost"]}
+      head={[
+        m.analytics_table_user(),
+        m.analytics_table_messages(),
+        m.analytics_table_images(),
+        m.analytics_table_tokens(),
+        m.analytics_table_cost(),
+      ]}
       rows={byUser.map((row) => [
         `${row.name} (${row.email})`,
         formatCount(row.messages),
