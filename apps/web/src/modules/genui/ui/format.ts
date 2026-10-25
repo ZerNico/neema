@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+
 // Numbers in the reader's locale, for <num> and chart axes. A block names a
 // format ("decimal:2", "percent", "compact", "currency:EUR"); QuickJS has no
 // Intl worth relying on, so formatting happens here on the host.
@@ -11,7 +13,7 @@ export function formatNumber(
   format: string | undefined,
   options: { readonly axis?: boolean } = {},
 ): string {
-  const locale = typeof navigator === "undefined" ? undefined : navigator.language;
+  const locale = getLocale();
   const [kind = "decimal", arg] = (format ?? "decimal").split(":");
   const compact = options.axis ? ({ notation: "compact" } as const) : {};
   try {

@@ -55,6 +55,8 @@ import { disclosureTriggerClassName } from "~/ui/disclosure-classes.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import type { ValidNode } from "../catalog.ts";
 import { Celebrate } from "./celebrate.tsx";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
@@ -190,7 +192,7 @@ function formatDate(value: unknown, format: string | undefined): string {
     typeof value === "number" || typeof value === "string" ? value : Number.NaN,
   );
   if (Number.isNaN(date.getTime())) return "";
-  const locale = typeof navigator === "undefined" ? undefined : navigator.language;
+  const locale = getLocale();
   if (format === "relative") {
     const days = Math.round((date.getTime() - Date.now()) / 86_400_000);
     return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
@@ -221,7 +223,7 @@ function SliderNode({ node }: { node: ValidNode }) {
           // renders a second thumb that swallows every press on the track.
           value={[value]}
           disabled={!fire}
-          aria-label={str(p.label) ?? "Value"}
+          aria-label={str(p.label) ?? m.genui_slider_label()}
           onValueChange={(next) => {
             const v = Array.isArray(next) ? next[0] : next;
             if (typeof v !== "number") return;
@@ -240,7 +242,7 @@ function TextInputNode({ node, numeric }: { node: ValidNode; numeric: boolean })
   const fire = useHandler(handlerOf(p.onchange), { event: "change", tag: node.tag });
   const initial = numeric ? String(num(p.value) ?? "") : (str(p.value) ?? "");
   const [value, setValue] = useLocal(initial);
-  const label = str(p.label) ?? str(p.placeholder) ?? "Input";
+  const label = str(p.label) ?? str(p.placeholder) ?? m.genui_input_label();
   if (!numeric && p.multiline === true)
     return (
       <Field label={str(p.label)}>
@@ -307,10 +309,9 @@ function DatePickerNode({ node }: { node: ValidNode }) {
   const min = parseDay(p.min);
   const max = parseDay(p.max);
   const label = str(p.label);
-  const locale = typeof navigator === "undefined" ? undefined : navigator.language;
   const shown = day
-    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(day)
-    : "Pick a date";
+    ? new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" }).format(day)
+    : m.genui_date_pick();
   return (
     <Field label={label}>
       <Popover open={open && !!fire} onOpenChange={setOpen}>
@@ -321,7 +322,10 @@ function DatePickerNode({ node }: { node: ValidNode }) {
               className="w-fit"
               disabled={!fire}
               // Named with its date, so a screen reader hears what is picked.
-              aria-label={`${label ?? "Date"}: ${shown}`}
+              aria-label={m.genui_date_label({
+                label: label ?? m.genui_date_default_label(),
+                date: shown,
+              })}
             />
           }
         >
@@ -418,21 +422,21 @@ function StepperNode({ node }: { node: ValidNode }) {
         <Button
           variant="outline"
           size="icon-sm"
-          aria-label="Decrease"
+          aria-label={m.genui_stepper_decrease()}
           disabled={!fire || value - delta < min}
           onClick={() => fire?.([value - delta])}
         >
-          −
+          {"−"}
         </Button>
         <span className="min-w-8 text-center text-sm font-medium tabular-nums">{value}</span>
         <Button
           variant="outline"
           size="icon-sm"
-          aria-label="Increase"
+          aria-label={m.genui_stepper_increase()}
           disabled={!fire || value + delta > max}
           onClick={() => fire?.([value + delta])}
         >
-          +
+          {"+"}
         </Button>
       </div>
     </Field>
@@ -453,14 +457,14 @@ function ToggleNode({ node }: { node: ValidNode }) {
       <Switch
         checked={checked}
         disabled={!fire}
-        aria-label={label ?? "Toggle"}
+        aria-label={label ?? m.genui_switch_label()}
         onCheckedChange={onChange}
       />
     ) : (
       <Checkbox
         checked={checked}
         disabled={!fire}
-        aria-label={label ?? "Check"}
+        aria-label={label ?? m.genui_checkbox_label()}
         onCheckedChange={onChange}
       />
     );
@@ -481,7 +485,7 @@ function SegmentedNode({ node }: { node: ValidNode }) {
   const [value, setValue] = useLocal(str(p.value) ?? "");
   return (
     <SegmentedControl
-      aria-label="Options"
+      aria-label={m.genui_options_label()}
       multiple={false}
       value={[value]}
       disabled={!fire}
@@ -512,7 +516,7 @@ function ChoiceNode({ node }: { node: ValidNode }) {
       <RadioGroup
         value={value}
         disabled={!fire}
-        aria-label={label ?? "Options"}
+        aria-label={label ?? m.genui_options_label()}
         onValueChange={(next) => {
           if (typeof next !== "string") return;
           setValue(next);
@@ -651,7 +655,7 @@ function StepsNode({ node }: { node: ValidNode }) {
       {checkable ? (
         <Progress value={(done.length / Math.max(1, steps.length)) * 100}>
           <ProgressLabel>
-            {done.length} of {steps.length} done
+            {m.genui_steps_done({ done: done.length, total: steps.length })}
           </ProgressLabel>
         </Progress>
       ) : null}
@@ -666,7 +670,9 @@ function StepsNode({ node }: { node: ValidNode }) {
                   <Checkbox
                     checked={finished}
                     onCheckedChange={(checked) => toggle(i, checked === true)}
-                    aria-label={str(step.props.title) ?? `Step ${i + 1}`}
+                    aria-label={
+                      str(step.props.title) ?? m.genui_steps_step_label({ number: i + 1 })
+                    }
                   />
                 ) : (
                   <span className="bg-primary mt-1.5 size-2 shrink-0 rounded-full" />
@@ -704,7 +710,7 @@ function WizardNode({ node }: { node: ValidNode }) {
     <div className="flex flex-col gap-3">
       <Progress value={((index + 1) / steps.length) * 100}>
         <ProgressLabel>
-          Step {index + 1} of {steps.length}
+          {m.genui_wizard_position({ number: index + 1, total: steps.length })}
         </ProgressLabel>
       </Progress>
       <StepHeading step={step} />
@@ -713,10 +719,10 @@ function WizardNode({ node }: { node: ValidNode }) {
       </div>
       <div className="flex justify-between gap-2">
         <Button size="sm" variant="outline" disabled={index === 0} onClick={() => go(index - 1)}>
-          Back
+          {m.common_back()}
         </Button>
         <Button size="sm" disabled={index === steps.length - 1} onClick={() => go(index + 1)}>
-          Next
+          {m.genui_wizard_next()}
         </Button>
       </div>
     </div>
@@ -802,9 +808,12 @@ function QuizNode({ node }: { node: ValidNode }) {
       <div className="border-border flex flex-col items-start gap-3 rounded-2xl border p-4">
         {title ? <span className="text-muted-foreground text-xs">{title}</span> : null}
         <p className="text-lg font-semibold" role="status">
-          {score} of {questions.length} correct
+          {m.genui_quiz_score({ score, total: questions.length })}
         </p>
-        <Progress value={(score / questions.length) * 100} aria-label="Score" />
+        <Progress
+          value={(score / questions.length) * 100}
+          aria-label={m.genui_quiz_score_label()}
+        />
         {more ? <SuggestionChip label={more} /> : null}
         <Button
           size="sm"
@@ -816,7 +825,7 @@ function QuizNode({ node }: { node: ValidNode }) {
           }}
         >
           <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" aria-hidden />
-          Try again
+          {m.genui_quiz_retry()}
         </Button>
       </div>
     );
@@ -825,13 +834,14 @@ function QuizNode({ node }: { node: ValidNode }) {
     <div className="border-border flex flex-col gap-3 rounded-2xl border p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-muted-foreground text-xs">
-          {title ? `${title} · ` : ""}Question {at + 1} of {questions.length}
+          {title ? `${title} · ` : ""}
+          {m.genui_quiz_position({ number: at + 1, total: questions.length })}
         </span>
         <div className="flex gap-1">
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Previous question"
+            aria-label={m.genui_quiz_previous()}
             disabled={at === 0}
             onClick={() => setIndex(at - 1)}
           >
@@ -840,7 +850,7 @@ function QuizNode({ node }: { node: ValidNode }) {
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Next question"
+            aria-label={m.genui_quiz_next_question()}
             disabled={last}
             onClick={() => setIndex(at + 1)}
           >
@@ -851,7 +861,7 @@ function QuizNode({ node }: { node: ValidNode }) {
       <p className="font-medium">
         <Nodes nodes={question.prompt} scope={at} />
       </p>
-      <ul className="flex flex-col gap-2" aria-label="Options">
+      <ul className="flex flex-col gap-2" aria-label={m.genui_options_label()}>
         {question.options.map((option, i) => {
           const right = chosen !== null && option === question.answer;
           const wrong = chosen === option && option !== question.answer;
@@ -895,13 +905,17 @@ function QuizNode({ node }: { node: ValidNode }) {
       <div role="status" className="flex flex-col gap-1 text-sm">
         {chosen === null ? (
           hinted === at && question.hint ? (
-            <p className="text-muted-foreground">Hint: {question.hint}</p>
+            <p className="text-muted-foreground">
+              {m.genui_quiz_hint_text({ hint: question.hint })}
+            </p>
           ) : null
         ) : (
           <>
             <p>
               <b className={chosen === question.answer ? "text-success" : "text-destructive"}>
-                {chosen === question.answer ? "Correct." : `Not quite: it’s ${question.answer}.`}
+                {chosen === question.answer
+                  ? m.genui_quiz_correct()
+                  : m.genui_quiz_wrong({ answer: question.answer })}
               </b>{" "}
               {question.feedback[question.options.indexOf(chosen)] ?? null}
             </p>
@@ -912,7 +926,7 @@ function QuizNode({ node }: { node: ValidNode }) {
       <div className="flex justify-end gap-2">
         {question.hint && chosen === null && hinted !== at ? (
           <Button size="sm" variant="ghost" onClick={() => setHinted(at)}>
-            Hint
+            {m.genui_quiz_hint()}
           </Button>
         ) : null}
         <Button
@@ -920,7 +934,7 @@ function QuizNode({ node }: { node: ValidNode }) {
           disabled={chosen === null}
           onClick={() => (last ? setScored(true) : setIndex(at + 1))}
         >
-          {last ? "See score" : "Next"}
+          {last ? m.genui_quiz_see_score() : m.genui_quiz_next()}
         </Button>
       </div>
     </div>
@@ -959,9 +973,9 @@ function MathNode({ node }: { node: ValidNode }) {
 const clock = (totalSeconds: number) => {
   const whole = Math.max(0, Math.round(totalSeconds));
   const h = Math.floor(whole / 3600);
-  const m = Math.floor((whole % 3600) / 60);
+  const min = Math.floor((whole % 3600) / 60);
   const sec = String(whole % 60).padStart(2, "0");
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  return h > 0 ? `${h}:${String(min).padStart(2, "0")}:${sec}` : `${min}:${sec}`;
 };
 
 interface Clock {
@@ -1046,7 +1060,7 @@ function TimerNode({ node }: { node: ValidNode }) {
     250,
     total,
     () => {
-      toast.success(label ? `${label} is done` : "Timer done");
+      toast.success(label ? m.genui_timer_done_named({ label }) : m.genui_timer_done());
       done?.([]);
     },
   );
@@ -1073,31 +1087,31 @@ function TimerNode({ node }: { node: ValidNode }) {
         <div className="flex flex-col">
           {label ? <span className="text-muted-foreground text-xs">{label}</span> : null}
           <span className="text-3xl font-semibold tabular-nums" role="timer" aria-live="off">
-            {finished ? "Done" : clock(shown)}
+            {finished ? m.genui_timer_finished() : clock(shown)}
           </span>
         </div>
         <div className="flex gap-2">
           {running ? (
             <Button size="sm" variant="outline" onClick={pause}>
               <HugeiconsIcon icon={PauseIcon} strokeWidth={2} data-icon="inline-start" />
-              Pause
+              {m.genui_timer_pause()}
             </Button>
           ) : (
             <Button size="sm" onClick={start} disabled={finished}>
               <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
-              {elapsed > 0 && !finished ? "Resume" : "Start"}
+              {elapsed > 0 && !finished ? m.genui_timer_resume() : m.genui_timer_start()}
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={reset} disabled={elapsed === 0}>
             <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
-            Reset
+            {m.genui_timer_reset()}
           </Button>
         </div>
       </div>
       {total !== undefined ? (
         <Progress
           value={Math.min(100, (elapsed / total) * 100)}
-          aria-label={label ?? "Timer"}
+          aria-label={label ?? m.genui_timer_label()}
           ref={bar}
           // A transition would override the animation each time the value moves.
           motion={reducedMotion || sliding ? "none" : "ease"}
@@ -1199,7 +1213,7 @@ function RoutineNode({ node }: { node: ValidNode }) {
   // Eased like a breath: slow at both ends. Without motion, each phase's size at once.
   const eased = at && !reducedMotion ? (1 - Math.cos(Math.PI * at.progress)) / 2 : 1;
   const size = MIN_CIRCLE + (1 - MIN_CIRCLE) * (from + (to - from) * eased);
-  const heading = finished ? "Done" : phase.label;
+  const heading = finished ? m.genui_timer_finished() : phase.label;
   const count = at ? Math.ceil(at.left) : null;
 
   return (
@@ -1241,21 +1255,17 @@ function RoutineNode({ node }: { node: ValidNode }) {
       ) : null}
       <div className="text-muted-foreground flex gap-3 text-xs">
         {rounds > 1 && at ? (
-          <span>
-            Round {at.round + 1} of {rounds}
-          </span>
+          <span>{m.genui_interval_round({ number: at.round + 1, total: rounds })}</span>
         ) : null}
         {next && !lastPhase ? (
-          <span>
-            Next: {next.label}, {next.seconds} s
-          </span>
+          <span>{m.genui_interval_next({ label: next.label, seconds: next.seconds })}</span>
         ) : null}
       </div>
       <div className="flex gap-2">
         {running ? (
           <Button size="sm" variant="outline" onClick={pause}>
             <HugeiconsIcon icon={PauseIcon} strokeWidth={2} data-icon="inline-start" />
-            Pause
+            {m.genui_timer_pause()}
           </Button>
         ) : (
           <Button size="sm" onClick={finished ? reset : start}>
@@ -1264,13 +1274,17 @@ function RoutineNode({ node }: { node: ValidNode }) {
               strokeWidth={2}
               data-icon="inline-start"
             />
-            {finished ? "Again" : elapsed > 0 ? "Resume" : "Start"}
+            {finished
+              ? m.genui_interval_again()
+              : elapsed > 0
+                ? m.genui_timer_resume()
+                : m.genui_timer_start()}
           </Button>
         )}
         {!finished ? (
           <Button size="sm" variant="ghost" onClick={reset} disabled={elapsed === 0}>
             <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} data-icon="inline-start" />
-            Reset
+            {m.genui_timer_reset()}
           </Button>
         ) : null}
       </div>
@@ -1298,7 +1312,7 @@ function CopyNode({ node }: { node: ValidNode }) {
       disabled={!text}
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
-          toast.success("Copied", { description: copiedPreview(text) });
+          toast.success(m.genui_copied(), { description: copiedPreview(text) });
           setCopied(true);
           clearTimeout(timer.current);
           timer.current = setTimeout(() => setCopied(false), 1500);
@@ -1314,7 +1328,7 @@ function CopyNode({ node }: { node: ValidNode }) {
           aria-hidden
         />
       </MotionSwap>
-      {copied ? "Copied" : <Nodes nodes={node.children} />}
+      {copied ? m.genui_copied() : <Nodes nodes={node.children} />}
     </Button>
   );
 }

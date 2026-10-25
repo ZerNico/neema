@@ -10,6 +10,7 @@ import {
 } from "~/modules/chat/assistant-output.ts";
 import { AttachmentPreviewDialog } from "~/modules/attachments/ui/attachment-preview.tsx";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { m } from "~/paraglide/messages.js";
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { cn } from "~/ui/utils";
 import type { ValidNode } from "../catalog.ts";
@@ -43,9 +44,11 @@ function useLookup(): (query: string, index: number) => Lookup {
       : undefined;
     const found = result?.items[index];
     if (found) return { found };
-    if (!result) return message?.streaming ? { pending: true } : { missing: "Image unavailable" };
+    if (!result)
+      return message?.streaming ? { pending: true } : { missing: m.genui_image_unavailable() };
     return {
-      missing: result.status === "search_off" ? "Images need web search" : "Image unavailable",
+      missing:
+        result.status === "search_off" ? m.genui_image_needs_search() : m.genui_image_unavailable(),
     };
   };
 }
@@ -99,7 +102,7 @@ function FoundTile({
     <figure className="flex min-w-0 flex-col gap-1">
       <button
         type="button"
-        aria-label={`Preview ${name}`}
+        aria-label={m.genui_image_preview({ name })}
         className={cn("cursor-zoom-in rounded-xl", focusRingClassName)}
         onClick={() => setOpen(true)}
       >

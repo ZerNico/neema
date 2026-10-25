@@ -41,7 +41,12 @@ interface Slice {
  * largest four keep their colours and the rest, a slice the block named Other
  * among them, sum into one Other at the end.
  */
-export function slicesOf(xs: readonly string[], values: readonly (number | null)[]): Slice[] {
+export function slicesOf(
+  xs: readonly string[],
+  values: readonly (number | null)[],
+  /** The rest slice's name, in the reader's language. */
+  other = "Other",
+): Slice[] {
   const totals = new Map<string, number>();
   xs.forEach((name, i) => {
     const value = values[i];
@@ -51,10 +56,10 @@ export function slicesOf(xs: readonly string[], values: readonly (number | null)
   if (all.length <= PIE_COLOURS) return all;
   const kept = new Set(
     all
-      .flatMap((s, i) => (s.name === "Other" ? [] : [i]))
+      .flatMap((s, i) => (s.name === other ? [] : [i]))
       .toSorted((a, b) => all[b]!.value - all[a]!.value || a - b)
       .slice(0, PIE_COLOURS),
   );
   const rest = all.filter((_, i) => !kept.has(i)).reduce((sum, s) => sum + s.value, 0);
-  return [...all.filter((_, i) => kept.has(i)), { name: "Other", value: rest }];
+  return [...all.filter((_, i) => kept.has(i)), { name: other, value: rest }];
 }

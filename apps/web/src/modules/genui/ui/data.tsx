@@ -3,6 +3,7 @@
 // only with the lazy ui-block chunk.
 
 import { formatNumber } from "./format.ts";
+import { m } from "~/paraglide/messages.js";
 import { PIE_COLOURS, slicesOf, sortRows, type Cell, type Sort } from "./data-model.ts";
 import { areaY, barY, defineChart, dot, lineY, ruleX, ruleY } from "@tanstack/charts";
 import { pie, polar, radialArc } from "@tanstack/charts/polar";
@@ -167,7 +168,7 @@ export function UiProgress({ node }: { node: ValidNode }) {
   const value = typeof node.props.value === "number" ? node.props.value : 0;
   const label = typeof node.props.label === "string" ? node.props.label : undefined;
   return (
-    <Progress value={value} aria-label={label ?? "Progress"}>
+    <Progress value={value} aria-label={label ?? m.genui_progress_label()}>
       {label ? <ProgressLabel>{label}</ProgressLabel> : null}
     </Progress>
   );
@@ -220,9 +221,14 @@ function PieChart({ node, donut }: { node: ValidNode; donut: boolean }) {
   const p = node.props;
   const format = typeof p.format === "string" ? p.format : undefined;
   const unit = typeof p.unit === "string" ? p.unit : "";
-  const label = typeof p.label === "string" ? p.label : "Chart";
+  const label = typeof p.label === "string" ? p.label : m.genui_chart_label();
   const slices = useMemo(
-    () => slicesOf(Array.isArray(p.x) ? p.x.map(String) : [], seriesOf(p.series)[0]?.values ?? []),
+    () =>
+      slicesOf(
+        Array.isArray(p.x) ? p.x.map(String) : [],
+        seriesOf(p.series)[0]?.values ?? [],
+        m.genui_chart_other(),
+      ),
     [p.x, p.series],
   );
   const total = slices.reduce((sum, s) => sum + s.value, 0);
@@ -405,7 +411,7 @@ function ScatterChart({ node }: { node: ValidNode }) {
     <ChartFigure
       series={series}
       rules={rules}
-      label={strOf(p.label) ?? "Chart"}
+      label={strOf(p.label) ?? m.genui_chart_label()}
       definition={definition}
     />
   );
@@ -472,7 +478,7 @@ function CategoryChart({ node }: { node: ValidNode }) {
     <ChartFigure
       series={series}
       rules={rules}
-      label={strOf(p.label) ?? "Chart"}
+      label={strOf(p.label) ?? m.genui_chart_label()}
       definition={definition}
     />
   );
@@ -503,7 +509,7 @@ function SvgNode({ node }: { node: ValidNode }) {
     Object.assign(props, {
       role: "button",
       tabIndex: 0,
-      "aria-label": typeof label === "string" ? label : "Select",
+      "aria-label": typeof label === "string" ? label : m.genui_drawing_select(),
       className: "cursor-pointer outline-none focus-visible:[outline:2px_solid_var(--ring)]",
       onClick: () => fire([]),
       onKeyDown: (event: KeyboardEvent<SVGElement>) => {
@@ -521,7 +527,7 @@ function SvgNode({ node }: { node: ValidNode }) {
 }
 
 export function UiSvg({ node }: { node: ValidNode }) {
-  const label = typeof node.props.label === "string" ? node.props.label : "Drawing";
+  const label = typeof node.props.label === "string" ? node.props.label : m.genui_drawing_label();
   const height = typeof node.props.height === "number" ? node.props.height : undefined;
   return (
     <svg

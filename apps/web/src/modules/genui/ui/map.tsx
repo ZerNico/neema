@@ -25,11 +25,18 @@ import { BlockKeyContext } from "./context.ts";
 import { handlerOf, useHandler } from "./handler.ts";
 import { resolveMap, routeSummary, type MapModel } from "./map-model.ts";
 import { useMapLookups } from "./map-requests.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 // MapLibre is large; it loads only for a block that draws a map.
 const MapCanvas = lazy(() => import("./map-canvas.tsx"));
 
-const MODE_LABEL = { drive: "Drive", walk: "Walk", bike: "Bike", straight: "Direct" } as const;
+const MODE_LABEL = {
+  drive: m.genui_map_mode_drive,
+  walk: m.genui_map_mode_walk,
+  bike: m.genui_map_mode_bike,
+  straight: m.genui_map_mode_straight,
+} as const;
 
 const observeDark = (notify: () => void) => {
   const observer = new MutationObserver(notify);
@@ -140,7 +147,7 @@ function PlaceList({
 }) {
   if (model.pins.length === 0) return null;
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label="Places">
+    <ul className="flex flex-wrap gap-1.5" aria-label={m.genui_map_places()}>
       {model.pins.map((pin) => (
         <li key={pin.id}>
           <button
@@ -200,7 +207,7 @@ export function UiMap({
     ...(center ? { center: [center.lng, center.lat] as [number, number] } : {}),
     ...(typeof p.zoom === "number" ? { zoom: p.zoom } : {}),
   };
-  const label = typeof p.label === "string" ? p.label : "Map";
+  const label = typeof p.label === "string" ? p.label : m.genui_map_label();
   const height = typeof p.height === "number" ? p.height : 320;
 
   const pending =
@@ -228,10 +235,14 @@ export function UiMap({
         <div className="relative">
           <MapBox {...shared} fitAll={fitAll} style={{ height }} />
           <div className="absolute top-2 left-2 flex gap-1.5">
-            <MapButton label="Expand map" icon={FullScreenIcon} onClick={() => setExpanded(true)} />
+            <MapButton
+              label={m.genui_map_expand()}
+              icon={FullScreenIcon}
+              onClick={() => setExpanded(true)}
+            />
             {view.zoom === undefined ? (
               <MapButton
-                label="Show everything"
+                label={m.genui_map_show_all()}
                 icon={CenterFocusIcon}
                 onClick={() => setFitAll((n) => n + 1)}
               />
@@ -262,7 +273,7 @@ export function UiMap({
                     className="h-0.5 w-3 rounded-full"
                     style={{ background: `var(--${route.color})` }}
                   />
-                  {route.label ?? MODE_LABEL[route.mode]} {routeSummary(route)}
+                  {route.label ?? MODE_LABEL[route.mode]()} {routeSummary(route, getLocale())}
                 </li>
               ) : null,
             )}
@@ -272,15 +283,21 @@ export function UiMap({
         {current && current.content.length > 0 ? (
           <div className="text-sm">{renderContent(current.content)}</div>
         ) : null}
-        {off ? <span className="text-muted-foreground text-xs">Maps are off</span> : null}
-        {pending ? <span className="text-muted-foreground text-xs">Finding places…</span> : null}
+        {off ? <span className="text-muted-foreground text-xs">{m.genui_map_off()}</span> : null}
+        {pending ? (
+          <span className="text-muted-foreground text-xs">{m.genui_map_finding()}</span>
+        ) : null}
         {missingPlaces.length > 0 || missingRoutes.length > 0 ? (
           <span className="text-muted-foreground text-xs">
             {[
               missingPlaces.length > 0
-                ? `Couldn’t find ${missingPlaces.map((pin) => pin.label).join(", ")}`
+                ? m.genui_map_not_found({
+                    places: new Intl.ListFormat(getLocale()).format(
+                      missingPlaces.map((pin) => pin.label),
+                    ),
+                  })
                 : null,
-              missingRoutes.length > 0 ? "Route unavailable" : null,
+              missingRoutes.length > 0 ? m.genui_map_route_unavailable() : null,
             ]
               .filter(Boolean)
               .join(". ")}

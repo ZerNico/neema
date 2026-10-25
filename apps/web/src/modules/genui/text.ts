@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+
 // Invisible characters in model-written text. A label can look like one
 // message and carry another: Unicode tag characters, zero-width marks and
 // bidi controls render as nothing yet reach the model. The zero-width joiner
@@ -31,5 +34,9 @@ const PREVIEW_CHARS = 200;
 export function copiedPreview(text: string): string {
   if (text.length <= PREVIEW_CHARS) return text;
   const more = text.length - PREVIEW_CHARS;
-  return `${text.slice(0, PREVIEW_CHARS)}… and ${more.toLocaleString()} more characters`;
+  return m.genui_copied_more({
+    text: text.slice(0, PREVIEW_CHARS),
+    count: more,
+    shown: more.toLocaleString(getLocale()),
+  });
 }

@@ -26,6 +26,7 @@ import { cachedTree, keepTree, warmTrees, type DrawnTree } from "../client/tree-
 import { fenceKey, hashSource } from "../fences.ts";
 import type { BlockAction } from "../runtime.ts";
 import { copiedPreview, hasHiddenText, mentionsUrl } from "../text.ts";
+import { genui_copied } from "~/paraglide/messages.js";
 import {
   BlockKeyContext,
   BlockOrdinalContext,
@@ -482,7 +483,7 @@ function useBlockActions(
           setLeaving(action.value);
         } else if (action.kind === "copy" && clicked && action.value.length <= COPY_CHARS) {
           void navigator.clipboard?.writeText(action.value).then(() => {
-            toast.success("Copied", { description: copiedPreview(action.value) });
+            toast.success(genui_copied(), { description: copiedPreview(action.value) });
           });
         } else if (
           action.kind === "reveal" &&
