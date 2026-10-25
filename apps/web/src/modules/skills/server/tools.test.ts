@@ -359,16 +359,6 @@ describe("agent-attached skills", () => {
     const session = await setup([{ ...agentSkill, fromAgent: false, ambient: true }]).prepare;
     expect(promptOf(session)).not.toMatch(/forThisAgent|Prefer them/);
   });
-
-  it("still hides a manual-only skill that is merely offered from the library", async () => {
-    const session = await setup([
-      { ...agentSkill, manualOnly: true, fromAgent: false, ambient: true },
-    ]).prepare;
-    expect(promptOf(session)).not.toMatch(/"skillId":"one"/);
-    const loaded = await Effect.runPromise(session.group.handlers.load_skill({ skillId: "one" }));
-    expect(loaded.ok).toBe(false);
-    expect(loaded.error).toMatch(/not in this attempt's automatic catalogue/);
-  });
 });
 
 describe("skills an earlier answer loaded", () => {

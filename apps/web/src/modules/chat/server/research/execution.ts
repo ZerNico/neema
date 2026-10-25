@@ -1,7 +1,7 @@
 import { liveModelId } from "~/modules/analytics/server/repo.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
-import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
+import { prepareSkillTools, skillOffer } from "~/modules/skills/server/tools.ts";
 import { SkillToolName, projectSkillToolResult } from "~/modules/skills/tool-schema.ts";
 import { eq } from "drizzle-orm";
 import { Cause, Duration, Effect, Schema, Semaphore, Stream } from "effect";
@@ -119,7 +119,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     session: KnowledgeSearchSession;
     service: KnowledgeService["Service"];
   } | null;
-  skillReader?: SkillReader["Service"];
+  skillReader: SkillReader["Service"];
   modelId: string;
   userId: string;
   /** The `deep_research` row this run answers, and the ordinals it renders under. */
@@ -273,17 +273,14 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
         indexer,
       }).pipe(Effect.provideService(KnowledgeService, deps.knowledge.service))
     : null;
-  const skillReader =
-    deps.skillReader ?? (yield* Effect.die(new Error("Missing research skill reader")));
+  const { skillReader } = deps;
   // Same offer as ordinary chat: selections are pinned, the library is visible.
-  const skillManifest = [
-    ...(deps.config.skills ?? []),
-    ...(yield* skillReader.catalogue(deps.userId, [
-      ...(deps.config.skills ?? []).map((entry) => entry.skillId),
-      // A run's workers write briefs nobody renders, so blocks would only cost tokens.
-      INTERACTIVE_UI_SKILL_ID,
-    ])),
-  ];
+  const skillManifest = yield* skillOffer(skillReader, {
+    userId: deps.userId,
+    pinned: deps.config.skills ?? [],
+    // A run's workers write briefs nobody renders, so blocks would only cost tokens.
+    leaveOut: [INTERACTIVE_UI_SKILL_ID],
+  });
   const skillTools = skillManifest.length
     ? yield* prepareSkillTools({
         userId: deps.userId,

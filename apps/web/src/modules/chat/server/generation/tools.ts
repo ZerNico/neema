@@ -16,7 +16,7 @@ import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";
 import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
-import { prepareSkillTools } from "~/modules/skills/server/tools.ts";
+import { prepareSkillTools, skillOffer } from "~/modules/skills/server/tools.ts";
 import { SkillToolName } from "~/modules/skills/tool-schema.ts";
 import type { FontFace } from "~/modules/presentations/server/font-file.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
@@ -313,17 +313,13 @@ export const prepareGenerationTools = (
     // Selected and agent-attached skills are pinned by the attempt; the
     // rest of the reader's library is offered as metadata so the model
     // can find a relevant skill without being told to use it.
-    const skillManifest = permissions.skillsUse
-      ? [
-          ...(config.skills ?? []),
-          ...(yield* skillReader.catalogue(input.userId, [
-            ...(config.skills ?? []).map((entry) => entry.skillId),
-            // Switched off, the skill is not offered; blocks already
-            // in earlier answers still render.
-            ...(interactiveUi.enabled ? [] : [INTERACTIVE_UI_SKILL_ID]),
-          ])),
-        ]
-      : [];
+    const skillManifest = yield* skillOffer(skillReader, {
+      userId: input.userId,
+      pinned: config.skills ?? [],
+      // Switched off, the skill is not offered; blocks already in
+      // earlier answers still render.
+      leaveOut: interactiveUi.enabled ? [] : [INTERACTIVE_UI_SKILL_ID],
+    });
     const skillTools = skillManifest.length
       ? yield* prepareSkillTools({
           userId: input.userId,
@@ -794,7 +790,7 @@ export const prepareGenerationTools = (
             knowledge: knowledgeSession
               ? { session: knowledgeSession, service: knowledgeService }
               : null,
-            ...(skillReader ? { skillReader } : {}),
+            skillReader,
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,

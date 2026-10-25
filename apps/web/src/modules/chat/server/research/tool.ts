@@ -107,7 +107,7 @@ export const prepareResearchTool = (input: {
   priorSources: ReadonlyArray<Source>;
   config: GenerationConfig;
   knowledge: { session: KnowledgeSearchSession; service: KnowledgeService["Service"] } | null;
-  skillReader?: SkillReader["Service"];
+  skillReader: SkillReader["Service"];
   userId: string;
   conversationId: string;
   messageId: string;
@@ -197,7 +197,7 @@ export const prepareResearchTool = (input: {
         priorSources: input.priorSources,
         config: input.config,
         knowledge: input.knowledge,
-        ...(input.skillReader ? { skillReader: input.skillReader } : {}),
+        skillReader: input.skillReader,
         modelId: input.modelId,
         userId: input.userId,
         call: row,

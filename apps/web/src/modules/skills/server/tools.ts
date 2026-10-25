@@ -56,6 +56,30 @@ export const earlierSkillMessage = (skillId: string, root: string): Prompt.Messa
   ].join("\n"),
 });
 
+/**
+ * The skills an attempt offers, chat and research alike: its pinned
+ * selections, then the reader's catalogue around them. The catalogue applies
+ * skills Use, the builtins' own grants and manual-only; pinned skills need Use
+ * too, which the attempt checked before it got here. `leaveOut` names skills
+ * this surface has no use for.
+ */
+export const skillOffer = Effect.fn("skills.offer")(function* (
+  reader: SkillReader["Service"],
+  input: {
+    userId: string;
+    pinned: readonly SkillManifestEntry[];
+    leaveOut: readonly string[];
+  },
+) {
+  return [
+    ...input.pinned,
+    ...(yield* reader.catalogue(input.userId, [
+      ...input.pinned.map((entry) => entry.skillId),
+      ...input.leaveOut,
+    ])),
+  ];
+});
+
 export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (input: {
   userId: string;
   manifest: readonly SkillManifestEntry[];
@@ -71,10 +95,8 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   // Loaded by an earlier answer whose replay is still in the prompt history.
   // Their text is there, so this attempt neither reloads nor repeats it.
   let earlier: ReadonlySet<string> = new Set();
-  // Manual-only skills can be selected or attached to an agent, but not offered ambiently.
-  const catalogue = input.manifest
-    .filter((entry) => !entry.manualOnly || !entry.ambient)
-    .slice(0, SKILL_LIMITS.catalogue);
+  // The catalogue already left out ambient manual-only skills.
+  const catalogue = input.manifest.slice(0, SKILL_LIMITS.catalogue);
   const required = input.manifest.filter((entry) => !entry.ambient).map((entry) => entry.skillId);
   if (input.manifest.filter((entry) => !entry.ambient).length > SKILL_LIMITS.catalogue)
     return yield* new SkillRejected({ reason: "Skill catalogue exceeds twenty entries." });
