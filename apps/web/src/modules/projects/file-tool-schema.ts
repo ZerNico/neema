@@ -1,15 +1,10 @@
 import { Option, Schema } from "effect";
 import { EntityId } from "~/entity-id.ts";
 
-export const ProjectFileToolName = Schema.Literals([
-  "list_project_files",
-  "read_project_file",
-  "save_project_file",
-]);
+export const ProjectFileToolName = Schema.Literals(["list_project_files", "save_project_file"]);
 export type ProjectFileToolName = typeof ProjectFileToolName.Type;
 export const ProjectFileOutcome = Schema.Literals([
   "listed",
-  "read",
   "saved",
   "conflict",
   "invalid",
@@ -44,7 +39,7 @@ export function projectProjectFileResult(value: unknown): ProjectFileActivityRes
   };
 }
 export const projectFileResultOk = (result: Pick<ProjectFileActivityResult, "outcome">) =>
-  result.outcome === "listed" || result.outcome === "read" || result.outcome === "saved";
+  result.outcome === "listed" || result.outcome === "saved";
 
 /** The handler's own explanation for a call that did not succeed. */
 export function projectFileFailureReason(value: unknown): string | undefined {

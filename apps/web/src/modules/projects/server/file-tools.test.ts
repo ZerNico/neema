@@ -23,12 +23,6 @@ function setup(canEdit = true) {
   const tools = prepareProjectFileTools({
     service: {
       list: () => Effect.succeed({ files: [deck], usedBytes: 1000 }),
-      read: () =>
-        Effect.succeed({
-          file: deck,
-          content: "## Slide 1\nLaunch plan",
-          note: "The file's text.",
-        }),
       write: (_writer, input) =>
         Effect.gen(function* () {
           writes.push({ basedOnVersion: input.basedOnVersion, fileId: input.fileId });
@@ -58,16 +52,13 @@ function setup(canEdit = true) {
 }
 
 describe("project file tools", () => {
-  it("gives the model a file's text, and the row only which file it was", async () => {
+  it("lists each file with the ref read_attachment reads, and the row only that it listed", async () => {
     const { call } = setup();
-    const result = await call("read_project_file", { name: "Launch.pptx" });
-    expect(result.content).toContain("Launch plan");
-    expect(projectProjectFileResult(result)).toEqual({
-      outcome: "read",
-      fileId: "file-1",
-      fileName: "Launch.pptx",
-      version: 3,
-    });
+    const result = await call("list_project_files");
+    expect(result.files).toEqual([
+      expect.objectContaining({ id: "file-1", ref: "project:file-1@3", version: 3 }),
+    ]);
+    expect(projectProjectFileResult(result)).toEqual({ outcome: "listed" });
   });
 
   it("refuses to overwrite an existing file the model has not seen", async () => {
@@ -77,9 +68,9 @@ describe("project file tools", () => {
     expect(writes).toEqual([]);
   });
 
-  it("saves over the version it last read, and reports a newer one as a conflict", async () => {
+  it("saves over the version it last listed, and reports a newer one as a conflict", async () => {
     const { call, writes } = setup();
-    await call("read_project_file", { fileId: "file-1" });
+    await call("list_project_files");
     const saved = await call("save_project_file", { name: "Launch.pptx", content: "text" });
     expect(saved).toMatchObject({ outcome: "saved", version: 4 });
     expect(writes).toEqual([{ basedOnVersion: 3, fileId: "file-1" }]);
@@ -101,8 +92,8 @@ describe("project file tools", () => {
     ).toMatchObject({ outcome: "invalid" });
   });
 
-  it("offers a viewer reading only", () => {
+  it("offers a viewer listing only", () => {
     const { tools } = setup(false);
-    expect(Object.keys(tools.group.handlers)).toEqual(["list_project_files", "read_project_file"]);
+    expect(Object.keys(tools.group.handlers)).toEqual(["list_project_files"]);
   });
 });

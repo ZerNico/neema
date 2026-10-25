@@ -18,6 +18,7 @@ import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
+import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -93,7 +94,8 @@ export type HarnessCore =
   | HarnessBase
   | Layer.Success<ReturnType<typeof defaultServices>>
   | AttachmentService
-  | KeptWorkingFiles;
+  | KeptWorkingFiles
+  | ProjectFileService;
 
 export interface EngineHarnessOptions<S, ES, K, EK> {
   readonly maxConnections?: number;
@@ -124,7 +126,7 @@ export const engineLayer = <S = never, ES = never, K = never, EK = never>(
     defaultServices(options.gateway),
     options.services ?? Layer.empty,
   ).pipe(Layer.provideMerge(base));
-  const files = KeptWorkingFiles.layer.pipe(
+  const files = Layer.mergeAll(KeptWorkingFiles.layer, ProjectFileService.layer).pipe(
     Layer.provideMerge(AttachmentService.layer),
     Layer.provideMerge(core),
   );

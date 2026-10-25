@@ -195,8 +195,8 @@ const CASES: Case[] = [
   ),
   ...outcomeCases(
     "project-file",
-    "read_project_file",
-    { outcome: "read", fileId: "f1", fileName: "a.pptx", version: 2 },
+    "save_project_file",
+    { outcome: "saved", fileId: "f1", fileName: "a.pptx", version: 2 },
     { outcome: "unavailable" },
     "ProjectFileNotUsed",
   ),

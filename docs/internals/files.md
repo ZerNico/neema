@@ -82,10 +82,13 @@ declared type, and only the kinds we understand are shown or handed to a model.
 - Images and PDFs go as bytes when the model takes them, PDFs as extracted text otherwise
   (scanned pages read as an admin chose; see [PDFs](pdf.md)), text as a fenced block. Text
   past `inlineTextCharsFor` (a quarter of the window, at most 60k characters) is inlined as its start and end around a marked cut: a whole large CSV or
-  log failed the turn outright. Any text, PDF or Office file linked to the conversation's
-  messages stays readable through `read_attachment`, by range or by searching its lines,
-  which is also how a file summarized out of history is read again by id. The tool's row
-  keeps which file and part were read, never the text.
+  log failed the turn outright. `read_attachment` is the one reader for a file the model
+  names: one linked to the conversation's messages, or in a project chat one of the project's
+  files by its `project:` ref, id or name. Text, PDF and Office files read by range or by
+  searching their lines, which is also how a file summarized out of history is read again by
+  id. An image goes through `fileForModel` after the round's results, as bytes to a vision
+  model and as a line saying it cannot see it to any other. The tool's row keeps which file
+  and part were read, never the text.
 - An image a person attached to the turn being answered is refused for a model without
   vision, at send and when a retry, edit or resume switches to one: that question is about
   the image (a resume counts the steers it took in too). Every other image, an earlier

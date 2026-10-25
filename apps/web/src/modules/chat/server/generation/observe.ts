@@ -316,6 +316,7 @@ export const observePart = (
       mapRouteTools,
       workingFiles,
       toolFiles,
+      attachmentReader,
       officeFamilyOf,
       customTools,
       imageModel,
@@ -980,6 +981,16 @@ export const observePart = (
           const activity = part.isFailure
             ? { ok: false, error: "The file could not be read." }
             : attachmentReadActivity(part.result);
+          // An image it read reaches the model after the results, like a tool's returned file.
+          const shown = attachmentReader.takeShown(part.id);
+          if (shown && activity.ok)
+            turnFiles.push(
+              yield* fileForModel(promptDeps.parser, {
+                ...shown,
+                vision: model?.capabilities.vision ?? false,
+                files: model?.capabilities.files ?? false,
+              }),
+            );
           yield* repo.completeToolCall({
             id: rowId,
             result: json(activity),

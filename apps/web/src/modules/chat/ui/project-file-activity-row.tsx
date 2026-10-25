@@ -8,14 +8,11 @@ function projectFileActivityLabel(activity: ProjectFileToolActivity) {
   const name = activity.result?.fileName;
   if (activity.status === "running") {
     if (activity.name === "save_project_file") return "Saving to the project";
-    if (activity.name === "read_project_file") return "Reading a project file";
     return "Checking project files";
   }
   switch (activity.result?.outcome) {
     case "listed":
       return "Checked project files";
-    case "read":
-      return name ? `Read ${name}` : "Read a project file";
     case "saved":
       return name
         ? `Saved ${name}${activity.result.version ? ` as version ${activity.result.version}` : ""}`

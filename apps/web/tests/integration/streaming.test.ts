@@ -79,6 +79,7 @@ import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { GenerationFence, QueueSweepInterval } from "~/modules/chat/server/generation-fence.ts";
 import { estimatePromptTokens } from "~/modules/chat/server/compaction.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ProjectFileService } from "~/modules/projects/server/project-files.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { SCHEDULE_AUTHORING_SKILL } from "~/modules/skills/bundled/index.ts";
 import { AiGateway, type ChatStreamPart } from "~/modules/providers/server/gateway.ts";
@@ -147,7 +148,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | ExternalCompletion
   | ScheduleRepo
   | ToolsRepo
-  | KeptWorkingFiles,
+  | KeptWorkingFiles
+  | ProjectFileService,
   unknown
 >;
 /** messages.model_id is a real FK; retry resolves the row behind it. */
@@ -742,6 +744,99 @@ describe("conversational agent authoring", () => {
           call.messageId === again.assistantMessageId && call.toolName === "read_attachment",
       );
       expect(reread?.result).toMatchObject({ ok: true, fileName: "big.csv", matches: 1 });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("reads a project's files like a chat's: a long text by range, an image by sight", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const projectId = uuidv7();
+    // Past the 60k characters the old project reader cut at, with no line breaks.
+    const body = Array.from(
+      { length: 12_000 },
+      (_, i) => `row ${String(i).padStart(5, "0")} `,
+    ).join("");
+    const { plan, logo } = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        yield* db.insert(projects).values({ id: projectId, userId: seed.userId, name: "Launch" });
+        yield* db
+          .update(conversations)
+          .set({ projectId })
+          .where(eq(conversations.id, seed.conversation.id));
+        const files = yield* ProjectFileService;
+        const writer = { origin: "user", userId: seed.userId } as const;
+        return {
+          plan: yield* files.write(writer, {
+            projectId,
+            name: "plan.txt",
+            bytes: new TextEncoder().encode(body),
+          }),
+          logo: yield* files.write(writer, {
+            projectId,
+            name: "logo.png",
+            bytes: Uint8Array.from(generatedPng),
+          }),
+        };
+      }),
+    );
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      if (prompts.length === 1)
+        return authoringTool(input, "read_attachment", {
+          attachmentId: `project:${plan.id}@${plan.version}`,
+          offset: 100_000,
+          length: 50,
+        });
+      if (prompts.length === 2)
+        return authoringTool(input, "read_attachment", { attachmentId: "logo.png" });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Read both." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId, conversationId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: visionModelId,
+            content: "How does the plan end, and what is on the logo?",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      expect(prompts).toHaveLength(3);
+      // Offered with no chat file at all: the project's files are the reader's too.
+      const offered = Object.keys(prompts[0]!.toolkit!.tools);
+      expect(offered).toContain("read_attachment");
+      expect(offered).not.toContain("read_project_file");
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain(body.slice(100_000, 100_050));
+      const shown = prompts[2]!.prompt.content.flatMap((message) =>
+        message.role === "user" ? message.content : [],
+      );
+      expect(shown).toContainEqual(
+        expect.objectContaining({ type: "file", mediaType: "image/png", fileName: logo.name }),
+      );
+      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
+      const reads = detail.toolCalls.filter((call) => call.toolName === "read_attachment");
+      expect(reads.map((call) => call.result)).toEqual([
+        {
+          ok: true,
+          fileName: "plan.txt",
+          mode: "range",
+          from: 100_000,
+          to: 100_050,
+          total: body.length,
+        },
+        { ok: true, fileName: "logo.png" },
+      ]);
     } finally {
       authoringScript = null;
     }

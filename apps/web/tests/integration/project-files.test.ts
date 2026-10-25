@@ -24,6 +24,11 @@ import {
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { makeToolFileResolver } from "~/modules/chat/server/tool-files.ts";
+import {
+  prepareAttachmentReader,
+  type ReadAttachmentResult,
+} from "~/modules/chat/server/attachment-reader.ts";
+import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -46,7 +51,8 @@ type Services =
   | ProjectFileService
   | AttachmentService
   | AttachmentRepo
-  | BlobStore;
+  | BlobStore
+  | DocumentParser;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const puts: string[] = [];
@@ -131,6 +137,37 @@ const setup = async () => {
     );
   return { owner, editor, viewer, projectId: project.id };
 };
+/** What `read_attachment` gives the model for a project file, read as `userId` in a chat of that project. */
+const readAsModel = (
+  userId: string,
+  projectId: string,
+  reference: string,
+  range: { offset?: number } = {},
+) =>
+  run(
+    Effect.gen(function* () {
+      const store = yield* BlobStore;
+      const toolFiles = makeToolFileResolver({
+        db: yield* Db,
+        store,
+        projectFiles: Option.some(yield* ProjectFileService),
+        userId,
+        conversationId: uuidv7(),
+        projectId,
+      });
+      const reader = prepareAttachmentReader({
+        deps: { store, parser: yield* DocumentParser },
+        owner: userId,
+        find: () => Effect.succeed(null),
+        project: toolFiles.resolve,
+      });
+      const read = reader.group.handlers["read_attachment"] as (
+        args: unknown,
+        context: { toolCallId: string },
+      ) => Effect.Effect<ReadAttachmentResult>;
+      return yield* read({ attachmentId: reference, ...range }, { toolCallId: "call" });
+    }),
+  );
 const versionRows = (fileId: string) =>
   db((d) =>
     d
@@ -341,10 +378,10 @@ describe("project files", () => {
       }),
     );
     expect(binary.mediaType).toBe("application/octet-stream");
-    const read = await files((s) => s.read(owner, projectId, { name: "tool.exe" }));
-    expect(read).toMatchObject({
-      content: null,
-      note: expect.stringContaining("a tool that takes files"),
+    expect(await readAsModel(owner, projectId, "tool.exe")).toMatchObject({
+      ok: false,
+      fileName: "tool.exe",
+      error: expect.stringContaining("a tool that takes files"),
     });
   });
 
@@ -710,17 +747,51 @@ describe("project files", () => {
     );
   });
 
-  it("reads an Office file's text for the model", async () => {
+  it("reads an Office file's text for the model, only while the reader is a member", async () => {
     const { owner, viewer, projectId } = await setup();
     const deck = zipSync({
       "[Content_Types].xml": strToU8("<Types/>"),
       "ppt/presentation.xml": strToU8("<p/>"),
       "ppt/slides/slide1.xml": strToU8("<a:p><a:r><a:t>Autumn launch</a:t></a:r></a:p>"),
     });
-    await files((s) => s.write(person(owner), { projectId, name: "Launch.pptx", bytes: deck }));
-    const read = await files((s) => s.read(viewer, projectId, { name: "Launch.pptx" }));
-    expect(read.content).toBe("## Slide 1\nAutumn launch");
-    expect(read.file.mediaType).toContain("presentationml");
+    const file = await files((s) =>
+      s.write(person(owner), { projectId, name: "Launch.pptx", bytes: deck }),
+    );
+    expect(file.mediaType).toContain("presentationml");
+    expect(await readAsModel(viewer, projectId, `project:${file.id}@1`)).toMatchObject({
+      ok: true,
+      fileName: "Launch.pptx",
+      content: "## Slide 1\nAutumn launch",
+    });
+    // The role is asked on every read, not when the chat began.
+    await run(
+      Effect.flatMap(ProjectService, (s) =>
+        s.changeMembers(owner, projectId, { action: "removeUser", userId: viewer }),
+      ),
+    );
+    expect(await readAsModel(viewer, projectId, `project:${file.id}@1`)).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("pages a project text file past 60k characters", async () => {
+    const { owner, projectId } = await setup();
+    const body = Array.from({ length: 4_000 }, (_, i) => `line ${i}: ${"x".repeat(30)}`).join("\n");
+    expect(body.length).toBeGreaterThan(100_000);
+    await files((s) => s.write(person(owner), { projectId, name: "log.txt", bytes: text(body) }));
+    const first = await readAsModel(owner, projectId, "log.txt");
+    expect(first).toMatchObject({ ok: true, mode: "range", from: 0, total: body.length });
+    expect(first.content).toBe(body.slice(0, first.to));
+    // Follow nextOffset to the end: every character is reachable.
+    let offset = first.nextOffset ?? null;
+    let read = first.content ?? "";
+    while (offset !== null) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each page starts where the last ended.
+      const page = await readAsModel(owner, projectId, "log.txt", { offset });
+      read += page.content ?? "";
+      offset = page.nextOffset ?? null;
+    }
+    expect(read).toBe(body);
   });
 
   it("keeps validated attachment types across durable reads, queue transfer and branching", async () => {

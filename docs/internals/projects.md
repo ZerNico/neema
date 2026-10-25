@@ -83,11 +83,15 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
   owner's own files. A version is one more owner in the orphan check, so dropping a
   version, a file or the project records cleanup intents in the same transaction and the
   [blob ledger](../../AGENTS.md#invariants) settles them.
-- The model gets `list_project_files`, `read_project_file` and, for an editor,
-  `save_project_file`, only in a project chat. A read hands it the file's text when there
-  is a reader for it, for the rest of that answer; the tool row keeps only which file and
-  version. A save takes either text content or a chat file by id or name, and runs under
-  the answer's generation fence, taken before the project row.
+- The model gets `list_project_files` and, for an editor, `save_project_file`, only in a
+  project chat. It reads a project file exactly as it reads a chat file, through
+  `read_attachment` with the `project:<id>@<version>` ref the listing gives (or the file's id
+  or name): the same paging, search and PDF handling, and an image shown to a vision model.
+  There is no second reader; see [files](files.md#what-the-model-sees). Each read resolves
+  through the attempt's tool-file resolver, which asks for the person's project role on that
+  call, and a ref whose version has been replaced is refused. A save takes either text content
+  or a chat file by id or name, and runs under the answer's generation fence, taken before the
+  project row.
 - A custom or presentation tool reads a project file through an authorized, pinned
   reference. Its result names the version it read; it can edit a private working copy,
   but only a published attachment can be passed to `save_project_file` as the next

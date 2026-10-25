@@ -840,15 +840,17 @@ export const prepareGenerationTools = (
     const readable = (file: (typeof conversationFiles)[number]) =>
       ["text", "pdf"].includes(attachmentKind(file.mediaType)) || hasFileText(file.fileName);
     // What the rounds may change about the offer. The reader is always in
-    // the toolkit, advertised only while a readable file is here: a steered
-    // file can bring the first one in mid-answer. Retrieval follows the
-    // knowledge context once it is decided.
+    // the toolkit, advertised only while a readable file is here (a project
+    // chat always has one): a steered file can bring the first one in
+    // mid-answer. Retrieval follows the knowledge context once decided.
     const offerState = {
-      readerAdvertised: conversationFiles.some(readable),
+      readerAdvertised: conversationFiles.some(readable) || projectFileTools !== null,
       retrievalEnabled: config.knowledgeMode === "retrieval",
     };
     const attachmentReader = prepareAttachmentReader({
       deps: promptDeps,
+      owner: input.userId,
+      project: projectFileTools && toolFiles ? toolFiles.resolve : undefined,
       find: (requested) =>
         Effect.gen(function* () {
           // A branch maps its source's ids onto its own copies, as in a
@@ -905,7 +907,7 @@ export const prepareGenerationTools = (
     };
     const commonGroups = [
       ...(toolLoad ? [toolLoad] : []),
-      attachmentReader,
+      attachmentReader.group,
       ...(historyTools ? [historyTools] : []),
       ...(permissions.agentsCreate ? [authoring.group] : []),
       ...(permissions.schedules ? [scheduleAuthoring.group] : []),
@@ -1076,6 +1078,7 @@ export const prepareGenerationTools = (
       keepChanges,
       workingFiles,
       toolFiles,
+      attachmentReader,
       officeFamilyOf,
       customTools,
       imageModel,

@@ -1,8 +1,9 @@
 # PDFs
 
 Every PDF the app reads as text goes through `DocumentParser.parsePdf`
-(`attachments/server/document-parser.ts`): chat prompts and history, `read_attachment`, files a tool
-or the computer returns (`fileForModel`), project files, knowledge indexing and `read_url`. A model
+(`attachments/server/document-parser.ts`): chat prompts and history, `read_attachment` (chat and
+project files), files a tool or the computer returns (`fileForModel`), knowledge indexing and
+`read_url`. A model
 that takes PDFs natively gets the bytes instead, and reads scans itself.
 
 ## The worker boundary

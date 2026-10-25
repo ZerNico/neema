@@ -29,6 +29,8 @@ export interface ToolFile {
   readonly bytes: Uint8Array;
   readonly source: ToolFileSource;
   readonly ref: FileRef;
+  /** The stored blob, so a PDF's scanned pages are read once; absent for drafts and skill files. */
+  readonly blobId?: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export const makeToolFileResolver = (input: {
         id: attachments.id,
         name: attachments.fileName,
         mediaType: attachments.mediaType,
+        blobId: attachments.blobId,
         storageKey: attachmentBlobs.storageKey,
       })
       .from(attachments)
@@ -148,6 +151,7 @@ export const makeToolFileResolver = (input: {
           bytes,
           source: { kind: "chat", attachmentId: found.id },
           ref: { kind: "attachment", id: found.id },
+          blobId: found.blobId,
         } satisfies ToolFile;
       }
       if (canonical?.kind === "attachment")
@@ -163,7 +167,7 @@ export const makeToolFileResolver = (input: {
               ])
         ).pipe(Effect.option);
         if (Option.isSome(opened)) {
-          const { file, bytes } = opened.value;
+          const { file, bytes, blobId } = opened.value;
           if (canonical?.kind === "project" && canonical.version !== file.version)
             return yield* Effect.fail("The project file changed since that version was inspected.");
           return {
@@ -172,6 +176,7 @@ export const makeToolFileResolver = (input: {
             bytes,
             source: { kind: "project", fileId: file.id, version: file.version },
             ref: { kind: "project", id: file.id, version: file.version },
+            blobId,
           } satisfies ToolFile;
         }
       }

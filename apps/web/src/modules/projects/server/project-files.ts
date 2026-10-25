@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
-import { Context, Duration, Effect, Layer, Option, Schedule } from "effect";
+import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   attachmentBlobs,
@@ -16,7 +16,6 @@ import { classifyFile, sanitizeFileName } from "~/modules/attachments/server/val
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
@@ -27,9 +26,7 @@ import {
   type ProjectFileVersion,
 } from "../files.ts";
 import { projectAccess, projectNotifier, projectRole, requireProject } from "./access.ts";
-import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { readImageSize } from "~/modules/attachments/image-header.ts";
-import { fileText } from "~/modules/attachments/server/file-text.ts";
 import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
@@ -44,13 +41,6 @@ export type FileWriter =
       /** The answer's fence, taken first in the write's transaction. */
       guard: (tx: DbTx) => Effect.Effect<unknown>;
     };
-/** What a model's read of a file gives it: text when there is any to give. */
-export interface ProjectFileRead {
-  file: ProjectFileSummary;
-  content: string | null;
-  note: string;
-}
-
 const SWEEP_EVERY = Duration.hours(1);
 const lockProject = (tx: DbTx, projectId: string) =>
   tx
@@ -178,11 +168,6 @@ export class ProjectFileService extends Context.Service<
       sha256: string;
       bytes: Effect.Effect<Uint8Array | null>;
     } | null>;
-    read(
-      userId: string,
-      projectId: string,
-      target: { fileId?: string | undefined; name?: string | undefined },
-    ): Effect.Effect<ProjectFileRead, ProjectFileError>;
     /** Whether the person may still read this exact version, without loading it. */
     canRead(
       userId: string,
@@ -207,7 +192,6 @@ export class ProjectFileService extends Context.Service<
       const blobs = yield* BlobStore;
       const attachmentService = yield* AttachmentService;
       const storage = yield* StorageQuota;
-      const parser = yield* DocumentParser;
       const bus = yield* SyncBus;
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
@@ -734,38 +718,6 @@ export class ProjectFileService extends Context.Service<
             .limit(1)
             .pipe(Effect.orDie);
           return row !== undefined;
-        }),
-        read: Effect.fn("ProjectFileService.read")(function* (userId, projectId, target) {
-          const { file, bytes, blobId } = yield* open(userId, projectId, target);
-          const kind = attachmentKind(classifyFile(file.name, "", bytes).mediaType);
-          if (kind === "text")
-            return {
-              file,
-              content: new TextDecoder().decode(bytes).slice(0, PROJECT_FILE_LIMITS.readChars),
-              note: "The file's text.",
-            };
-          if (kind === "pdf") {
-            const parsed = yield* parser
-              .parsePdf({ bytes, fileName: file.name, blobId, owner: userId })
-              .pipe(Effect.option);
-            return Option.isSome(parsed)
-              ? {
-                  file,
-                  content: parsed.value.text.slice(0, PROJECT_FILE_LIMITS.readChars),
-                  note: "The PDF's text.",
-                }
-              : { file, content: null, note: "The PDF's text could not be read here." };
-          }
-          if (kind === "image")
-            return { file, content: null, note: "An image; its pixels cannot be read here." };
-          const content = fileText(file.name, bytes, PROJECT_FILE_LIMITS.readChars);
-          return content === null
-            ? {
-                file,
-                content: null,
-                note: "Its contents are not readable here; a tool that takes files can use it.",
-              }
-            : { file, content, note: "The file's text, without formatting, images or notes." };
         }),
       });
     }),
