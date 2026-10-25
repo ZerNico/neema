@@ -38,11 +38,13 @@ export function makeDraftSession<
   state: (draft: D) => State;
   /** Paraphrased setting names, applied inside `changes`. */
   fieldAliases: Record<string, string>;
-  /** Settings where null is a real value (it clears the setting), so it is kept. */
-  nullable: ReadonlySet<string>;
+  /** The changes the model may make; where it takes null, null clears the setting and is kept. */
+  changes: Schema.Struct<Schema.Struct.Fields>;
   /** Normalizes a kind's own top-level parameter value. */
   normalize?: (key: string, value: unknown) => unknown;
 }) {
+  const isChange = Schema.is(config.changes);
+  const nullable = new Set(Object.keys(config.changes.fields).filter((key) => isChange({ [key]: null })));
   // Models write "no value" as null and small integers as strings. Both mean the
   // key is absent or the number itself; refusing them only burns a round trip.
   const lenient = (raw: unknown, changes = false): unknown => {
@@ -51,7 +53,7 @@ export function makeDraftSession<
     for (const [rawKey, value] of Object.entries(raw)) {
       const key = (changes ? config.fieldAliases : DRAFT_ID_ALIASES)[rawKey] ?? rawKey;
       if (value === null || value === undefined) {
-        if (config.nullable.has(key)) out[key] = null;
+        if (nullable.has(key)) out[key] = null;
         continue;
       }
       if (key === "changes") out[key] = lenient(value, true);

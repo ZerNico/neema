@@ -97,8 +97,6 @@ const Result = Schema.Struct({
 });
 type Result = typeof Result.Type;
 
-// null explicitly clears these settings, so it is kept.
-const NULLABLE = new Set(["modelId", "agentId", "imageModelId", "endAt", "chatId"]);
 const draftTool = Tool.make("draft_schedule", {
   description:
     "Start one editable draft for a recurring or one-time scheduled task, reminder, or automation, and show its widget in this chat. Omit scheduleId for a new schedule, or pass an owned schedule's ID to edit that schedule. Optional changes populate the draft as it is created. Call this once per schedule you are preparing, then use the returned draftId with update_schedule_draft; calling it again for the same schedule, or while an empty unedited draft exists, returns that draft instead of making another. Never creates or starts a live schedule.",
@@ -116,7 +114,7 @@ const readTool = Tool.make("read_schedule_draft", {
 });
 const updateTool = Tool.make("update_schedule_draft", {
   description:
-    "Patch one schedule draft at its current expectedRevision. draftId may be omitted only when this chat has exactly one schedule draft; with several, pass the draftId of the one you mean. Only supplied settings change; an empty array clears that selection, and null clears modelId, agentId, endAt, or chatId. Never change unrelated fields. The cron field must be a valid 5-field cron expression interpreted in the draft's timezone. A conflict means someone edited the draft; read its current values instead of overwriting their changes. This updates only the draft, not the saved schedule.",
+    "Patch one schedule draft at its current expectedRevision. draftId may be omitted only when this chat has exactly one schedule draft; with several, pass the draftId of the one you mean. Only supplied settings change; an empty array clears that selection, and null clears modelId, agentId, imageModelId, endAt, or chatId. Never change unrelated fields. The cron field must be a valid 5-field cron expression interpreted in the draft's timezone. A conflict means someone edited the draft; read its current values instead of overwriting their changes. This updates only the draft, not the saved schedule.",
   parameters: Schema.Struct({
     draftId: advertisedAs(EntityId),
     expectedRevision: advertisedAs(UpdateParams.fields.expectedRevision),
@@ -164,7 +162,7 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       summary,
       state,
       fieldAliases: DRAFT_FIELD_ALIASES,
-      nullable: NULLABLE,
+      changes: ScheduleModelPatch,
     });
     // The models this user can pick, marked with the one answering right now.
     let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];

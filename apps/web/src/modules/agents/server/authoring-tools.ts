@@ -106,8 +106,6 @@ const Result = Schema.Struct({
 });
 type Result = typeof Result.Type;
 
-// modelId and imageModelId keep null: there it is a real value (no preference).
-const NULLABLE = new Set(["modelId", "imageModelId"]);
 const normalize = (key: string, value: unknown) =>
   key === "kind" && typeof value === "string"
     ? (OPTION_KIND_ALIASES[value.trim().toLowerCase()] ?? value)
@@ -187,7 +185,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
     summary,
     state,
     fieldAliases: DRAFT_FIELD_ALIASES,
-    nullable: NULLABLE,
+    changes: AgentDraftPatch,
     normalize,
   });
   const inspected = new Map<
