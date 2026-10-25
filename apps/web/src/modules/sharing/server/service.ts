@@ -12,6 +12,8 @@ import { SharedResourceNotAvailable, SharingNotAllowed, SharingRateLimited } fro
 import { sharingResources } from "./resources.ts";
 import type { ResourceGrants, SharedResource, SharingChange, ShareRecipient } from "../schema.ts";
 import { escapeLike } from "~/server/sql.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** One page of the picker; the query narrows it rather than paging. */
 const RECIPIENT_LIMIT = 20;
@@ -175,7 +177,7 @@ export class SharingService extends Context.Service<
                     const email = change.email.trim().toLowerCase();
                     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
                       return yield* new SharingNotAllowed({
-                        reason: "enter an existing account's email address",
+                        reason: localized(m.sharing_error_email_unknown),
                       });
                     const required = yield* verificationRequiredIn(tx);
                     const [recipient] = yield* tx
@@ -185,7 +187,7 @@ export class SharingService extends Context.Service<
                       .for("key share");
                     if (!recipient || recipient.id === userId)
                       return yield* new SharingNotAllowed({
-                        reason: "could not share with that account",
+                        reason: localized(m.sharing_error_recipient_refused),
                       });
                     const [count] = yield* tx
                       .select({
@@ -197,7 +199,7 @@ export class SharingService extends Context.Service<
                     if (count?.existing) break;
                     if ((count?.value ?? 0) >= 100)
                       return yield* new SharingNotAllowed({
-                        reason: "direct sharing limit reached",
+                        reason: localized(m.sharing_error_user_limit),
                       });
                     yield* tx.execute(
                       sql`insert into ${userGrants} (${sql.identifier(userResourceId.name)}, user_id) values (${resource.id}, ${recipient.id}) on conflict do nothing`,
@@ -217,7 +219,7 @@ export class SharingService extends Context.Service<
                     if (count?.existing) break;
                     if ((count?.value ?? 0) >= 100)
                       return yield* new SharingNotAllowed({
-                        reason: "group sharing limit reached",
+                        reason: localized(m.sharing_error_group_limit),
                       });
                     const [group] = yield* tx
                       .select()
@@ -226,7 +228,7 @@ export class SharingService extends Context.Service<
                       .for("share");
                     if (!group)
                       return yield* new SharingNotAllowed({
-                        reason: "group is not available for sharing",
+                        reason: localized(m.sharing_error_group_unavailable),
                       });
                     if (actor.role !== "admin") {
                       // Held through insertion: permission updates and membership deletion
@@ -244,7 +246,7 @@ export class SharingService extends Context.Service<
                         .for("share");
                       if (!member?.canShare)
                         return yield* new SharingNotAllowed({
-                          reason: "group is not available for sharing",
+                          reason: localized(m.sharing_error_group_unavailable),
                         });
                     }
                     yield* tx.execute(
@@ -274,7 +276,7 @@ export class SharingService extends Context.Service<
                     // admin gate. Admin status alone never exposes a private resource.
                     if (actor.role !== "admin")
                       return yield* new SharingNotAllowed({
-                        reason: "only admin owners can publish to the instance",
+                        reason: localized(m.sharing_error_publish_admin_only),
                       });
                     yield* tx
                       .update(table)

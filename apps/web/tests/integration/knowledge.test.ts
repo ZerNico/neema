@@ -3,6 +3,7 @@ import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { english } from "~/i18n/localized.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AgentService } from "~/modules/agents/server/service.ts";
@@ -4200,10 +4201,10 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
           Effect.flip(service.change(owner, resource, mutation(101))),
         ),
       );
-      expect(denied).toMatchObject({
-        _tag: "SharingNotAllowed",
-        reason: expect.stringContaining("limit reached"),
-      });
+      expect(denied._tag).toBe("SharingNotAllowed");
+      expect(denied._tag === "SharingNotAllowed" && english(denied.reason)).toContain(
+        "limit reached",
+      );
       const grants = await run(
         Effect.flatMap(SharingService, (service) => service.detail(owner, resource)),
       );

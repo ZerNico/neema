@@ -41,6 +41,7 @@ import {
 import { Separator } from "~/ui/primitives/separator";
 import { Spinner } from "~/ui/primitives/spinner";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 interface EligibleGroup {
   id: string;
@@ -53,12 +54,13 @@ type AddTarget =
   | { kind: "group"; id: string; name: string; detail: string };
 interface AddSection {
   value: string;
+  label: string;
   items: AddTarget[];
 }
 
-const AUDIENCES = [
-  { value: "private", label: "Only people and groups you add" },
-  { value: "instance", label: "Everyone signed in" },
+const audiences = () => [
+  { value: "private", label: m.sharing_audience_private() },
+  { value: "instance", label: m.sharing_audience_instance() },
 ];
 
 const responseText = (error: unknown, fallback: string) =>
@@ -107,8 +109,7 @@ export function AccessDialog({
       setAddError(null);
       await invalidate();
     },
-    onError: (cause) =>
-      setAddError(responseText(cause, "Could not give access to that email address.")),
+    onError: (cause) => setAddError(responseText(cause, m.sharing_error_add_email())),
   });
   const shareGroup = useMutation({
     mutationFn: (group: EligibleGroup) =>
@@ -116,9 +117,9 @@ export function AccessDialog({
     onSuccess: async (_result, group) => {
       setAddError(null);
       await invalidate();
-      toast.success(`${group.name} can use this.`);
+      toast.success(m.sharing_toast_group_added({ name: group.name }));
     },
-    onError: (cause) => setAddError(responseText(cause, "Could not give that group access.")),
+    onError: (cause) => setAddError(responseText(cause, m.sharing_error_add_group())),
   });
   const revokeUser = useMutation({
     mutationFn: (user: { userId: string; name: string }) =>
@@ -130,13 +131,16 @@ export function AccessDialog({
       // Grants are additive, so this row was not necessarily their only way in.
       // Say so here rather than parking a permanent caveat above the list.
       const other = otherAccess();
+      const name = { name: user.name };
       toast.success(
-        other
-          ? `Removed ${user.name}. They can still use this through ${other}.`
-          : `Removed ${user.name}.`,
+        other === "instance"
+          ? m.sharing_toast_removed_everyone(name)
+          : other === "group"
+            ? m.sharing_toast_removed_group(name)
+            : m.sharing_toast_removed(name),
       );
     },
-    onError: (error) => toastError("Could not remove access.", error),
+    onError: (error) => toastError(m.sharing_error_remove(), error),
   });
   const revokeGroup = useMutation({
     mutationFn: (group: { groupId: string }) =>
@@ -144,13 +148,13 @@ export function AccessDialog({
         data: { ...resource, change: { action: "revokeGroup", groupId: group.groupId } },
       }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not remove access.", error),
+    onError: (error) => toastError(m.sharing_error_remove(), error),
   });
   const publish = useMutation({
     mutationFn: (audience: "private" | "instance") =>
       changeSharing({ data: { ...resource, change: { action: "publish", audience } } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not change general access.", error),
+    onError: (error) => toastError(m.sharing_error_publish(), error),
   });
   const pending =
     confirming ||
@@ -165,8 +169,8 @@ export function AccessDialog({
   // row really was the person's only access.
   const otherAccess = () => {
     if (!data) return null;
-    if (data.audience === "instance") return "everyone signed in";
-    if (data.groups.length > 0) return "a group";
+    if (data.audience === "instance") return "instance";
+    if (data.groups.length > 0) return "group";
     return null;
   };
   const recipients = useQuery({ ...shareRecipientsQuery(search), enabled: open && picker });
@@ -186,12 +190,21 @@ export function AccessDialog({
     }));
   const groupMatches: AddTarget[] = availableGroups
     .filter((group) => !search || group.name.toLowerCase().includes(search.toLowerCase()))
-    .map((group) => ({ kind: "group", id: group.id, name: group.name, detail: "Group" }));
+    .map((group) => ({
+      kind: "group",
+      id: group.id,
+      name: group.name,
+      detail: m.sharing_group_detail(),
+    }));
   // Groups first: granting one covers several people at once, so it is the
   // choice worth seeing before scrolling a directory.
   const sections: AddSection[] = [
-    groupMatches.length > 0 ? { value: "Groups", items: groupMatches } : null,
-    people.length > 0 ? { value: "People", items: people } : null,
+    groupMatches.length > 0
+      ? { value: "groups", label: m.sharing_section_groups(), items: groupMatches }
+      : null,
+    people.length > 0
+      ? { value: "people", label: m.sharing_section_people(), items: people }
+      : null,
   ].filter((section) => section !== null);
 
   // Only the broadening direction has a consequence worth interrupting for.
@@ -204,10 +217,9 @@ export function AccessDialog({
     }
     setConfirming(true);
     const accepted = await confirm({
-      title: "Let everyone signed in use this?",
-      description:
-        "Anyone with an account on this app will be able to use it. They still cannot edit it, and it does not become public on the internet.",
-      confirmLabel: "Give access",
+      title: m.sharing_confirm_publish_title(),
+      description: m.sharing_confirm_publish_description(),
+      confirmLabel: m.sharing_confirm_publish_action(),
       destructive: false,
     });
     setConfirming(false);
@@ -245,19 +257,19 @@ export function AccessDialog({
         className="flex max-h-[min(40rem,calc(var(--dialog-viewport-height,100dvh)-2rem))] min-h-0 flex-col"
       >
         <DialogHeader>
-          <DialogTitle>Access</DialogTitle>
+          <DialogTitle>{m.sharing_title()}</DialogTitle>
           <DialogDescription className="break-words">{title}</DialogDescription>
         </DialogHeader>
         {grants.isError ? (
           <ErrorState
-            title="Could not load access"
+            title={m.sharing_error_load()}
             onRetry={() => {
               void grants.refetch();
             }}
           />
         ) : !data ? (
           <div className="flex justify-center py-10">
-            <Spinner aria-label="Loading access" />
+            <Spinner aria-label={m.sharing_loading()} />
           </div>
         ) : (
           <div className="flex min-h-0 flex-col gap-5">
@@ -294,22 +306,22 @@ export function AccessDialog({
                       disabled={pending}
                       // role=combobox takes its name from the author, not from
                       // the trigger's own text.
-                      aria-label="Add people or groups"
+                      aria-label={m.sharing_add()}
                     />
                   }
                 >
                   <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                  Add people or groups
+                  {m.sharing_add()}
                 </ComboboxTrigger>
                 <ComboboxContent align="start" className="w-[var(--anchor-width)] min-w-72">
-                  <ComboboxInput placeholder="Search by name or email…" showTrigger={false} />
+                  <ComboboxInput placeholder={m.sharing_add_placeholder()} showTrigger={false} />
                   <ComboboxEmpty>
-                    {recipients.isPending ? "Searching…" : "No people or groups match"}
+                    {recipients.isPending ? m.sharing_add_searching() : m.sharing_add_empty()}
                   </ComboboxEmpty>
                   <ComboboxList>
                     {(section: AddSection) => (
                       <ComboboxGroup key={section.value} items={section.items}>
-                        <ComboboxLabel>{section.value}</ComboboxLabel>
+                        <ComboboxLabel>{section.label}</ComboboxLabel>
                         <ComboboxCollection>
                           {(target: AddTarget) => (
                             <ComboboxItem key={`${target.kind}:${target.id}`} value={target}>
@@ -332,14 +344,15 @@ export function AccessDialog({
 
             <div className="flex min-h-0 flex-col gap-2">
               <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                People with access
+                {m.sharing_people_heading()}
               </h2>
               {data.users.length === 0 && data.groups.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  Nobody else yet. Only you can use this.
-                </p>
+                <p className="text-muted-foreground text-sm">{m.sharing_people_empty()}</p>
               ) : null}
-              <ul className="divide-border min-h-0 divide-y overflow-y-auto" aria-label="Access">
+              <ul
+                className="divide-border min-h-0 divide-y overflow-y-auto"
+                aria-label={m.sharing_people_list()}
+              >
                 {data.users.map((user) => (
                   <li key={user.userId} className="flex items-center gap-3 py-2.5">
                     <Avatar className="size-9 shrink-0">
@@ -349,8 +362,12 @@ export function AccessDialog({
                       <span className="truncate text-sm">{user.name}</span>
                       <span className="text-muted-foreground truncate text-xs">{user.email}</span>
                     </div>
-                    <span className="text-muted-foreground shrink-0 text-xs">Can use</span>
-                    {removeButton(`Remove access for ${user.name}`, () => revokeUser.mutate(user))}
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      {m.sharing_can_use()}
+                    </span>
+                    {removeButton(m.sharing_remove_access({ name: user.name }), () =>
+                      revokeUser.mutate(user),
+                    )}
                   </li>
                 ))}
                 {data.groups.map((group) => (
@@ -360,10 +377,14 @@ export function AccessDialog({
                     </div>
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate text-sm">{group.name}</span>
-                      <span className="text-muted-foreground text-xs">Group</span>
+                      <span className="text-muted-foreground text-xs">
+                        {m.sharing_group_detail()}
+                      </span>
                     </div>
-                    <span className="text-muted-foreground shrink-0 text-xs">Can use</span>
-                    {removeButton(`Remove access for ${group.name}`, () =>
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      {m.sharing_can_use()}
+                    </span>
+                    {removeButton(m.sharing_remove_access({ name: group.name }), () =>
                       revokeGroup.mutate(group),
                     )}
                   </li>
@@ -375,20 +396,20 @@ export function AccessDialog({
 
             <div className="flex flex-col gap-2">
               <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                General access
+                {m.sharing_general_heading()}
               </h2>
               {data.canPublish ? (
                 <Select
-                  items={AUDIENCES}
+                  items={audiences()}
                   value={data.audience}
                   onValueChange={(next) => void changeAudience(next)}
                   disabled={pending}
                 >
-                  <SelectTrigger aria-label="General access" className="w-full">
+                  <SelectTrigger aria-label={m.sharing_general_heading()} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {AUDIENCES.map((audience) => (
+                    {audiences().map((audience) => (
                       <SelectItem key={audience.value} value={audience.value}>
                         {audience.label}
                       </SelectItem>
@@ -398,22 +419,22 @@ export function AccessDialog({
               ) : (
                 <p className="text-sm">
                   {data.audience === "instance"
-                    ? "Everyone signed in"
-                    : "Only people and groups you add"}
+                    ? m.sharing_audience_instance()
+                    : m.sharing_audience_private()}
                 </p>
               )}
               <p className="text-muted-foreground text-xs">
                 {data.audience === "instance"
-                  ? "Anyone with an account here can use it. It is not public on the internet."
+                  ? m.sharing_hint_instance()
                   : resource.kind === "agent"
-                    ? "People you add can use this agent, not edit it. They need their own access to its model and collections."
+                    ? m.sharing_hint_agent()
                     : resource.kind === "customTool"
-                      ? "People you add can use agents that have this module. Anyone else gets that agent without it."
+                      ? m.sharing_hint_custom_tool()
                       : resource.kind === "integration"
-                        ? "People you add can connect their own account. Nobody else sees it."
+                        ? m.sharing_hint_integration()
                         : resource.kind === "skill"
-                          ? "People you add can use this skill and read its instructions, not edit it."
-                          : "People you add can use this collection in chats, not edit it."}
+                          ? m.sharing_hint_skill()
+                          : m.sharing_hint_collection()}
               </p>
             </div>
           </div>
