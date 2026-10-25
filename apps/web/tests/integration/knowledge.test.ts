@@ -3897,6 +3897,9 @@ describe("saved agent configurations", () => {
     planEnabled: true,
     starters: ["Review this contract"],
     collectionIds: [],
+    skillIds: [],
+    customToolIds: [],
+    integrationIds: [],
   };
   const create = (owner: string, overrides: Partial<AgentSettings> = {}) =>
     run(
@@ -4138,6 +4141,9 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
                 planEnabled: false,
                 starters: [],
                 collectionIds: [],
+                skillIds: [],
+                customToolIds: [],
+                integrationIds: [],
               }),
             ),
           )

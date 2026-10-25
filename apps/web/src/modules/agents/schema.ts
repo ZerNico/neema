@@ -36,13 +36,13 @@ export const AgentSettings = Schema.Struct({
   starters: Schema.Array(AgentStarter.check(Schema.isMinLength(1))).check(
     Schema.isMaxLength(AGENT_LIMITS.maxStarters),
   ),
-  skillIds: Schema.optional(AgentResourceIds),
-  customToolIds: Schema.optional(AgentResourceIds),
+  skillIds: AgentResourceIds,
+  customToolIds: AgentResourceIds,
   /**
    * Services the agent is meant to use. They run with each sender's own
    * connection; a sender without one simply is not offered them.
    */
-  integrationIds: Schema.optional(AgentResourceIds),
+  integrationIds: AgentResourceIds,
   collectionIds: Schema.Array(EntityId).check(
     Schema.isMaxLength(KNOWLEDGE_LIMITS.maxCollectionsPerSelection),
   ),
@@ -72,13 +72,13 @@ export interface AgentDetail extends AgentSelectionDetail {
 /** Configuration metadata intentionally visible to shared recipients. */
 export interface AgentSelectionDetail extends AgentSummary {
   modelId: string | null;
-  imageModelId?: string | null;
+  imageModelId: string | null;
   searchEnabled: boolean;
   planEnabled: boolean;
   starters: ReadonlyArray<string>;
   model: { id: string; name: string | null; available: boolean } | null;
   collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
-  skills?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
-  customTools?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
-  integrations?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  skills: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  customTools: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
+  integrations: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
 }

@@ -53,9 +53,9 @@ export const validateAgentSettings = Effect.fn(function* (
     description: settings.description.trim(),
     starters: settings.starters.map((starter) => starter.trim()),
     collectionIds: [...new Set(settings.collectionIds)],
-    skillIds: [...new Set(settings.skillIds ?? [])],
-    customToolIds: [...new Set(settings.customToolIds ?? [])],
-    integrationIds: [...new Set(settings.integrationIds ?? [])],
+    skillIds: [...new Set(settings.skillIds)],
+    customToolIds: [...new Set(settings.customToolIds)],
+    integrationIds: [...new Set(settings.integrationIds)],
   };
 });
 
@@ -124,7 +124,7 @@ export class AgentService extends Context.Service<
           { concurrency: 3 },
         );
         const skills = yield* Effect.forEach(
-          skillIds ?? [],
+          skillIds,
           (id) =>
             skillRepo.get(userId, id).pipe(
               Effect.map((skill) => ({ id, name: skill.name as string | null, available: true })),

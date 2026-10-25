@@ -19,7 +19,7 @@ export const storedAgentToDraftSettings = ({
   planEnabled: row.planEnabled,
   starters: row.starters,
   collectionIds,
-  skillIds: skillIds ?? [],
+  skillIds,
   customToolIds,
   integrationIds,
 });

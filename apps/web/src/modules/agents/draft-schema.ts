@@ -4,7 +4,6 @@ import {
   AgentInstructions,
   AgentName,
   AgentSettings,
-  AgentResourceIds,
   AgentStarter,
   type AgentDetail,
 } from "./schema.ts";
@@ -16,8 +15,6 @@ export const DraftSettings = Schema.Struct({
   name: AgentName,
   instructions: AgentInstructions,
   starters: Schema.Array(AgentStarter).check(Schema.isMaxLength(AGENT_LIMITS.maxStarters)),
-  skillIds: AgentResourceIds,
-  customToolIds: AgentResourceIds,
 });
 export type DraftSettings = typeof DraftSettings.Type;
 export const AgentDraftPatch = DraftSettings.mapFields(Struct.map(Schema.optionalKey));
@@ -43,14 +40,14 @@ export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   icon: agent.icon as DraftSettings["icon"],
   instructions: agent.instructions,
   modelId: agent.modelId,
-  imageModelId: agent.imageModelId ?? null,
+  imageModelId: agent.imageModelId,
   searchEnabled: agent.searchEnabled,
   planEnabled: agent.planEnabled,
   starters: [...agent.starters],
   collectionIds: agent.collections.map(({ id }) => id),
-  skillIds: (agent.skills ?? []).map(({ id }) => id),
-  customToolIds: (agent.customTools ?? []).map(({ id }) => id),
-  integrationIds: (agent.integrations ?? []).map(({ id }) => id),
+  skillIds: agent.skills.map(({ id }) => id),
+  customToolIds: agent.customTools.map(({ id }) => id),
+  integrationIds: agent.integrations.map(({ id }) => id),
 });
 
 export const AgentDraftIdInput = Schema.Struct({ draftId: EntityId });

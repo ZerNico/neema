@@ -67,6 +67,10 @@ const AGENT = {
   starters: ["Summarize this contract", "List the key risks"],
   model: null,
   collections: [],
+  imageModelId: null,
+  skills: [],
+  customTools: [],
+  integrations: [],
 };
 
 const renderNewChat = (

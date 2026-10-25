@@ -89,6 +89,10 @@ const detail = (overrides: Partial<AgentDetail> = {}): AgentDetail => ({
   starters: [],
   model: null,
   collections: [],
+  imageModelId: null,
+  skills: [],
+  customTools: [],
+  integrations: [],
   ...overrides,
 });
 

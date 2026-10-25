@@ -64,6 +64,9 @@ describe("agent draft settings", () => {
       starters: ["Help me write"],
       collections: [{ id: "revoked-collection", name: null, available: false }],
       skills: [{ id: "deleted-skill", name: null, available: false }],
+      imageModelId: null,
+      customTools: [],
+      integrations: [],
     };
     expect(agentDetailToSettings(detail)).toEqual({
       ...EMPTY_AGENT_DRAFT,

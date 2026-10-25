@@ -8,7 +8,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { agentQuery } from "../client/queries.ts";
 import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
-import { AgentSettings, AgentResourceIds, type AgentDetail } from "../schema.ts";
+import { AgentSettings, type AgentDetail } from "../schema.ts";
 import { createAgent, deleteAgent, updateAgent } from "../server/functions.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AgentSettingsFields } from "./agent-settings-fields.tsx";
@@ -33,13 +33,7 @@ import {
 import { FieldError } from "~/ui/primitives/field";
 import { toastError } from "~/ui/error-toast.ts";
 
-const agentFormValidator = Schema.toStandardSchemaV1(
-  Schema.Struct({
-    ...AgentSettings.fields,
-    skillIds: AgentResourceIds,
-    customToolIds: AgentResourceIds,
-  }),
-);
+const agentFormValidator = Schema.toStandardSchemaV1(AgentSettings);
 
 /**
  * Owner-only editor. Recipients start chats from the agent list instead.

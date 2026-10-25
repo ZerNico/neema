@@ -31,7 +31,7 @@ export interface StoredAgent {
   row: AgentRow;
   ownerName: string | null;
   collectionIds: ReadonlyArray<string>;
-  skillIds?: ReadonlyArray<string>;
+  skillIds: ReadonlyArray<string>;
   customToolIds: ReadonlyArray<string>;
   integrationIds: ReadonlyArray<string>;
 }
@@ -130,13 +130,7 @@ export class AgentRepo extends Context.Service<
             if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
               return yield* new AgentRejected({ reason: "agent limit reached" });
           }
-          const {
-            collectionIds,
-            skillIds = [],
-            customToolIds = [],
-            integrationIds = [],
-            ...settings
-          } = input;
+          const { collectionIds, skillIds, customToolIds, integrationIds, ...settings } = input;
           if (integrationIds.length) {
             // On, and the author's to use: shared with them, or their own server.
             const available = yield* tx

@@ -234,6 +234,9 @@ const agentSettings = (collectionIds: string[] = [], revision = 1) => ({
   planEnabled: revision > 1,
   starters: [],
   collectionIds,
+  skillIds: [] as string[],
+  customToolIds: [] as string[],
+  integrationIds: [] as string[],
 });
 const makeAgent = (owner: string, collectionIds: string[] = []) =>
   run(
@@ -458,6 +461,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: false,
           starters: [],
           collectionIds: [collectionId],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );
@@ -520,6 +526,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: false,
           starters: [],
           collectionIds: [collectionId],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );
@@ -753,7 +762,10 @@ describe("knowledge-backed generations", () => {
     );
     await exec(
       readFileSync(
-        new URL("../../drizzle/20261025182049_resolved_agent_revision/migration.sql", import.meta.url),
+        new URL(
+          "../../drizzle/20261025182049_resolved_agent_revision/migration.sql",
+          import.meta.url,
+        ),
         "utf8",
       ),
     );
@@ -770,6 +782,26 @@ describe("knowledge-backed generations", () => {
       imageModelId: null,
     });
     expect(await configRow(kept.assistantMessageId)).toEqual(keptBefore);
+  });
+
+  it("offers an agent chat only its own custom tools, never every module", async () => {
+    const owner = await createUser();
+    const slug = `everyone_${owner.slice(-8)}`;
+    await exec(
+      `insert into custom_tools (id, slug, name, source, compiled, functions, version) values ('${uuidv7()}', '${slug}', 'Everyone', 'source', 'compiled', '[{"key":"lookup","name":"Lookup","description":"Look up a value.","modelName":"custom_${slug}__lookup","parametersSchema":{"type":"object","properties":{}}}]', 'v1')`,
+    );
+    const offered: string[][] = [];
+    script = (input) => {
+      offered.push(Object.keys(input.toolkit?.tools ?? {}).filter((name) => name.includes(slug)));
+      return Stream.make(text("done"), finish());
+    };
+    const plain = await send({ userId: owner });
+    await settle(plain.assistantMessageId);
+    const agentId = await makeAgent(owner);
+    const withAgent = await send({ userId: owner, agentId });
+    await settle(withAgent.assistantMessageId);
+    expect(offered[0]).toEqual([`custom_${slug}__lookup`]);
+    expect(offered.at(-1)).toEqual([]);
   });
 
   it("keeps a running attempt coherent while an edit changes the next attempt", async () => {
@@ -1372,6 +1404,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: false,
           starters: [],
           collectionIds: [collectionId],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );
@@ -1698,6 +1733,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: true,
           starters: [],
           collectionIds: [],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );
@@ -1734,6 +1772,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: true,
           starters: [],
           collectionIds: [],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );
@@ -1807,6 +1848,9 @@ describe("knowledge-backed generations", () => {
           planEnabled: false,
           starters: [],
           collectionIds: [],
+          skillIds: [],
+          customToolIds: [],
+          integrationIds: [],
         }),
       ),
     );

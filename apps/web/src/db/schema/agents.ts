@@ -119,8 +119,8 @@ export type ResolvedAgentConfig = {
   icon: string;
   instructions: string;
   collectionIds: ReadonlyArray<string>;
-  skillIds?: ReadonlyArray<string>;
-  customToolIds?: ReadonlyArray<string>;
+  skillIds: ReadonlyArray<string>;
+  customToolIds: ReadonlyArray<string>;
   /** Integrations it attached; each sender's own accounts of them come on. */
   integrationIds: ReadonlyArray<string>;
   /** Its preferred image model, used after the submission's pick and the chat's lock. */

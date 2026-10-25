@@ -77,13 +77,12 @@ export const loadAttemptContext = (
       (config.researchEnabled && (!permissions.deepResearch || !permissions.webSearch)) ||
       (config.desktopFolders && !permissions.work);
     // Modules are read here rather than stored with the config: a plain
-    // chat offers every module the sender may use, an agent narrows that
-    // to what it attached, and a disabled, deleted or no-longer-shared
-    // module drops out rather than failing the attempt. The list is held
-    // for this generation only.
+    // chat offers every module the sender may use, an agent exactly what it
+    // attached, and a disabled, deleted or no-longer-shared module drops
+    // out rather than failing the attempt. Held for this generation only.
     const customToolManifests = yield* customToolRepo.resolveForAttempt(
       input.userId,
-      config.resolvedAgent?.customToolIds ?? "all",
+      config.resolvedAgent ? config.resolvedAgent.customToolIds : "all",
     );
     // Like custom tools, read as the generation starts and held for it: the
     // chat's own choices (or a schedule fire's grants) and the sender's
