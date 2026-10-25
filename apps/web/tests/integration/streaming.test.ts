@@ -8168,9 +8168,8 @@ describe("custom tool calls", () => {
       expect(
         events.filter((event) => event.kind === "chunk" && event.chunkKind === "file"),
       ).toHaveLength(2);
-      // The tool row names its files; the transcript result carries names only.
+      // The tool row never carries the bytes.
       const call = detail.toolCalls.find((row) => row.messageId === assistantMessageId)!;
-      expect(call.result).toMatchObject({ fileIds: stored.map((row) => row.id) });
       expect(JSON.stringify(call.result)).not.toContain(csv.toString("base64"));
       // The model is handed each file's attachment id, the handle
       // save_to_workspace takes; the bytes stay on the server.

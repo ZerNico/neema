@@ -295,7 +295,6 @@ const CustomFields = Schema.Struct({
   resultPreview: CustomToolActivity.fields.resultPreview,
   resultChars: CustomToolActivity.fields.resultChars,
   error: CustomToolActivity.fields.error,
-  fileIds: CustomToolActivity.fields.fileIds,
   workingFiles: CustomToolActivity.fields.workingFiles,
 });
 
@@ -515,7 +514,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
         ...(kept?.resultPreview !== undefined ? { resultPreview: kept.resultPreview } : {}),
         ...(kept?.resultChars !== undefined ? { resultChars: kept.resultChars } : {}),
         ...(kept ? (kept.error ? { error: kept.error } : {}) : errorOf(call)),
-        ...(kept?.fileIds?.length ? { fileIds: kept.fileIds } : {}),
         ...(kept?.workingFiles?.length ? { workingFiles: kept.workingFiles } : {}),
       };
     },

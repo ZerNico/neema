@@ -1447,7 +1447,6 @@ export const observePart = (
 
         if (customToolNames.has(part.name)) {
           if (isPreliminary) return;
-          const fileIds: string[] = [];
           const workingOutputs: Array<{
             id: string;
             revision: number;
@@ -1496,7 +1495,6 @@ export const observePart = (
               outcomes.push({ error: stored.reason });
               continue;
             }
-            fileIds.push(stored.attachment.id);
             outcomes.push({
               attachmentId: stored.attachment.id,
               ref: formatFileRef({
@@ -1535,7 +1533,6 @@ export const observePart = (
             displayName: customToolDisplayName(part.name),
             raw: part.result,
             isFailure: part.isFailure,
-            fileIds,
             workingFiles: workingOutputs,
           });
           yield* repo.completeToolCall({
@@ -1559,7 +1556,6 @@ export const observePart = (
               : {}),
             ...(activity.resultChars !== undefined ? { resultChars: activity.resultChars } : {}),
             ...(activity.error ? { error: activity.error } : {}),
-            ...(activity.fileIds ? { fileIds: activity.fileIds } : {}),
             ...(activity.workingFiles ? { workingFiles: activity.workingFiles } : {}),
           });
           return;

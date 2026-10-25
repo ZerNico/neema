@@ -194,8 +194,6 @@ export interface CustomToolActivity extends ToolActivityBase {
   displayName: string;
   resultPreview?: string;
   resultChars?: number;
-  /** Attachments the call produced; the bytes live in the message's files. */
-  fileIds?: ReadonlyArray<string>;
   workingFiles?: ReadonlyArray<{ id: string; revision: number; name: string }>;
 }
 

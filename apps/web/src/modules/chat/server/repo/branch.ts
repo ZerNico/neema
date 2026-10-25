@@ -23,8 +23,6 @@ import {
 import { ownedConversationById } from "../owned-conversation.ts";
 import { projectRole } from "~/modules/projects/server/access.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
-import { CustomToolActivity } from "~/modules/custom-tools/tool-schema.ts";
-import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
 import { ToolFileActivity } from "../../tool-file-schema.ts";
 import { BranchNotAllowed, ConversationNotFound, MessageNotFound } from "../../errors.ts";
 import { rejectReservedWorkTurn } from "./work-turns.ts";
@@ -54,10 +52,6 @@ const withClonedFileIds = (
       const [id] = copy(stored.attachmentId);
       return id ? { ...next, attachmentId: id } : next;
     }
-  }
-  if (isCustomToolName(toolName)) {
-    const stored = Option.getOrUndefined(Schema.decodeUnknownOption(CustomToolActivity)(result));
-    if (stored?.fileIds) return { ...result, fileIds: stored.fileIds.flatMap(copy) };
   }
   if (toolName === IMAGE_TOOL) {
     const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ImageToolActivity)(result));

@@ -142,8 +142,8 @@ are derived from it during inspection; a rename that only rewrote the column
 would leave the stored manifest naming functions the attempt no longer offers.
 Deleting a module deletes the row, freeing its slug, since attachments and
 grants cascade and no answer depends on it. Nothing is versioned: an assistant answer
-that ran an older build keeps what it needs (display name, result preview, file
-ids) on its own tool-call row, the way web and desktop tool rows do, and the
+that ran an older build keeps what it needs (display name, result preview) on
+its own tool-call row, the way web and desktop tool rows do, and the
 bytes that ran are not retrievable afterwards. That is the same trade every
 other tool family makes, and it is what lets the model stay one table.
 
@@ -203,9 +203,9 @@ module; see [files](files.md#files-into-tools).
 
 `showModel: true` independently puts accepted bytes in front of the model on the
 next round when supported; it does not save a second file. The durable tool row
-holds bounded result/working status and accepted attachment IDs, never the bytes
-or full output. Delivered attachments render after the tool row without another
-chip inside it. A published attachment ID can be passed to `save_to_workspace`
+holds bounded result and working status, never the bytes or full output. A
+delivered attachment names its call through `origin.toolCallId` and renders after
+the tool row without another chip inside it. A published attachment ID can be passed to `save_to_workspace`
 in Work or `save_project_file` in a project chat. An admin Test has no chat to
 publish into: its bounded returned bytes come back inline as `data:` URLs with
 stated delivery intent, without claiming a persistent reference.

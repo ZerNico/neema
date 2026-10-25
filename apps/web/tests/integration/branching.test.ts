@@ -497,14 +497,6 @@ describe("branching a conversation", () => {
           attachmentId: idOf("deck.pptx"),
         });
         yield* call("create_file", { ok: true, attachmentId: idOf("totals.csv") });
-        yield* call("custom_exporter__csv", {
-          family: "custom",
-          version: 1,
-          name: "custom_exporter__csv",
-          displayName: "CSV export",
-          status: "complete",
-          fileIds: [idOf("export.csv")],
-        });
         // A draft the answer left unpublished: the source chat's alone.
         const keptAttachment = uuidv7();
         yield* db.insert(attachments).values({
@@ -551,9 +543,6 @@ describe("branching a conversation", () => {
       ok: true,
       attachmentId: copyOf("totals.csv"),
     });
-    expect(
-      result.calls.find((row) => row.toolName === "custom_exporter__csv")?.result,
-    ).toMatchObject({ fileIds: [copyOf("export.csv")] });
     expect(result.kept).toEqual([]);
     expect(result.defaults.workingFiles).toEqual([]);
   });

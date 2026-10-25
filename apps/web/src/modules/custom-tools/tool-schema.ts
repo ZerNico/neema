@@ -52,8 +52,6 @@ export const CustomToolActivity = Schema.Struct({
   resultPreview: Schema.optional(Schema.String),
   resultChars: Schema.optional(Schema.Int),
   error: Schema.optional(bounded(CUSTOM_ACTIVITY_LIMITS.error)),
-  /** Attachments the call produced, in return order. */
-  fileIds: Schema.optional(Schema.Array(Schema.String)),
   workingFiles: Schema.optional(Schema.Array(WorkingFileActivity)),
 });
 export type CustomToolActivity = typeof CustomToolActivity.Type;
@@ -83,7 +81,6 @@ export const CustomToolEnvelope = Schema.Union([
     resultPreview: Schema.optionalKey(Schema.String),
     resultChars: Schema.optionalKey(Schema.Int),
     error: Schema.optionalKey(bounded(CUSTOM_ACTIVITY_LIMITS.error)),
-    fileIds: Schema.optionalKey(Schema.Array(Schema.String)),
     workingFiles: Schema.optionalKey(Schema.Array(WorkingFileActivity)),
   }),
 ]);
@@ -101,7 +98,6 @@ export function projectCustomToolResult(input: {
   displayName: string;
   raw: unknown;
   isFailure: boolean;
-  fileIds?: ReadonlyArray<string>;
   workingFiles?: ReadonlyArray<{ id: string; revision: number; name: string }>;
 }): CustomToolActivity {
   const parsed = Schema.decodeUnknownOption(CustomToolResult)(input.raw);
@@ -125,7 +121,6 @@ export function projectCustomToolResult(input: {
         }
       : {}),
     ...(!ok && error ? { error: clamp(String(error), CUSTOM_ACTIVITY_LIMITS.error) } : {}),
-    ...(input.fileIds?.length ? { fileIds: [...input.fileIds] } : {}),
     ...(input.workingFiles?.length
       ? {
           workingFiles: input.workingFiles.map((file) => ({

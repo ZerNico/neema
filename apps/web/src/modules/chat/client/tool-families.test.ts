@@ -80,7 +80,6 @@ const customActivity = {
   status: "complete",
   resultPreview: "3",
   resultChars: 1,
-  fileIds: ["file-1"],
 };
 const integrationActivity = {
   family: "integration",
@@ -294,7 +293,7 @@ const CASES: Case[] = [
   },
   {
     family: "custom",
-    label: "returned a file",
+    label: "succeeded",
     name: "custom_math__add",
     status: "complete",
     result: customActivity,
@@ -305,7 +304,6 @@ const CASES: Case[] = [
         status: "complete",
         resultPreview: "3",
         resultChars: 1,
-        fileIds: ["file-1"],
       },
     ],
   },
