@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Link01Icon } from "@hugeicons/core-free-icons";
 import { useCallback } from "react";
 import type { ToolSource } from "../client/use-message-stream.ts";
@@ -9,7 +10,7 @@ export const SOURCES_PREFIX = "sources:";
 
 export const sourcesRequest = (messageId: string, sources: ToolSource[]): DetailPanelRequest => ({
   id: `${SOURCES_PREFIX}${messageId}`,
-  title: "Sources",
+  title: m.chat_sources_panel_title(),
   subtitle: `${sources.length}`,
   icon: Link01Icon,
   restorable: true,

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Book02Icon } from "@hugeicons/core-free-icons";
 import type { SkillToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
@@ -20,8 +21,10 @@ export function SkillActivityBlock({ activities }: { activities: SkillToolActivi
   ];
   const running = activities.some((activity) => activity.status === "running");
   const label = names.length
-    ? `${running ? "Using" : "Used"} ${names.join(", ")}`
-    : "Couldn’t load the skill";
+    ? running
+      ? m.chat_skill_using({ names: names.join(", ") })
+      : m.chat_skill_used({ names: names.join(", ") })
+    : m.chat_skill_failed();
   return (
     <div className={cn(activityRowClassName, "mb-2")}>
       <ActivityFace

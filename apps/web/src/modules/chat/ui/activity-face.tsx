@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Alert02Icon, ArrowDown01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
@@ -100,7 +101,7 @@ export function ActivityNote({ children }: { children: ReactNode }) {
 export function ActivityQueries({
   queries,
   limit = 4,
-  label = "Searches",
+  label = m.chat_activity_searches(),
 }: {
   queries: ReadonlyArray<string>;
   limit?: number;
@@ -120,7 +121,7 @@ export function ActivityQueries({
       ))}
       {hidden > 0 ? (
         <li>
-          <Badge variant="outline">+{hidden} more</Badge>
+          <Badge variant="outline">{m.chat_activity_more({ count: hidden })}</Badge>
         </li>
       ) : null}
     </ul>

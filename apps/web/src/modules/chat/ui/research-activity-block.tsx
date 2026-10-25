@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowRight01Icon, GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -22,13 +23,11 @@ import { formatDuration } from "./work-steps.ts";
 // How a run that did not finish cleanly reads. When it still gathered sources
 // the count leads and this becomes the qualifier, because "24 sources" is the
 // part the reader can act on.
-const endedEarly: Partial<Record<ResearchPhase, { alone: string; note: string }>> = {
-  aborted: { alone: "Research stopped", note: "stopped early" },
-  interrupted: { alone: "Research interrupted", note: "interrupted" },
-  error: { alone: "Research failed", note: "ended early" },
+const endedEarly: Partial<Record<ResearchPhase, { alone: () => string; note: () => string }>> = {
+  aborted: { alone: m.chat_research_stopped, note: m.chat_research_stopped_note },
+  interrupted: { alone: m.chat_research_interrupted, note: m.chat_research_interrupted_note },
+  error: { alone: m.chat_research_failed, note: m.chat_research_failed_note },
 };
-
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 export function ResearchActivityBlock({
   activity,
@@ -57,16 +56,16 @@ export function ResearchActivityBlock({
 
   const line = running
     ? sources > 0
-      ? `${plural(sources, "source")} so far`
+      ? m.chat_research_sources_so_far({ count: sources })
       : topics > 0
-        ? `Made a plan · ${plural(topics, "topic")}`
-        : "Planning what to look into"
+        ? m.chat_research_planned({ count: topics })
+        : m.chat_research_planning()
     : sources > 0
-      ? plural(sources, "source")
-      : (early?.alone ?? "No sources found");
+      ? m.chat_research_sources({ count: sources })
+      : (early?.alone() ?? m.chat_research_no_sources());
   // Only how the run ended is worth a qualifier. Individual failed reads are
   // the answer's job to route around, and the panel lists them for the curious.
-  const note = !running && sources > 0 ? early?.note : undefined;
+  const note = !running && sources > 0 ? early?.note() : undefined;
   const failed = !running && phase === "error" && sources === 0;
   const [mountedAt] = useState(serverNow);
   const since = activity.startedAt ?? mountedAt;
@@ -84,7 +83,7 @@ export function ResearchActivityBlock({
         <span
           className={cn("text-foreground truncate text-sm font-medium", running && "text-shimmer")}
         >
-          {progress?.title ?? "Deep research"}
+          {progress?.title ?? m.chat_research_title()}
         </span>
         <span className={activityRowClassName}>
           <ActivityFace

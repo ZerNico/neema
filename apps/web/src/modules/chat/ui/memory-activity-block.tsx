@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Brain02Icon } from "@hugeicons/core-free-icons";
 import type { MemoryToolActivity } from "../client/use-message-stream.ts";
 import { cn } from "~/ui/utils";
@@ -10,15 +11,16 @@ import { activityRowClassName } from "./activity-row.ts";
  * save that never completed (transport, defect, interruption) is an error.
  */
 function memoryActivityLabel(activity: MemoryToolActivity): string {
-  if (activity.status === "running") return "Saving to memory";
+  if (activity.status === "running") return m.chat_memory_saving();
   const project = activity.scope === "project";
   if (activity.outcome === "created")
-    return project ? "Saved to project memory" : "Saved to memory";
-  if (activity.outcome === "updated") return project ? "Updated project memory" : "Updated memory";
+    return project ? m.chat_memory_saved_project() : m.chat_memory_saved();
+  if (activity.outcome === "updated")
+    return project ? m.chat_memory_updated_project() : m.chat_memory_updated();
   if (activity.outcome === "unchanged")
-    return project ? "Project already knows this" : "Memory already saved";
-  if (activity.outcome === "rejected") return "No memory saved";
-  return "Couldn’t save memory";
+    return project ? m.chat_memory_known_project() : m.chat_memory_known();
+  if (activity.outcome === "rejected") return m.chat_memory_rejected();
+  return m.chat_memory_failed();
 }
 
 const isMemoryFailure = (activity: MemoryToolActivity) =>

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useDraftPanel } from "~/modules/drafts/ui/draft-panel-context.ts";

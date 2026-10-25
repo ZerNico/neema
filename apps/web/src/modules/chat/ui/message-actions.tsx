@@ -85,7 +85,7 @@ function SameModelHeader({
         role="separator"
       >
         <span className="bg-border h-px flex-1" />
-        or switch model
+        {m.chat_actions_or_switch_model()}
         <span className="bg-border h-px flex-1" />
       </div>
     </div>
@@ -126,7 +126,7 @@ function RetryMenu({
         // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
         header={({ close }) => (
           <SameModelHeader
-            label="Retry same"
+            label={m.chat_actions_retry_same()}
             icon={ArrowReloadHorizontalIcon}
             onPick={() => {
               close();
@@ -140,7 +140,7 @@ function RetryMenu({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Retry"
+                aria-label={m.chat_actions_retry()}
                 disabled={disabled}
                 // The trigger primitive appends its own chevron; on an
                 // icon-sized button the retry glyph alone is the affordance.
@@ -152,7 +152,7 @@ function RetryMenu({
       >
         <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
       </ModelPicker>
-      <TooltipContent>Retry</TooltipContent>
+      <TooltipContent>{m.chat_actions_retry()}</TooltipContent>
     </Tooltip>
   );
 }
@@ -186,7 +186,7 @@ export function ResumeMenu({
       // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
       header={({ close }) => (
         <SameModelHeader
-          label="Resume same"
+          label={m.chat_actions_resume_same()}
           icon={PlayIcon}
           onPick={() => {
             close();
@@ -195,10 +195,17 @@ export function ResumeMenu({
         />
       )}
       // A combobox takes no name from its content, so the label names it.
-      trigger={<Button size="sm" variant="outline" aria-label="Resume" disabled={disabled} />}
+      trigger={
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label={m.chat_actions_resume()}
+          disabled={disabled}
+        />
+      }
     >
       <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" aria-hidden />
-      Resume
+      {m.chat_actions_resume()}
     </ModelPicker>
   );
 }
@@ -224,7 +231,7 @@ function RetryControl({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Retry"
+              aria-label={m.chat_actions_retry()}
               onClick={onRetry}
               disabled={disabled}
               className="text-muted-foreground"
@@ -233,7 +240,7 @@ function RetryControl({
         >
           <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={2} />
         </TooltipTrigger>
-        <TooltipContent>Retry</TooltipContent>
+        <TooltipContent>{m.chat_actions_retry()}</TooltipContent>
       </Tooltip>
     );
   }
@@ -261,7 +268,7 @@ function SourcesMenu({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Message actions"
+            aria-label={m.chat_actions_more()}
             className="text-muted-foreground"
           />
         }
@@ -271,7 +278,7 @@ function SourcesMenu({
       <DropdownMenuContent align="start">
         <DropdownMenuItem onClick={onOpenSources}>
           <HugeiconsIcon icon={BookOpen01Icon} strokeWidth={2} />
-          View sources ({sources.length})
+          {m.chat_actions_view_sources({ count: sources.length })}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -371,7 +378,7 @@ export function MessageActions({
     <div className={cn("mt-2 flex items-center gap-1", className)}>
       {timeFirst ? stamp : null}
       {content.length > 0 && (
-        <ActionButton label={copied ? "Copied" : "Copy"} onClick={copy}>
+        <ActionButton label={copied ? m.common_copied() : m.common_copy()} onClick={copy}>
           <MotionSwap value={copied ? "copied" : "copy"} kind="icon" className="size-4">
             <HugeiconsIcon
               icon={copied ? Tick02Icon : Copy01Icon}
@@ -383,12 +390,20 @@ export function MessageActions({
         </ActionButton>
       )}
       {onEdit ? (
-        <ActionButton label="Edit" onClick={onEdit} disabled={editDisabled ?? false}>
+        <ActionButton
+          label={m.chat_actions_edit()}
+          onClick={onEdit}
+          disabled={editDisabled ?? false}
+        >
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
         </ActionButton>
       ) : null}
       {onBranch ? (
-        <ActionButton label="Branch off" onClick={onBranch} disabled={branchDisabled ?? false}>
+        <ActionButton
+          label={m.chat_actions_branch()}
+          onClick={onBranch}
+          disabled={branchDisabled ?? false}
+        >
           <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} />
         </ActionButton>
       ) : null}

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   Alert02Icon,
   Doc01Icon,
@@ -22,85 +23,126 @@ import type { WorkingFilePart } from "./assistant-body.ts";
 type Step = WorkingFilePart["steps"][number];
 type OfficeStep = OfficeActivity;
 
-const slides = (count: number) => `${count} ${count === 1 ? "slide" : "slides"}`;
-const sheets = (count: number) => `${count} ${count === 1 ? "sheet" : "sheets"}`;
-const blocks = (count: number) =>
-  `${count} ${count === 1 ? "paragraph or table" : "paragraphs and tables"}`;
+const slides = (count: number) => m.chat_office_slides({ count });
 
-/** "slide 5", "slides 3–6" when consecutive, else "slides 1, 4 and 9". */
-function positions(numbers: ReadonlyArray<number>) {
-  if (numbers.length === 1) return `slide ${numbers[0]}`;
+/** "Read slide 5", "Read slides 3–6" when consecutive, else "Read slides 1, 4 and 9". */
+function readPositions(numbers: ReadonlyArray<number>) {
+  if (numbers.length === 1) return m.chat_office_read_slide({ number: numbers[0]! });
   const sorted = numbers.toSorted((a, b) => a - b);
   if (sorted.every((slide, index) => index === 0 || slide === sorted[index - 1]! + 1))
-    return `slides ${sorted[0]}–${sorted.at(-1)}`;
-  return `slides ${sorted.slice(0, -1).join(", ")} and ${sorted.at(-1)}`;
+    return m.chat_office_read_slide_range({ from: sorted[0]!, to: sorted.at(-1)! });
+  return m.chat_office_read_slide_list({
+    list: sorted.slice(0, -1).join(", "),
+    last: sorted.at(-1)!,
+  });
 }
 
 /**
  * How the transcript speaks about each Office editor. Everything shown comes
- * from bounded numbers and positions, never from the file's own text.
+ * from bounded numbers and positions, never from the file's own text. Each
+ * family has its own sentences, since its noun's gender changes the German.
  */
 const WORDING = {
   presentation: {
     icon: Presentation01Icon,
-    noun: "presentation",
     inspect: OFFICE_FAMILIES.presentation.inspect,
     edit: OFFICE_FAMILIES.presentation.edit,
-    reading: "Reading slides",
-    editing: "Editing slides",
-    creating: "Creating the deck",
-    started: "Started a new deck",
-    built: "Built the slides",
-    edited: "Edited the slides",
+    reading: m.chat_office_presentation_reading,
+    editing: m.chat_office_presentation_editing,
+    creating: m.chat_office_presentation_creating,
+    started: m.chat_office_presentation_started,
+    built: m.chat_office_presentation_built,
+    edited: m.chat_office_presentation_edited,
+    working: m.chat_office_presentation_working,
+    readingFile: m.chat_office_presentation_reading_file,
+    created: m.chat_office_presentation_created,
+    changed: m.chat_office_presentation_changed,
+    readFile: m.chat_office_presentation_read,
+    draft: m.chat_office_presentation_draft,
+    createFailed: m.chat_office_presentation_create_failed,
+    changeFailed: m.chat_office_presentation_change_failed,
+    readFailed: m.chat_office_presentation_read_failed,
+    createdFile: m.chat_office_presentation_created_file,
+    publishedFile: m.chat_office_presentation_published_file,
     count: (step: OfficeStep) =>
       step.family === "presentation" && step.slideCount ? slides(step.slideCount) : null,
     read: (step: OfficeStep) => {
-      if (step.family !== "presentation" || !step.read) return "Read presentation";
+      if (step.family !== "presentation" || !step.read) return m.chat_office_presentation_read();
       const { read } = step;
       if (read.template)
-        return read.template === "master" ? "Read slide master" : "Read slide layout";
-      if (read.slides?.length) return `Read ${positions(read.slides)}`;
+        return read.template === "master"
+          ? m.chat_office_read_slide_master()
+          : m.chat_office_read_slide_layout();
+      if (read.slides?.length) return readPositions(read.slides);
       return read.from === read.to
-        ? `Read slide ${read.from}`
-        : `Read slides ${read.from}–${read.to}`;
+        ? m.chat_office_read_slide({ number: read.from })
+        : m.chat_office_read_slide_range({ from: read.from, to: read.to });
     },
   },
   spreadsheet: {
     icon: Xls01Icon,
-    noun: "spreadsheet",
     inspect: OFFICE_FAMILIES.spreadsheet.inspect,
     edit: OFFICE_FAMILIES.spreadsheet.edit,
-    reading: "Reading cells",
-    editing: "Editing cells",
-    creating: "Creating the workbook",
-    started: "Started a new workbook",
-    built: "Wrote the cells",
-    edited: "Edited the cells",
+    reading: m.chat_office_spreadsheet_reading,
+    editing: m.chat_office_spreadsheet_editing,
+    creating: m.chat_office_spreadsheet_creating,
+    started: m.chat_office_spreadsheet_started,
+    built: m.chat_office_spreadsheet_built,
+    edited: m.chat_office_spreadsheet_edited,
+    working: m.chat_office_spreadsheet_working,
+    readingFile: m.chat_office_spreadsheet_reading_file,
+    created: m.chat_office_spreadsheet_created,
+    changed: m.chat_office_spreadsheet_changed,
+    readFile: m.chat_office_spreadsheet_read,
+    draft: m.chat_office_spreadsheet_draft,
+    createFailed: m.chat_office_spreadsheet_create_failed,
+    changeFailed: m.chat_office_spreadsheet_change_failed,
+    readFailed: m.chat_office_spreadsheet_read_failed,
+    createdFile: m.chat_office_spreadsheet_created_file,
+    publishedFile: m.chat_office_spreadsheet_published_file,
     count: (step: OfficeStep) =>
-      step.family === "spreadsheet" && step.sheetCount ? sheets(step.sheetCount) : null,
+      step.family === "spreadsheet" && step.sheetCount
+        ? m.chat_office_sheets({ count: step.sheetCount })
+        : null,
     read: (step: OfficeStep) => {
-      if (step.family !== "spreadsheet" || !step.read) return "Read spreadsheet";
+      if (step.family !== "spreadsheet" || !step.read) return m.chat_office_spreadsheet_read();
       const { sheet, range } = step.read;
-      return range ? `Read ${range} on sheet ${sheet}` : `Read sheet ${sheet}`;
+      return range
+        ? m.chat_office_read_range({ range, sheet })
+        : m.chat_office_read_sheet({ sheet });
     },
   },
   word: {
     icon: Doc01Icon,
-    noun: "document",
     inspect: OFFICE_FAMILIES.word.inspect,
     edit: OFFICE_FAMILIES.word.edit,
-    reading: "Reading the document",
-    editing: "Editing the document",
-    creating: "Creating the document",
-    started: "Started a new document",
-    built: "Wrote the document",
-    edited: "Edited the document",
+    reading: m.chat_office_word_reading,
+    editing: m.chat_office_word_editing,
+    creating: m.chat_office_word_creating,
+    started: m.chat_office_word_started,
+    built: m.chat_office_word_built,
+    edited: m.chat_office_word_edited,
+    working: m.chat_office_word_working,
+    readingFile: m.chat_office_word_reading_file,
+    created: m.chat_office_word_created,
+    changed: m.chat_office_word_changed,
+    readFile: m.chat_office_word_read_settled,
+    draft: m.chat_office_word_draft,
+    createFailed: m.chat_office_word_create_failed,
+    changeFailed: m.chat_office_word_change_failed,
+    readFailed: m.chat_office_word_read_failed,
+    createdFile: m.chat_office_word_created_file,
+    publishedFile: m.chat_office_word_published_file,
     count: (step: OfficeStep) =>
-      step.family === "word" && step.blockCount ? blocks(step.blockCount) : null,
+      step.family === "word" && step.blockCount
+        ? m.chat_office_blocks({ count: step.blockCount })
+        : null,
     read: (step: OfficeStep) => {
-      if (step.family !== "word" || !step.read) return "Read the document";
+      if (step.family !== "word" || !step.read) return m.chat_office_word_read();
       const { from, blockCount } = step.read;
-      return from === 0 ? "Read the document" : `Read on from block ${from} of ${blockCount}`;
+      return from === 0
+        ? m.chat_office_word_read()
+        : m.chat_office_word_read_on({ from, total: blockCount });
     },
   },
 } as const satisfies Record<OfficeFamily, unknown>;
@@ -109,11 +151,11 @@ type Wording = (typeof WORDING)[OfficeFamily];
 /** `drafted`: a draft exists, or the file was read first, so an edit changes an existing one. */
 function runningLabel(step: Step, drafted: boolean, words: Wording) {
   if (step.family === "tool-file")
-    return step.name === "create_file" ? "Writing the file" : "Publishing";
-  if (step.writing) return "Writing changes";
-  if (step.name === "render_presentation") return "Checking appearance";
-  if (step.name === words.inspect) return words.reading;
-  return drafted ? words.editing : words.creating;
+    return step.name === "create_file" ? m.chat_office_writing_file() : m.chat_office_publishing();
+  if (step.writing) return m.chat_office_writing_changes();
+  if (step.name === "render_presentation") return m.chat_office_checking_appearance();
+  if (step.name === words.inspect) return words.reading();
+  return drafted ? words.editing() : words.creating();
 }
 
 /**
@@ -122,10 +164,12 @@ function runningLabel(step: Step, drafted: boolean, words: Wording) {
  */
 function failureLabel(step: Step, words?: Wording) {
   if (step.family === "tool-file")
-    return step.name === "create_file" ? "Couldn’t create the file" : "Couldn’t publish the file";
-  if (words && step.name === words.inspect) return `Couldn’t read the ${words.noun}`;
-  if (step.name === "render_presentation") return "Couldn’t check the slides";
-  return "Couldn’t apply an edit";
+    return step.name === "create_file"
+      ? m.chat_office_create_file_failed()
+      : m.chat_office_publish_file_failed();
+  if (words && step.name === words.inspect) return words.readFailed();
+  if (step.name === "render_presentation") return m.chat_office_check_slides_failed();
+  return m.chat_office_edit_failed();
 }
 
 function stepLabels(
@@ -136,26 +180,30 @@ function stepLabels(
 ): string[] {
   if (step.status === "running") return [runningLabel(step, drafted, words)];
   if (step.status === "error") return [failureLabel(step, words)];
-  if (step.family === "tool-file")
-    return [
-      `${step.name === "create_file" ? "Created" : "Published"} ${fileName ?? `the ${words.noun}`}`,
-    ];
+  if (step.family === "tool-file") {
+    const created = step.name === "create_file";
+    if (fileName)
+      return [
+        created
+          ? m.chat_office_created_named({ name: fileName })
+          : m.chat_office_published_named({ name: fileName }),
+      ];
+    return [created ? words.createdFile() : words.publishedFile()];
+  }
   if (step.name === words.inspect) return [words.read(step)];
   if (step.family === "presentation" && step.name === "render_presentation") {
     const count = step.renderedSlideIds?.length;
-    return [count ? `Checked appearance of ${slides(count)}` : "Checked slide appearance"];
+    return [count ? m.chat_office_checked_appearance({ count }) : m.chat_office_checked_slides()];
   }
   const labels: string[] = [];
-  if (step.origin === "created") labels.push(words.started);
-  if (step.origin === "opened") labels.push("Opened the file for editing");
-  if (step.changes) labels.push(step.origin === "created" ? words.built : words.edited);
+  if (step.origin === "created") labels.push(words.started());
+  if (step.origin === "opened") labels.push(m.chat_office_opened_for_editing());
+  if (step.changes) labels.push(step.origin === "created" ? words.built() : words.edited());
   if (step.family === "presentation" && step.renderedSlideIds?.length)
-    labels.push("Checked slide appearance");
+    labels.push(m.chat_office_checked_slides());
   if (step.family === "spreadsheet" && step.formulaErrors)
-    labels.push(
-      `${step.formulaErrors} ${step.formulaErrors === 1 ? "formula shows" : "formulas show"} an error`,
-    );
-  return labels.length ? labels : ["Made changes"];
+    labels.push(m.chat_office_formula_errors({ count: step.formulaErrors }));
+  return labels.length ? labels : [m.chat_office_made_changes()];
 }
 
 /**
@@ -203,25 +251,24 @@ function settledLabel(
   words: Wording,
 ) {
   const { steps } = part;
-  const Noun = words.noun[0]!.toUpperCase() + words.noun.slice(1);
   if (edits && !state.published && !state.streaming && state.final)
-    return part.workingFileId === undefined ? `Couldn’t create the ${words.noun}` : `${Noun} draft`;
+    return part.workingFileId === undefined ? words.createFailed() : words.draft();
   const done = steps.filter((step) => step.status === "complete");
   const counted = done
     .flatMap((step) => (step.family === "tool-file" ? [] : [words.count(step)]))
     .findLast((count) => count !== null);
-  const suffix = counted ? ` · ${counted}` : "";
+  const withCount = (label: string) => (counted ? `${label} · ${counted}` : label);
   if (done.some((step) => step.family !== "tool-file" && step.origin === "created"))
-    return `Created ${words.noun}${suffix}`;
-  if (done.some((step) => step.name === words.edit)) return `Edited ${words.noun}${suffix}`;
+    return withCount(words.created());
+  if (done.some((step) => step.name === words.edit)) return withCount(words.changed());
   const checked = done.reduce(
     (total, step) =>
       total + (step.family === "presentation" ? (step.renderedSlideIds?.length ?? 0) : 0),
     0,
   );
-  if (checked) return `Checked appearance of ${slides(checked)}`;
-  if (done.some((step) => step.name === words.inspect)) return `Read ${words.noun}`;
-  return edits ? `Couldn’t change the ${words.noun}` : `Couldn’t read the ${words.noun}`;
+  if (checked) return m.chat_office_checked_appearance({ count: checked });
+  if (done.some((step) => step.name === words.inspect)) return words.readFile();
+  return edits ? words.changeFailed() : words.readFailed();
 }
 
 /** Whether the part changes a file, and whether one existed for its edits to change. */
@@ -252,7 +299,7 @@ function rowLabels(
     const current = running ?? steps.at(-1)!;
     return {
       live,
-      primary: edits ? `Working on ${words.noun}` : `Reading ${words.noun}`,
+      primary: edits ? words.working() : words.readingFile(),
       // A failed step is the model's to retry, not news for the reader: the
       // line keeps naming the work, and the step list marks the failure.
       secondary:
@@ -285,7 +332,11 @@ export function WorkingFileActivityBlock({
         {failure ? (
           <ActivityFace label={failureLabel(failure)} status="failed" />
         ) : (
-          <ActivityFace icon={File01Icon} label="Publishing the file" status="running" />
+          <ActivityFace
+            icon={File01Icon}
+            label={m.chat_office_publishing_file()}
+            status="running"
+          />
         )}
       </div>
     );
@@ -317,11 +368,13 @@ export function WorkingFileActivityBlock({
                     icon={Alert02Icon}
                     strokeWidth={2}
                     className="text-warning mt-0.5 size-3.5 shrink-0"
-                    aria-label="Failed"
+                    aria-label={m.chat_office_failed()}
                   />
                 ) : null}
                 <span className={cn("min-w-0", row.status === "running" && "text-shimmer")}>
-                  {row.count > 1 ? `${row.label} · ${row.count} times` : row.label}
+                  {row.count > 1
+                    ? m.chat_office_times({ label: row.label, count: row.count })
+                    : row.label}
                 </span>
               </li>
             ))}

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useId, useRef, useState } from "react";
 import type { AskToolActivity } from "../client/use-message-stream.ts";
 import type { MessageTime } from "./timestamps.ts";
@@ -99,16 +100,16 @@ export function AskUserBlock({
   return (
     <Card
       className="mb-3 gap-4 py-4"
-      aria-label="Clarification questions"
+      aria-label={m.chat_ask_label()}
       aria-busy={pending !== null || undefined}
       data-answer-message-id={resolution?.messageId}
     >
       {preparing || activity.status === "error" || questions.length === 0 ? (
         <p className="text-muted-foreground px-4 text-xs">
-          {preparing ? "Preparing questions…" : "These questions are unavailable."}
+          {preparing ? m.chat_ask_preparing() : m.chat_ask_unavailable()}
         </p>
       ) : !actionable && !resolution ? (
-        <p className="text-muted-foreground px-4 text-xs">Previous questions · read-only</p>
+        <p className="text-muted-foreground px-4 text-xs">{m.chat_ask_read_only()}</p>
       ) : null}
       {questions.length > 0 ? (
         <CardContent className="px-4">
@@ -192,10 +193,10 @@ export function AskUserBlock({
                         {/* oxlint-disable-next-line shadcn/no-restyle -- a secondary prompt under the options, not a field label */}
                         <Label htmlFor={customId} className="text-xs">
                           {question.options.length === 0
-                            ? "Your answer"
+                            ? m.chat_ask_your_answer()
                             : question.multiSelect
-                              ? "Add your own answer (optional)"
-                              : "Or write your own answer"}
+                              ? m.chat_ask_add_own()
+                              : m.chat_ask_write_own()}
                         </Label>
                         <Textarea
                           id={customId}
@@ -224,7 +225,7 @@ export function AskUserBlock({
                   ) : resolvedAnswer ? (
                     <div
                       role="group"
-                      aria-label="Your answers"
+                      aria-label={m.chat_ask_your_answers()}
                       className="space-y-1 [overflow-wrap:anywhere]"
                     >
                       {resolvedAnswer.selected.map((choice) => (
@@ -259,7 +260,7 @@ export function AskUserBlock({
                   pending={pending === "answers"}
                   disabled={locked || !valid}
                 >
-                  {editing ? "Save answers" : "Send answers"}
+                  {editing ? m.chat_ask_save() : m.chat_ask_send()}
                 </PendingButton>
                 <PendingButton
                   size="sm"
@@ -268,7 +269,7 @@ export function AskUserBlock({
                   disabled={locked}
                   onClick={() => void submit({ kind: "skip" })}
                 >
-                  {editing ? "Skip and regenerate" : "Skip and continue"}
+                  {editing ? m.chat_ask_skip_regenerate() : m.chat_ask_skip_continue()}
                 </PendingButton>
                 {editState ? (
                   <Button
@@ -278,7 +279,7 @@ export function AskUserBlock({
                     disabled={locked}
                     onClick={editState.onCancel}
                   >
-                    Cancel
+                    {m.common_cancel()}
                   </Button>
                 ) : null}
               </div>
@@ -287,11 +288,11 @@ export function AskUserBlock({
           {resolution && !editing ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {resolution.response.kind === "skip" ? (
-                <span className="text-muted-foreground text-xs">Skipped</span>
+                <span className="text-muted-foreground text-xs">{m.chat_ask_skipped()}</span>
               ) : null}
               {resolution.originClientName ? (
                 <span className="text-muted-foreground text-xs">
-                  Answered via {resolution.originClientName}
+                  {m.chat_ask_answered_via({ client: resolution.originClientName })}
                 </span>
               ) : null}
               {resolution.onEdit ? (
@@ -301,7 +302,7 @@ export function AskUserBlock({
                   onClick={resolution.onEdit}
                   disabled={resolution.editDisabled}
                 >
-                  Edit answers
+                  {m.chat_ask_edit()}
                 </Button>
               ) : null}
               {resolution.time ? (

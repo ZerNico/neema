@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
@@ -251,13 +252,13 @@ export function VirtualMessageList({
           className="bg-popover text-muted-foreground absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full px-3 py-1.5 text-xs shadow-sm"
         >
           <Spinner aria-hidden className="size-3.5" />
-          Loading earlier messages…
+          {m.chat_list_loading_earlier()}
         </div>
       ) : null}
       <Button
         size="icon-sm"
         variant="floating"
-        aria-label="Jump to bottom"
+        aria-label={m.chat_list_jump_to_bottom()}
         inert={atBottom || undefined}
         onClick={() => {
           onReleaseAnchor?.();

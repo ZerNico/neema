@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "~/ui/utils";
 import type { ProjectFileToolActivity } from "../client/use-message-stream.ts";
@@ -7,20 +8,22 @@ import { activityRowClassName } from "./activity-row.ts";
 function projectFileActivityLabel(activity: ProjectFileToolActivity) {
   const name = activity.result?.fileName;
   if (activity.status === "running") {
-    if (activity.name === "save_project_file") return "Saving to the project";
-    return "Checking project files";
+    if (activity.name === "save_project_file") return m.chat_project_file_saving();
+    return m.chat_project_file_checking();
   }
   switch (activity.result?.outcome) {
     case "listed":
-      return "Checked project files";
+      return m.chat_project_file_checked();
     case "saved":
       return name
-        ? `Saved ${name}${activity.result.version ? ` as version ${activity.result.version}` : ""}`
-        : "Saved a project file";
+        ? activity.result.version
+          ? m.chat_project_file_saved_version({ name, version: activity.result.version })
+          : m.chat_project_file_saved_named({ name })
+        : m.chat_project_file_saved();
     default:
       return activity.name === "save_project_file"
-        ? "Not saved to the project"
-        : "Couldn’t read project files";
+        ? m.chat_project_file_not_saved()
+        : m.chat_project_file_read_failed();
   }
 }
 

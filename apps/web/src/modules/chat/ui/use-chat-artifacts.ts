@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AgentDraftHandle } from "~/modules/agents/ui/agent-draft-owner.tsx";
@@ -136,19 +137,19 @@ export function useChatArtifacts({
   // button would simply do nothing.
   const flushAgentDraft = async () => {
     if (hasAgentDraft && !(await agentDraft.current?.flush())) {
-      toast.error("Resolve the changes in your agent draft before continuing.");
+      toast.error(m.chat_artifacts_resolve_agent());
       throw new AlreadyTold("agent draft has unresolved changes");
     }
   };
   const flushScheduleDraft = async () => {
     if (hasScheduleDraft && !(await scheduleDraft.current?.flush())) {
-      toast.error("Resolve the changes in your schedule draft before continuing.");
+      toast.error(m.chat_artifacts_resolve_schedule());
       throw new AlreadyTold("schedule draft has unresolved changes");
     }
   };
   const flushDocuments = async () => {
     if (hasDocument && !(await documents.current?.flush())) {
-      toast.error("Resolve the changes in your document before continuing.");
+      toast.error(m.chat_artifacts_resolve_document());
       throw new AlreadyTold("document has unresolved changes");
     }
   };

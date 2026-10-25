@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import type { ScheduleDraftToolActivity } from "../client/use-message-stream.ts";
 import { m } from "~/paraglide/messages.js";

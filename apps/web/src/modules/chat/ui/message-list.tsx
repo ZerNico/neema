@@ -455,9 +455,9 @@ function InlineMessageEditor({
           onRemove: (removed) =>
             setReferences((current) => current.filter((reference) => reference !== removed)),
         }}
-        placeholder="Edit message…"
-        textareaLabel="Edit message"
-        submitLabel="Save edit"
+        placeholder={m.chat_edit_placeholder()}
+        textareaLabel={m.chat_edit_label()}
+        submitLabel={m.chat_edit_save()}
       />
     </div>
   );
@@ -513,7 +513,9 @@ function UserBubble({ message }: { message: DisplayMessage }) {
               <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                 <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} className="size-3.5" />
                 <span className="truncate">
-                  Comment on “{comment.quote}”{comment.file ? ` in ${comment.file}` : null}
+                  {comment.file
+                    ? m.chat_comment_on_in_file({ quote: comment.quote, file: comment.file })
+                    : m.chat_comment_on({ quote: comment.quote })}
                 </span>
               </span>
               <span className="whitespace-pre-wrap wrap-anywhere leading-relaxed">
@@ -528,8 +530,10 @@ function UserBubble({ message }: { message: DisplayMessage }) {
           {message.editedAt || message.originClientName ? (
             <span className="text-muted-foreground mr-1 mt-1 text-2xs leading-[inherit]">
               {[
-                message.originClientName ? `via ${message.originClientName}` : null,
-                message.editedAt ? "edited" : null,
+                message.originClientName
+                  ? m.chat_message_via({ client: message.originClientName })
+                  : null,
+                message.editedAt ? m.chat_message_edited() : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -663,14 +667,14 @@ function AssistantFileAttachment({
     <figure className="my-3 max-w-full">
       {state === "error" ? (
         <p role="alert" className="text-muted-foreground text-sm">
-          This image could not be loaded.
+          {m.chat_image_failed()}
         </p>
       ) : (
         <a
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label={`Preview ${attachment.fileName}`}
+          aria-label={m.chat_image_preview({ name: attachment.fileName })}
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -679,7 +683,7 @@ function AssistantFileAttachment({
         >
           <img
             src={url}
-            alt={file.origin ? attachment.fileName : "Generated image"}
+            alt={file.origin ? attachment.fileName : m.chat_image_generated()}
             {...reservedImageBox(attachment.dimensions)}
             onLoad={() => setState("ready")}
             onError={() => setState("error")}
@@ -1225,9 +1229,14 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
           <div className={cn(activityRowClassName, "mb-2")}>
             {/* The label holds still while pages are read; only the count after it rolls. */}
             <ActivityFace
-              label={message.reading ? "Reading scanned pages" : "Thinking"}
+              label={message.reading ? m.chat_reading_scanned_pages() : m.chat_thinking()}
               detail={
-                message.reading ? `${message.reading.read} of ${message.reading.total}` : null
+                message.reading
+                  ? m.chat_reading_progress({
+                      read: message.reading.read,
+                      total: message.reading.total,
+                    })
+                  : null
               }
               status="running"
             />
@@ -1242,7 +1251,7 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
           />
         ) : message.status === "aborted" ? (
           <div className="mt-2 flex items-center gap-3">
-            <p className="text-muted-foreground text-xs">Stopped.</p>
+            <p className="text-muted-foreground text-xs">{m.chat_stopped()}</p>
             {resume}
           </div>
         ) : null}

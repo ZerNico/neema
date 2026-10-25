@@ -366,6 +366,22 @@
   "browser_settings_links_panel": "In the side panel",
   "browser_settings_title": "Browser",
   "browser_tab_new": "New tab",
+  "chat_actions_branch": "Branch off",
+  "chat_actions_edit": "Edit",
+  "chat_actions_more": "Message actions",
+  "chat_actions_or_switch_model": "or switch model",
+  "chat_actions_resume": "Resume",
+  "chat_actions_resume_same": "Resume same",
+  "chat_actions_retry": "Retry",
+  "chat_actions_retry_same": "Retry same",
+  "chat_actions_view_sources": "View sources ({count})",
+  "chat_activity_more": "+{count} more",
+  "chat_activity_searches": "Searches",
+  "chat_agent_draft_checking": "Checking agent settings",
+  "chat_agent_draft_failed": "Couldn’t update the agent draft",
+  "chat_agent_draft_options": "Checked available options",
+  "chat_agent_draft_preparing": "Preparing the agent draft",
+  "chat_agent_draft_updating": "Updating the agent draft",
   "chat_agent_missing_collection_named": "The agent’s collection “{name}” is no longer available",
   "chat_agent_missing_collection_unnamed": [
     {
@@ -432,7 +448,84 @@
   ],
   "chat_answers_save_failed": "Could not save your answers.",
   "chat_answers_send_failed": "Could not send your answers.",
+  "chat_artifacts_resolve_agent": "Resolve the changes in your agent draft before continuing.",
+  "chat_artifacts_resolve_document": "Resolve the changes in your document before continuing.",
+  "chat_artifacts_resolve_schedule": "Resolve the changes in your schedule draft before continuing.",
+  "chat_ask_add_own": "Add your own answer (optional)",
+  "chat_ask_answered_via": "Answered via {client}",
+  "chat_ask_edit": "Edit answers",
+  "chat_ask_label": "Clarification questions",
+  "chat_ask_preparing": "Preparing questions…",
+  "chat_ask_read_only": "Previous questions · read-only",
+  "chat_ask_save": "Save answers",
+  "chat_ask_send": "Send answers",
+  "chat_ask_skip_continue": "Skip and continue",
+  "chat_ask_skip_regenerate": "Skip and regenerate",
+  "chat_ask_skipped": "Skipped",
+  "chat_ask_unavailable": "These questions are unavailable.",
+  "chat_ask_write_own": "Or write your own answer",
+  "chat_ask_your_answer": "Your answer",
+  "chat_ask_your_answers": "Your answers",
+  "chat_attachment_read": "Read a file",
+  "chat_attachment_read_failed": "Couldn’t read the file",
+  "chat_attachment_read_failed_named": "Couldn’t read {name}",
+  "chat_attachment_read_named": "Read {name}",
+  "chat_attachment_read_part": "Read a file, {from}–{to}%",
+  "chat_attachment_read_part_named": "Read {name}, {from}–{to}%",
+  "chat_attachment_reading": "Reading a file",
+  "chat_attachment_searched": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Searched a file: {count} match",
+        "countPlural=other": "Searched a file: {count} matches"
+      }
+    }
+  ],
+  "chat_attachment_searched_named": [
+    {
+      "declarations": [
+        "input count",
+        "input name",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Searched {name}: {count} match",
+        "countPlural=other": "Searched {name}: {count} matches"
+      }
+    }
+  ],
   "chat_branch_without_files": "The branch opened without its local files.",
+  "chat_browser_browsed_many": [
+    {
+      "declarations": [
+        "input count",
+        "input first",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Browsed {first} and {count} other site",
+        "countPlural=other": "Browsed {first} and {count} other sites"
+      }
+    }
+  ],
+  "chat_browser_browsed_one": "Browsed {site}",
+  "chat_browser_browsed_two": "Browsed {first} and {second}",
+  "chat_browser_failed": "Couldn’t use the browser",
+  "chat_browser_used": "Used the browser",
+  "chat_browser_waiting": "Waiting for you",
   "chat_collection_documents": [
     {
       "declarations": [
@@ -450,6 +543,12 @@
   ],
   "chat_collection_failed": "{count} failed",
   "chat_collection_preparing": "{count} preparing",
+  "chat_comment_on": "Comment on “{quote}”",
+  "chat_comment_on_in_file": "Comment on “{quote}” in {file}",
+  "chat_compaction_complete": "Earlier messages shortened",
+  "chat_compaction_failed": "Couldn’t shorten earlier messages",
+  "chat_compaction_running": "Shortening earlier messages",
+  "chat_compaction_truncated": "Earlier messages left out",
   "chat_composer_add_attachment": "Add attachment",
   "chat_composer_add_files_or_tools": "Add files or tools",
   "chat_composer_add_integration": "Add integration…",
@@ -512,9 +611,169 @@
   "chat_context_selection_failed": "Could not load selection",
   "chat_context_skill_unavailable": "Skill unavailable",
   "chat_context_unavailable": "Unavailable",
+  "chat_custom_chars": "({count} chars)",
+  "chat_custom_failed": "Couldn’t run {name}",
+  "chat_custom_ran": "Ran {name}",
+  "chat_custom_running": "Running {name}",
+  "chat_desktop_allow": "Allow",
+  "chat_desktop_allow_always": "Always allow",
+  "chat_desktop_allow_answer": "Allow for this answer",
+  "chat_desktop_allow_chat": "Allow in this chat",
+  "chat_desktop_allow_once": "Allow once",
+  "chat_desktop_always_note": "“Always” applies to every Work chat on this computer. You can remove it in Settings › This computer.",
+  "chat_desktop_ask_change": "Change this file",
+  "chat_desktop_ask_command": "Run a program on this computer",
+  "chat_desktop_ask_delete": "Delete from this computer",
+  "chat_desktop_ask_delete_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Delete {count} file from this computer",
+        "countPlural=other": "Delete {count} files from this computer"
+      }
+    }
+  ],
+  "chat_desktop_ask_delete_in": [
+    {
+      "declarations": [
+        "input count",
+        "input folder",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Delete {count} file in {folder}",
+        "countPlural=other": "Delete {count} files in {folder}"
+      }
+    }
+  ],
+  "chat_desktop_ask_list": "List this folder",
+  "chat_desktop_ask_local": "Let commands use services on this computer",
+  "chat_desktop_ask_move": "Move on this computer",
+  "chat_desktop_ask_network": "Allow network access on this computer",
+  "chat_desktop_ask_path": "Let commands read this",
+  "chat_desktop_ask_private_network": "Allow access to your private network",
+  "chat_desktop_ask_read": "Read this file",
+  "chat_desktop_ask_search": "Search this computer",
+  "chat_desktop_ask_site": "Open this site in the browser",
+  "chat_desktop_ask_ssh": "Let commands in this chat sign in with your SSH keys",
+  "chat_desktop_ask_write": "Write this file",
+  "chat_desktop_blanket_browser": "Let it use the browser for this chat",
+  "chat_desktop_blanket_command": "Let it run programs for this chat",
+  "chat_desktop_blanket_files": "Let it change files for this chat",
+  "chat_desktop_deleting": "Deleting files",
+  "chat_desktop_deleting_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Deleting {count} file",
+        "countPlural=other": "Deleting {count} files"
+      }
+    }
+  ],
+  "chat_desktop_deleting_path": "Deleting {path}",
+  "chat_desktop_deny": "Deny",
+  "chat_desktop_editing": "Editing a file",
+  "chat_desktop_editing_path": "Editing {path}",
+  "chat_desktop_failed_delete": "Couldn’t delete",
+  "chat_desktop_failed_edit": "Couldn’t edit",
+  "chat_desktop_failed_edit_path": "Couldn’t edit {path}",
+  "chat_desktop_failed_find": "Couldn’t find files",
+  "chat_desktop_failed_import": "Couldn’t import",
+  "chat_desktop_failed_import_path": "Couldn’t import {path}",
+  "chat_desktop_failed_list": "Couldn’t list the folder",
+  "chat_desktop_failed_move": "Couldn’t move the file",
+  "chat_desktop_failed_read": "Couldn’t read",
+  "chat_desktop_failed_read_path": "Couldn’t read {path}",
+  "chat_desktop_failed_run": "Couldn’t run the program",
+  "chat_desktop_failed_save": "Couldn’t save",
+  "chat_desktop_failed_save_path": "Couldn’t save {path}",
+  "chat_desktop_failed_search": "Couldn’t search files",
+  "chat_desktop_failed_write": "Couldn’t write",
+  "chat_desktop_failed_write_path": "Couldn’t write {path}",
+  "chat_desktop_finding": "Finding files",
+  "chat_desktop_finding_path": "Finding {path}",
+  "chat_desktop_importing": "Importing a file",
+  "chat_desktop_importing_path": "Importing {path}",
+  "chat_desktop_listing": "Listing the folder",
+  "chat_desktop_listing_path": "Listing {path}",
+  "chat_desktop_local_note": "Commands could reach services running on this computer, and a server a command starts could be reached from your network.",
+  "chat_desktop_moving": "Moving a file",
+  "chat_desktop_moving_path": "Moving {path}",
+  "chat_desktop_reading": "Reading a file",
+  "chat_desktop_reading_path": "Reading {path}",
+  "chat_desktop_requesting_local": "Requesting services on this computer",
+  "chat_desktop_requesting_network": "Requesting network access",
+  "chat_desktop_requesting_network_to": "Requesting network access to {host}",
+  "chat_desktop_requesting_read": "Requesting read access",
+  "chat_desktop_requesting_read_to": "Requesting read access to {path}",
+  "chat_desktop_requesting_ssh": "Requesting sign-in with SSH keys",
+  "chat_desktop_running": "Running a program",
+  "chat_desktop_running_path": "Running {command}",
+  "chat_desktop_saving": "Saving a file to the workspace",
+  "chat_desktop_saving_path": "Saving {path}",
+  "chat_desktop_searching": "Searching files",
+  "chat_desktop_searching_path": "Searching for {path}",
+  "chat_desktop_shortened": "Shortened to fit.",
+  "chat_desktop_ssh_note": "Commands could use the keys in your SSH agent to sign in to the hosts this chat may reach. The key files stay unreadable.",
+  "chat_desktop_writing": "Writing a file",
+  "chat_desktop_writing_path": "Writing {path}",
+  "chat_document_checked": "checked documents",
+  "chat_document_commented": "commented on the document",
+  "chat_document_commented_named": "commented on {title}",
+  "chat_document_commenting": "commenting",
+  "chat_document_created": "created a document",
+  "chat_document_created_named": "created {title}",
+  "chat_document_creating": "creating a document",
+  "chat_document_edited": "edited the document",
+  "chat_document_edited_named": "edited {title}",
+  "chat_document_editing": "editing the document",
+  "chat_document_editing_named": "editing {title}",
+  "chat_document_failed": "couldn’t update the document",
+  "chat_document_read": "read the document",
+  "chat_document_read_named": "read {title}",
+  "chat_document_reading": "reading the document",
+  "chat_document_reading_all": "reading documents",
+  "chat_document_reading_named": "reading {title}",
+  "chat_document_unchanged": "document unchanged",
+  "chat_document_unchanged_named": "{title} unchanged",
+  "chat_document_widget_deleted": "Document deleted",
+  "chat_document_widget_elsewhere": "From another chat",
+  "chat_document_widget_loading": "Loading document…",
+  "chat_document_widget_name": "Document",
+  "chat_document_widget_open": "Open document: {name}",
+  "chat_document_widget_project": "Project document",
+  "chat_document_widget_retry": "Retry loading document",
+  "chat_draft_agent_open": "Open agent draft: {name}",
+  "chat_draft_agent_title": "Agent draft",
+  "chat_draft_elsewhere": "From another chat",
+  "chat_draft_loading": "Loading draft…",
+  "chat_draft_retry": "Retry loading draft",
+  "chat_draft_schedule_open": "Open schedule draft: {name}",
+  "chat_draft_schedule_title": "Schedule draft",
+  "chat_duration_minutes": "{minutes}m",
+  "chat_duration_minutes_seconds": "{minutes}m {seconds}s",
+  "chat_duration_seconds": "{seconds}s",
   "chat_edit_confirm": "Save and regenerate",
   "chat_edit_confirm_later": "All messages after its response will be removed.",
   "chat_edit_confirm_title": "Edit this message?",
+  "chat_edit_label": "Edit message",
+  "chat_edit_placeholder": "Edit message…",
+  "chat_edit_save": "Save edit",
   "chat_edit_send_failed": "Could not send the edit.",
   "chat_effort_default": "Default",
   "chat_effort_high": "High",
@@ -641,6 +900,10 @@
   "chat_failure_retry_moment": "Try again in a moment.",
   "chat_failure_technical_details": "Technical details",
   "chat_failure_try_again_description": "Try again, or choose another model.",
+  "chat_file_preview": "Preview {name}",
+  "chat_file_unavailable": "This file is unavailable",
+  "chat_file_unavailable_here": "{path} · Unavailable on this computer",
+  "chat_file_unavailable_label": "Unavailable file: {name}",
   "chat_greeting_afternoon": "Good afternoon{who}",
   "chat_greeting_evening": "Good evening{who}",
   "chat_greeting_first_today": "What’s first today{who}?",
@@ -656,6 +919,145 @@
   "chat_greeting_weekend": "Weekend project{who}?",
   "chat_greeting_who": ", {name}",
   "chat_greeting_working_on": "What are we working on{who}?",
+  "chat_history_found_chats": [
+    {
+      "declarations": [
+        "input count",
+        "input query",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Found {count} chat for “{query}”",
+        "countPlural=other": "Found {count} chats for “{query}”"
+      }
+    }
+  ],
+  "chat_history_found_earlier": [
+    {
+      "declarations": [
+        "input count",
+        "input query",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Found {count} earlier message for “{query}”",
+        "countPlural=other": "Found {count} earlier messages for “{query}”"
+      }
+    }
+  ],
+  "chat_history_look_back_failed": "Couldn’t look back in this chat",
+  "chat_history_looking_back": "Looking back in this chat",
+  "chat_history_no_chats": "No chats found for “{query}”",
+  "chat_history_no_earlier": "No earlier messages found for “{query}”",
+  "chat_history_read_chat_failed": "Couldn’t read the chat",
+  "chat_history_read_earlier_here": "Read earlier messages of this chat",
+  "chat_history_read_earlier_other": "Read earlier messages of another chat",
+  "chat_history_read_earlier_titled": "Read earlier messages of “{title}”",
+  "chat_history_read_message_here": "Read message {number} of this chat",
+  "chat_history_read_message_other": "Read message {number} of another chat",
+  "chat_history_read_message_titled": "Read message {number} of “{title}”",
+  "chat_history_read_messages_here": "Read messages {from}–{to} of this chat",
+  "chat_history_read_messages_other": "Read messages {from}–{to} of another chat",
+  "chat_history_read_messages_titled": "Read messages {from}–{to} of “{title}”",
+  "chat_history_read_other": "Read another chat",
+  "chat_history_read_titled": "Read “{title}”",
+  "chat_history_reading_chat": "Reading another chat",
+  "chat_history_search_failed": "Couldn’t search your other chats",
+  "chat_history_searching": "Searching your other chats",
+  "chat_image_failed": "This image could not be loaded.",
+  "chat_image_generated": "Generated image",
+  "chat_image_preview": "Preview {name}",
+  "chat_knowledge_excerpts": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} excerpt",
+        "countPlural=other": "{count} excerpts"
+      }
+    }
+  ],
+  "chat_knowledge_failed": "Couldn’t search documents",
+  "chat_knowledge_keywords_only": "Matched by keywords only",
+  "chat_knowledge_listed": "Listed documents",
+  "chat_knowledge_listed_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Listed {count} document",
+        "countPlural=other": "Listed {count} documents"
+      }
+    }
+  ],
+  "chat_knowledge_listing": "Listing documents",
+  "chat_knowledge_read_excerpts": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Read {count} excerpt",
+        "countPlural=other": "Read {count} excerpts"
+      }
+    }
+  ],
+  "chat_knowledge_read_in_full": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Read {count} excerpt in full",
+        "countPlural=other": "Read {count} excerpts in full"
+      }
+    }
+  ],
+  "chat_knowledge_reading": "Reading documents",
+  "chat_knowledge_searched": "Searched documents",
+  "chat_knowledge_searching": "Searching documents",
+  "chat_knowledge_steps_failed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "One step didn’t work.",
+        "countPlural=other": "{count} steps didn’t work."
+      }
+    }
+  ],
+  "chat_list_jump_to_bottom": "Jump to bottom",
+  "chat_list_load_more": "Load more",
+  "chat_list_loading_earlier": "Loading earlier messages…",
   "chat_loss_agent_draft_count": [
     {
       "declarations": [
@@ -725,16 +1127,198 @@
   ],
   "chat_loss_working_file_named": "The unpublished file “{name}” will also be deleted.",
   "chat_loss_working_file_untitled": "An untitled unpublished file will also be deleted.",
+  "chat_map_bike": "Bike",
+  "chat_map_drive": "Drive",
+  "chat_map_failed": "Couldn’t find a route",
+  "chat_map_looking_up": "Looking up a route",
+  "chat_map_walk": "Walk",
+  "chat_memory_failed": "Couldn’t save memory",
+  "chat_memory_known": "Memory already saved",
+  "chat_memory_known_project": "Project already knows this",
+  "chat_memory_rejected": "No memory saved",
+  "chat_memory_saved": "Saved to memory",
+  "chat_memory_saved_project": "Saved to project memory",
+  "chat_memory_saving": "Saving to memory",
+  "chat_memory_updated": "Updated memory",
+  "chat_memory_updated_project": "Updated project memory",
   "chat_mention_collections": "Knowledge collections",
   "chat_mention_integrations": "Integrations",
   "chat_mention_skills": "Local skills",
+  "chat_message_edited": "edited",
+  "chat_message_via": "via {client}",
   "chat_models_loading": "Loading models…",
   "chat_models_no_match": "No models match",
   "chat_models_search": "Search models…",
   "chat_new_in_project": "In {project}",
+  "chat_notify_done": "Notified you: {message}",
+  "chat_notify_failed": "Couldn’t notify you",
+  "chat_notify_running": "Notifying you",
+  "chat_office_blocks": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} paragraph or table",
+        "countPlural=other": "{count} paragraphs and tables"
+      }
+    }
+  ],
+  "chat_office_check_slides_failed": "Couldn’t check the slides",
+  "chat_office_checked_appearance": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Checked appearance of {count} slide",
+        "countPlural=other": "Checked appearance of {count} slides"
+      }
+    }
+  ],
+  "chat_office_checked_slides": "Checked slide appearance",
+  "chat_office_checking_appearance": "Checking appearance",
+  "chat_office_create_file_failed": "Couldn’t create the file",
+  "chat_office_created_named": "Created {name}",
+  "chat_office_edit_failed": "Couldn’t apply an edit",
+  "chat_office_failed": "Failed",
+  "chat_office_formula_errors": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} formula shows an error",
+        "countPlural=other": "{count} formulas show an error"
+      }
+    }
+  ],
+  "chat_office_made_changes": "Made changes",
+  "chat_office_opened_for_editing": "Opened the file for editing",
+  "chat_office_presentation_built": "Built the slides",
+  "chat_office_presentation_change_failed": "Couldn’t change the presentation",
+  "chat_office_presentation_changed": "Edited presentation",
+  "chat_office_presentation_create_failed": "Couldn’t create the presentation",
+  "chat_office_presentation_created": "Created presentation",
+  "chat_office_presentation_created_file": "Created the presentation",
+  "chat_office_presentation_creating": "Creating the deck",
+  "chat_office_presentation_draft": "Presentation draft",
+  "chat_office_presentation_edited": "Edited the slides",
+  "chat_office_presentation_editing": "Editing slides",
+  "chat_office_presentation_published_file": "Published the presentation",
+  "chat_office_presentation_read": "Read presentation",
+  "chat_office_presentation_read_failed": "Couldn’t read the presentation",
+  "chat_office_presentation_reading": "Reading slides",
+  "chat_office_presentation_reading_file": "Reading presentation",
+  "chat_office_presentation_started": "Started a new deck",
+  "chat_office_presentation_working": "Working on presentation",
+  "chat_office_publish_file_failed": "Couldn’t publish the file",
+  "chat_office_published_named": "Published {name}",
+  "chat_office_publishing": "Publishing",
+  "chat_office_publishing_file": "Publishing the file",
+  "chat_office_read_range": "Read {range} on sheet {sheet}",
+  "chat_office_read_sheet": "Read sheet {sheet}",
+  "chat_office_read_slide": "Read slide {number}",
+  "chat_office_read_slide_layout": "Read slide layout",
+  "chat_office_read_slide_list": "Read slides {list} and {last}",
+  "chat_office_read_slide_master": "Read slide master",
+  "chat_office_read_slide_range": "Read slides {from}–{to}",
+  "chat_office_sheets": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} sheet",
+        "countPlural=other": "{count} sheets"
+      }
+    }
+  ],
+  "chat_office_slides": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} slide",
+        "countPlural=other": "{count} slides"
+      }
+    }
+  ],
+  "chat_office_spreadsheet_built": "Wrote the cells",
+  "chat_office_spreadsheet_change_failed": "Couldn’t change the spreadsheet",
+  "chat_office_spreadsheet_changed": "Edited spreadsheet",
+  "chat_office_spreadsheet_create_failed": "Couldn’t create the spreadsheet",
+  "chat_office_spreadsheet_created": "Created spreadsheet",
+  "chat_office_spreadsheet_created_file": "Created the spreadsheet",
+  "chat_office_spreadsheet_creating": "Creating the workbook",
+  "chat_office_spreadsheet_draft": "Spreadsheet draft",
+  "chat_office_spreadsheet_edited": "Edited the cells",
+  "chat_office_spreadsheet_editing": "Editing cells",
+  "chat_office_spreadsheet_published_file": "Published the spreadsheet",
+  "chat_office_spreadsheet_read": "Read spreadsheet",
+  "chat_office_spreadsheet_read_failed": "Couldn’t read the spreadsheet",
+  "chat_office_spreadsheet_reading": "Reading cells",
+  "chat_office_spreadsheet_reading_file": "Reading spreadsheet",
+  "chat_office_spreadsheet_started": "Started a new workbook",
+  "chat_office_spreadsheet_working": "Working on spreadsheet",
+  "chat_office_times": "{label} · {count} times",
+  "chat_office_word_built": "Wrote the document",
+  "chat_office_word_change_failed": "Couldn’t change the document",
+  "chat_office_word_changed": "Edited document",
+  "chat_office_word_create_failed": "Couldn’t create the document",
+  "chat_office_word_created": "Created document",
+  "chat_office_word_created_file": "Created the document",
+  "chat_office_word_creating": "Creating the document",
+  "chat_office_word_draft": "Document draft",
+  "chat_office_word_edited": "Edited the document",
+  "chat_office_word_editing": "Editing the document",
+  "chat_office_word_published_file": "Published the document",
+  "chat_office_word_read": "Read the document",
+  "chat_office_word_read_failed": "Couldn’t read the document",
+  "chat_office_word_read_on": "Read on from block {from} of {total}",
+  "chat_office_word_read_settled": "Read document",
+  "chat_office_word_reading": "Reading the document",
+  "chat_office_word_reading_file": "Reading document",
+  "chat_office_word_started": "Started a new document",
+  "chat_office_word_working": "Working on document",
+  "chat_office_writing_changes": "Writing changes",
+  "chat_office_writing_file": "Writing the file",
+  "chat_plan_failed": "Couldn’t update the checklist",
+  "chat_plan_progress": "{done} of {total}",
+  "chat_plan_summary": "Checklist · {done} of {total} done",
+  "chat_plan_updating": "Updating the checklist",
   "chat_preferred_model_label": "Preferred model",
   "chat_preferred_model_none": "No preference",
   "chat_preferred_model_unavailable": "Unavailable model",
+  "chat_project_file_checked": "Checked project files",
+  "chat_project_file_checking": "Checking project files",
+  "chat_project_file_not_saved": "Not saved to the project",
+  "chat_project_file_read_failed": "Couldn’t read project files",
+  "chat_project_file_saved": "Saved a project file",
+  "chat_project_file_saved_named": "Saved {name}",
+  "chat_project_file_saved_version": "Saved {name} as version {version}",
+  "chat_project_file_saving": "Saving to the project",
   "chat_queue_add_failed": "Could not queue your message.",
   "chat_queue_answer_first": "Answer the questions above first",
   "chat_queue_count": [
@@ -785,13 +1369,274 @@
   "chat_queue_steering": "Sends at the next step",
   "chat_queue_steering_hint": "If this answer finishes first, it’s sent right after.",
   "chat_queue_stop_and_send": "Stop and send now",
+  "chat_reading_progress": "{read} of {total}",
+  "chat_reading_scanned_pages": "Reading scanned pages",
+  "chat_reasoning_done": "Thought process",
   "chat_refresh_failed": "Could not refresh the chat.",
+  "chat_research_counting": "and counting",
+  "chat_research_failed": "Research failed",
+  "chat_research_failed_note": "ended early",
+  "chat_research_getting_started": "Getting started",
+  "chat_research_interrupted": "Research interrupted",
+  "chat_research_interrupted_note": "interrupted",
+  "chat_research_listing": "Listing documents",
+  "chat_research_made_plan": "Made a plan",
+  "chat_research_more_sources": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} more source",
+        "countPlural=other": "{count} more sources"
+      }
+    }
+  ],
+  "chat_research_no_sources": "No sources found",
+  "chat_research_note_incomplete": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "One topic couldn’t be finished, so some of this may be missing.",
+        "countPlural=other": "{count} topics couldn’t be finished, so some of this may be missing."
+      }
+    }
+  ],
+  "chat_research_note_no_search": "Web search wasn’t working, so most of the research couldn’t happen.",
+  "chat_research_note_nothing": "The research didn’t turn up anything usable.",
+  "chat_research_note_out_of_room": "The research ran out of room, so some of this may be missing.",
+  "chat_research_nothing": "Nothing was researched.",
+  "chat_research_other_steps": "Other steps",
+  "chat_research_panel_in_progress": "In progress",
+  "chat_research_panel_steps": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} step",
+        "countPlural=other": "{count} steps"
+      }
+    }
+  ],
+  "chat_research_planned": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Made a plan · {count} topic",
+        "countPlural=other": "Made a plan · {count} topics"
+      }
+    }
+  ],
+  "chat_research_planning": "Planning what to look into",
+  "chat_research_reading_documents": "Reading documents",
+  "chat_research_reading_host": "Reading {host}",
+  "chat_research_searching_knowledge": "Searching knowledge",
+  "chat_research_searching_query": "Searching “{query}”",
+  "chat_research_sources": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} source",
+        "countPlural=other": "{count} sources"
+      }
+    }
+  ],
+  "chat_research_sources_by_site": "Sources by site",
+  "chat_research_sources_so_far": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} source so far",
+        "countPlural=other": "{count} sources so far"
+      }
+    }
+  ],
+  "chat_research_step_excerpts": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} excerpt",
+        "countPlural=other": "{count} excerpts"
+      }
+    }
+  ],
+  "chat_research_step_listed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Listed {count} document",
+        "countPlural=other": "Listed {count} documents"
+      }
+    }
+  ],
+  "chat_research_step_read_documents": "Read documents",
+  "chat_research_step_read_failed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Couldn’t read a page",
+        "countPlural=other": "Couldn’t read {count} pages"
+      }
+    }
+  ],
+  "chat_research_step_read_pages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Read a page",
+        "countPlural=other": "Read {count} pages"
+      }
+    }
+  ],
+  "chat_research_step_reading_pages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Reading a page",
+        "countPlural=other": "Reading {count} pages"
+      }
+    }
+  ],
+  "chat_research_step_results": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} result",
+        "countPlural=other": "{count} results"
+      }
+    }
+  ],
+  "chat_research_step_search_failed": "Couldn’t search",
+  "chat_research_step_searched_documents": "Searched documents",
+  "chat_research_step_searched_web": "Searched the web",
+  "chat_research_step_searching_documents": "Searching documents",
+  "chat_research_step_searching_web": "Searching the web",
+  "chat_research_step_used_skill": "Used {name}",
+  "chat_research_step_using_skill": "Using {name}",
+  "chat_research_steps": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} step",
+        "countPlural=other": "{count} steps"
+      }
+    }
+  ],
+  "chat_research_stopped": "Research stopped",
+  "chat_research_stopped_note": "stopped early",
+  "chat_research_task_failed": "Couldn’t finish this one",
+  "chat_research_task_stopped": "Stopped",
+  "chat_research_title": "Deep research",
+  "chat_research_topics": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} topic",
+        "countPlural=other": "{count} topics"
+      }
+    }
+  ],
+  "chat_research_using_guidance": "Using {name} guidance",
   "chat_resume_failed": "Could not resume the answer.",
   "chat_retry_confirm": "Retry",
   "chat_retry_confirm_later": "All messages after it will be removed.",
   "chat_retry_confirm_title": "Retry this response?",
   "chat_retry_failed": "Could not retry the answer.",
+  "chat_schedule_draft_checking_drafts": "Checking schedule drafts",
+  "chat_schedule_draft_checking_settings": "Checking schedule settings",
+  "chat_schedule_draft_failed": "Couldn’t update the schedule draft",
+  "chat_schedule_draft_options": "Checked available options",
+  "chat_schedule_draft_preparing": "Preparing the schedule draft",
+  "chat_schedule_draft_updating": "Updating the schedule draft",
   "chat_send_failed": "Could not send the message.",
+  "chat_skill_failed": "Couldn’t load the skill",
+  "chat_skill_unnamed": "Skill",
+  "chat_skill_used": "Used {names}",
+  "chat_skill_using": "Using {names}",
+  "chat_source_document": "Document",
+  "chat_source_label": "Source: {title}",
+  "chat_sources_panel_title": "Sources",
   "chat_starters_label": "Conversation starters",
   "chat_steer_loss": [
     {
@@ -809,12 +1654,160 @@
     }
   ],
   "chat_stop_failed": "Could not stop the response.",
+  "chat_stopped": "Stopped.",
   "chat_temporary_description": "This chat won’t appear in your history or use your memories.",
   "chat_temporary_label": "Temporary chat",
   "chat_temporary_start": "Start a temporary chat",
   "chat_temporary_title": "Temporary chat",
   "chat_temporary_turn_off": "Turn off temporary chat",
+  "chat_thinking": "Thinking",
   "chat_title_new_chat": "New chat",
+  "chat_web_couldnt_read": "Couldn’t read",
+  "chat_web_pages_read": "Pages read",
+  "chat_web_read_failed": "Couldn’t read the pages",
+  "chat_web_read_pages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Read a page",
+        "countPlural=other": "Read {count} pages"
+      }
+    }
+  ],
+  "chat_web_reading_host": "Reading {host}",
+  "chat_web_reading_sites": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Reading a website",
+        "countPlural=other": "Reading {count} websites"
+      }
+    }
+  ],
+  "chat_web_reading_websites": "Reading websites",
+  "chat_web_search_failed": "Couldn’t search the web",
+  "chat_web_searched": "Searched the web",
+  "chat_web_searches_failed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "One search didn’t work.",
+        "countPlural=other": "{count} searches didn’t work."
+      }
+    }
+  ],
+  "chat_web_searching": "Searching the web",
+  "chat_web_searching_for": "Searching for “{query}”",
+  "chat_web_show_more": "Show {count} more",
+  "chat_web_sources": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} source",
+        "countPlural=other": "{count} sources"
+      }
+    }
+  ],
+  "chat_web_view_sources": "View all sources",
+  "chat_work_asking_access": "Asking for access",
+  "chat_work_document_created": "created the document",
+  "chat_work_document_edited": "edited the document",
+  "chat_work_document_read": "read the document",
+  "chat_work_document_working": "Working on the document",
+  "chat_work_editing_files": "Editing files",
+  "chat_work_list": "{head} and {last}",
+  "chat_work_list_more": "{list} and more",
+  "chat_work_looking_back": "Looking back in this chat",
+  "chat_work_looking_through_files": "Looking through files",
+  "chat_work_past_asked_access": "asked for access",
+  "chat_work_past_edited_files": "edited files",
+  "chat_work_past_looked_back": "looked back in this chat",
+  "chat_work_past_looked_in": "looked in {services}",
+  "chat_work_past_looked_through_files": "looked through files",
+  "chat_work_past_project_files": "worked with project files",
+  "chat_work_past_published_file": "published a file",
+  "chat_work_past_ran": "ran {name}",
+  "chat_work_past_ran_command": "ran a command",
+  "chat_work_past_read_chat": "read another chat",
+  "chat_work_past_read_file": "read a file",
+  "chat_work_past_read_pages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "read a page",
+        "countPlural=other": "read {count} pages"
+      }
+    }
+  ],
+  "chat_work_past_read_skill": "read a skill",
+  "chat_work_past_route": "looked up a route",
+  "chat_work_past_searched_chats": "searched your other chats",
+  "chat_work_past_searched_documents": "searched documents",
+  "chat_work_past_searched_web": "searched the web",
+  "chat_work_past_summarized": "summarized earlier messages",
+  "chat_work_past_thought": "thought",
+  "chat_work_past_updated": "updated {services}",
+  "chat_work_past_used_browser": "used the browser",
+  "chat_work_past_worked": "worked",
+  "chat_work_presentation_created": "created the presentation",
+  "chat_work_presentation_edited": "edited the presentation",
+  "chat_work_presentation_read": "read the presentation",
+  "chat_work_presentation_working": "Working on the presentation",
+  "chat_work_project_files": "Working with project files",
+  "chat_work_publishing_file": "Publishing the file",
+  "chat_work_reading_chat": "Reading another chat",
+  "chat_work_reading_file": "Reading a file",
+  "chat_work_reading_pages": "Reading pages",
+  "chat_work_reading_skill": "Reading a skill",
+  "chat_work_route": "Looking up a route",
+  "chat_work_running": "Running {name}",
+  "chat_work_running_command": "Running a command",
+  "chat_work_searching_chats": "Searching your other chats",
+  "chat_work_searching_documents": "Searching documents",
+  "chat_work_searching_web": "Searching the web",
+  "chat_work_spreadsheet_created": "created the spreadsheet",
+  "chat_work_spreadsheet_edited": "edited the spreadsheet",
+  "chat_work_spreadsheet_read": "read the spreadsheet",
+  "chat_work_spreadsheet_working": "Working on the spreadsheet",
+  "chat_work_summarizing": "Summarizing earlier messages",
+  "chat_work_using": "Using {name}",
+  "chat_work_using_browser": "Using the browser",
+  "chat_work_waiting": "Waiting for you",
+  "chat_work_working": "Working",
+  "chat_work_working_for": "Working · {duration}",
+  "chat_working_file_draft": "Draft",
+  "chat_working_file_published": "Published",
+  "chat_working_file_working": "Working",
   "common_add": "Add",
   "common_back": "Back",
   "common_cancel": "Cancel",

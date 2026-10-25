@@ -26,7 +26,7 @@ export function PreferredModelRow({
     // the rest, truncating long model names.
     <ListRow className="flex-wrap">
       <div className="flex min-w-24 shrink-0 flex-col">
-        <span className="text-sm font-medium">Preferred model</span>
+        <span className="text-sm font-medium">{m.chat_preferred_model_label()}</span>
       </div>
       <div className="flex min-w-0 flex-1 flex-col items-end gap-1">
         <ModelPicker

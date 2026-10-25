@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useEffect, useRef } from "react";
 import { PendingButton } from "~/ui/pending-button.tsx";
 
@@ -49,7 +50,7 @@ export function InfiniteSentinel({
         onClick={onLoadMore}
         pending={isFetching}
       >
-        Load more
+        {m.chat_list_load_more()}
       </PendingButton>
     </div>
   );

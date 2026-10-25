@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Option, Schema } from "effect";
 import {
   AgentDraftToolEnvelope,
@@ -339,7 +340,7 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
       const result = call.status === "running" ? null : decode(SkillActivity, call.result);
       return {
         skillId: label?.skillId ?? "",
-        skillName: label?.skillName ?? "Skill",
+        skillName: label?.skillName ?? m.chat_skill_unnamed(),
         path: label?.path ?? "",
         status:
           call.status === "running"

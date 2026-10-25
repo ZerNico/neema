@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { CodeIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import type { CustomToolActivity } from "../client/use-message-stream.ts";
@@ -9,7 +10,7 @@ import {
 import { cn } from "~/ui/utils";
 import { ActivityChevron, ActivityFace, ActivityNote } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
-import { workingFileState } from "./working-file-state.ts";
+import { workingFileLabel, workingFileState } from "./working-file-state.ts";
 
 /**
  * One admin-authored code tool call. The row carries the tool's display name
@@ -34,19 +35,21 @@ export function CustomToolActivityBlock({
   const failed = activity.status === "error";
   const status = running ? "running" : failed ? "failed" : "done";
   const label = running
-    ? `Running ${activity.displayName}`
+    ? m.chat_custom_running({ name: activity.displayName })
     : failed
-      ? `Couldn’t run ${activity.displayName}`
-      : `Ran ${activity.displayName}`;
+      ? m.chat_custom_failed({ name: activity.displayName })
+      : m.chat_custom_ran({ name: activity.displayName });
   const workingFiles = (activity.workingFiles ?? []).map((file) => ({
     file,
     state: workingFileState(published?.has(file.id) ?? false, terminal),
   }));
   const workingState = !workingFiles.length
     ? null
-    : workingFiles.every(({ state }) => state === "Published")
-      ? "Published"
-      : workingFileState(false, terminal);
+    : workingFileLabel(
+        workingFiles.every(({ state }) => state === "published")
+          ? "published"
+          : workingFileState(false, terminal),
+      );
 
   if (!activity.resultPreview && !activity.error && !workingFiles.length)
     return (
@@ -69,7 +72,7 @@ export function CustomToolActivityBlock({
               key={`${file.id}@${file.revision}`}
               className="text-muted-foreground text-xs [overflow-wrap:anywhere]"
             >
-              {file.name} · {state}
+              {file.name} · {workingFileLabel(state)}
             </p>
           ))}
           {activity.resultPreview ? (
@@ -77,7 +80,7 @@ export function CustomToolActivityBlock({
               {activity.resultPreview}
               {activity.resultChars !== undefined &&
               activity.resultChars > activity.resultPreview.length
-                ? ` (${activity.resultChars} chars)`
+                ? ` ${m.chat_custom_chars({ count: activity.resultChars })}`
                 : ""}
             </p>
           ) : null}

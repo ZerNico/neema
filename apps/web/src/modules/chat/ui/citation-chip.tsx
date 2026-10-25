@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
@@ -46,7 +47,7 @@ function DocumentCitationChip({
 const describeSource = (source: ToolSource) => {
   const document = source.kind === "document";
   return {
-    label: source.title?.trim() || (document ? "Document" : hostOf(source.url)),
+    label: source.title?.trim() || (document ? m.chat_source_document() : hostOf(source.url)),
     location: document ? (
       documentLocationLabel(source)
     ) : source.kind === "integration" ? (

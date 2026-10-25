@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { memo, useEffect, useRef, useState } from "react";
 import { markdownTableComponents } from "~/ui/markdown-components.ts";
 import { Streamdown } from "streamdown";
@@ -53,7 +54,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     if (!active) return null;
     return (
       <div className={cn(activityRowClassName, "mb-2")}>
-        <ActivityFace label="Thinking" status="running" />
+        <ActivityFace label={m.chat_thinking()} status="running" />
       </div>
     );
   }
@@ -66,7 +67,7 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
         <ActivityFace
-          label={active ? "Thinking" : "Thought process"}
+          label={active ? m.chat_thinking() : m.chat_reasoning_done()}
           status={active ? "running" : "done"}
         />
         <ActivityChevron open={expanded} />

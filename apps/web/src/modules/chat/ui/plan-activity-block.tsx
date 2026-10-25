@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { CheckListIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -26,10 +27,10 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
   const done = steps.filter((step) => step.status === "completed").length;
   const current = steps.find((step) => step.status === "in_progress");
   const label = running
-    ? "Updating the checklist"
+    ? m.chat_plan_updating()
     : activity.status === "error" || steps.length === 0
-      ? "Couldn’t update the checklist"
-      : (current?.step ?? `Checklist · ${done} of ${steps.length} done`);
+      ? m.chat_plan_failed()
+      : (current?.step ?? m.chat_plan_summary({ done, total: steps.length }));
 
   if (steps.length === 0)
     return (
@@ -44,7 +45,7 @@ export function PlanActivityBlock({ activity }: { activity: PlanToolActivity }) 
         <ActivityFace
           icon={CheckListIcon}
           label={label}
-          detail={current ? `${done} of ${steps.length}` : null}
+          detail={current ? m.chat_plan_progress({ done, total: steps.length }) : null}
           status={running ? "running" : activity.status === "error" ? "failed" : "done"}
         />
         <ActivityChevron open={open} />

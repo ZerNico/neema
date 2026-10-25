@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowShrink02Icon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
@@ -11,10 +12,10 @@ import { activityRowClassName } from "./activity-row.ts";
 
 export type CompactionStatus = "running" | "complete" | "failed";
 
-const LABELS: Record<CompactionStatus, string> = {
-  running: "Shortening earlier messages",
-  complete: "Earlier messages shortened",
-  failed: "Couldn’t shorten earlier messages",
+const LABELS: Record<CompactionStatus, () => string> = {
+  running: m.chat_compaction_running,
+  complete: m.chat_compaction_complete,
+  failed: m.chat_compaction_failed,
 };
 
 /**
@@ -47,8 +48,8 @@ export function CompactionBlock({
   );
   const label =
     status === "complete" && outcome === "hard_truncation"
-      ? "Earlier messages left out"
-      : LABELS[status];
+      ? m.chat_compaction_truncated()
+      : LABELS[status]();
 
   if (!summary) {
     return <div className={cn(activityRowClassName, className)}>{face(label)}</div>;

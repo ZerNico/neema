@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { getLocale, overwriteGetLocale } from "~/paraglide/runtime.js";
 import {
   stampToolTimes,
   type ToolActivity,
@@ -108,6 +109,22 @@ describe("a run of work", () => {
       ]),
     ).toBe("Searched the web, read 2 pages and summarized earlier messages");
     expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
+  });
+
+  it("keeps German nouns capitalised inside a summary and the first clause capitalised", () => {
+    const read = call("r", { name: "read_url", targets: ["https://a.test", "https://b.test"] });
+    const english = getLocale;
+    overwriteGetLocale(() => "de");
+    try {
+      expect(
+        workSummary([
+          { kind: "web", key: "w", activities: [call("a"), read] as never },
+          { kind: "knowledge", key: "k", activities: [] as never },
+        ]),
+      ).toBe("Im Web gesucht, 2 Seiten gelesen und Dokumente durchsucht");
+    } finally {
+      overwriteGetLocale(english);
+    }
   });
 
   it("names a server's calls by the service and what they did, and a shipped tool by its label", () => {

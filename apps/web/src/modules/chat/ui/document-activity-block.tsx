@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowRight01Icon, File01Icon, Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
@@ -17,16 +18,16 @@ import { documentRunLabel, documentRunSucceeded } from "./document-activity-labe
 
 export function DocumentWidget({ documentId, title }: { documentId: string; title?: string }) {
   const { owned, gone, entry } = useDocumentPanel(documentId);
-  const name = entry?.title ?? title ?? "Document";
+  const name = entry?.title ?? title ?? m.chat_document_widget_name();
   // A project document is shared with every member; say so where it appears.
-  const kind = entry?.inProject ? "Project document" : "Document";
+  const kind = entry?.inProject ? m.chat_document_widget_project() : m.chat_document_widget_name();
   const status = entry
     ? kind
     : gone
-      ? "Document deleted"
+      ? m.chat_document_widget_deleted()
       : owned
-        ? "Loading document…"
-        : "From another chat";
+        ? m.chat_document_widget_loading()
+        : m.chat_document_widget_elsewhere();
   const contents = (
     <>
       <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-xl">
@@ -56,7 +57,7 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
       <button
         type="button"
         className={cn(activityCardClassName, activityCardInteractiveClassName)}
-        aria-label={`Open document: ${name}`}
+        aria-label={m.chat_document_widget_open({ name })}
         aria-expanded={entry.expanded}
         onClick={entry.open}
       >
@@ -68,7 +69,7 @@ export function DocumentWidget({ documentId, title }: { documentId: string; titl
       {contents}
       {entry?.retry ? (
         <Button size="sm" variant="ghost" onClick={entry.retry}>
-          Retry loading document
+          {m.chat_document_widget_retry()}
         </Button>
       ) : null}
     </div>

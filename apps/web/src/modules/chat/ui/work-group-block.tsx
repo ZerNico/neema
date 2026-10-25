@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
@@ -83,9 +84,9 @@ export function WorkGroupBlock({
   // and for how long: "Thinking" between calls read as stalled. Settled, it says
   // what was done, not how long, since the time spent thinking is not recorded.
   const label = waiting ? (
-    "Waiting for you"
+    m.chat_work_waiting()
   ) : running ? (
-    `Working · ${formatDuration(elapsed)}`
+    m.chat_work_working_for({ duration: formatDuration(elapsed) })
   ) : calls.some((call) => call.family === "integration") ? (
     <IntegrationWorkSummary steps={part.steps} />
   ) : (

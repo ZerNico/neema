@@ -1,7 +1,14 @@
+import { m } from "~/paraglide/messages.js";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkStep } from "./assistant-body.ts";
-import { documentRunLabel, documentRunSucceeded } from "./document-activity-label.ts";
+import {
+  type Clause,
+  clause,
+  documentRunClause,
+  documentRunLabel,
+  documentRunSucceeded,
+} from "./document-activity-label.ts";
 
 /** The calls behind a step, for timing, failures and what is running. */
 export const stepActivities = (step: WorkStep): ToolActivity[] => {
@@ -21,7 +28,37 @@ export const stepActivities = (step: WorkStep): ToolActivity[] => {
   }
 };
 
-const OFFICE_NOUN = { presentation: "presentation", spreadsheet: "spreadsheet", word: "document" };
+type OfficeNoun = "presentation" | "spreadsheet" | "document";
+const OFFICE_NOUN = {
+  presentation: "presentation",
+  spreadsheet: "spreadsheet",
+  word: "document",
+} as const satisfies Record<string, OfficeNoun>;
+
+/** Each Office noun's own sentences, since its gender changes the German around it. */
+const OFFICE_WORDS: Record<
+  OfficeNoun,
+  { working: () => string; created: () => string; edited: () => string; read: () => string }
+> = {
+  presentation: {
+    working: m.chat_work_presentation_working,
+    created: m.chat_work_presentation_created,
+    edited: m.chat_work_presentation_edited,
+    read: m.chat_work_presentation_read,
+  },
+  spreadsheet: {
+    working: m.chat_work_spreadsheet_working,
+    created: m.chat_work_spreadsheet_created,
+    edited: m.chat_work_spreadsheet_edited,
+    read: m.chat_work_spreadsheet_read,
+  },
+  document: {
+    working: m.chat_work_document_working,
+    created: m.chat_work_document_created,
+    edited: m.chat_work_document_edited,
+    read: m.chat_work_document_read,
+  },
+};
 
 /** The Office family a draft step edits; a publish-only step has none. */
 const officeNoun = (step: Extract<WorkStep, { kind: "working-file" }>) => {
@@ -33,117 +70,146 @@ const officeNoun = (step: Extract<WorkStep, { kind: "working-file" }>) => {
 export function stepLabel(step: WorkStep): string {
   switch (step.kind) {
     case "reasoning":
-      return "Thinking";
+      return m.chat_thinking();
     case "web":
       return step.activities.some(
         (call) => call.name === "read_url" && call.status === "running",
       ) || step.activities.every((call) => call.name === "read_url")
-        ? "Reading pages"
-        : "Searching the web";
+        ? m.chat_work_reading_pages()
+        : m.chat_work_searching_web();
     case "knowledge":
-      return "Searching documents";
+      return m.chat_work_searching_documents();
     case "skill":
-      return "Reading a skill";
+      return m.chat_work_reading_skill();
     case "browser":
-      return "Using the browser";
+      return m.chat_work_using_browser();
     case "compaction":
-      return "Summarizing earlier messages";
+      return m.chat_work_summarizing();
     case "document":
       return documentRunLabel(step.activities, step.named ?? false);
     case "working-file": {
       const noun = officeNoun(step);
-      return noun ? `Working on the ${noun}` : "Publishing the file";
+      return noun ? OFFICE_WORDS[noun].working() : m.chat_work_publishing_file();
     }
     case "tool": {
       const call = step.activity;
       switch (call.family) {
         case "integration":
-          return `Using ${call.label}`;
+          return m.chat_work_using({ name: call.label });
         case "custom":
-          return `Running ${call.displayName}`;
+          return m.chat_work_running({ name: call.displayName });
         case "project-file":
-          return "Working with project files";
+          return m.chat_work_project_files();
         case "attachment":
-          return "Reading a file";
+          return m.chat_work_reading_file();
         case "history":
           return call.name === "search_chats"
-            ? "Searching your other chats"
+            ? m.chat_work_searching_chats()
             : call.name === "read_chat"
-              ? "Reading another chat"
-              : "Looking back in this chat";
+              ? m.chat_work_reading_chat()
+              : m.chat_work_looking_back();
         case "map":
-          return "Looking up a route";
+          return m.chat_work_route();
         case "desktop":
-          if (isBrowserTool(call.name)) return "Using the browser";
-          if (call.name === "run_command") return "Running a command";
+          if (isBrowserTool(call.name)) return m.chat_work_using_browser();
+          if (call.name === "run_command") return m.chat_work_running_command();
           if (
             call.name === "write_local_file" ||
             call.name === "edit_local_file" ||
             call.name === "move_local_file" ||
             call.name === "delete_local_file"
           )
-            return "Editing files";
-          if (call.name.startsWith("request_")) return "Asking for access";
-          return "Looking through files";
+            return m.chat_work_editing_files();
+          if (call.name.startsWith("request_")) return m.chat_work_asking_access();
+          return m.chat_work_looking_through_files();
         default:
-          return "Working";
+          return m.chat_work_working();
       }
     }
     default:
-      return "Working";
+      return m.chat_work_working();
   }
 }
 
-/** What a settled step did, in the past tense, for a group without timing. */
-const PAST: Record<string, string> = {
-  Thinking: "Thought",
-  "Reading pages": "Read pages",
-  "Searching the web": "Searched the web",
-  "Searching documents": "Searched documents",
-  "Reading a skill": "Read a skill",
-  "Using the browser": "Used the browser",
-  "Summarizing earlier messages": "Summarized earlier messages",
-  "Working with project files": "Worked with project files",
-  "Reading a file": "Read a file",
-  "Looking back in this chat": "Looked back in this chat",
-  "Searching your other chats": "Searched your other chats",
-  "Reading another chat": "Read another chat",
-  "Looking up a route": "Looked up a route",
-  "Running a command": "Ran a command",
-  "Editing files": "Edited files",
-  "Looking through files": "Looked through files",
-  "Asking for access": "Asked for access",
+/** What a settled step did, in the past tense, as it reads inside a summary. */
+const pastClauses = (step: WorkStep): Clause[] => {
+  switch (step.kind) {
+    case "reasoning":
+      return [clause(m.chat_work_past_thought())];
+    case "web": {
+      const searched = step.activities.some((call) => call.name !== "read_url");
+      const pages = new Set(
+        step.activities.flatMap((call) => (call.name === "read_url" ? call.targets : [])),
+      ).size;
+      const read = pages === 0 ? [] : [clause(m.chat_work_past_read_pages({ count: pages }))];
+      return searched ? [clause(m.chat_work_past_searched_web()), ...read] : read;
+    }
+    case "knowledge":
+      return [clause(m.chat_work_past_searched_documents())];
+    case "skill":
+      return [clause(m.chat_work_past_read_skill())];
+    case "browser":
+      return [clause(m.chat_work_past_used_browser())];
+    case "compaction":
+      return [clause(m.chat_work_past_summarized())];
+    case "document":
+      return [documentRunClause(step.activities, step.named ?? false)];
+    case "working-file": {
+      const noun = officeNoun(step);
+      if (!noun) return [clause(m.chat_work_past_published_file())];
+      const done = step.steps.filter((call) => call.status === "complete");
+      if (done.some((call) => call.family !== "tool-file" && call.origin === "created"))
+        return [clause(OFFICE_WORDS[noun].created())];
+      if (done.some((call) => call.name.startsWith("edit_")))
+        return [clause(OFFICE_WORDS[noun].edited())];
+      return [clause(OFFICE_WORDS[noun].read())];
+    }
+    case "tool": {
+      const call = step.activity;
+      switch (call.family) {
+        // A shipped integration's label already says what the call did: "Searched Outline".
+        case "integration":
+          return [{ inline: lowerFirst(call.label), lead: call.label }];
+        case "custom":
+          return [clause(m.chat_work_past_ran({ name: call.displayName }), call.displayName)];
+        case "project-file":
+          return [clause(m.chat_work_past_project_files())];
+        case "attachment":
+          return [clause(m.chat_work_past_read_file())];
+        case "history":
+          return [
+            clause(
+              call.name === "search_chats"
+                ? m.chat_work_past_searched_chats()
+                : call.name === "read_chat"
+                  ? m.chat_work_past_read_chat()
+                  : m.chat_work_past_looked_back(),
+            ),
+          ];
+        case "map":
+          return [clause(m.chat_work_past_route())];
+        case "desktop":
+          if (isBrowserTool(call.name)) return [clause(m.chat_work_past_used_browser())];
+          if (call.name === "run_command") return [clause(m.chat_work_past_ran_command())];
+          if (
+            call.name === "write_local_file" ||
+            call.name === "edit_local_file" ||
+            call.name === "move_local_file" ||
+            call.name === "delete_local_file"
+          )
+            return [clause(m.chat_work_past_edited_files())];
+          if (call.name.startsWith("request_")) return [clause(m.chat_work_past_asked_access())];
+          return [clause(m.chat_work_past_looked_through_files())];
+        default:
+          return [clause(m.chat_work_past_worked())];
+      }
+    }
+    default:
+      return [clause(m.chat_work_past_worked())];
+  }
 };
 
-const pastLabels = (step: WorkStep): string[] => {
-  if (step.kind === "web") {
-    const searched = step.activities.some((call) => call.name !== "read_url");
-    const pages = new Set(
-      step.activities.flatMap((call) => (call.name === "read_url" ? call.targets : [])),
-    ).size;
-    const read = pages === 0 ? [] : [pages === 1 ? "Read a page" : `Read ${pages} pages`];
-    return searched ? ["Searched the web", ...read] : read;
-  }
-  if (step.kind === "working-file") {
-    const noun = officeNoun(step);
-    if (!noun) return ["Published a file"];
-    const done = step.steps.filter((call) => call.status === "complete");
-    if (done.some((call) => call.family !== "tool-file" && call.origin === "created"))
-      return [`Created the ${noun}`];
-    if (done.some((call) => call.name.startsWith("edit_"))) return [`Edited the ${noun}`];
-    return [`Read the ${noun}`];
-  }
-  // A shipped integration's label already says what the call did: "Searched Outline".
-  if (step.kind === "tool" && step.activity.family === "integration") return [step.activity.label];
-  const present = stepLabel(step);
-  return [
-    PAST[present] ??
-      present
-        .replace(/^Using /, "Used ")
-        .replace(/^Running /, "Ran ")
-        .replace(/^Working$/, "Worked"),
-  ];
-};
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /** A document step none of whose calls succeeded; its own row says so. */
 const failedDocumentStep = (step: WorkStep) =>
@@ -154,14 +220,17 @@ const failedDocumentStep = (step: WorkStep) =>
 /** How a summary names an integration: a server's own tools have no labels written for people. */
 export type IntegrationNamer = (integrationId: string) => { name: string; listed: boolean } | null;
 
-const joined = (names: ReadonlyArray<string>) =>
-  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
+/** "A, B and C" in the reader's language, keeping English without a serial comma. */
+const joined = (items: ReadonlyArray<string>) =>
+  items.length > 1
+    ? m.chat_work_list({ head: items.slice(0, -1).join(", "), last: items.at(-1)! })
+    : (items[0] ?? "");
 
 /**
  * A server's tools by the service and what they did: "Looked in Trello and
  * Notion", "Updated Linear". Its tools' own names stay in the steps below.
  */
-const serviceLabels = (calls: ReadonlyArray<ToolActivity>, describe: IntegrationNamer) => {
+const serviceClauses = (calls: ReadonlyArray<ToolActivity>, describe: IntegrationNamer) => {
   const services = new Map<string, boolean>();
   for (const call of calls) {
     if (call.family !== "integration") continue;
@@ -173,8 +242,12 @@ const serviceLabels = (calls: ReadonlyArray<ToolActivity>, describe: Integration
   const looked = [...services].flatMap(([name, changed]) => (changed ? [] : [name]));
   const updated = [...services].flatMap(([name, changed]) => (changed ? [name] : []));
   return [
-    ...(looked.length ? [`Looked in ${joined(looked)}`] : []),
-    ...(updated.length ? [`Updated ${joined(updated)}`] : []),
+    ...(looked.length
+      ? [clause(m.chat_work_past_looked_in({ services: joined(looked) }), ...looked)]
+      : []),
+    ...(updated.length
+      ? [clause(m.chat_work_past_updated({ services: joined(updated) }), ...updated)]
+      : []),
   ];
 };
 
@@ -193,34 +266,36 @@ export const workSummary = (steps: ReadonlyArray<WorkStep>, describe?: Integrati
     Boolean(describe?.(step.activity.integrationId)?.listed);
   const chosen = acting.length ? acting : steps;
   const services = describe
-    ? serviceLabels(
+    ? serviceClauses(
         chosen.flatMap((step) => (step.kind === "tool" && listedCall(step) ? [step.activity] : [])),
         describe,
       )
     : [];
   // Where the first of a server's calls came, so the summary keeps the order things happened in.
   const first = chosen.findIndex(listedCall);
-  const labels = [
-    ...new Set(
-      chosen.flatMap((step, index) =>
-        listedCall(step) ? (index === first ? services : []) : pastLabels(step),
-      ),
-    ),
+  const clauses = [
+    ...new Map(
+      chosen
+        .flatMap((step, index) =>
+          listedCall(step) ? (index === first ? services : []) : pastClauses(step),
+        )
+        .map((item) => [item.inline, item] as const),
+    ).values(),
   ];
-  if (labels.length === 0) return "Worked";
-  const shown = labels
-    .slice(0, 3)
-    .map((label, index) => (index === 0 ? label : label.charAt(0).toLowerCase() + label.slice(1)));
-  if (labels.length > 3) return `${shown.join(", ")} and more`;
-  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0]!;
+  if (clauses.length === 0) return clause(m.chat_work_past_worked()).lead;
+  const shown = clauses.slice(0, 3).map((item, index) => (index === 0 ? item.lead : item.inline));
+  if (clauses.length > 3) return m.chat_work_list_more({ list: shown.join(", ") });
+  return joined(shown);
 };
 
 export const formatDuration = (ms: number) => {
   const seconds = Math.max(1, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return m.chat_duration_seconds({ seconds });
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
-  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  return rest
+    ? m.chat_duration_minutes_seconds({ minutes, seconds: rest })
+    : m.chat_duration_minutes({ minutes });
 };
 
 /** When the first call started, if the calls say. */

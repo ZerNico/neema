@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Notification03Icon } from "@hugeicons/core-free-icons";
 import { cn } from "~/ui/utils";
 import type { NotifyToolActivity } from "../client/use-message-stream.ts";
@@ -12,10 +13,10 @@ export function NotifyActivityRow({ activity }: { activity: NotifyToolActivity }
         icon={Notification03Icon}
         label={
           activity.status === "running"
-            ? "Notifying you"
+            ? m.chat_notify_running()
             : activity.message
-              ? `Notified you: ${activity.message}`
-              : "Couldn’t notify you"
+              ? m.chat_notify_done({ message: activity.message })
+              : m.chat_notify_failed()
         }
         status={
           activity.status === "running"

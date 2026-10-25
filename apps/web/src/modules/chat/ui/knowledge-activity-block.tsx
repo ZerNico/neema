@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { FolderLibraryIcon } from "@hugeicons/core-free-icons";
 import { useState } from "react";
 import type { KnowledgeToolActivity } from "../client/use-message-stream.ts";
@@ -40,17 +41,17 @@ export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeTo
 
   const headerLabel = running
     ? running.name === "search_knowledge"
-      ? "Searching documents"
+      ? m.chat_knowledge_searching()
       : running.name === "read_knowledge_document"
-        ? "Reading documents"
-        : "Listing documents"
+        ? m.chat_knowledge_reading()
+        : m.chat_knowledge_listing()
     : allFailed
-      ? "Couldn’t search documents"
+      ? m.chat_knowledge_failed()
       : searches.length > 0
-        ? `Searched documents · ${excerpts} ${excerpts === 1 ? "excerpt" : "excerpts"}`
+        ? `${m.chat_knowledge_searched()} · ${m.chat_knowledge_excerpts({ count: excerpts })}`
         : reads.length > 0
-          ? `Read ${readExcerpts} ${readExcerpts === 1 ? "excerpt" : "excerpts"}`
-          : "Listed documents";
+          ? m.chat_knowledge_read_excerpts({ count: readExcerpts })
+          : m.chat_knowledge_listed();
   const hasDetails = queries.length > 0 || reads.length > 0 || listings.length > 0 || failed > 0;
 
   return (
@@ -70,25 +71,24 @@ export function KnowledgeActivityBlock({ activities }: { activities: KnowledgeTo
               <div className="flex flex-col gap-1">
                 <ActivityQueries queries={queries} />
                 {keywordOnly ? (
-                  <p className="text-muted-foreground/70 text-xs">Matched by keywords only</p>
+                  <p className="text-muted-foreground/70 text-xs">
+                    {m.chat_knowledge_keywords_only()}
+                  </p>
                 ) : null}
               </div>
             ) : null}
             {reads.length > 0 ? (
-              <p>
-                Read {readExcerpts} {readExcerpts === 1 ? "excerpt" : "excerpts"} in full
-              </p>
+              <p>{m.chat_knowledge_read_in_full({ count: readExcerpts })}</p>
             ) : null}
             {listings.length > 0 ? (
               <p>
-                Listed {listings.reduce((t, a) => t + (a.summary?.documentsListed ?? 0), 0)}{" "}
-                documents
+                {m.chat_knowledge_listed_count({
+                  count: listings.reduce((t, a) => t + (a.summary?.documentsListed ?? 0), 0),
+                })}
               </p>
             ) : null}
             {failed > 0 && !allFailed ? (
-              <ActivityNote>
-                {failed === 1 ? "One step didn’t work." : `${failed} steps didn’t work.`}
-              </ActivityNote>
+              <ActivityNote>{m.chat_knowledge_steps_failed({ count: failed })}</ActivityNote>
             ) : null}
           </div>
         </DisclosureContent>

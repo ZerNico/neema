@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { use, useState, type ReactNode } from "react";
@@ -28,7 +29,7 @@ function FileTag({ name, title, onClick }: { name: string; title: string; onClic
         "max-w-full cursor-pointer disabled:cursor-default disabled:opacity-60",
       )}
       title={title}
-      aria-label={`${onClick ? "Preview" : "Unavailable file:"} ${name}`}
+      aria-label={onClick ? m.chat_file_preview({ name }) : m.chat_file_unavailable_label({ name })}
       disabled={!onClick}
       onClick={onClick}
     >
@@ -79,7 +80,7 @@ function LocalReference({ path }: { path: string }) {
     <>
       <FileTag
         name={localFileName(path)}
-        title={preview ? resolved! : `${path} · Unavailable on this computer`}
+        title={preview ? resolved! : m.chat_file_unavailable_here({ path })}
         {...(preview ? { onClick: preview.open } : {})}
       />
       {preview?.dialog}
@@ -98,7 +99,7 @@ export function FileReferenceLink({ href, children }: { href: string; children: 
       : undefined;
   if (attachment) return <StoredReference key={attachment.id} attachment={attachment} />;
   return (
-    <span title="This file is unavailable" aria-disabled="true">
+    <span title={m.chat_file_unavailable()} aria-disabled="true">
       {children}
     </span>
   );

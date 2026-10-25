@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Alert02Icon, ArrowRight01Icon, GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -139,7 +140,7 @@ function PageRow({ page, active }: { page: ToolPageStatus; active: boolean }) {
       {failed ? (
         <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
           <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="text-warning size-3.5" />
-          Couldn’t read
+          {m.chat_web_couldnt_read()}
         </span>
       ) : (
         <span className="text-muted-foreground/70 hidden shrink-0 text-xs sm:inline">
@@ -156,8 +157,6 @@ const pagePriority: Record<ToolPageStatus["status"], number> = {
   error: 2,
   done: 3,
 };
-
-const websites = (count: number) => (count === 1 ? "a website" : `${count} websites`);
 
 /**
  * One search-and-read step, written for people who do not care which tool
@@ -198,21 +197,25 @@ export function ToolActivityBlock({
     .at(-1)
     ?.trim();
 
-  const suffix =
-    sourceCount > 0 ? ` · ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}` : "";
+  const withSources = (label: string) =>
+    sourceCount > 0 ? `${label} · ${m.chat_web_sources({ count: sourceCount })}` : label;
   const headerLabel = anyRunning
     ? reads.some((activity) => activity.status === "running")
-      ? `Reading ${readingNow.length === 1 ? hostOf(readingNow[0]!.url) : readingNow.length > 1 ? websites(readingNow.length) : "websites"}`
+      ? readingNow.length === 1
+        ? m.chat_web_reading_host({ host: hostOf(readingNow[0]!.url) })
+        : readingNow.length > 1
+          ? m.chat_web_reading_sites({ count: readingNow.length })
+          : m.chat_web_reading_websites()
       : runningQuery
-        ? `Searching for “${runningQuery}”`
-        : "Searching the web"
+        ? m.chat_web_searching_for({ query: runningQuery })
+        : m.chat_web_searching()
     : allFailed
       ? searches.length > 0
-        ? "Couldn’t search the web"
-        : "Couldn’t read the pages"
+        ? m.chat_web_search_failed()
+        : m.chat_web_read_failed()
       : searches.length > 0
-        ? `Searched the web${suffix}`
-        : `Read ${pages.length === 1 ? "a page" : `${pages.length} pages`}${suffix}`;
+        ? withSources(m.chat_web_searched())
+        : withSources(m.chat_web_read_pages({ count: pages.length }));
 
   let orderedPages = pages;
   if (anyRunning) {
@@ -240,7 +243,7 @@ export function ToolActivityBlock({
           <div className={cn(disclosureBodyRailClassName, "flex flex-col gap-3")}>
             <ActivityQueries queries={queries} />
             {pages.length > 0 ? (
-              <ul className="flex flex-col gap-1.5" aria-label="Pages read">
+              <ul className="flex flex-col gap-1.5" aria-label={m.chat_web_pages_read()}>
                 {visiblePages.map((page) => (
                   <PageRow key={urlKey(page.url)} page={page} active={anyRunning} />
                 ))}
@@ -251,18 +254,14 @@ export function ToolActivityBlock({
                       onClick={() => setShowAllPages(true)}
                       className="hover:text-foreground text-xs transition-colors"
                     >
-                      Show {hiddenPages} more
+                      {m.chat_web_show_more({ count: hiddenPages })}
                     </button>
                   </li>
                 ) : null}
               </ul>
             ) : null}
             {failedSearches > 0 && !allFailed ? (
-              <ActivityNote>
-                {failedSearches === 1
-                  ? "One search didn’t work."
-                  : `${failedSearches} searches didn’t work.`}
-              </ActivityNote>
+              <ActivityNote>{m.chat_web_searches_failed({ count: failedSearches })}</ActivityNote>
             ) : null}
             {canViewSources ? (
               <button
@@ -270,7 +269,7 @@ export function ToolActivityBlock({
                 onClick={onViewSources}
                 className="text-foreground hover:text-primary flex w-fit items-center gap-1 text-xs font-medium transition-colors"
               >
-                View all sources
+                {m.chat_web_view_sources()}
                 <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} className="size-3.5" />
               </button>
             ) : null}

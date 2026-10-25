@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import type { AgentDraftToolActivity } from "../client/use-message-stream.ts";
 import { m } from "~/paraglide/messages.js";

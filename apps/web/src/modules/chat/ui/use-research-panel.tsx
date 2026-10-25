@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { GlobalSearchIcon } from "@hugeicons/core-free-icons";
 import { useCallback } from "react";
 import type { ResearchToolActivity } from "../client/use-message-stream.ts";
@@ -16,8 +17,10 @@ export function researchPanelRequest(
   const running = activity.status === "running";
   return {
     id: researchPanelId(messageId, position),
-    title: activity.progress?.title ?? "Deep research",
-    subtitle: running ? "In progress" : `${webActivities.length} steps`,
+    title: activity.progress?.title ?? m.chat_research_title(),
+    subtitle: running
+      ? m.chat_research_panel_in_progress()
+      : m.chat_research_panel_steps({ count: webActivities.length }),
     icon: GlobalSearchIcon,
     restorable: true,
     body: (

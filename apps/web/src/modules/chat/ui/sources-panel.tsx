@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DocumentSource } from "~/modules/tools/source-schema.ts";
@@ -54,14 +55,14 @@ function DocumentSourceRow({ source }: { source: DocumentSource }) {
         type="button"
         onClick={open}
         className="group flex w-full flex-col gap-1.5 text-left"
-        aria-label={`Source: ${source.title || "Document"}`}
+        aria-label={m.chat_source_label({ title: source.title || m.chat_source_document() })}
       >
         <div className="text-muted-foreground flex items-center gap-2 text-xs">
           <HugeiconsIcon icon={File01Icon} strokeWidth={2} className="size-4" aria-hidden />
           <span className="min-w-0 truncate">{documentLocationLabel(source)}</span>
         </div>
         <p className="group-hover:text-primary text-sm leading-snug font-medium transition-colors">
-          {source.title || "Document"}
+          {source.title || m.chat_source_document()}
         </p>
         {source.snippet ? (
           <p className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">

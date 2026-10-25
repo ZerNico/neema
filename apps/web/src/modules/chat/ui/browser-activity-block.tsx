@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
@@ -17,9 +18,13 @@ import { hostOf } from "./host-of.ts";
 
 type Page = { url: string; title: string };
 
-// "example.com", "example.com and iana.org", "example.com and 2 other sites".
-const sitesPhrase = (sites: ReadonlyArray<string>) =>
-  sites.length <= 2 ? sites.join(" and ") : `${sites[0]} and ${sites.length - 1} other sites`;
+// "Browsed example.com", "… example.com and iana.org", "… example.com and 2 other sites".
+const browsed = (sites: ReadonlyArray<string>) =>
+  sites.length === 1
+    ? m.chat_browser_browsed_one({ site: sites[0]! })
+    : sites.length === 2
+      ? m.chat_browser_browsed_two({ first: sites[0]!, second: sites[1]! })
+      : m.chat_browser_browsed_many({ first: sites[0]!, count: sites.length - 1 });
 
 const lineOf = (activity: DesktopToolActivity) =>
   activity.result?.summary ??
@@ -78,14 +83,14 @@ export function BrowserActivityBlock({
   ];
   const failed = activities.filter((activity) => activity.status === "error").length;
   const headerLabel = waiting
-    ? "Waiting for you"
+    ? m.chat_browser_waiting()
     : running
       ? lineOf(running)
       : failed === activities.length
-        ? "Couldn’t use the browser"
+        ? m.chat_browser_failed()
         : sites.length > 0
-          ? `Browsed ${sitesPhrase(sites)}`
-          : "Used the browser";
+          ? browsed(sites)
+          : m.chat_browser_used();
 
   // A page is linked where the run first reached it, not on every step there.
   const steps: Array<{ activity: DesktopToolActivity; reached: Page | null }> = [];

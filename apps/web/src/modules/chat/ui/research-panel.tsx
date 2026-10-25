@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   Alert02Icon,
   Book02Icon,
@@ -34,16 +35,13 @@ const coverageNote = (progress: ResearchProgress | undefined): string | null => 
   const limitations = progress?.limitations ?? [];
   if (progress?.phase === "aborted") return null;
   if (limitations.some((limitation) => /search was unavailable/i.test(limitation)))
-    return "Web search wasn’t working, so most of the research couldn’t happen.";
+    return m.chat_research_note_no_search();
   if (limitations.some((limitation) => /No usable research reports/i.test(limitation)))
-    return "The research didn’t turn up anything usable.";
+    return m.chat_research_note_nothing();
   const incomplete = (progress?.tasks ?? []).filter((task) => task.status === "error").length;
-  if (incomplete > 0)
-    return incomplete === 1
-      ? "One topic couldn’t be finished, so some of this may be missing."
-      : `${incomplete} topics couldn’t be finished, so some of this may be missing.`;
+  if (incomplete > 0) return m.chat_research_note_incomplete({ count: incomplete });
   if (limitations.some((limitation) => /time limit|cut short|abridged/i.test(limitation)))
-    return "The research ran out of room, so some of this may be missing.";
+    return m.chat_research_note_out_of_room();
   return null;
 };
 
@@ -62,7 +60,11 @@ function StepRow({ activity }: { activity: ResearchStepActivity }) {
       <li className={stepClassName}>
         <ActivityFace
           icon={Book02Icon}
-          label={running ? `Using ${activity.skillName}` : `Used ${activity.skillName}`}
+          label={
+            running
+              ? m.chat_research_step_using_skill({ name: activity.skillName })
+              : m.chat_research_step_used_skill({ name: activity.skillName })
+          }
           status={status}
         />
       </li>
@@ -79,19 +81,19 @@ function StepRow({ activity }: { activity: ResearchStepActivity }) {
             label={
               listing
                 ? running
-                  ? "Listing documents"
-                  : `Listed ${activity.summary?.documentsListed ?? 0} documents`
+                  ? m.chat_research_listing()
+                  : m.chat_research_step_listed({
+                      count: activity.summary?.documentsListed ?? 0,
+                    })
                 : searching
                   ? running
-                    ? "Searching documents"
-                    : "Searched documents"
+                    ? m.chat_research_step_searching_documents()
+                    : m.chat_research_step_searched_documents()
                   : running
-                    ? "Reading documents"
-                    : "Read documents"
+                    ? m.chat_research_reading_documents()
+                    : m.chat_research_step_read_documents()
             }
-            detail={
-              !running && !listing ? `${count} ${count === 1 ? "excerpt" : "excerpts"}` : null
-            }
+            detail={!running && !listing ? m.chat_research_step_excerpts({ count }) : null}
             status={status}
           />
         </div>
@@ -106,9 +108,11 @@ function StepRow({ activity }: { activity: ResearchStepActivity }) {
         <div className={stepClassName}>
           <ActivityFace
             glyph={<FaviconStack urls={targets.slice(0, 4)} />}
-            label={`${running ? "Reading" : status === "failed" ? "Couldn’t read" : "Read"} ${
-              targets.length === 1 ? "a page" : `${targets.length} pages`
-            }`}
+            label={(running
+              ? m.chat_research_step_reading_pages
+              : status === "failed"
+                ? m.chat_research_step_read_failed
+                : m.chat_research_step_read_pages)({ count: targets.length })}
             status={status}
           />
         </div>
@@ -138,14 +142,14 @@ function StepRow({ activity }: { activity: ResearchStepActivity }) {
           icon={Search01Icon}
           label={
             running
-              ? "Searching the web"
+              ? m.chat_research_step_searching_web()
               : status === "failed"
-                ? "Couldn’t search"
-                : "Searched the web"
+                ? m.chat_research_step_search_failed()
+                : m.chat_research_step_searched_web()
           }
           detail={
             activity.resultCount !== undefined && !running && status !== "failed"
-              ? `${activity.resultCount} results`
+              ? m.chat_research_step_results({ count: activity.resultCount })
               : null
           }
           status={status}
@@ -278,8 +282,6 @@ function StepList({ activities }: { activities: ResearchStepActivity[] }) {
   );
 }
 
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
 /** The run's sources by site, as a reader sizes up what it drew on. */
 function SourcesBySite({ activities }: { activities: ResearchStepActivity[] }) {
   const bySite = new Map<string, { url: string; count: number }>();
@@ -295,13 +297,13 @@ function SourcesBySite({ activities }: { activities: ResearchStepActivity[] }) {
   const most = top[0]?.count ?? 1;
   const rest = sites.slice(5).reduce((sum, site) => sum + site.count, 0);
   return (
-    <ul className="flex flex-col gap-1.5" aria-label="Sources by site">
+    <ul className="flex flex-col gap-1.5" aria-label={m.chat_research_sources_by_site()}>
       {top.map((site) => (
         <li key={site.site} className="flex min-w-0 items-center gap-2 text-xs">
           <Favicon url={site.url} className="size-3.5" />
           <span className="min-w-0 flex-1 truncate">{site.site}</span>
           <span className="text-muted-foreground shrink-0 tabular-nums">
-            {plural(site.count, "source")}
+            {m.chat_research_sources({ count: site.count })}
           </span>
           <span className="bg-muted h-1 w-16 shrink-0 overflow-hidden rounded-full" aria-hidden>
             <span
@@ -312,7 +314,9 @@ function SourcesBySite({ activities }: { activities: ResearchStepActivity[] }) {
         </li>
       ))}
       {rest > 0 ? (
-        <li className="text-muted-foreground text-xs">{plural(rest, "more source")}</li>
+        <li className="text-muted-foreground text-xs">
+          {m.chat_research_more_sources({ count: rest })}
+        </li>
       ) : null}
     </ul>
   );
@@ -325,17 +329,20 @@ const taskMilestone = (
   const pages = gatheredPages(activities).size;
   switch (task.status) {
     case "running":
-      return { detail: currentDetail(activities) ?? "Getting started", state: "live" };
+      return {
+        detail: currentDetail(activities) ?? m.chat_research_getting_started(),
+        state: "live",
+      };
     case "error":
-      return { detail: "Couldn’t finish this one", state: "failed" };
+      return { detail: m.chat_research_task_failed(), state: "failed" };
     case "aborted":
-      return { detail: "Stopped", state: "done" };
+      return { detail: m.chat_research_task_stopped(), state: "done" };
     default:
       return {
         detail: pages
-          ? plural(pages, "source")
+          ? m.chat_research_sources({ count: pages })
           : activities.length
-            ? plural(activities.length, "step")
+            ? m.chat_research_steps({ count: activities.length })
             : null,
         state: "done",
       };
@@ -374,8 +381,8 @@ export function ResearchActivityBody({
   if (tasks.length)
     milestones.push({
       key: "plan",
-      title: "Made a plan",
-      detail: plural(tasks.length, "topic"),
+      title: m.chat_research_made_plan(),
+      detail: m.chat_research_topics({ count: tasks.length }),
       state: "done",
       body: (
         <ol className="text-muted-foreground flex list-decimal flex-col gap-1 pl-4 text-xs">
@@ -388,7 +395,7 @@ export function ResearchActivityBody({
       ),
     });
   else if (running)
-    milestones.push({ key: "plan", title: "Planning what to look into", state: "live" });
+    milestones.push({ key: "plan", title: m.chat_research_planning(), state: "live" });
   // A topic joins the story when work on it starts; until then it sits in the plan.
   for (const task of tasks) {
     if (task.status === "queued") continue;
@@ -404,16 +411,16 @@ export function ResearchActivityBody({
   if (unassigned.length)
     milestones.push({
       key: "other",
-      title: "Other steps",
-      detail: plural(unassigned.length, "step"),
+      title: m.chat_research_other_steps(),
+      detail: m.chat_research_steps({ count: unassigned.length }),
       state: unassigned.some((activity) => activity.status === "running") ? "live" : "done",
       body: <StepList activities={unassigned} />,
     });
   if (total)
     milestones.push({
       key: "sources",
-      title: plural(total, "source"),
-      detail: running ? "and counting" : null,
+      title: m.chat_research_sources({ count: total }),
+      detail: running ? m.chat_research_counting() : null,
       state: "done",
       body: <SourcesBySite activities={webActivities} />,
     });
@@ -429,7 +436,7 @@ export function ResearchActivityBody({
           ))}
         </ol>
       ) : (
-        <p className="text-muted-foreground text-xs">Nothing was researched.</p>
+        <p className="text-muted-foreground text-xs">{m.chat_research_nothing()}</p>
       )}
       {note && !running ? <ActivityNote>{note}</ActivityNote> : null}
     </div>

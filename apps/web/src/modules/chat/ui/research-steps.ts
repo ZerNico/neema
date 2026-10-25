@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { ResearchStepActivity } from "./research-panel.tsx";
 import { hostOf } from "./host-of.ts";
@@ -31,16 +32,18 @@ export const currentDetail = (
     else if (!latest || latest.status !== "running") latest = activity;
   }
   if (!latest) return null;
-  if (latest.family === "skill") return `Using ${latest.skillName} guidance`;
+  if (latest.family === "skill") return m.chat_research_using_guidance({ name: latest.skillName });
   if (latest.family === "knowledge")
     return latest.name === "list_knowledge_documents"
-      ? "Listing documents"
+      ? m.chat_research_listing()
       : latest.name === "search_knowledge"
-        ? "Searching knowledge"
-        : "Reading documents";
+        ? m.chat_research_searching_knowledge()
+        : m.chat_research_reading_documents();
   const target = latest.targets.at(-1)?.trim();
   if (!target) return null;
-  return latest.name === "read_url" ? `Reading ${hostOf(target)}` : `Searching “${target}”`;
+  return latest.name === "read_url"
+    ? m.chat_research_reading_host({ host: hostOf(target) })
+    : m.chat_research_searching_query({ query: target });
 };
 
 /** Distinct pages a run's steps gathered, newest site first, for the count and the icons. */
