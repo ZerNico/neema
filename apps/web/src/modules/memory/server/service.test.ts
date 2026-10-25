@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { containsObviousSensitiveValue } from "./service.ts";
+import { MAX_MEMORY_CONTENT_LENGTH } from "../schema.ts";
+import { containsObviousSensitiveValue, prepareMemoryContent } from "./service.ts";
 
 describe("memory sensitive-value rejection", () => {
   it.each([
@@ -107,5 +108,27 @@ describe("memory sensitive-value rejection", () => {
     "My conference room booking code is 123 456 7890.",
   ])("does not reject a general preference: %s", (content) => {
     expect(containsObviousSensitiveValue(content)).toBe(false);
+  });
+});
+
+describe("memory content preparation", () => {
+  it("stores trimmed content and refuses what no memory may hold", () => {
+    expect(prepareMemoryContent("  Prefers tea  ")).toMatchObject({
+      ok: true,
+      content: "Prefers tea",
+    });
+    expect(prepareMemoryContent("   ")).toEqual({ ok: false, reason: "empty" });
+    expect(prepareMemoryContent("x".repeat(MAX_MEMORY_CONTENT_LENGTH + 1))).toEqual({
+      ok: false,
+      reason: "too_long",
+    });
+    expect(prepareMemoryContent("password is correct-horse-battery-staple")).toEqual({
+      ok: false,
+      reason: "sensitive",
+    });
+  });
+
+  it("measures against the limit of the memory it is for", () => {
+    expect(prepareMemoryContent("12345", 4)).toEqual({ ok: false, reason: "too_long" });
   });
 });

@@ -85,8 +85,12 @@ describe("prepareMemoryTool", () => {
   it.each([
     [{}, "invalid_content", undefined],
     [{ content: 7 }, "invalid_content", undefined],
-    [{ content: "   " }, "empty", undefined],
-    [{ content: "x".repeat(MAX_MEMORY_CONTENT_LENGTH + 1) }, "too_long", undefined],
+    [{ content: "   " }, "empty", { outcome: "rejected", reason: "empty" }],
+    [
+      { content: "x".repeat(MAX_MEMORY_CONTENT_LENGTH + 1) },
+      "too_long",
+      { outcome: "rejected", reason: "too_long" },
+    ],
     [{ content: "Fine", replaces: "1" }, "invalid_replaces", undefined],
     [{ content: "Fine", replaces: 99 }, "unknown_ordinal", undefined],
     [{ content: "Fine" }, "sensitive", { outcome: "rejected", reason: "sensitive" }],
@@ -236,8 +240,6 @@ describe("save_memory malformed parameters", () => {
   it.each([
     ["missing content", {}],
     ["non-string content", { content: 42 }],
-    ["blank content", { content: "   " }],
-    ["oversized content", { content: oversized }],
     ["string replaces", { content: "Remember this", replaces: "1" }],
     ["fractional replaces", { content: "Remember this", replaces: 1.5 }],
     ["zero replaces", { content: "Remember this", replaces: 0 }],

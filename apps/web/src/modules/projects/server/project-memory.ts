@@ -3,8 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { projectMemories, user } from "~/db/schema/index.ts";
 import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
-import { hashMemoryContent } from "~/modules/memory/server/content-hash.ts";
-import { containsObviousSensitiveValue } from "~/modules/memory/server/service.ts";
+import { prepareMemoryContent } from "~/modules/memory/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
@@ -24,15 +23,7 @@ export type ProjectMemorySave =
       reason: "empty" | "too_long" | "sensitive" | "limit_reached" | "read_only";
     };
 
-const prepare = (content: string) => {
-  const trimmed = content.trim();
-  if (!trimmed) return { ok: false as const, reason: "empty" as const };
-  if (trimmed.length > PROJECT_MEMORY_LIMITS.content)
-    return { ok: false as const, reason: "too_long" as const };
-  if (containsObviousSensitiveValue(trimmed))
-    return { ok: false as const, reason: "sensitive" as const };
-  return { ok: true as const, content: trimmed, contentHash: hashMemoryContent(trimmed) };
-};
+const prepare = (content: string) => prepareMemoryContent(content, PROJECT_MEMORY_LIMITS.content);
 const rejectionText = {
   empty: "A project memory cannot be empty.",
   too_long: `A project memory can be at most ${PROJECT_MEMORY_LIMITS.content} characters.`,

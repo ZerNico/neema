@@ -157,19 +157,11 @@ type Validated<A> =
   | { readonly ok: true; readonly value: A }
   | { readonly ok: false; readonly reason: SaveMemoryRejection; readonly message: string };
 
-// Mirrors the service's own preparation so a malformed call is answered here
-// instead of walking untrusted data through storage.
-const readContent = (raw: unknown): Validated<string> => {
-  if (!Predicate.isString(raw))
-    return { ok: false, reason: "invalid_content", message: INVALID_CONTENT_MESSAGE };
-  const content = raw.trim();
-  if (content.length === 0)
-    return { ok: false, reason: "empty", message: REJECTION_MESSAGES.empty };
-  if (content.length > MAX_MEMORY_CONTENT_LENGTH) {
-    return { ok: false, reason: "too_long", message: REJECTION_MESSAGES.too_long };
-  }
-  return { ok: true, value: content };
-};
+// Only the type: emptiness, length and secrets are the memory services' to judge.
+const readContent = (raw: unknown): Validated<string> =>
+  Predicate.isString(raw)
+    ? { ok: true, value: raw }
+    : { ok: false, reason: "invalid_content", message: INVALID_CONTENT_MESSAGE };
 
 // `null` is how models routinely spell "no value" for an optional field, so it
 // means "add a new memory". Anything else that is not a positive whole number

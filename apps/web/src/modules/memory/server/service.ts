@@ -145,14 +145,16 @@ export const containsObviousSensitiveValue = (content: string): boolean =>
   containsPaymentCard(content) ||
   containsIban(content);
 
-const prepareContent = (
+/** What any memory, a person's or a project's, is stored as, or why it is refused. */
+export const prepareMemoryContent = (
   content: string,
+  maxLength: number = MAX_MEMORY_CONTENT_LENGTH,
 ):
   | { ok: true; content: string; contentHash: string }
   | { ok: false; reason: MemoryRejectionReason } => {
   const trimmed = content.trim();
   if (trimmed.length === 0) return { ok: false, reason: "empty" };
-  if (trimmed.length > MAX_MEMORY_CONTENT_LENGTH) return { ok: false, reason: "too_long" };
+  if (trimmed.length > maxLength) return { ok: false, reason: "too_long" };
   if (containsObviousSensitiveValue(trimmed)) return { ok: false, reason: "sensitive" };
   return { ok: true, content: trimmed, contentHash: hashMemoryContent(trimmed) };
 };
@@ -247,7 +249,7 @@ export class MemoryService extends Context.Service<
         content: string,
       ) {
         yield* requireMemory(userId);
-        const prepared = prepareContent(content);
+        const prepared = prepareMemoryContent(content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
         }
@@ -261,7 +263,7 @@ export class MemoryService extends Context.Service<
         input: { memoryId: string; content: string },
       ) {
         yield* requireMemory(userId);
-        const prepared = prepareContent(input.content);
+        const prepared = prepareMemoryContent(input.content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
         }
@@ -295,7 +297,7 @@ export class MemoryService extends Context.Service<
         input: SaveModelMemoryInput,
       ) {
         yield* requireMemory(userId);
-        const prepared = prepareContent(input.content);
+        const prepared = prepareMemoryContent(input.content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
         }
