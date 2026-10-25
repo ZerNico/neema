@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { Editor } from "@tiptap/core";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { ReactNodeViewRenderer } from "@tiptap/react";
@@ -23,7 +24,10 @@ export const BrowserDetails = Details.extend({
     toggle.className = "details-toggle";
     const label = () => {
       toggle.setAttribute("aria-expanded", String(open));
-      toggle.setAttribute("aria-label", open ? "Fold section" : "Unfold section");
+      toggle.setAttribute(
+        "aria-label",
+        open ? m.documents_details_fold() : m.documents_details_unfold(),
+      );
     };
     label();
     // A click must not move the caret into the title.

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Selection } from "@tiptap/pm/state";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { useState } from "react";
@@ -60,7 +61,7 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
         <button
           ref={setAnchor}
           type="button"
-          aria-label={note ? `Footnote: ${note}` : "Footnote"}
+          aria-label={note ? m.documents_footnote_label({ note }) : m.documents_editor_footnote()}
           className={cn(
             "footnote-number text-primary rounded-sm px-0.5 font-medium",
             (selected || open) && "ring-ring/50 ring-2",
@@ -79,9 +80,9 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
         <PopoverContent anchor={anchor} align="start" className="w-80">
           {editing ? (
             <Textarea
-              aria-label="Footnote"
+              aria-label={m.documents_editor_footnote()}
               value={value}
-              placeholder="The note, as it appears at the foot of the page"
+              placeholder={m.documents_footnote_placeholder()}
               onChange={(event) => {
                 if (typed === null) setBase(note);
                 setTyped(event.target.value);
@@ -98,7 +99,7 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
           {editing && changedMeanwhile ? (
             // Closing keeps what this person typed; they see the other version first.
             <div role="status" className="mt-2 flex flex-col gap-1 text-xs">
-              <span className="text-muted-foreground">Someone changed this note meanwhile:</span>
+              <span className="text-muted-foreground">{m.documents_footnote_changed()}</span>
               <span>{note}</span>
               <Button
                 size="xs"
@@ -109,7 +110,7 @@ export function FootnoteView({ node, selected, editor, getPos }: ReactNodeViewPr
                   setBase(null);
                 }}
               >
-                Use theirs
+                {m.documents_footnote_use_theirs()}
               </Button>
             </div>
           ) : null}

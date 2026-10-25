@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ColorPicker } from "~/ui/color-picker";
 import { Toolbar } from "@base-ui/react/toolbar";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
@@ -129,7 +130,7 @@ export function ColorSwatches({
         ))}
       </div>
       <div className="flex flex-col gap-2">
-        <span className="text-muted-foreground text-xs">More colours</span>
+        <span className="text-muted-foreground text-xs">{m.documents_color_more()}</span>
         <ColorPicker value={value} onChange={onChange} />
       </div>
     </div>

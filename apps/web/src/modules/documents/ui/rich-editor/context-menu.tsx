@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { toastError } from "~/ui/error-toast.ts";
 import type { Transaction } from "@tiptap/pm/state";
 import { Mapping } from "@tiptap/pm/transform";
@@ -121,7 +122,7 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
       <ContextMenuContent className="w-56">
         <Item
           icon={ScissorIcon}
-          label="Cut"
+          label={m.documents_editor_cut()}
           shortcut="⌘X"
           disabled={state.empty}
           onClick={() => {
@@ -142,20 +143,20 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
                 if (range.from < range.to && still === text)
                   editor.chain().focus().deleteRange(range).run();
               })
-              .catch((error: unknown) => toastError("Couldn’t cut the selection.", error))
+              .catch((error: unknown) => toastError(m.documents_editor_cut_failed(), error))
               .finally(() => editor.off("transaction", follow));
           }}
         />
         <Item
           icon={Copy01Icon}
-          label="Copy"
+          label={m.common_copy()}
           shortcut="⌘C"
           disabled={state.empty}
           onClick={() => void navigator.clipboard.writeText(selected())}
         />
         <Item
           icon={TaskDaily01Icon}
-          label="Paste"
+          label={m.documents_editor_paste()}
           shortcut="⌘V"
           onClick={() =>
             void navigator.clipboard.readText().then(
@@ -167,7 +168,11 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
         {focusComposer && !state.empty ? (
           <>
             <ContextMenuSeparator />
-            <Item icon={AiChat02Icon} label="Ask about the selection" onClick={focusComposer} />
+            <Item
+              icon={AiChat02Icon}
+              label={m.documents_editor_ask_selection()}
+              onClick={focusComposer}
+            />
           </>
         ) : null}
         {state.empty ? null : (
@@ -175,24 +180,24 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
             <ContextMenuSeparator />
             <Item
               icon={TextBoldIcon}
-              label="Bold"
+              label={m.documents_editor_bold()}
               shortcut="⌘B"
               onClick={() => run((c) => c.toggleBold())}
             />
             <Item
               icon={TextItalicIcon}
-              label="Italic"
+              label={m.documents_editor_italic()}
               shortcut="⌘I"
               onClick={() => run((c) => c.toggleItalic())}
             />
             <Item
               icon={TextStrikethroughIcon}
-              label="Strikethrough"
+              label={m.documents_editor_strikethrough()}
               onClick={() => run((c) => c.toggleStrike())}
             />
             <Item
               icon={SourceCodeIcon}
-              label="Inline code"
+              label={m.documents_editor_inline_code()}
               onClick={() => run((c) => c.toggleCode())}
             />
           </>
@@ -201,48 +206,52 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <HugeiconsIcon icon={TextIcon} strokeWidth={2} />
-            Turn into
+            {m.documents_editor_turn_into()}
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
-            <Item icon={TextIcon} label="Text" onClick={() => run((c) => c.setParagraph())} />
+            <Item
+              icon={TextIcon}
+              label={m.documents_editor_text()}
+              onClick={() => run((c) => c.setParagraph())}
+            />
             <Item
               icon={Heading01Icon}
-              label="Heading 1"
+              label={m.documents_editor_heading({ level: 1 })}
               onClick={() => run((c) => c.setHeading({ level: 1 }))}
             />
             <Item
               icon={Heading02Icon}
-              label="Heading 2"
+              label={m.documents_editor_heading({ level: 2 })}
               onClick={() => run((c) => c.setHeading({ level: 2 }))}
             />
             <Item
               icon={Heading03Icon}
-              label="Heading 3"
+              label={m.documents_editor_heading({ level: 3 })}
               onClick={() => run((c) => c.setHeading({ level: 3 }))}
             />
             <Item
               icon={LeftToRightListBulletIcon}
-              label="Bulleted list"
+              label={m.documents_editor_bulleted_list()}
               onClick={() => run((c) => c.toggleBulletList())}
             />
             <Item
               icon={LeftToRightListNumberIcon}
-              label="Numbered list"
+              label={m.documents_editor_numbered_list()}
               onClick={() => run((c) => c.toggleOrderedList())}
             />
             <Item
               icon={CheckListIcon}
-              label="Checklist"
+              label={m.documents_editor_checklist()}
               onClick={() => run((c) => c.toggleTaskList())}
             />
             <Item
               icon={QuoteDownIcon}
-              label="Quote"
+              label={m.documents_editor_quote()}
               onClick={() => run((c) => c.toggleBlockquote())}
             />
             <Item
               icon={CodeSquareIcon}
-              label="Code block"
+              label={m.documents_editor_code_block()}
               onClick={() => run((c) => c.toggleCodeBlock())}
             />
           </ContextMenuSubContent>
@@ -250,12 +259,12 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
-            Insert
+            {m.documents_editor_insert()}
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
             <Item
               icon={Calendar03Icon}
-              label="Date"
+              label={m.documents_editor_date()}
               onClick={() =>
                 run((c) =>
                   c.insertContent([
@@ -267,12 +276,12 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
             />
             <Item
               icon={LayoutTable01Icon}
-              label="Table"
+              label={m.documents_editor_table()}
               onClick={() => run((c) => c.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))}
             />
             <Item
               icon={MinusSignIcon}
-              label="Divider"
+              label={m.documents_editor_divider()}
               onClick={() => run((c) => c.setHorizontalRule())}
             />
           </ContextMenuSubContent>
@@ -282,60 +291,60 @@ export function EditorContextMenu({ editor, children }: { editor: Editor; childr
             <ContextMenuSeparator />
             <Item
               icon={LayoutAlignTopIcon}
-              label="Add row above"
+              label={m.documents_table_add_row_above()}
               onClick={() => run((c) => c.addRowBefore())}
             />
             <Item
               icon={LayoutAlignBottomIcon}
-              label="Add row below"
+              label={m.documents_table_add_row_below()}
               onClick={() => run((c) => c.addRowAfter())}
             />
             <Item
               icon={LayoutAlignLeftIcon}
-              label="Add column left"
+              label={m.documents_table_add_column_left()}
               onClick={() => run((c) => c.addColumnBefore())}
             />
             <Item
               icon={LayoutAlignRightIcon}
-              label="Add column right"
+              label={m.documents_table_add_column_right()}
               onClick={() => run((c) => c.addColumnAfter())}
             />
             <Item
               icon={RowDeleteIcon}
-              label="Delete row"
+              label={m.documents_table_delete_row()}
               onClick={() => run((c) => c.deleteRow())}
             />
             <Item
               icon={ColumnDeleteIcon}
-              label="Delete column"
+              label={m.documents_table_delete_column()}
               onClick={() => run((c) => c.deleteColumn())}
             />
             <ContextMenuSeparator />
             <Item
               icon={TableRowsSplitIcon}
-              label="Toggle header row"
+              label={m.documents_table_toggle_header_row()}
               onClick={() => run((c) => c.toggleHeaderRow())}
             />
             <Item
               icon={TableColumnsSplitIcon}
-              label="Toggle header column"
+              label={m.documents_table_toggle_header_column()}
               onClick={() => run((c) => c.toggleHeaderColumn())}
             />
             <ContextMenuSeparator />
             <Item
               icon={SortByUp01Icon}
-              label="Sort column ascending"
+              label={m.documents_table_sort_ascending()}
               onClick={() => sortColumn(editor, 1)}
             />
             <Item
               icon={SortByDown01Icon}
-              label="Sort column descending"
+              label={m.documents_table_sort_descending()}
               onClick={() => sortColumn(editor, -1)}
             />
             <ContextMenuSeparator />
             <Item
               icon={Delete02Icon}
-              label="Delete table"
+              label={m.documents_table_delete()}
               variant="destructive"
               onClick={() => run((c) => c.deleteTable())}
             />

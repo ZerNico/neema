@@ -1,6 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { toast } from "sonner";
 import { uuidv7 } from "uuidv7";
+import { m } from "~/paraglide/messages.js";
 import { toastError } from "~/ui/error-toast.ts";
 import { commentsKey, type CommentsMeta } from "../client/comments-plugin.ts";
 import type { DocumentDiscussion } from "../client/use-document.ts";
@@ -61,8 +62,8 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
       thread: threadId,
     }).catch(() => null);
     if (sent === false || sent === undefined)
-      toast.error("Couldn’t send it to the assistant", {
-        description: "Try again once the current answer is done.",
+      toast.error(m.documents_comments_ask_failed(), {
+        description: m.documents_comments_ask_failed_description(),
       });
   };
   return {
@@ -82,7 +83,7 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
       } catch (error) {
         const anchor = commentAnchors(editor.state.doc).get(thread);
         if (anchor) editor.view.dispatch(editor.state.tr.removeMark(anchor.from, anchor.to, mark));
-        toastError("Couldn’t add the comment.", error);
+        toastError(m.documents_comments_add_failed(), error);
         return;
       }
       setComments(editor, { active: thread });
@@ -92,7 +93,7 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
       try {
         await discussion.comment(threadId, body, { toAssistant });
       } catch (error) {
-        toastError("Couldn’t send the reply.", error);
+        toastError(m.documents_comments_reply_failed(), error);
         return;
       }
       if (toAssistant) await sendToAssistant(threadId, quote, body);
@@ -100,11 +101,11 @@ export const commentActions = (editor: Editor, discussion: DocumentDiscussion) =
     resolve: (threadId: string, resolved: boolean) =>
       discussion
         .resolve(threadId, resolved)
-        .catch((error: unknown) => toastError("Couldn’t update the thread.", error)),
+        .catch((error: unknown) => toastError(m.documents_comments_resolve_failed(), error)),
     remove: (commentId: string) =>
       discussion
         .remove(commentId)
-        .catch((error: unknown) => toastError("Couldn’t delete the comment.", error)),
+        .catch((error: unknown) => toastError(m.documents_comments_delete_failed(), error)),
   };
 };
 export type CommentActions = ReturnType<typeof commentActions>;

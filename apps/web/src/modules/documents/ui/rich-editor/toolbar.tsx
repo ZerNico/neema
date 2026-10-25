@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowDown01Icon,
   Calendar03Icon,
@@ -85,24 +86,25 @@ const run = (editor: Editor, command: (chain: Chain) => Chain) =>
 // A control taking focus would drop the editor's selection first.
 const keepSelection = (event: { preventDefault: () => void }) => event.preventDefault();
 
+const heading = (level: number) => () => m.documents_editor_heading({ level });
 const BLOCKS = [
-  { value: "paragraph", label: "Text", icon: TextIcon },
-  { value: "h1", label: "Heading 1", icon: Heading01Icon },
-  { value: "h2", label: "Heading 2", icon: Heading02Icon },
-  { value: "h3", label: "Heading 3", icon: Heading03Icon },
-  { value: "h4", label: "Heading 4", icon: Heading04Icon },
-  { value: "h5", label: "Heading 5", icon: Heading05Icon },
-  { value: "h6", label: "Heading 6", icon: Heading06Icon },
+  { value: "paragraph", label: m.documents_editor_text, icon: TextIcon },
+  { value: "h1", label: heading(1), icon: Heading01Icon },
+  { value: "h2", label: heading(2), icon: Heading02Icon },
+  { value: "h3", label: heading(3), icon: Heading03Icon },
+  { value: "h4", label: heading(4), icon: Heading04Icon },
+  { value: "h5", label: heading(5), icon: Heading05Icon },
+  { value: "h6", label: heading(6), icon: Heading06Icon },
 ] as const;
 type Block = (typeof BLOCKS)[number]["value"];
 
 /** Callouts by kind, as GitHub names its alerts. */
-const CALLOUTS: ReadonlyArray<{ kind: CalloutKind; label: string; icon: Icon }> = [
-  { kind: "note", label: "Note", icon: InformationSquareIcon },
-  { kind: "tip", label: "Tip", icon: BulbIcon },
-  { kind: "important", label: "Important", icon: AlertDiamondIcon },
-  { kind: "warning", label: "Warning", icon: Alert02Icon },
-  { kind: "caution", label: "Caution", icon: StopIcon },
+const CALLOUTS: ReadonlyArray<{ kind: CalloutKind; label: () => string; icon: Icon }> = [
+  { kind: "note", label: m.documents_callout_note, icon: InformationSquareIcon },
+  { kind: "tip", label: m.documents_callout_tip, icon: BulbIcon },
+  { kind: "important", label: m.documents_callout_important, icon: AlertDiamondIcon },
+  { kind: "warning", label: m.documents_callout_warning, icon: Alert02Icon },
+  { kind: "caution", label: m.documents_callout_caution, icon: StopIcon },
 ];
 
 const setBlock = (editor: Editor, block: Block) =>
@@ -278,59 +280,96 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
   const tabs: RibbonTab<"home" | "insert" | "review" | "view">[] = [
     {
       value: "home",
-      label: "Home",
+      label: m.documents_ribbon_tab_home(),
       groups: [
         {
           id: "text",
-          label: "Text",
+          label: m.documents_ribbon_group_text(),
           controls: (
             <>
               <TextStyleMenu editor={editor} block={state.block} />
-              {format("Bold", TextBoldIcon, state.bold, (c) => c.toggleBold(), "⌘B")}
-              {format("Italic", TextItalicIcon, state.italic, (c) => c.toggleItalic(), "⌘I")}
               {format(
-                "Underline",
+                m.documents_editor_bold(),
+                TextBoldIcon,
+                state.bold,
+                (c) => c.toggleBold(),
+                "⌘B",
+              )}
+              {format(
+                m.documents_editor_italic(),
+                TextItalicIcon,
+                state.italic,
+                (c) => c.toggleItalic(),
+                "⌘I",
+              )}
+              {format(
+                m.documents_editor_underline(),
                 TextUnderlineIcon,
                 state.underline,
                 (c) => c.toggleUnderline(),
                 "⌘U",
               )}
-              {format("Highlight", HighlighterIcon, state.highlight, (c) => c.toggleHighlight())}
+              {format(m.documents_editor_highlight(), HighlighterIcon, state.highlight, (c) =>
+                c.toggleHighlight(),
+              )}
               {format(
-                "Strikethrough",
+                m.documents_editor_strikethrough(),
                 TextStrikethroughIcon,
                 state.strike,
                 (c) => c.toggleStrike(),
                 "⌘⇧S",
               )}
-              {format("Inline code", SourceCodeIcon, state.code, (c) => c.toggleCode(), "⌘E")}
-              <Format icon={Link01Icon} label="Link" pressed={state.link} onPress={setLinkAnchor} />
+              {format(
+                m.documents_editor_inline_code(),
+                SourceCodeIcon,
+                state.code,
+                (c) => c.toggleCode(),
+                "⌘E",
+              )}
+              <Format
+                icon={Link01Icon}
+                label={m.documents_editor_link()}
+                pressed={state.link}
+                onPress={setLinkAnchor}
+              />
             </>
           ),
         },
         {
           id: "paragraph",
-          label: "Paragraph",
+          label: m.documents_ribbon_group_paragraph(),
           controls: (
             <>
               {format(
-                "Bulleted list",
+                m.documents_editor_bulleted_list(),
                 LeftToRightListBulletIcon,
                 state.bulletList,
                 (c) => c.toggleBulletList(),
                 "⌘⇧8",
               )}
               {format(
-                "Numbered list",
+                m.documents_editor_numbered_list(),
                 LeftToRightListNumberIcon,
                 state.orderedList,
                 (c) => c.toggleOrderedList(),
                 "⌘⇧7",
               )}
-              {format("Checklist", CheckListIcon, state.taskList, (c) => c.toggleTaskList(), "⌘⇧9")}
-              {format("Quote", QuoteDownIcon, state.blockquote, (c) => c.toggleBlockquote(), "⌘⇧B")}
               {format(
-                "Code block",
+                m.documents_editor_checklist(),
+                CheckListIcon,
+                state.taskList,
+                (c) => c.toggleTaskList(),
+                "⌘⇧9",
+              )}
+              {format(
+                m.documents_editor_quote(),
+                QuoteDownIcon,
+                state.blockquote,
+                (c) => c.toggleBlockquote(),
+                "⌘⇧B",
+              )}
+              {format(
+                m.documents_editor_code_block(),
                 CodeSquareIcon,
                 state.codeBlock,
                 (c) => c.toggleCodeBlock(),
@@ -341,11 +380,11 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
         },
         {
           id: "editing",
-          label: "Editing",
+          label: m.documents_ribbon_group_editing(),
           controls: (
             <Action
               icon={SearchReplaceIcon}
-              label="Find and replace"
+              label={m.documents_editor_find_replace()}
               shortcut="⌘⇧H"
               disabled={false}
               onPress={() => setFindOpen(editor, "replace")}
@@ -356,21 +395,21 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
     },
     {
       value: "insert",
-      label: "Insert",
+      label: m.documents_ribbon_tab_insert(),
       groups: [
         {
           id: "tables",
-          label: "Tables",
+          label: m.documents_ribbon_group_tables(),
           controls: <TableMenu editor={editor} inTable={state.table} />,
         },
         {
           id: "math",
-          label: "Formulas",
+          label: m.documents_ribbon_group_formulas(),
           controls: (
             <>
-              {action("Formula", FunctionIcon, insertFormula)}
+              {action(m.documents_editor_formula(), FunctionIcon, insertFormula)}
               {action(
-                "Inline formula",
+                m.documents_editor_inline_formula(),
                 FunctionOfXIcon,
                 insert({ type: "inlineMath", attrs: { latex: "" } }),
               )}
@@ -379,27 +418,27 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
         },
         {
           id: "blocks",
-          label: "Blocks",
+          label: m.documents_ribbon_group_blocks(),
           controls: (
             <>
               <Action
                 icon={Image01Icon}
-                label="Image"
+                label={m.documents_editor_image()}
                 disabled={false}
                 onPress={() => pickImages(editor)}
               />
-              {action("Divider", MinusSignIcon, (c) => c.setHorizontalRule())}
-              {action("Date", Calendar03Icon, insertToday)}
-              {action("Mention someone", UserIcon, insert("@"))}
+              {action(m.documents_editor_divider(), MinusSignIcon, (c) => c.setHorizontalRule())}
+              {action(m.documents_editor_date(), Calendar03Icon, insertToday)}
+              {action(m.documents_editor_mention(), UserIcon, insert("@"))}
             </>
           ),
         },
         {
           id: "sections",
-          label: "Sections",
+          label: m.documents_ribbon_group_sections(),
           controls: (
             <>
-              <ToolbarMenu label="Callout" icon={InformationSquareIcon}>
+              <ToolbarMenu label={m.documents_editor_callout()} icon={InformationSquareIcon}>
                 <DropdownMenuContent align="start" className="w-44">
                   {CALLOUTS.map((callout) => (
                     <DropdownMenuItem
@@ -407,13 +446,13 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
                       onClick={() => run(editor, setCallout(callout.kind))}
                     >
                       <HugeiconsIcon icon={callout.icon} strokeWidth={2} />
-                      {callout.label}
+                      {callout.label()}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </ToolbarMenu>
-              {action("Collapsible section", ArrowRight01Icon, insertDetails)}
-              {action("Footnote", TextFootnoteIcon, insertFootnote)}
+              {action(m.documents_editor_collapsible(), ArrowRight01Icon, insertDetails)}
+              {action(m.documents_editor_footnote(), TextFootnoteIcon, insertFootnote)}
             </>
           ),
         },
@@ -421,15 +460,15 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
     },
     {
       value: "review",
-      label: "Review",
+      label: m.documents_ribbon_tab_review(),
       groups: [
         {
           id: "comments",
-          label: "Comments",
+          label: m.documents_ribbon_group_comments(),
           controls: (
             <Action
               icon={CommentAdd01Icon}
-              label="New comment"
+              label={m.documents_editor_new_comment()}
               disabled={!state.canComment}
               onPress={() => startComment(editor)}
             />
@@ -437,11 +476,11 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
         },
         {
           id: "history",
-          label: "History",
+          label: m.documents_ribbon_group_history(),
           controls: (
             <Action
               icon={Clock01Icon}
-              label="Version history"
+              label={m.documents_editor_version_history()}
               disabled={false}
               onPress={() => setHistory(true)}
             />
@@ -451,20 +490,20 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
     },
     {
       value: "view",
-      label: "View",
+      label: m.documents_ribbon_tab_view(),
       groups: [
         {
           id: "navigate",
-          label: "Navigate",
+          label: m.documents_ribbon_group_navigate(),
           controls: <OutlineMenu editor={editor} />,
         },
         {
           id: "show",
-          label: "Show",
+          label: m.documents_ribbon_group_show(),
           controls: (
             <Format
               icon={TextNumberSignIcon}
-              label="Word count"
+              label={m.documents_editor_word_count()}
               pressed={wordCount}
               onPress={() => setWordCountShown(!wordCount)}
             />
@@ -481,14 +520,14 @@ export function DocumentToolbar({ editor, documentId }: { editor: Editor; docume
           <>
             <Action
               icon={Undo02Icon}
-              label="Undo"
+              label={m.documents_editor_undo()}
               shortcut="⌘Z"
               disabled={!state.canUndo}
               onPress={() => run(editor, (c) => c.undo())}
             />
             <Action
               icon={Redo02Icon}
-              label="Redo"
+              label={m.documents_editor_redo()}
               shortcut="⌘⇧Z"
               disabled={!state.canRedo}
               onPress={() => run(editor, (c) => c.redo())}
@@ -525,7 +564,7 @@ function TextStyleMenu({ editor, block }: { editor: Editor; block: Block }) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      aria-label={`Text style: ${shown.label}`}
+                      aria-label={m.documents_editor_text_style_current({ style: shown.label() })}
                       className="text-muted-foreground"
                       onMouseDown={keepSelection}
                     />
@@ -538,7 +577,7 @@ function TextStyleMenu({ editor, block }: { editor: Editor; block: Block }) {
           <HugeiconsIcon icon={shown.icon} strokeWidth={2} />
           <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
         </TooltipTrigger>
-        <Hint label="Text style" />
+        <Hint label={m.documents_editor_text_style()} />
       </Tooltip>
       <DropdownMenuContent align="start" className="w-44">
         <DropdownMenuRadioGroup
@@ -548,7 +587,7 @@ function TextStyleMenu({ editor, block }: { editor: Editor; block: Block }) {
           {BLOCKS.map((item) => (
             <DropdownMenuRadioItem key={item.value} value={item.value}>
               <HugeiconsIcon icon={item.icon} strokeWidth={2} />
-              {item.label}
+              {item.label()}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -565,7 +604,7 @@ function InsertTableItem({ editor }: { editor: Editor }) {
       }
     >
       <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
-      Insert table
+      {m.documents_table_insert()}
     </DropdownMenuItem>
   );
 }
@@ -575,28 +614,28 @@ function TableItems({ editor }: { editor: Editor }) {
     <>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowBefore())}>
         <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
-        Add row above
+        {m.documents_table_add_row_above()}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addRowAfter())}>
         <HugeiconsIcon icon={RowInsertIcon} strokeWidth={2} />
-        Add row below
+        {m.documents_table_add_row_below()}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnBefore())}>
         <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />
-        Add column left
+        {m.documents_table_add_column_left()}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.addColumnAfter())}>
         <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={2} />
-        Add column right
+        {m.documents_table_add_column_right()}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.deleteRow())}>
         <HugeiconsIcon icon={RowDeleteIcon} strokeWidth={2} />
-        Delete row
+        {m.documents_table_delete_row()}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => run(editor, (chain) => chain.deleteColumn())}>
         <HugeiconsIcon icon={ColumnDeleteIcon} strokeWidth={2} />
-        Delete column
+        {m.documents_table_delete_column()}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem
@@ -604,7 +643,7 @@ function TableItems({ editor }: { editor: Editor }) {
         onClick={() => run(editor, (chain) => chain.deleteTable())}
       >
         <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-        Delete table
+        {m.documents_table_delete()}
       </DropdownMenuItem>
     </>
   );
@@ -625,7 +664,7 @@ function TableMenu({ editor, inTable }: { editor: Editor; inTable: boolean }) {
                       size="icon"
                       variant="toolbar"
                       pressed={inTable}
-                      aria-label="Table"
+                      aria-label={m.documents_editor_table()}
                       onMouseDown={keepSelection}
                     />
                   }
@@ -636,7 +675,7 @@ function TableMenu({ editor, inTable }: { editor: Editor; inTable: boolean }) {
         >
           <HugeiconsIcon icon={LayoutTable01Icon} strokeWidth={2} />
         </TooltipTrigger>
-        <Hint label="Table" />
+        <Hint label={m.documents_editor_table()} />
       </Tooltip>
       <DropdownMenuContent align="end" className="w-52">
         {inTable ? <TableItems editor={editor} /> : <InsertTableItem editor={editor} />}

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { cn } from "~/ui/utils";
 
@@ -13,8 +14,10 @@ export function PendingView({ node, selected }: ReactNodeViewProps) {
         selected && "ring-ring/50 ring-2",
       )}
     >
-      <span className="text-muted-foreground shrink-0 text-xs font-medium">Planned</span>
-      <span className="text-shimmer min-w-0">{intent || "Section"}</span>
+      <span className="text-muted-foreground shrink-0 text-xs font-medium">
+        {m.documents_pending_planned()}
+      </span>
+      <span className="text-shimmer min-w-0">{intent || m.documents_pending_section()}</span>
     </NodeViewWrapper>
   );
 }

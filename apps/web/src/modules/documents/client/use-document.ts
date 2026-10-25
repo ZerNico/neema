@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useSessionUser } from "~/modules/auth/client.ts";
@@ -15,7 +16,7 @@ import type { DocumentSync } from "./document-sync.ts";
 
 /** This tab's own cursor label; the server replaces it with the signed-in person's. */
 const cursorUser = (user: { id: string; name: string } | null | undefined) =>
-  presenceUser({ id: user?.id ?? "", name: user?.name ?? "You" });
+  presenceUser({ id: user?.id ?? "", name: user?.name ?? m.documents_presence_you() });
 
 /**
  * The connection, its editor and the unsent-changes store, loaded with the

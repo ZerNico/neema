@@ -14,7 +14,7 @@ export const DocumentDateChip = DateChip.extend({
 });
 
 const asItem = (candidate: MentionCandidate): SlashItem => ({
-  title: candidate.label,
+  title: () => candidate.label,
   icon: UserIcon,
   keywords: candidate.id,
   run: () => {},
@@ -22,7 +22,7 @@ const asItem = (candidate: MentionCandidate): SlashItem => ({
 
 const menuProps = (props: SuggestionProps<MentionCandidate>) => ({
   items: props.items.map(asItem),
-  command: (item: SlashItem) => props.command({ id: item.keywords, label: item.title }),
+  command: (item: SlashItem) => props.command({ id: item.keywords, label: item.title() }),
 });
 
 /** Type @ to mention someone who can see the document. */

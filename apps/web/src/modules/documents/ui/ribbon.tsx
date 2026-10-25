@@ -2,6 +2,7 @@ import { Toolbar } from "@base-ui/react/toolbar";
 import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
 import { Tabs, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
@@ -82,7 +83,7 @@ function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGr
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      aria-label={`More ${label} tools`}
+                      aria-label={m.documents_ribbon_more_tools({ tab: label })}
                       className="text-muted-foreground shrink-0"
                     />
                   }
@@ -91,10 +92,13 @@ function RibbonRow({ label, groups }: { label: string; groups: readonly RibbonGr
             >
               <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </TooltipTrigger>
-            <TooltipContent>More</TooltipContent>
+            <TooltipContent>{m.documents_ribbon_more()}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-auto max-w-96">
-            <Toolbar.Root aria-label={`More ${label} tools`} className="flex flex-col gap-3">
+            <Toolbar.Root
+              aria-label={m.documents_ribbon_more_tools({ tab: label })}
+              className="flex flex-col gap-3"
+            >
               {more.map((group) => (
                 <div
                   key={group.id}
@@ -147,7 +151,10 @@ export function Ribbon<Name extends string>({
       className="@container min-w-0 flex-1"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-1">
-        <Toolbar.Root aria-label="History" className="flex shrink-0 items-center gap-0.5">
+        <Toolbar.Root
+          aria-label={m.documents_ribbon_history()}
+          className="flex shrink-0 items-center gap-0.5"
+        >
           {history}
         </Toolbar.Root>
         <TabsList
@@ -163,7 +170,7 @@ export function Ribbon<Name extends string>({
         </TabsList>
         {extra ? (
           <Toolbar.Root
-            aria-label={extraLabel ?? "More actions"}
+            aria-label={extraLabel ?? m.documents_ribbon_more_actions()}
             className="ml-auto flex shrink-0 items-center"
           >
             {extra}

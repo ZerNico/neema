@@ -8,6 +8,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Fragment, useState } from "react";
 import { ChatTextarea, type TextareaMentions } from "~/modules/chat/ui/chat-textarea.tsx";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { inlineTagClassName } from "~/ui/inline-tag.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { initials } from "~/ui/initials.ts";
@@ -20,21 +22,22 @@ import { cn } from "~/ui/utils";
 import type { DocumentComment } from "../schema.ts";
 import { shorten, type ThreadActions } from "./comment-actions.ts";
 
-/** How the assistant is named in a comment that asks it. */
+/** How the assistant is named in a comment that asks it: a token the text is matched by, in every locale. */
 const ASSISTANT_MENTION = "@Assistant";
 const ASSISTANT_PATTERN = /(^|\s)@Assistant(?=\s|$)/u;
-const ASSISTANT_SOURCE: TextareaMentions = {
+const assistantSource = (): TextareaMentions => ({
   items: [
     {
       id: "assistant",
+      // Inserted as the "@Assistant" token itself, so it stays as written.
       label: "Assistant",
-      description: "Answers in this thread",
+      description: m.documents_comments_assistant_description(),
       search: "assistant ai",
     },
   ],
   onSelect: () => undefined,
   icon: () => <HugeiconsIcon icon={AiChat02Icon} strokeWidth={2} className="size-3.5" />,
-};
+});
 
 /**
  * Where a comment or reply is written, on the chat composer's own field:
@@ -43,12 +46,15 @@ const ASSISTANT_SOURCE: TextareaMentions = {
  */
 export function CommentInput({
   placeholder,
+  askPlaceholder,
   canAsk,
   autoFocus,
   askByDefault = false,
   onSubmit,
 }: {
   placeholder: string;
+  /** The placeholder when the assistant can be named too. */
+  askPlaceholder: string;
   canAsk: boolean;
   autoFocus?: boolean;
   /** Starts with the assistant named, as a new comment in a chat does. */
@@ -80,11 +86,11 @@ export function CommentInput({
           onValueChange={setBody}
           onSubmit={send}
           ariaLabel={placeholder}
-          placeholder={canAsk ? `${placeholder}, or @ the assistant` : placeholder}
+          placeholder={canAsk ? askPlaceholder : placeholder}
           autoFocus={autoFocus ?? false}
           disabled={sending}
           className="px-3 pt-2.5"
-          integrations={canAsk ? ASSISTANT_SOURCE : undefined}
+          integrations={canAsk ? assistantSource() : undefined}
         />
       </div>
       <InputGroupAddon align="block-end">
@@ -96,7 +102,7 @@ export function CommentInput({
                   size="icon-xs"
                   variant={asking ? "secondary" : "ghost"}
                   aria-pressed={asking}
-                  aria-label="Ask the assistant"
+                  aria-label={m.documents_comments_ask()}
                   onClick={toggleAssistant}
                 />
               }
@@ -104,7 +110,7 @@ export function CommentInput({
               <HugeiconsIcon icon={AiChat02Icon} strokeWidth={2} />
             </TooltipTrigger>
             <TooltipContent>
-              {asking ? "Don’t ask the assistant" : "Ask the assistant"}
+              {asking ? m.documents_comments_dont_ask() : m.documents_comments_ask()}
             </TooltipContent>
           </Tooltip>
         ) : null}
@@ -112,7 +118,7 @@ export function CommentInput({
           size="icon-xs"
           variant="default"
           className="ml-auto"
-          aria-label="Send"
+          aria-label={m.documents_comments_send()}
           disabled={!body.trim() || body.trim() === ASSISTANT_MENTION || sending}
           onClick={send}
         >
@@ -140,7 +146,7 @@ function CommentBody({ text }: { text: string }) {
         part === ASSISTANT_MENTION ? (
           <span key={start} className={inlineTagClassName("field")}>
             <HugeiconsIcon icon={AiChat02Icon} strokeWidth={2} className="size-3.5" />
-            Assistant
+            {m.documents_comments_assistant()}
           </span>
         ) : (
           <Fragment key={start}>{part}</Fragment>
@@ -183,10 +189,10 @@ function Comment({
   isRoot: boolean;
 }) {
   const name = comment.byAssistant
-    ? "Assistant"
+    ? m.documents_comments_assistant()
     : comment.fromFile
-      ? comment.fromFile.name || "Note"
-      : (comment.author?.name ?? "Someone");
+      ? comment.fromFile.name || m.documents_comments_note()
+      : (comment.author?.name ?? m.documents_comments_someone());
   return (
     <div className="group/comment flex gap-2.5">
       <Avatar size="sm">
@@ -204,15 +210,21 @@ function Comment({
         <div className="flex h-6 items-center gap-2 text-xs">
           <span className="truncate font-medium">{name}</span>
           {comment.fromFile ? (
-            <span className="text-muted-foreground shrink-0">from Excel</span>
+            <span className="text-muted-foreground shrink-0">
+              {m.documents_comments_from_excel()}
+            </span>
           ) : null}
           <span className="text-muted-foreground shrink-0">
-            {relativeAgeLabel(comment.createdAt)}
+            {relativeAgeLabel(comment.createdAt, undefined, getLocale())}
           </span>
           {own && actions ? (
             <span className="ml-auto opacity-0 transition-opacity group-hover/comment:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
               <IconAction
-                label={isRoot ? "Delete thread" : "Delete reply"}
+                label={
+                  isRoot
+                    ? m.documents_comments_delete_thread()
+                    : m.documents_comments_delete_reply()
+                }
                 icon={Delete02Icon}
                 onClick={() => void actions.remove(comment.id)}
               />
@@ -253,7 +265,9 @@ export function CommentThread({
   const waiting = all.some((each) => each.toAssistant && !each.answered);
   const quote = (
     <span className="line-clamp-2 text-left">
-      {anchored ? null : <span className="font-medium">Text removed · </span>}
+      {anchored ? null : (
+        <span className="font-medium">{m.documents_comments_text_removed()} · </span>
+      )}
       {shorten(about, 160)}
     </span>
   );
@@ -275,7 +289,7 @@ export function CommentThread({
         )}
         {actions ? (
           <IconAction
-            label={root.resolvedAt ? "Reopen" : "Resolve"}
+            label={root.resolvedAt ? m.documents_comments_reopen() : m.documents_comments_resolve()}
             icon={CheckmarkCircle02Icon}
             onClick={() => void actions.resolve(root.id, !root.resolvedAt)}
           />
@@ -301,12 +315,13 @@ export function CommentThread({
       {waiting ? (
         <p className="text-muted-foreground flex items-center gap-2 text-xs">
           <Spinner />
-          The assistant is working on it
+          {m.documents_comments_assistant_working()}
         </p>
       ) : null}
       {expanded && actions && !root.resolvedAt ? (
         <CommentInput
-          placeholder="Reply"
+          placeholder={m.documents_comments_reply()}
+          askPlaceholder={m.documents_comments_reply_or_ask()}
           canAsk={actions.canAsk}
           onSubmit={(body, toAssistant) => actions.reply(root.id, about, body, toAssistant)}
         />

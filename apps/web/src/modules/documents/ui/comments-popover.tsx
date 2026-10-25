@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
 import { useState } from "react";
+import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import { Popover, PopoverContent, PopoverTrigger } from "~/ui/primitives/popover";
 import { Separator } from "~/ui/primitives/separator";
@@ -70,7 +71,7 @@ export function CommentsPopover({
       />
       {expanded !== root.id && !root.resolvedAt && actions ? (
         <Button size="xs" variant="ghost" className="self-start" onClick={() => choose(root)}>
-          Reply
+          {m.documents_comments_reply()}
         </Button>
       ) : null}
     </div>
@@ -86,7 +87,11 @@ export function CommentsPopover({
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label={`Comments${openRoots.length ? `, ${openRoots.length} open` : ""}`}
+                  aria-label={
+                    openRoots.length
+                      ? m.documents_comments_label_open({ count: openRoots.length })
+                      : m.documents_comments_title()
+                  }
                   className="text-muted-foreground relative"
                 />
               }
@@ -100,14 +105,16 @@ export function CommentsPopover({
             </span>
           ) : null}
         </TooltipTrigger>
-        <TooltipContent>Comments</TooltipContent>
+        <TooltipContent>{m.documents_comments_title()}</TooltipContent>
       </Tooltip>
       <PopoverContent align="end" className="w-96">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-medium">Comments</h2>
+          <h2 className="text-sm font-medium">{m.documents_comments_title()}</h2>
           {resolved.length ? (
             <Button size="xs" variant="ghost" onClick={() => setShowResolved((shown) => !shown)}>
-              {showResolved ? "Hide resolved" : `Resolved (${resolved.length})`}
+              {showResolved
+                ? m.documents_comments_hide_resolved()
+                : m.documents_comments_show_resolved({ count: resolved.length })}
             </Button>
           ) : null}
         </div>
@@ -116,7 +123,7 @@ export function CommentsPopover({
             openRoots.map(thread)
           ) : (
             <p className="text-muted-foreground py-6 text-center text-sm">
-              {canEdit ? "No open comments. Select text to add one." : "No open comments."}
+              {canEdit ? m.documents_comments_empty_editable() : m.documents_comments_empty()}
             </p>
           )}
           {showResolved && resolved.length ? (

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowDown01Icon,
   ArrowUp01Icon,
@@ -74,14 +75,14 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
   return (
     <div
       role="search"
-      aria-label="Find in document"
+      aria-label={m.documents_find_label()}
       className="border-border shrink-0 border-b px-3"
     >
       <div className="flex h-9 items-center gap-1">
         <Input
           autoFocus
-          aria-label="Find in document"
-          placeholder="Find in document"
+          aria-label={m.documents_find_label()}
+          placeholder={m.documents_find_label()}
           value={query}
           // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the bar's other controls do.
           className="h-7 border-0 text-xs shadow-none focus-visible:ring-0"
@@ -92,16 +93,18 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
         />
         <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
           {replaced !== null
-            ? `Replaced ${replaced}`
+            ? m.documents_find_replaced({ count: replaced })
             : query
               ? count
-                ? `${find.index + 1} of ${count}`
-                : "No matches"
+                ? m.documents_find_position({ index: find.index + 1, count })
+                : m.common_no_matches()
               : ""}
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button size="icon-xs" variant="ghost" aria-label="Find options" />}
+            render={
+              <Button size="icon-xs" variant="ghost" aria-label={m.documents_find_options()} />
+            }
           >
             <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
@@ -112,7 +115,7 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
                 searchFor(query, { ...find.options, caseSensitive: checked })
               }
             >
-              Match case
+              {m.documents_find_match_case()}
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
               checked={find.options.wholeWord}
@@ -120,14 +123,14 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
                 searchFor(query, { ...find.options, wholeWord: checked })
               }
             >
-              Whole words only
+              {m.documents_find_whole_words()}
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <Button
           size="icon-xs"
           variant="ghost"
-          aria-label="Previous match"
+          aria-label={m.documents_find_previous()}
           disabled={!count}
           onClick={() => goToMatch(editor, find.index - 1)}
         >
@@ -136,21 +139,26 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
         <Button
           size="icon-xs"
           variant="ghost"
-          aria-label="Next match"
+          aria-label={m.documents_find_next()}
           disabled={!count}
           onClick={() => goToMatch(editor, find.index + 1)}
         >
           <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
         </Button>
-        <Button size="icon-xs" variant="ghost" aria-label="Close find" onClick={close}>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={m.documents_find_close()}
+          onClick={close}
+        >
           <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
         </Button>
       </div>
       {replacing && editable ? (
         <div className="flex h-9 items-center gap-1">
           <Input
-            aria-label="Replace with"
-            placeholder="Replace with"
+            aria-label={m.documents_find_replace_with()}
+            placeholder={m.documents_find_replace_with()}
             value={replacement}
             // oxlint-disable-next-line shadcn/no-restyle -- sits flat in its row, as the query does.
             className="h-7 border-0 text-xs shadow-none focus-visible:ring-0"
@@ -163,7 +171,7 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
             disabled={!count}
             onClick={() => replaceCurrent(editor, replacement)}
           >
-            Replace
+            {m.documents_find_replace()}
           </Button>
           <Button
             size="xs"
@@ -171,7 +179,7 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
             disabled={!count}
             onClick={() => setReplaced(replaceAll(editor, replacement))}
           >
-            Replace all
+            {m.documents_find_replace_all()}
           </Button>
         </div>
       ) : null}

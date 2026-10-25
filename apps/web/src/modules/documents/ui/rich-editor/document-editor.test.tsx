@@ -272,7 +272,7 @@ describe("document editor", () => {
     mount(sync);
     const editor = await editorOf();
     const [table] = filterSlashItems("grid");
-    expect(table?.title).toBe("Table");
+    expect(table?.title()).toBe("Table");
     act(() => {
       editor.commands.insertContentAt(editor.state.doc.content.size - 1, "/tab");
       const end = editor.state.selection.from;

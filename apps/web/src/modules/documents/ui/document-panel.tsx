@@ -7,9 +7,10 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { Suspense, lazy, useState } from "react";
 import { toast } from "sonner";
+import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -41,7 +42,7 @@ const markdownOf = async (sync: NonNullable<Controller["sync"]>) =>
 /** The server builds the Word file from what it stores, so what was typed is sent first. */
 const downloadWord = async (controller: Controller) => {
   if (!(await controller.flush())) {
-    toast.error("Your latest changes aren’t saved yet.");
+    toast.error(m.documents_export_unsaved());
     return;
   }
   const link = document.createElement("a");
@@ -52,7 +53,7 @@ const downloadWord = async (controller: Controller) => {
 const exportAs = async (controller: Controller, format: "pdf" | "markdown") => {
   const sync = controller.sync;
   if (!sync) return;
-  const title = controller.document?.title ?? "Document";
+  const title = controller.document?.title ?? m.documents_fallback_title();
   const { printDocument, downloadMarkdown } = await import("./export.ts");
   if (format === "pdf") printDocument(sync.editor, title);
   else downloadMarkdown(await markdownOf(sync), title);
@@ -93,7 +94,7 @@ export function DocumentPanelActions({
                     <Button
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="Document actions"
+                      aria-label={m.documents_actions_label()}
                       className="text-muted-foreground"
                     />
                   }
@@ -102,14 +103,14 @@ export function DocumentPanelActions({
             >
               <HugeiconsIcon icon={MoreVerticalIcon} strokeWidth={2} />
             </TooltipTrigger>
-            <TooltipContent>More</TooltipContent>
+            <TooltipContent>{m.documents_actions_more()}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-52">
             {document?.canEdit ? (
               <>
                 <DropdownMenuItem onClick={() => setRenaming(true)}>
                   <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                  Rename
+                  {m.common_rename()}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
@@ -119,21 +120,21 @@ export function DocumentPanelActions({
               onClick={() => void exportAs(controller, "pdf")}
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-              Export as PDF
+              {m.documents_export_pdf()}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!controller.sync}
               onClick={() => void exportAs(controller, "markdown")}
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-              Export as Markdown
+              {m.documents_export_markdown()}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!controller.document}
               onClick={() => void downloadWord(controller)}
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-              Export as Word
+              {m.documents_export_word()}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -146,7 +147,7 @@ export function DocumentPanelActions({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Copy document"
+                aria-label={m.documents_copy()}
                 className="text-muted-foreground"
                 disabled={!controller.sync}
                 onClick={() => {
@@ -164,7 +165,7 @@ export function DocumentPanelActions({
           >
             <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} strokeWidth={2} />
           </TooltipTrigger>
-          <TooltipContent>{copied ? "Copied" : "Copy document"}</TooltipContent>
+          <TooltipContent>{copied ? m.common_copied() : m.documents_copy()}</TooltipContent>
         </Tooltip>
       </div>
     </div>
@@ -188,7 +189,7 @@ export function DocumentPanelBody({
           drop the body by a step the moment the notice starts leaving. */}
       <AnimatePresence initial={false}>
         {controller.status === "offline" ? (
-          <m.div
+          <motion.div
             key="offline"
             className="overflow-hidden"
             initial={{ height: 0, opacity: 0 }}
@@ -198,9 +199,9 @@ export function DocumentPanelBody({
           >
             <p className="text-muted-foreground flex items-center gap-2 pb-3 text-xs">
               <Spinner className="size-3" aria-hidden />
-              Reconnecting. Your edits are kept and sent once it’s back.
+              {m.documents_offline_notice()}
             </p>
-          </m.div>
+          </motion.div>
         ) : null}
       </AnimatePresence>
       <div className="flex min-w-0 flex-1 flex-col space-y-3">
@@ -211,7 +212,12 @@ export function DocumentPanelBody({
             // The editor pads its own text, so it is pulled to the panel's
             // edges; the fallback keeps the panel's padding.
             <Suspense
-              fallback={<Spinner aria-label="Loading editor" className="text-muted-foreground" />}
+              fallback={
+                <Spinner
+                  aria-label={m.documents_loading_editor()}
+                  className="text-muted-foreground"
+                />
+              }
             >
               {/* Fills the rest of the panel, edge to edge, whatever the text's
               length, so the editor's own scrollbars sit on the panel's edges
@@ -236,7 +242,7 @@ export function DocumentPanelBody({
               </div>
             </Suspense>
           ) : (
-            <Spinner aria-label="Connecting to document" className="text-muted-foreground" />
+            <Spinner aria-label={m.documents_connecting()} className="text-muted-foreground" />
           )}
         </div>
       </div>
@@ -252,7 +258,7 @@ function RecoveredChanges({ controller }: { controller: Controller }) {
   const text = controller.recovered ?? "";
   return (
     <div role="status" className="bg-muted space-y-2 rounded-xl p-3 text-sm">
-      <p className="font-medium">Some offline changes couldn’t be placed</p>
+      <p className="font-medium">{m.documents_recovered_title()}</p>
       <p className="text-muted-foreground line-clamp-4 whitespace-pre-wrap">{text}</p>
       <div className="flex gap-2">
         <Button
@@ -261,10 +267,10 @@ function RecoveredChanges({ controller }: { controller: Controller }) {
           onClick={() => void navigator.clipboard.writeText(text)}
         >
           <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} data-icon="inline-start" />
-          Copy
+          {m.common_copy()}
         </Button>
         <Button size="xs" variant="ghost" onClick={controller.dismissRecovered}>
-          Dismiss
+          {m.documents_recovered_dismiss()}
         </Button>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   CommentAdd01Icon,
   Link01Icon,
@@ -61,10 +62,13 @@ export function DocumentBubbleMenu({
         options={{ placement: "top", offset: 8, hide: true, scrollTarget: scroller ?? window }}
         className="bg-popover text-popover-foreground ring-foreground/5 dark:ring-foreground/10 rounded-full p-1 shadow-lg ring-1"
       >
-        <Toolbar.Root aria-label="Selection formatting" className="flex items-center gap-0.5">
+        <Toolbar.Root
+          aria-label={m.documents_editor_selection_formatting()}
+          className="flex items-center gap-0.5"
+        >
           <Format
             icon={CommentAdd01Icon}
-            label="Comment"
+            label={m.documents_editor_comment()}
             pressed={false}
             // The selection collapses as the card opens, so the bubble steps aside.
             onPress={() => startComment(editor)}
@@ -73,33 +77,38 @@ export function DocumentBubbleMenu({
             <>
               <Format
                 icon={TextBoldIcon}
-                label="Bold"
+                label={m.documents_editor_bold()}
                 shortcut="⌘B"
                 pressed={state.bold}
                 onPress={() => toggle((chain) => chain.toggleBold())}
               />
               <Format
                 icon={TextItalicIcon}
-                label="Italic"
+                label={m.documents_editor_italic()}
                 shortcut="⌘I"
                 pressed={state.italic}
                 onPress={() => toggle((chain) => chain.toggleItalic())}
               />
               <Format
                 icon={TextStrikethroughIcon}
-                label="Strikethrough"
+                label={m.documents_editor_strikethrough()}
                 shortcut="⌘⇧S"
                 pressed={state.strike}
                 onPress={() => toggle((chain) => chain.toggleStrike())}
               />
               <Format
                 icon={SourceCodeIcon}
-                label="Inline code"
+                label={m.documents_editor_inline_code()}
                 shortcut="⌘E"
                 pressed={state.code}
                 onPress={() => toggle((chain) => chain.toggleCode())}
               />
-              <Format icon={Link01Icon} label="Link" pressed={state.link} onPress={setLinkAnchor} />
+              <Format
+                icon={Link01Icon}
+                label={m.documents_editor_link()}
+                pressed={state.link}
+                onPress={setLinkAnchor}
+              />
             </>
           )}
         </Toolbar.Root>

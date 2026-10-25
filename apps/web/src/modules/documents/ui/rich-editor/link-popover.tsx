@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { Editor } from "@tiptap/core";
 import { useId, useState } from "react";
 import { Button } from "~/ui/primitives/button";
@@ -59,11 +60,12 @@ export function LinkPopover({
           }}
         >
           <Field data-invalid={invalid || undefined}>
-            <FieldLabel htmlFor={`${id}-href`}>Link address</FieldLabel>
+            <FieldLabel htmlFor={`${id}-href`}>{m.documents_link_address()}</FieldLabel>
             <Input
               id={`${id}-href`}
               value={value}
               autoFocus
+              // oxlint-disable-next-line i18n/no-literal-text -- an address, the same in every language
               placeholder="https://example.com"
               aria-invalid={invalid || undefined}
               onChange={(event) => {
@@ -71,7 +73,7 @@ export function LinkPopover({
                 setInvalid(false);
               }}
             />
-            {invalid ? <FieldError>Use a web or email address.</FieldError> : null}
+            {invalid ? <FieldError>{m.documents_link_invalid()}</FieldError> : null}
           </Field>
           <div className="flex justify-end gap-2">
             {active ? (
@@ -84,11 +86,11 @@ export function LinkPopover({
                   onClose();
                 }}
               >
-                Remove
+                {m.common_remove()}
               </Button>
             ) : null}
             <Button type="submit" size="sm">
-              {active ? "Update" : "Add link"}
+              {active ? m.documents_link_update() : m.documents_link_add()}
             </Button>
           </div>
         </form>

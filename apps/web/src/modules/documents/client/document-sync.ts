@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Editor, Extension, type AnyExtension, type EditorOptions } from "@tiptap/core";
 import { Node, type Schema } from "@tiptap/pm/model";
 import { EditorState, Selection, type Plugin, type Transaction } from "@tiptap/pm/state";
@@ -53,11 +54,11 @@ const STEP_LOG = 1_000;
 /** The assistant's cursor stays this long after its last write. */
 const ASSISTANT_IDLE_MS = 3_000;
 const ASSISTANT = "model";
-const assistantUser = {
-  name: "Assistant",
+const assistantUser = () => ({
+  name: m.documents_presence_assistant(),
   color: "var(--primary)",
   colorLight: "color-mix(in oklab, var(--primary) 15%, transparent)",
-};
+});
 
 const frameTypes = ["reset", "steps", "presence", "comments", "gone"] as const;
 
@@ -617,7 +618,7 @@ export class DocumentSync {
         this.#setError(
           failure instanceof Error && failure.message
             ? failure.message
-            : "Could not save your changes.",
+            : m.documents_sync_save_failed(),
         );
         // The server may have dropped its copy of the document; a fresh feed
         // catches up from storage, and the unsent steps go again after it.
@@ -788,7 +789,7 @@ export class DocumentSync {
       anchor: position,
       head: position,
       revision,
-      user: assistantUser,
+      user: assistantUser(),
     });
     if (this.#assistantTimer) clearTimeout(this.#assistantTimer);
     this.#assistantTimer = setTimeout(() => {

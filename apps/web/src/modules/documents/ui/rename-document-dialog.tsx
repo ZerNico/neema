@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { m } from "~/paraglide/messages.js";
 import { NameDialog } from "~/ui/name-dialog.tsx";
 import { DOCUMENT_LIMITS, type EditableDocument } from "../schema.ts";
 import { renameDocument } from "../server/document-functions.ts";
@@ -21,12 +22,12 @@ export function RenameDocumentDialog({
     <NameDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Rename document"
-      label="Title"
+      title={m.documents_rename_title()}
+      label={m.documents_rename_label()}
       initial={document.title}
       maxLength={DOCUMENT_LIMITS.title}
-      submitLabel="Rename"
-      failure="Could not rename the document."
+      submitLabel={m.common_rename()}
+      failure={m.documents_rename_error()}
       onSubmit={async (title) => {
         const renamed = await renameDocument({ data: { documentId: document.id, title } });
         queryClient.setQueryData(["documents", document.id], renamed);

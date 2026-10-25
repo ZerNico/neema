@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { LeftToRightListBulletIcon } from "@hugeicons/core-free-icons";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
@@ -12,7 +13,11 @@ export function OutlineMenu({ editor }: { editor: Editor }) {
     selector: ({ editor: current }) => documentHeadings(current.state.doc),
   });
   return (
-    <ToolbarMenu label="Outline" icon={LeftToRightListBulletIcon} text="Outline">
+    <ToolbarMenu
+      label={m.documents_outline()}
+      icon={LeftToRightListBulletIcon}
+      text={m.documents_outline()}
+    >
       <DropdownMenuContent align="start" className="max-h-96 w-64 overflow-y-auto">
         {headings.length ? (
           headings.map((heading) => (
@@ -24,11 +29,11 @@ export function OutlineMenu({ editor }: { editor: Editor }) {
                 editor.chain().focus().setTextSelection(heading.pos).scrollIntoView().run()
               }
             >
-              <span className="truncate">{heading.text || "Untitled heading"}</span>
+              <span className="truncate">{heading.text || m.documents_outline_untitled()}</span>
             </DropdownMenuItem>
           ))
         ) : (
-          <DropdownMenuItem disabled>Headings you add show here</DropdownMenuItem>
+          <DropdownMenuItem disabled>{m.documents_outline_empty()}</DropdownMenuItem>
         )}
       </DropdownMenuContent>
     </ToolbarMenu>

@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
@@ -21,8 +23,8 @@ export function DateChipView({ node, updateAttributes, editor, selected }: React
   const [open, setOpen] = useState(false);
   const day = parseDay(String(node.attrs.value ?? ""));
   const label = day
-    ? day.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
-    : "No date";
+    ? day.toLocaleDateString(getLocale(), { day: "numeric", month: "short", year: "numeric" })
+    : m.documents_date_none();
   return (
     <NodeViewWrapper as="span" className="inline-block align-baseline">
       <Popover open={open && editor.isEditable} onOpenChange={setOpen}>
@@ -31,7 +33,7 @@ export function DateChipView({ node, updateAttributes, editor, selected }: React
             <button
               type="button"
               contentEditable={false}
-              aria-label={`Date: ${label}`}
+              aria-label={m.documents_date_label({ date: label })}
               className={cn(
                 "bg-muted text-foreground inline-flex items-center gap-1 rounded-md px-1.5 align-baseline text-[0.9em] leading-snug font-medium",
                 selected && "ring-ring/50 ring-2",

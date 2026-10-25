@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { m } from "~/paraglide/messages.js";
 import { parseMarkdown } from "../../editor/markdown.ts";
 import { countWords, documentCounts, documentHeadings } from "./document-stats.ts";
 
@@ -36,5 +37,19 @@ describe("a document's statistics", () => {
       [3, "Quoted"],
     ]);
     expect(doc.textBetween(headings[1]!.pos, headings[1]!.pos + 5)).toBe("Risks");
+  });
+});
+
+describe("the word count's wording", () => {
+  it("tells one word from several and groups digits by locale", () => {
+    expect(m.documents_word_count_total({ words: 2, characters: 1 }, { locale: "en" })).toBe(
+      "2 words · 1 character",
+    );
+    expect(m.documents_word_count_total({ words: 1, characters: 1200 }, { locale: "de" })).toBe(
+      "1 Wort · 1.200 Zeichen",
+    );
+    expect(m.documents_word_count_selected({ selected: 2, words: 5 }, { locale: "de" })).toBe(
+      "2 von 5 Wörtern",
+    );
   });
 });

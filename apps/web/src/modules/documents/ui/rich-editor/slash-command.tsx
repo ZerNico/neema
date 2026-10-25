@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   AiChat02Icon,
   Calendar03Icon,
@@ -35,70 +36,70 @@ import { SlashMenu, type MenuHandle, type SlashItem } from "./slash-menu.tsx";
 const blocks = (editor: Editor, range: Range) => editor.chain().focus().deleteRange(range);
 export const SLASH_ITEMS: SlashItem[] = [
   {
-    title: "Text",
+    title: m.documents_editor_text,
 
     icon: TextIcon,
     keywords: "paragraph",
     run: (e, r) => blocks(e, r).setParagraph().run(),
   },
   {
-    title: "Heading 1",
+    title: () => m.documents_editor_heading({ level: 1 }),
 
     icon: Heading01Icon,
     keywords: "h1 title",
     run: (e, r) => blocks(e, r).setHeading({ level: 1 }).run(),
   },
   {
-    title: "Heading 2",
+    title: () => m.documents_editor_heading({ level: 2 }),
 
     icon: Heading02Icon,
     keywords: "h2 subtitle",
     run: (e, r) => blocks(e, r).setHeading({ level: 2 }).run(),
   },
   {
-    title: "Heading 3",
+    title: () => m.documents_editor_heading({ level: 3 }),
 
     icon: Heading03Icon,
     keywords: "h3",
     run: (e, r) => blocks(e, r).setHeading({ level: 3 }).run(),
   },
   {
-    title: "Bulleted list",
+    title: m.documents_editor_bulleted_list,
 
     icon: LeftToRightListBulletIcon,
     keywords: "ul unordered bullet",
     run: (e, r) => blocks(e, r).toggleBulletList().run(),
   },
   {
-    title: "Numbered list",
+    title: m.documents_editor_numbered_list,
 
     icon: LeftToRightListNumberIcon,
     keywords: "ol ordered number",
     run: (e, r) => blocks(e, r).toggleOrderedList().run(),
   },
   {
-    title: "Checklist",
+    title: m.documents_editor_checklist,
 
     icon: CheckListIcon,
     keywords: "todo task checkbox",
     run: (e, r) => blocks(e, r).toggleTaskList().run(),
   },
   {
-    title: "Quote",
+    title: m.documents_editor_quote,
 
     icon: QuoteDownIcon,
     keywords: "blockquote citation",
     run: (e, r) => blocks(e, r).toggleBlockquote().run(),
   },
   {
-    title: "Code block",
+    title: m.documents_editor_code_block,
 
     icon: CodeSquareIcon,
     keywords: "pre snippet",
     run: (e, r) => blocks(e, r).toggleCodeBlock().run(),
   },
   {
-    title: "Formula",
+    title: m.documents_editor_formula,
     icon: FunctionIcon,
     keywords: "math equation latex katex",
     // Empty, it opens for its LaTeX; left empty, it goes again.
@@ -108,7 +109,7 @@ export const SLASH_ITEMS: SlashItem[] = [
         .run(),
   },
   {
-    title: "Inline formula",
+    title: m.documents_editor_inline_formula,
     icon: FunctionOfXIcon,
     keywords: "math equation latex katex",
     run: (e, r) =>
@@ -117,32 +118,32 @@ export const SLASH_ITEMS: SlashItem[] = [
         .run(),
   },
   {
-    title: "Table",
+    title: m.documents_editor_table,
 
     icon: LayoutTable01Icon,
     keywords: "grid",
     run: (e, r) => blocks(e, r).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
   {
-    title: "Callout",
+    title: m.documents_editor_callout,
     icon: InformationSquareIcon,
     keywords: "note tip warning alert info box",
     run: (e, r) => setCallout("note")(blocks(e, r)).run(),
   },
   {
-    title: "Collapsible section",
+    title: m.documents_editor_collapsible,
     icon: ArrowRight01Icon,
     keywords: "toggle details fold expand",
     run: (e, r) => insertDetails(blocks(e, r)).run(),
   },
   {
-    title: "Footnote",
+    title: m.documents_editor_footnote,
     icon: TextFootnoteIcon,
     keywords: "note reference source",
     run: (e, r) => insertFootnote(blocks(e, r)).run(),
   },
   {
-    title: "Image",
+    title: m.documents_editor_image,
     icon: Image01Icon,
     keywords: "picture photo upload",
     available: canAddImages,
@@ -152,14 +153,14 @@ export const SLASH_ITEMS: SlashItem[] = [
     },
   },
   {
-    title: "Divider",
+    title: m.documents_editor_divider,
 
     icon: MinusSignIcon,
     keywords: "hr rule separator",
     run: (e, r) => blocks(e, r).setHorizontalRule().run(),
   },
   {
-    title: "Date",
+    title: m.documents_editor_date,
     icon: Calendar03Icon,
     keywords: "today day calendar",
     run: (e, r) =>
@@ -171,13 +172,13 @@ export const SLASH_ITEMS: SlashItem[] = [
         .run(),
   },
   {
-    title: "Mention someone",
+    title: m.documents_editor_mention,
     icon: UserIcon,
     keywords: "person people @",
     run: (e, r) => blocks(e, r).insertContent("@").run(),
   },
   {
-    title: "Ask the assistant",
+    title: m.documents_editor_ask,
     icon: AiChat02Icon,
     keywords: "ai write generate help",
     available: (editor) => editorHooks(editor).ask !== null,
@@ -200,7 +201,7 @@ export const SLASH_ITEMS: SlashItem[] = [
 
 /** How well an item answers the query: its name first, then words in it, then keywords. */
 const rank = (item: SlashItem, needle: string) => {
-  const title = item.title.toLowerCase();
+  const title = item.title().toLowerCase();
   if (title.startsWith(needle)) return 0;
   if (title.split(" ").some((word) => word.startsWith(needle))) return 1;
   if (title.includes(needle)) return 2;

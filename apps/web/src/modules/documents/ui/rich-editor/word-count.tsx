@@ -1,10 +1,7 @@
+import { m } from "~/paraglide/messages.js";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
 import { countWords, documentCounts, useWordCountShown } from "./document-stats.ts";
-
-const number = new Intl.NumberFormat();
-const plural = (count: number, one: string, many: string) =>
-  `${number.format(count)} ${count === 1 ? one : many}`;
 
 /**
  * Under the text, as Google Docs' word count shows: the document's words and
@@ -28,12 +25,12 @@ export function WordCount({ editor }: { editor: Editor }) {
   if (!shown || !counts) return null;
   return (
     <output
-      aria-label="Word count"
+      aria-label={m.documents_editor_word_count()}
       className="text-muted-foreground shrink-0 border-t px-4 py-1 text-xs tabular-nums"
     >
       {counts.selected !== null
-        ? `${number.format(counts.selected)} of ${plural(counts.words, "word", "words")}`
-        : `${plural(counts.words, "word", "words")} · ${plural(counts.characters, "character", "characters")}`}
+        ? m.documents_word_count_selected({ selected: counts.selected, words: counts.words })
+        : m.documents_word_count_total({ words: counts.words, characters: counts.characters })}
     </output>
   );
 }

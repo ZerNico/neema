@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Selection } from "@tiptap/pm/state";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
 import { renderToString } from "katex";
@@ -76,7 +77,7 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
         // KaTeX's own output: it escapes the LaTeX, and with trust off it allows no links or HTML.
         dangerouslySetInnerHTML={shown ? { __html: typeset(shown, display) } : undefined}
       >
-        {shown ? undefined : "Formula"}
+        {shown ? undefined : m.documents_editor_formula()}
       </span>
       <Popover
         open={editing}
@@ -86,8 +87,10 @@ export function MathView({ node, selected, editor, getPos }: ReactNodeViewProps)
       >
         <PopoverContent anchor={anchor} align={display ? "center" : "start"} className="w-80">
           <Textarea
+            // oxlint-disable-next-line i18n/no-literal-text -- the language's name
             aria-label="LaTeX"
             value={value}
+            // oxlint-disable-next-line i18n/no-literal-text -- a formula, the same in every language
             placeholder="E = mc^2"
             onChange={(event) => setTyped(event.target.value)}
             onKeyDown={(event) => {

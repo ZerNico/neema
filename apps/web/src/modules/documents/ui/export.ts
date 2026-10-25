@@ -1,5 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { renderToString } from "katex";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 const escapeHtml = (text: string) =>
   text.replace(
@@ -13,7 +15,7 @@ export const fileName = (title: string) =>
   title
     .replace(/[\\/:*?"<>|]+/g, " ")
     .trim()
-    .slice(0, 120) || "Document";
+    .slice(0, 120) || m.documents_fallback_title();
 
 // Print on paper: the app's theme does not apply, and nothing interactive shows.
 // No page margin, where the browser prints its own date and title header; the
@@ -88,7 +90,7 @@ export const printDocument = (editor: Editor, title: string) => {
     for (const chip of page.querySelectorAll<HTMLElement>("[data-date-chip]")) {
       const value = chip.dataset.value;
       if (value)
-        chip.textContent = new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
+        chip.textContent = new Date(`${value}T00:00:00`).toLocaleDateString(getLocale(), {
           day: "numeric",
           month: "short",
           year: "numeric",

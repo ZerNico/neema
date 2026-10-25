@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { HugeiconsIcon, type HugeiconsIconProps } from "@hugeicons/react";
 import type { Editor, Range } from "@tiptap/core";
 import type { SuggestionKeyDownProps } from "@tiptap/suggestion";
@@ -5,7 +6,8 @@ import { useImperativeHandle, useState, type Ref } from "react";
 import { cn } from "~/ui/utils";
 
 export interface SlashItem {
-  title: string;
+  /** Its name, read where it is shown. */
+  title: () => string;
   icon: HugeiconsIconProps["icon"];
   /** Extra words it is found by. */
   keywords: string;
@@ -69,15 +71,15 @@ export function SlashMenu({
     // The same surface and items as the app's dropdown menus.
     <div
       role="listbox"
-      aria-label="Insert block"
+      aria-label={m.documents_slash_label()}
       className="bg-popover text-popover-foreground ring-foreground/5 dark:ring-foreground/10 max-h-80 w-56 overflow-y-auto rounded-3xl p-1.5 shadow-lg ring-1"
     >
       {items.length === 0 ? (
-        <p className="text-muted-foreground px-3 py-2 text-sm">No matching block</p>
+        <p className="text-muted-foreground px-3 py-2 text-sm">{m.documents_slash_empty()}</p>
       ) : (
         items.map((item, index) => (
           <button
-            key={item.title}
+            key={item.title()}
             type="button"
             role="option"
             aria-selected={index === active}
@@ -97,7 +99,7 @@ export function SlashMenu({
               strokeWidth={2}
               className="text-muted-foreground size-4"
             />
-            {item.title}
+            {item.title()}
           </button>
         ))
       )}

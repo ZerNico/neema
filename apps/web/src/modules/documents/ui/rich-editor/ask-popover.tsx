@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { Editor } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { useEditorState } from "@tiptap/react";
@@ -69,7 +70,7 @@ export function AskPopover({ editor }: { editor: Editor }) {
           return true;
         })
         .run();
-      if (sent === false) setError("Wait for the current answer to finish, then ask again.");
+      if (sent === false) setError(m.documents_ask_busy());
       return;
     }
     setRequest("");
@@ -91,18 +92,18 @@ export function AskPopover({ editor }: { editor: Editor }) {
           }}
         >
           <Field data-invalid={error ? true : undefined}>
-            <FieldLabel htmlFor={id}>Ask the assistant to write here</FieldLabel>
+            <FieldLabel htmlFor={id}>{m.documents_ask_label()}</FieldLabel>
             <Input
               id={id}
               autoFocus
               value={request}
-              placeholder="A short intro on the budget"
+              placeholder={m.documents_ask_placeholder()}
               onChange={(event) => setRequest(event.target.value)}
             />
             {error ? <FieldError>{error}</FieldError> : null}
           </Field>
           <Button type="submit" size="sm" disabled={!request.trim() || sending}>
-            Ask
+            {m.documents_ask_submit()}
           </Button>
         </form>
       </PopoverContent>

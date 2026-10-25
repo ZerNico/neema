@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { IMAGE_MEDIA_TYPES } from "~/modules/attachments/constants.ts";
@@ -66,7 +67,7 @@ export const addImages = async (editor: Editor, files: ReadonlyArray<File>, at: 
   const failed = results.find((result) => result.status === "rejected");
   if (failed)
     toastError(
-      images.length > 1 ? "Could not add every image" : "Could not add the image",
+      images.length > 1 ? m.documents_image_add_some_failed() : m.documents_image_add_failed(),
       failed.reason,
     );
 };

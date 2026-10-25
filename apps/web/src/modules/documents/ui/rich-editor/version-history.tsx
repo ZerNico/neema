@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { useQuery } from "@tanstack/react-query";
 import type { Editor, JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -18,13 +20,13 @@ import type { DocumentVersion } from "../../server/versions.ts";
 import { browserEditorExtensions } from "./editor-extensions.ts";
 import { restoreVersion } from "./version-restore.ts";
 
-const when = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const when = new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" });
 
 const label = (version: DocumentVersion) =>
   version.author === null
-    ? "Earliest kept version"
+    ? m.documents_versions_earliest()
     : version.author.kind === "assistant"
-      ? "Assistant"
+      ? m.documents_versions_assistant()
       : version.author.name;
 
 /**
@@ -67,10 +69,8 @@ export function VersionHistoryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Version history</DialogTitle>
-          <DialogDescription>
-            Versions go back as far as the document keeps its edits.
-          </DialogDescription>
+          <DialogTitle>{m.documents_editor_version_history()}</DialogTitle>
+          <DialogDescription>{m.documents_versions_description()}</DialogDescription>
         </DialogHeader>
         <div className="flex h-[60vh] min-h-0 gap-4">
           <div className="min-w-0 flex-1 overflow-y-auto rounded-xl border px-4 py-3">
@@ -78,11 +78,11 @@ export function VersionHistoryDialog({
               <VersionPreview key={selected} json={version.data} />
             ) : (
               <p className="text-muted-foreground text-sm">
-                {version.isError ? "This version is no longer kept" : "Loading…"}
+                {version.isError ? m.documents_versions_gone() : m.documents_versions_loading()}
               </p>
             )}
           </div>
-          <ul aria-label="Versions" className="w-60 shrink-0 overflow-y-auto">
+          <ul aria-label={m.documents_versions_list()} className="w-60 shrink-0 overflow-y-auto">
             {list.map((each, index) => (
               <li key={each.revision}>
                 <button
@@ -95,7 +95,7 @@ export function VersionHistoryDialog({
                   onClick={() => setChosen(each.revision)}
                 >
                   <span className="text-sm font-medium">
-                    {index === 0 ? "Current version" : when.format(new Date(each.at))}
+                    {index === 0 ? m.documents_versions_current() : when.format(new Date(each.at))}
                   </span>
                   <span className="text-muted-foreground text-xs">{label(each)}</span>
                 </button>
@@ -105,7 +105,7 @@ export function VersionHistoryDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
+            {m.common_close()}
           </Button>
           <Button
             disabled={!version.data || current}
@@ -113,10 +113,12 @@ export function VersionHistoryDialog({
               if (!version.data) return;
               restoreVersion(editor, version.data);
               onOpenChange(false);
-              toast.success("Version restored", { description: "Undo takes it back." });
+              toast.success(m.documents_versions_restored(), {
+                description: m.documents_versions_restored_description(),
+              });
             }}
           >
-            Restore this version
+            {m.documents_versions_restore()}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -129,7 +131,9 @@ function VersionPreview({ json }: { json: JSONContent }) {
   const preview = useEditor({
     extensions: browserEditorExtensions(),
     // Named apart from the document itself, which stays open behind the dialog.
-    editorProps: { attributes: { class: "rich-editor", "aria-label": "Version preview" } },
+    editorProps: {
+      attributes: { class: "rich-editor", "aria-label": m.documents_versions_preview() },
+    },
     content: json,
     editable: false,
     immediatelyRender: true,

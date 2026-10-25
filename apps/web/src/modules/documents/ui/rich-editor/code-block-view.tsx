@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   NodeViewContent,
   NodeViewWrapper,
@@ -57,7 +58,7 @@ function Diagram({ source, onEdit }: { source: string; onEdit: () => void }) {
   if (!svg)
     return (
       <div data-diagram className="code-diagram text-muted-foreground items-center text-sm">
-        {failed ? "Couldn’t draw this diagram" : null}
+        {failed ? m.documents_diagram_failed() : null}
       </div>
     );
   return (
@@ -72,7 +73,7 @@ function Diagram({ source, onEdit }: { source: string; onEdit: () => void }) {
       <div className="contents" dangerouslySetInnerHTML={{ __html: svg }} />
       {failed ? (
         <span className="bg-background text-muted-foreground absolute top-2 right-2 rounded-md px-1.5 text-xs">
-          Last version that drew
+          {m.documents_diagram_stale()}
         </span>
       ) : null}
     </div>

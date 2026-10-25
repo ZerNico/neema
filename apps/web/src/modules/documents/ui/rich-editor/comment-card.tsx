@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
+import { m } from "~/paraglide/messages.js";
 import { Popover, PopoverContent } from "~/ui/primitives/popover";
 import { commentsKey } from "../../client/comments-plugin.ts";
 import type { DocumentDiscussion } from "../../client/use-document.ts";
@@ -89,7 +90,8 @@ export function CommentCard({
               {shorten(editor.state.doc.textBetween(compose.from, compose.to, " ", " "), 160)}
             </div>
             <CommentInput
-              placeholder="Add a comment"
+              placeholder={m.documents_comments_add()}
+              askPlaceholder={m.documents_comments_add_or_ask()}
               canAsk={actions.canAsk}
               askByDefault
               autoFocus

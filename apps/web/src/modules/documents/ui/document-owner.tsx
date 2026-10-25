@@ -13,6 +13,7 @@ import {
   type Ref,
   useRef,
 } from "react";
+import { m } from "~/paraglide/messages.js";
 import { useDocument } from "../client/use-document.ts";
 import { DocumentPanelActions, DocumentPanelBody } from "./document-panel.tsx";
 import { documentSubtitle } from "./document-subtitle.ts";
@@ -193,7 +194,7 @@ function DocumentSession({
   const request = useMemo(
     () => ({
       id,
-      title: controller.document?.title ?? "Document",
+      title: controller.document?.title ?? m.documents_fallback_title(),
       subtitle,
       icon: File01Icon,
       restorable: true,
@@ -226,10 +227,10 @@ function DocumentSession({
       title: available ? (controller.document?.title ?? null) : null,
       status: !available
         ? failed
-          ? "Could not load document"
-          : "Loading document…"
+          ? m.documents_status_load_failed()
+          : m.documents_status_loading()
         : controller.error
-          ? "Changes not saved yet"
+          ? m.documents_status_unsaved()
           : subtitle,
       inProject: available ? controller.document?.projectId != null : null,
       expanded: selected === id,

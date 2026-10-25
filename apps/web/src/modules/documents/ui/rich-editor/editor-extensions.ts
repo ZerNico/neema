@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { EditorOptions } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { Placeholder } from "@tiptap/extensions";
@@ -41,7 +42,9 @@ const sharedExtensions = [
   Placeholder.configure({
     // An empty document invites writing; an empty section title names what goes there.
     placeholder: ({ node }) =>
-      node.type.name === "detailsSummary" ? "Section title" : "Write, or type / for blocks",
+      node.type.name === "detailsSummary"
+        ? m.documents_editor_section_title_placeholder()
+        : m.documents_editor_placeholder(),
     includeChildren: true,
   }),
   SlashCommand,
@@ -63,11 +66,11 @@ export const browserEditorExtensions = () =>
 /** How the editable surface presents itself; links open only on a modified click while editing. */
 export const browserEditorProps: EditorOptions["editorProps"] = {
   handleClick: (view, _position, event) => openLink(view.editable, event),
-  attributes: {
+  attributes: () => ({
     class: "rich-editor",
     role: "textbox",
     "aria-multiline": "true",
-    "aria-label": "Document",
+    "aria-label": m.documents_editor_label(),
     spellcheck: "true",
-  },
+  }),
 };
