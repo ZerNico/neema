@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { MAX_SEARCH_LENGTH } from "~/modules/search/text.ts";
 import { NameDialog } from "~/ui/name-dialog.tsx";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -70,13 +71,13 @@ export function useConversationActions(): ConversationActions {
       if (result === null) return;
       const reverted = await inLane(conversationId, () => input.revert(result)).catch(
         (error: unknown) => {
-          toastError("Could not undo.", error);
+          toastError(m.chat_actions_undo_failed(), error);
           return null;
         },
       );
       hold.release();
       await refresh(conversationId);
-      if (reverted === false) toast("That chat is already gone");
+      if (reverted === false) toast(m.chat_actions_already_gone());
       else if (reverted && closed && router.state.location.pathname === "/")
         await navigate({ to: "/chat/$conversationId", params: { conversationId } });
     };
@@ -122,7 +123,7 @@ export function useConversationActions(): ConversationActions {
       hold?.show();
       hold?.release();
       void refresh(conversationId);
-      toastError("Could not unarchive the chat.", error);
+      toastError(m.chat_actions_unarchive_failed(), error);
     },
   });
 
@@ -134,8 +135,8 @@ export function useConversationActions(): ConversationActions {
         conversationId,
         // An archived chat still opens; only the lists let it go.
         leaves: false,
-        done: "Chat archived",
-        failed: "Could not archive the chat.",
+        done: m.chat_actions_archived(),
+        failed: m.chat_actions_archive_failed(),
         act: () =>
           setConversationArchived({ data: { conversationId, archived: true } }).then(() => true),
         revert: () =>
@@ -149,8 +150,8 @@ export function useConversationActions(): ConversationActions {
       void reversibly({
         conversationId,
         leaves: true,
-        done: "Chat deleted",
-        failed: "Could not delete the chat.",
+        done: m.chat_actions_deleted(),
+        failed: m.chat_actions_delete_failed(),
         act: () => deleteConversation({ data: { conversationId } }),
         revert: (mark) => restoreConversation({ data: { conversationId, mark } }),
         // Undo is only ever offered here, so a work chat's folder can go once
@@ -164,12 +165,12 @@ export function useConversationActions(): ConversationActions {
         key={renaming?.id}
         open={renaming !== null}
         onOpenChange={(open) => !open && setRenaming(null)}
-        title="Rename chat"
-        label="Title"
+        title={m.chat_rename_title()}
+        label={m.chat_rename_label()}
         initial={renaming?.title ?? ""}
         maxLength={MAX_SEARCH_LENGTH}
-        submitLabel="Rename"
-        failure="Could not rename the chat."
+        submitLabel={m.chat_rename_submit()}
+        failure={m.chat_rename_failed()}
         onSubmit={async (title) => {
           if (!renaming) return;
           await renameConversation({ data: { conversationId: renaming.id, title } });

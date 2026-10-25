@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 // Local-clock labels for the message list and the sidebar. Every function here
 // reads the visitor's timezone and clock, which the app always has: routes
 // render only in the browser, below the root shell's client-only boundary.
@@ -17,8 +19,8 @@ interface Formatters {
 // hundreds of messages and each render formats every one of them.
 const cache = new Map<string, Formatters>();
 
-const formatters = (locale?: string): Formatters => {
-  const cached = cache.get(locale ?? "");
+const formatters = (locale: string = getLocale()): Formatters => {
+  const cached = cache.get(locale);
   if (cached) return cached;
   const made: Formatters = {
     // "numeric" hour, so a 12-hour locale says "2:32 PM" rather than "02:32 PM".
@@ -33,7 +35,7 @@ const formatters = (locale?: string): Formatters => {
     full: new Intl.DateTimeFormat(locale, { dateStyle: "full", timeStyle: "short" }),
     relative: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }),
   };
-  cache.set(locale ?? "", made);
+  cache.set(locale, made);
   return made;
 };
 
@@ -57,8 +59,8 @@ const daysBefore = (day: number, today: number): number => Math.round((today - d
  */
 export function dayLabel(date: Date, now: Date = new Date(), locale?: string): string {
   const diff = daysBefore(startOfDay(date), startOfDay(now));
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Yesterday";
+  if (diff <= 0) return m.chat_day_today();
+  if (diff === 1) return m.chat_day_yesterday();
   const format = formatters(locale);
   // Stops at 6: seven days ago is the same weekday as today, which reads as
   // the wrong week rather than as a date.
@@ -119,7 +121,10 @@ export function buildMessageStamps(
       iso: date.toISOString(),
       clock: clockLabel(date, locale),
       absolute: edited
-        ? `${absoluteLabel(date, locale)} · edited ${absoluteLabel(edited, locale)}`
+        ? m.chat_time_edited({
+            sent: absoluteLabel(date, locale),
+            edited: absoluteLabel(edited, locale),
+          })
         : absoluteLabel(date, locale),
     });
     previousDay = day;
@@ -144,7 +149,7 @@ export function relativeAgeLabel(
 
   const seconds = (date.getTime() - now.getTime()) / 1_000;
   const absoluteSeconds = Math.abs(seconds);
-  if (absoluteSeconds < 60) return "just now";
+  if (absoluteSeconds < 60) return m.chat_time_just_now();
 
   const [amount, unit]: [number, Intl.RelativeTimeFormatUnit] =
     absoluteSeconds < 3_600
@@ -163,9 +168,9 @@ export function relativeAgeLabel(
 /** Sidebar row tooltip: when the chat was last active, in full. */
 export function describeActivity(conversation: DatedConversation, locale?: string): string {
   const last = optionalDate(conversation.lastMessageAt);
-  if (last) return `Last message ${absoluteLabel(last, locale)}`;
+  if (last) return m.chat_time_last_message({ date: absoluteLabel(last, locale) });
   const created = optionalDate(conversation.createdAt);
-  return created ? `Created ${absoluteLabel(created, locale)}` : "";
+  return created ? m.chat_time_created({ date: absoluteLabel(created, locale) }) : "";
 }
 
 /**
@@ -179,6 +184,7 @@ export function activityStamp(
 ): string {
   const date = optionalDate(conversation.lastMessageAt) ?? optionalDate(conversation.createdAt);
   if (!date) return "";
-  const label = dayLabel(date, now, locale);
-  return label === "Today" ? clockLabel(date, locale) : label;
+  return daysBefore(startOfDay(date), startOfDay(now)) <= 0
+    ? clockLabel(date, locale)
+    : dayLabel(date, now, locale);
 }

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArchiveArrowDownIcon,
   ArchiveArrowUpIcon,
@@ -56,7 +57,7 @@ export function ConversationMenuItems({
     <>
       <DropdownMenuItem onClick={() => actions.startRename(conversation)}>
         <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-        Rename
+        {m.chat_actions_rename()}
       </DropdownMenuItem>
       {conversation.temporary ? null : <MoveToProject conversation={conversation} />}
       {/* Nothing lists a temporary chat, so it has nowhere to be archived from. */}
@@ -66,12 +67,12 @@ export function ConversationMenuItems({
             icon={conversation.archived ? ArchiveArrowUpIcon : ArchiveArrowDownIcon}
             strokeWidth={2}
           />
-          {conversation.archived ? "Unarchive" : "Archive"}
+          {conversation.archived ? m.chat_actions_unarchive() : m.chat_actions_archive()}
         </DropdownMenuItem>
       )}
       <DropdownMenuItem variant="destructive" onClick={() => actions.remove(conversation)}>
         <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-        Delete
+        {m.chat_actions_delete()}
       </DropdownMenuItem>
     </>
   );
@@ -117,7 +118,7 @@ function MoveToProject({ conversation }: { conversation: ActionableConversation 
         queryClient.invalidateQueries({ queryKey: ["conversation", conversation.id] }),
         queryClient.invalidateQueries({ queryKey: ["projects"] }),
       ]),
-    onError: (error) => toastError("Could not move the chat.", error),
+    onError: (error) => toastError(m.chat_actions_move_failed(), error),
   });
   if (!capabilities?.projectsUse || (!projects.data?.length && !conversation.projectId))
     return null;
@@ -125,7 +126,7 @@ function MoveToProject({ conversation }: { conversation: ActionableConversation 
     <DropdownMenuSub>
       <DropdownMenuSubTrigger disabled={move.isPending}>
         <HugeiconsIcon icon={FolderTransferIcon} strokeWidth={2} />
-        Move to project
+        {m.chat_actions_move_to_project()}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-64">
         {(projects.data ?? []).map((project) => (
@@ -145,7 +146,7 @@ function MoveToProject({ conversation }: { conversation: ActionableConversation 
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => move.mutate(null)}>
-              Remove from project
+              {m.chat_actions_remove_from_project()}
             </DropdownMenuItem>
           </>
         ) : null}

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Archive02Icon, BubbleChatIcon } from "@hugeicons/core-free-icons";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { SearchSource } from "~/modules/search/registry.ts";
@@ -29,15 +30,20 @@ export const useChatSearch: SearchSource = (query, active) => {
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
-  const empty = { heading: "Chats", kind: "result" as const, items: [], pending: false };
+  const empty = {
+    heading: m.chat_search_heading(),
+    kind: "result" as const,
+    items: [],
+    pending: false,
+  };
   if (!active) return empty;
   if (!query)
     return {
       ...empty,
-      heading: "Recent chats",
+      heading: m.chat_search_recent(),
       items: (recent.data?.conversations ?? []).map((chat) => ({
         id: `chat:${chat.id}`,
-        label: chat.title ?? "New chat",
+        label: chat.title ?? m.chat_title_new_chat(),
         icon: BubbleChatIcon,
         href: chatHref(chat.id),
       })),
@@ -48,9 +54,9 @@ export const useChatSearch: SearchSource = (query, active) => {
     ...empty,
     items: (Array.isArray(found.data) ? found.data : []).map((hit) => ({
       id: `chat:${hit.conversationId}`,
-      label: hit.title ?? "New chat",
+      label: hit.title ?? m.chat_title_new_chat(),
       // Search is how an archived chat is found again, so say that it is one.
-      detail: hit.archived ? "Archived" : undefined,
+      detail: hit.archived ? m.chat_search_archived() : undefined,
       snippet: hit.snippet,
       icon: hit.archived ? Archive02Icon : BubbleChatIcon,
       href: chatHref(hit.conversationId),

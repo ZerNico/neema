@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import * as motion from "motion/react-m";
 import { useState } from "react";
 import type { ComponentProps } from "react";
@@ -71,27 +72,31 @@ export function ConversationStatusTitle({
               icon={Globe02Icon}
               strokeWidth={2}
               className="size-4 animate-pulse"
-              aria-label="Using the browser"
+              aria-label={m.chat_status_browsing()}
             />
           ) : generating ? (
-            <Spinner aria-label="Generating" className="size-4" />
+            <Spinner aria-label={m.chat_status_generating()} className="size-4" />
           ) : unread ? (
             <span className="flex size-4 items-center justify-center">
-              <span role="img" aria-label="New answer" className="bg-primary size-2 rounded-full" />
+              <span
+                role="img"
+                aria-label={m.chat_status_unread()}
+                className="bg-primary size-2 rounded-full"
+              />
             </span>
           ) : scheduled ? (
             <HugeiconsIcon
               icon={Calendar03Icon}
               strokeWidth={2}
               className="size-4"
-              aria-label="Scheduled chat"
+              aria-label={m.chat_status_scheduled()}
             />
           ) : branched ? (
             <HugeiconsIcon
               icon={GitBranchIcon}
               strokeWidth={2}
               className="size-4"
-              aria-label="Branched conversation"
+              aria-label={m.chat_status_branched()}
             />
           ) : null}
         </MotionSwap>

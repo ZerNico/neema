@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { Archive02Icon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -13,11 +15,10 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { useDebounced } from "~/ui/use-debounced.ts";
 import { cn } from "~/ui/utils";
 
-const archivedDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-
 /** Archived chats, a page below Chats: the same rows, their own list. */
 export function ArchivedChatsListPage() {
   const [search, setSearch] = useState("");
+  const archivedDate = new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" });
   const query = useDebounced(search.trim(), 250);
   // Archived chats are few and all fetched; the search box filters their titles here.
   const archivedList = useSuspenseQuery(archivedConversationsQuery);
@@ -30,25 +31,25 @@ export function ArchivedChatsListPage() {
   }, [archivedList.data, query]);
 
   return (
-    <Page title="Archived chats" backTo="/chats" backLabel="Chats">
+    <Page title={m.chat_archived_title()} backTo="/chats" backLabel={m.chat_archived_back()}>
       <SearchInput
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search archived chats…"
-        aria-label="Search archived chats"
+        placeholder={m.chat_archived_search()}
+        aria-label={m.chat_archived_search_label()}
       />
       {archivedRows.length === 0 ? (
         query ? (
           <EmptyState
             icon={Search01Icon}
-            title="No archived chats match"
-            description={`No titles match “${query}”.`}
+            title={m.chat_archived_no_match()}
+            description={m.chat_list_no_titles_match({ query })}
           />
         ) : (
           <EmptyState
             icon={Archive02Icon}
-            title="No archived chats"
-            description="Archive a chat from its menu to keep it out of your sidebar."
+            title={m.chat_archived_empty()}
+            description={m.chat_archived_empty_description()}
           />
         )
       ) : (
@@ -63,9 +64,11 @@ export function ArchivedChatsListPage() {
                   "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-11 text-sm transition-colors",
                 )}
               >
-                <span className="min-w-0 flex-1 truncate">{chat.title ?? "New chat"}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {chat.title ?? m.chat_title_new_chat()}
+                </span>
                 <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  Archived {archivedDate.format(new Date(chat.archivedAt))}
+                  {m.chat_archived_on({ date: archivedDate.format(new Date(chat.archivedAt)) })}
                 </span>
               </Link>
               <ConversationMenu
@@ -75,7 +78,9 @@ export function ArchivedChatsListPage() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Actions for ${chat.title ?? "New chat"}`}
+                    aria-label={m.chat_list_row_actions({
+                      title: chat.title ?? m.chat_title_new_chat(),
+                    })}
                     className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100"
                   />
                 }

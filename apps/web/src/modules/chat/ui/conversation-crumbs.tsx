@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   Archive02Icon,
   ArchiveArrowUpIcon,
@@ -80,8 +81,8 @@ export function ConversationCrumbs({
             }
           >
             <HugeiconsIcon icon={GitBranchIcon} strokeWidth={2} aria-hidden />
-            <span className="sr-only">Branched from</span>
-            <span className="truncate">{branchedFrom.title ?? "New chat…"}</span>
+            <span className="sr-only">{m.chat_crumbs_branched_from()}</span>
+            <span className="truncate">{branchedFrom.title ?? m.chat_title_pending()}</span>
           </Badge>
         ) : null}
         {temporary ? <TemporaryTag /> : null}
@@ -102,13 +103,10 @@ function TemporaryTag() {
         render={<Badge variant="secondary" className={tagClassName} tabIndex={0} />}
       >
         <HugeiconsIcon icon={IncognitoIcon} strokeWidth={2} aria-hidden />
-        <span className="truncate">Temporary</span>
+        <span className="truncate">{m.chat_crumbs_temporary()}</span>
       </HoverCardTrigger>
       <HoverCardContent align="start" sideOffset={8}>
-        <p className="text-muted-foreground text-xs">
-          This chat isn’t in your history and doesn’t use your memories. It’s deleted after a day
-          without new messages, unless you keep it.
-        </p>
+        <p className="text-muted-foreground text-xs">{m.chat_crumbs_temporary_note()}</p>
       </HoverCardContent>
     </HoverCard>
   );
@@ -123,13 +121,10 @@ function ArchivedTag() {
         render={<Badge variant="secondary" className={tagClassName} tabIndex={0} />}
       >
         <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} aria-hidden />
-        <span className="truncate">Archived</span>
+        <span className="truncate">{m.chat_crumbs_archived()}</span>
       </HoverCardTrigger>
       <HoverCardContent align="start" sideOffset={8}>
-        <p className="text-muted-foreground text-xs">
-          This chat isn’t in your sidebar, but search still finds it. Sending a message brings it
-          back.
-        </p>
+        <p className="text-muted-foreground text-xs">{m.chat_crumbs_archived_note()}</p>
       </HoverCardContent>
     </HoverCard>
   );
@@ -150,7 +145,7 @@ function UnarchiveButton({ conversationId }: { conversationId: string }) {
       onClick={() => unarchive.mutate()}
     >
       <HugeiconsIcon icon={ArchiveArrowUpIcon} strokeWidth={2} />
-      Unarchive
+      {m.chat_crumbs_unarchive()}
     </PendingButton>
   );
 }
@@ -173,7 +168,7 @@ function KeepButton({ conversationId }: { conversationId: string }) {
       pending={keep.isPending}
       onClick={() => keep.mutate()}
     >
-      Keep chat
+      {m.chat_crumbs_keep()}
     </PendingButton>
   );
 }
@@ -203,20 +198,20 @@ function ScheduleTag({ schedule }: { schedule: ScheduleOrigin }) {
       >
         <HugeiconsIcon icon={Calendar03Icon} strokeWidth={2} aria-hidden />
         <span className="sr-only">
-          {schedule.runsHere ? "Schedule running here" : "Scheduled run of"}
+          {schedule.runsHere ? m.chat_crumbs_schedule_here() : m.chat_crumbs_scheduled_run_of()}
         </span>
         <span className="truncate">{schedule.name}</span>
       </HoverCardTrigger>
       <HoverCardContent align="start" sideOffset={8}>
         <p className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <span className="truncate">{schedule.name}</span>
-          {detail.data?.paused ? <Badge variant="outline">Paused</Badge> : null}
+          {detail.data?.paused ? <Badge variant="outline">{m.chat_crumbs_paused()}</Badge> : null}
         </p>
         {facts ? <p className="text-muted-foreground mt-0.5 text-xs">{facts}</p> : null}
         <p className="text-muted-foreground mt-2 text-xs">
           {schedule.runsHere
-            ? "Every run of this schedule posts in this chat."
-            : "A run of this schedule started this chat."}
+            ? m.chat_crumbs_schedule_posts_here()
+            : m.chat_crumbs_schedule_started()}
         </p>
       </HoverCardContent>
     </HoverCard>
@@ -228,11 +223,13 @@ function ScheduleTag({ schedule }: { schedule: ScheduleOrigin }) {
  * on an error. The agent cannot be swapped once the chat exists.
  */
 function AgentTag({ agent }: { agent: { id: string | null; name: string | null; icon?: string } }) {
-  const name = agent.name ?? (agent.id === null ? "Deleted agent" : "Agent unavailable");
+  const name =
+    agent.name ??
+    (agent.id === null ? m.chat_crumbs_deleted_agent() : m.chat_crumbs_agent_unavailable());
   return (
     <Badge variant={agent.name === null ? "destructive" : "secondary"} className={tagClassName}>
       <HugeiconsIcon icon={agentIcon(agent.icon ?? "robot")} strokeWidth={2} aria-hidden />
-      <span className="sr-only">Agent:</span>
+      <span className="sr-only">{m.chat_crumbs_agent()}</span>
       <span className="truncate">{name}</span>
     </Badge>
   );
@@ -246,9 +243,9 @@ function ProjectTag({ project }: { project: { id: string; name: string; role: st
       render={<Link to="/projects/$projectId" params={{ projectId: project.id }} />}
     >
       <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} aria-hidden />
-      <span className="sr-only">Project:</span>
+      <span className="sr-only">{m.chat_crumbs_project()}</span>
       <span className="truncate">
-        {project.role ? project.name : `${project.name} (no access)`}
+        {project.role ? project.name : m.chat_crumbs_project_no_access({ name: project.name })}
       </span>
     </Badge>
   );

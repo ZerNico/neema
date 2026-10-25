@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { MoreHorizontalIcon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseInfiniteQuery } from "@tanstack/react-query";
@@ -71,7 +72,7 @@ export function AppSidebar({
               </SidebarMenu>
               <Link to="/" className={cn(buttonVariants({ variant: "outline" }), "justify-start")}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                New chat
+                {m.chat_sidebar_new_chat()}
               </Link>
             </SidebarHeader>
             {/* Match the chat scroller's soft edge; padding keeps the first and last
@@ -178,8 +179,8 @@ function ConversationList() {
       ))}
       {conversations.length === 0 ? (
         <div className="text-muted-foreground flex flex-col gap-1 px-4 py-3 text-sm">
-          <span className="text-foreground font-medium">No chats yet</span>
-          <span>Start one from the composer and it will show up here.</span>
+          <span className="text-foreground font-medium">{m.chat_sidebar_empty_title()}</span>
+          <span>{m.chat_sidebar_empty_description()}</span>
         </div>
       ) : (
         <InfiniteSentinel
@@ -246,7 +247,7 @@ function ConversationRow({
         <ConversationMenu
           conversation={conversation}
           actions={actions}
-          trigger={<SidebarMenuAction showOnHover aria-label="Chat actions" />}
+          trigger={<SidebarMenuAction showOnHover aria-label={m.chat_sidebar_row_actions()} />}
         >
           <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
         </ConversationMenu>

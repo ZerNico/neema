@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 // Sidebar bucketing by recency. The server already orders conversations
 // newest-first, so grouping only has to slice that order and never reorder it.
 
@@ -24,11 +25,11 @@ const DAY_MS = 86_400_000;
 // "Yesterday" at 08:00, which is what a person means by it.
 const labelFor = (activity: Date, today: number): string => {
   const time = activity.getTime();
-  if (Number.isNaN(time) || time >= today) return "Today";
-  if (time >= today - DAY_MS) return "Yesterday";
-  if (time >= today - 6 * DAY_MS) return "Previous 7 days";
-  if (time >= today - 29 * DAY_MS) return "Previous 30 days";
-  return "Older";
+  if (Number.isNaN(time) || time >= today) return m.chat_day_today();
+  if (time >= today - DAY_MS) return m.chat_day_yesterday();
+  if (time >= today - 6 * DAY_MS) return m.chat_group_previous_week();
+  if (time >= today - 29 * DAY_MS) return m.chat_group_previous_month();
+  return m.chat_group_older();
 };
 
 /**

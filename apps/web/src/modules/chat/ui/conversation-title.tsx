@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { relativeAgeLabel } from "./timestamps.ts";
@@ -107,10 +108,10 @@ export function ConversationTitle({
     return (
       <span
         data-title-state="pending"
-        aria-label="Generating title"
+        aria-label={m.chat_title_generating()}
         className="text-muted-foreground animate-pulse truncate italic motion-reduce:animate-none"
       >
-        New chat…
+        {m.chat_title_pending()}
       </span>
     );
   }
@@ -197,7 +198,9 @@ export function ConversationTitle({
         <span className="flex flex-col gap-0.5">
           <span className="font-medium leading-snug">{title}</span>
           {relativeAge ? (
-            <span className="text-muted-foreground leading-snug">Created {relativeAge}</span>
+            <span className="text-muted-foreground leading-snug">
+              {m.chat_title_created({ age: relativeAge })}
+            </span>
           ) : null}
         </span>
       </TooltipContent>

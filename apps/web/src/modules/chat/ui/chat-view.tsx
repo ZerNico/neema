@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   useInfiniteQuery,
   useMutation,
@@ -152,7 +153,7 @@ export function ChatView({
     mutationFn: (permissionLevel: PermissionLevel) =>
       updateWorkSettings({ data: { conversationId, permissionLevel } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
-    onError: (error) => toastError("Could not change the approval level.", error),
+    onError: (error) => toastError(m.chat_view_approval_failed(), error),
   });
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls),
@@ -407,14 +408,14 @@ export function ChatView({
               <div className="mx-auto w-full max-w-3xl px-4">
                 {questionNeedsRefresh ? (
                   <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" role="alert">
-                    <span>Your answers may not have been sent.</span>
+                    <span>{m.chat_view_answers_unsent()}</span>
                     <PendingButton
                       size="sm"
                       variant="outline"
                       pending={refreshQuestionMutation.isPending}
                       onClick={() => refreshQuestionMutation.mutate()}
                     >
-                      Refresh chat
+                      {m.chat_view_refresh()}
                     </PendingButton>
                   </div>
                 ) : null}

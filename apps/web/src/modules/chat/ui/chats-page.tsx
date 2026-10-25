@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   Archive02Icon,
   BubbleChatIcon,
@@ -55,14 +56,14 @@ export function ChatsPage() {
 
   return (
     <Page
-      title="Chats"
+      title={m.chat_list_title()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.chat_list_root()}
       actions={
         // Out of the way: archived chats are a place you go to, not a list to compare.
         <Link to="/chats/archived" className={buttonVariants({ variant: "ghost", size: "sm" })}>
           <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} data-icon="inline-start" />
-          Archived
+          {m.chat_list_archived_link()}
         </Link>
       }
     >
@@ -70,26 +71,26 @@ export function ChatsPage() {
         maxLength={MAX_SEARCH_LENGTH}
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search chats…"
-        aria-label="Search chats"
+        placeholder={m.chat_list_search()}
+        aria-label={m.chat_list_search_label()}
       />
 
       {empty ? (
         query ? (
           <EmptyState
             icon={Search01Icon}
-            title="No chats match"
-            description={`No titles match “${query}”.`}
+            title={m.chat_list_no_match()}
+            description={m.chat_list_no_titles_match({ query })}
           />
         ) : (
           <EmptyState
             icon={BubbleChatIcon}
-            title="No chats yet"
-            description="Your chats will show up here."
+            title={m.chat_list_empty()}
+            description={m.chat_list_empty_description()}
             action={
               <Link to="/" className={buttonVariants({ size: "sm" })}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                New chat
+                {m.chat_list_new_chat()}
               </Link>
             }
           />
@@ -136,7 +137,9 @@ export function ChatsPage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Actions for ${conversation.title ?? "New chat"}`}
+                          aria-label={m.chat_list_row_actions({
+                            title: conversation.title ?? m.chat_title_new_chat(),
+                          })}
                           className="absolute top-1/2 right-1.5 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100"
                         />
                       }
