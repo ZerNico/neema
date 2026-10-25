@@ -86,11 +86,12 @@ declared type, and only the kinds we understand are shown or handed to a model.
   messages stays readable through `read_attachment`, by range or by searching its lines,
   which is also how a file summarized out of history is read again by id. The tool's row
   keeps which file and part were read, never the text.
-- An image a person attached is refused for a model without vision, at send and when a
-  retry, edit or resume switches to one: the message is about that image. An image an
-  answer produced is not: such a model reads `imageStandIn` in its place, a line saying it
-  cannot view the image and must not guess at it, so switching models later never strands
-  the conversation.
+- An image a person attached to the turn being answered is refused for a model without
+  vision, at send and when a retry, edit or resume switches to one: that question is about
+  the image (a resume counts the steers it took in too). Every other image, an earlier
+  turn's or one an answer produced, is not: such a model reads `imageStandIn` in its place, a
+  line saying it cannot view the image and must not guess at it, so switching models later
+  never strands the conversation.
 - A `file` goes through `opaqueFileText` (`attachments/server/file-text.ts`): its text when
   `fileText` has a reader for it (Office documents and SVG source today; new formats are added
   there and nowhere else), otherwise a line naming the file, its size and its id, saying it cannot be

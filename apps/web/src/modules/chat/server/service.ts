@@ -38,6 +38,7 @@ import {
   ChatRepo,
   type EditContent,
   type HistorySnapshot,
+  type MessageRow,
   type TurnContent,
   type TurnFields,
   type ResolveError,
@@ -95,6 +96,12 @@ const reservationView = (row: WorkTurnReservationRow) => ({
 type WorkTurnReservationView = ReturnType<typeof reservationView>;
 
 /** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
+/** The question a turn answers: the last user message before it, past steers. */
+const turnQuestionIds = (before: ReadonlyArray<MessageRow>) => {
+  const question = before.findLast((m) => m.role === "user" && !m.steeredIntoMessageId);
+  return question ? [question.id] : [];
+};
+
 export class ChatService extends Context.Service<
   ChatService,
   {
@@ -937,16 +944,13 @@ function makeChatService() {
         return yield* new ModelNotFound({ modelId });
       }
 
-      // The history stays as it is, so a different model has to be able to
-      // read the files already in it. Checked before anything is wiped: a
-      // rejected switch leaves the existing answer untouched. Skipped for a
-      // plain retry, which by definition faces what it already handled.
+      // A different model must read the question being answered again, which
+      // is about its own files; earlier turns' files reach it as stand-ins.
+      // Checked before anything is wiped, so a refusal leaves the answer as it
+      // was. A plain retry faces what it already handled.
       if (switching) {
         const priorAttachments = yield* attachmentRepo.listForMessages(
-          all
-            .slice(0, index)
-            .filter((m) => m.role === "user")
-            .map((m) => m.id),
+          turnQuestionIds(all.slice(0, index)),
         );
         yield* validateAttachments(
           input.userId,
@@ -1044,12 +1048,18 @@ function makeChatService() {
           reason: "this answer has reached its continuation limit; start a new message instead",
         });
       }
-      // The answer is the last turn, so every user message is history the
-      // new model has to read, its steers included.
+      // The answer goes on from its question and the steers it took in, so
+      // a different model must read their files; earlier turns' are stand-ins.
       if (switching) {
-        const priorAttachments = yield* attachmentRepo.listForMessages(
-          all.filter((m) => m.role === "user").map((m) => m.id),
-        );
+        const priorAttachments = yield* attachmentRepo.listForMessages([
+          ...turnQuestionIds(
+            all.slice(
+              0,
+              all.findIndex((m) => m.id === message.id),
+            ),
+          ),
+          ...all.filter((m) => m.steeredIntoMessageId === message.id).map((m) => m.id),
+        ]);
         yield* validateAttachments(
           input.userId,
           model.capabilities,

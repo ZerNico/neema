@@ -6957,6 +6957,38 @@ describe("retry with a different model", () => {
     // Rejected before anything was wiped: the previous answer is still there.
     expect(result.message).toMatchObject({ status: "complete", content: "first answer" });
   }, 60_000);
+
+  it("retries a later answer on a model that cannot see an earlier turn's image", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const repo = yield* ChatRepo;
+        const { userId, conversation, userMessage } = yield* seedAnswered(visionModelId);
+        yield* attachImage(userId, userMessage.id);
+        const later = yield* chat.sendMessage({
+          userId,
+          conversation: { kind: "existing", id: conversation.id },
+          modelId: visionModelId,
+          content: "And now?",
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        });
+        yield* engine.subscribe(later.assistantMessageId, 0).pipe(Stream.runDrain);
+        // The image belongs to the first turn, so the second can switch models.
+        const retried = yield* chat.retryMessage({
+          userId,
+          conversationId: conversation.id,
+          messageId: later.assistantMessageId,
+          modelId: textModelId,
+        });
+        yield* engine.subscribe(retried.assistantMessageId, 0).pipe(Stream.runDrain);
+        return yield* repo.getMessage(retried.assistantMessageId);
+      }),
+    );
+    expect(result?.status).toBe("complete");
+  }, 60_000);
 });
 
 describe("reasoning effort attempts", () => {
