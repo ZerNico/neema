@@ -201,7 +201,10 @@ export const conversationIntegrations = pgTable(
   ],
 );
 
-/** An agent narrows the offer to what it attached; the sender's connection runs it. */
+/**
+ * What an agent turns on by default in its chats, run as the sender's own
+ * accounts. A chat's own choice overrides it either way.
+ */
 export const agentIntegrations = pgTable(
   "agent_integrations",
   {

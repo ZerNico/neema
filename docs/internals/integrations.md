@@ -73,7 +73,7 @@ Outline is reached through its REST API, not its `/mcp` endpoint: the sync needs
 anyway, and our own tools keep descriptions byte-stable for caching, let us decide each
 access class, and return citable sources. Services we will not write an adapter for are
 added as [MCP servers](mcp.md), a type whose tools come from what each server lists to each
-account (`toolSource: "catalog"`) rather than the manifest. A session therefore carries its
+account (`toolSource: "listed"`) rather than the manifest. A session therefore carries its
 offered tools, each with its own `prepare`, and the tool layer never asks where they came
 from.
 
