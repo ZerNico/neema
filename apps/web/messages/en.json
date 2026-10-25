@@ -178,6 +178,60 @@
   "custom_tools_error_conflict": "This module changed elsewhere. Reload it before saving.",
   "custom_tools_error_slug_taken": "The slug {slug} is already in use.",
   "groups_error_name_taken": "Group name already taken",
+  "help_agents_body": "An agent keeps how you want a task done: its instructions, the documents it may look at and the tools it may use. Pick one when you start a chat and it works that way every time.",
+  "help_agents_example": "A “Contract reviewer” that checks every contract you share against your company’s rules.",
+  "help_agents_open": "Open Agents",
+  "help_agents_summary": "Helpers set up for one kind of task.",
+  "help_agents_title": "Agents",
+  "help_agents_use_body": "Pick an agent when you start a chat to use its instructions, documents and tools. Agents shared with you are ready to use without setting one up yourself.",
+  "help_for_example": "For example",
+  "help_knowledge_body": "Put documents and notes into a collection. In a chat, the assistant can look things up in them and shows which document each answer came from.",
+  "help_knowledge_example": "A “Company handbook” collection, so you can ask how many vacation days you have left.",
+  "help_knowledge_open": "Open Knowledge",
+  "help_knowledge_summary": "Your documents, ready to use in chats.",
+  "help_knowledge_title": "Knowledge",
+  "help_knowledge_use_body": "Choose a collection shared with you in a chat. The assistant can look things up in its documents and show where each answer came from.",
+  "help_memory_body": "The assistant can save small facts you share, like how you like answers written, and use them in later chats. You can see, change or delete them in Settings.",
+  "help_memory_example": "“I prefer short answers” is remembered, and every later chat keeps to it.",
+  "help_memory_open": "Open Memory",
+  "help_memory_summary": "Things the assistant remembers about you.",
+  "help_memory_title": "Memory",
+  "help_root_label": "Chat",
+  "help_schedules_body": "Ask for something to happen regularly, like a news summary every weekday at 07:00. Each run starts a new chat, which you can open from the schedule.",
+  "help_schedules_example": "“Every Monday at 08:00, sum up last week’s news about our industry.”",
+  "help_schedules_open": "Open Schedules",
+  "help_schedules_summary": "Tasks that run on their own.",
+  "help_schedules_title": "Schedules",
+  "help_show_tour": "Show the tour",
+  "help_skills_body": "A skill is a short set of instructions for one kind of job, like reviewing a contract. The assistant uses it on its own when it fits, or when you choose it in a chat.",
+  "help_skills_example": "A “Meeting notes” skill that turns any transcript into decisions and to-dos.",
+  "help_skills_open": "Open Skills",
+  "help_skills_summary": "Know-how the assistant picks up when it’s needed.",
+  "help_skills_title": "Skills",
+  "help_skills_use_body": "A skill is a short set of instructions for one kind of job. Choose a skill shared with you in a chat, or let the assistant pick it up when it fits.",
+  "help_title": "Help",
+  "help_tour_new_title": "New in neema",
+  "help_tour_next": "Next",
+  "help_tour_progress": "{heading} · {step} of {count}",
+  "help_tour_show_me": "Show me",
+  "help_tour_skip": "Skip",
+  "help_tour_welcome_body": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Besides chatting, you can set it up to work the way you do. This takes about a minute: here is the 1 thing worth knowing about.",
+        "countPlural=other": "Besides chatting, you can set it up to work the way you do. This takes about a minute: here are the {count} things worth knowing about."
+      }
+    }
+  ],
+  "help_tour_welcome_description": "Chat with an assistant that can write, look things up and work through tasks with you.",
+  "help_tour_welcome_title": "Welcome to neema",
   "images_activity_create_failed": [
     {
       "declarations": [

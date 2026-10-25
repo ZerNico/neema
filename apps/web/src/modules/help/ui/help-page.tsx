@@ -15,6 +15,7 @@ import {
 } from "~/ui/card.tsx";
 import { Page } from "~/ui/page-shell.tsx";
 import { Button, buttonVariants } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Everything the tours explain, findable any time from the account menu: one
@@ -26,13 +27,13 @@ export function HelpPage() {
   const features = capabilities ? availableFeatures(capabilities) : [];
   return (
     <Page
-      title="Help"
+      title={m.help_title()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.help_root_label()}
       actions={
         <Button size="sm" variant="outline" onClick={replay}>
           <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
-          Show the tour
+          {m.help_show_tour()}
         </Button>
       }
     >
@@ -51,7 +52,7 @@ export function HelpPage() {
             <CardContent className="flex flex-1 flex-col gap-3">
               <p className="leading-relaxed">{feature.body}</p>
               <div className="bg-muted rounded-2xl px-4 py-3 leading-relaxed">
-                <span className="text-muted-foreground block text-xs">For example</span>
+                <span className="text-muted-foreground block text-xs">{m.help_for_example()}</span>
                 {feature.example}
               </div>
             </CardContent>

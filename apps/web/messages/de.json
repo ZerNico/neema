@@ -178,6 +178,60 @@
   "custom_tools_error_conflict": "Dieses Modul wurde woanders geändert. Lade es neu, bevor du speicherst.",
   "custom_tools_error_slug_taken": "Der Slug {slug} wird schon verwendet.",
   "groups_error_name_taken": "Dieser Gruppenname ist schon vergeben",
+  "help_agents_body": "Ein Agent merkt sich, wie du eine Aufgabe erledigt haben willst: seine Anweisungen, die Dokumente, die er ansehen darf, und die Tools, die er nutzen darf. Wähle ihn zu Beginn eines Chats, und er arbeitet jedes Mal so.",
+  "help_agents_example": "Ein „Vertragsprüfer“, der jeden Vertrag, den du teilst, mit den Regeln deines Unternehmens abgleicht.",
+  "help_agents_open": "Agenten öffnen",
+  "help_agents_summary": "Helfer, eingerichtet für eine bestimmte Art von Aufgabe.",
+  "help_agents_title": "Agenten",
+  "help_agents_use_body": "Wähle zu Beginn eines Chats einen Agenten, um seine Anweisungen, Dokumente und Tools zu nutzen. Agenten, die mit dir geteilt wurden, kannst du sofort verwenden, ohne selbst einen einzurichten.",
+  "help_for_example": "Zum Beispiel",
+  "help_knowledge_body": "Lege Dokumente und Notizen in einer Sammlung ab. Im Chat kann der Assistent darin nachschlagen und zeigt, aus welchem Dokument jede Antwort stammt.",
+  "help_knowledge_example": "Eine Sammlung „Mitarbeiterhandbuch“, damit du fragen kannst, wie viele Urlaubstage du noch hast.",
+  "help_knowledge_open": "Wissen öffnen",
+  "help_knowledge_summary": "Deine Dokumente, bereit für deine Chats.",
+  "help_knowledge_title": "Wissen",
+  "help_knowledge_use_body": "Wähle in einem Chat eine Sammlung, die mit dir geteilt wurde. Der Assistent kann in ihren Dokumenten nachschlagen und zeigt, woher jede Antwort stammt.",
+  "help_memory_body": "Der Assistent kann sich kleine Dinge merken, die du ihm erzählst, etwa wie du Antworten geschrieben haben möchtest, und sie in späteren Chats nutzen. In den Einstellungen kannst du sie ansehen, ändern oder löschen.",
+  "help_memory_example": "„Ich mag kurze Antworten“ wird gemerkt, und jeder spätere Chat hält sich daran.",
+  "help_memory_open": "Erinnerungen öffnen",
+  "help_memory_summary": "Was sich der Assistent über dich merkt.",
+  "help_memory_title": "Erinnerungen",
+  "help_root_label": "Chat",
+  "help_schedules_body": "Lass etwas regelmäßig geschehen, etwa eine Nachrichtenübersicht an jedem Werktag um 07:00. Jede Ausführung startet einen neuen Chat, den du über den Zeitplan öffnen kannst.",
+  "help_schedules_example": "„Fasse jeden Montag um 08:00 die Nachrichten der letzten Woche zu unserer Branche zusammen.“",
+  "help_schedules_open": "Zeitpläne öffnen",
+  "help_schedules_summary": "Aufgaben, die von selbst laufen.",
+  "help_schedules_title": "Zeitpläne",
+  "help_show_tour": "Tour anzeigen",
+  "help_skills_body": "Ein Skill ist eine kurze Anleitung für eine bestimmte Art von Aufgabe, etwa einen Vertrag zu prüfen. Der Assistent nutzt ihn von selbst, wenn er passt, oder wenn du ihn in einem Chat auswählst.",
+  "help_skills_example": "Ein Skill „Besprechungsnotizen“, der aus jedem Transkript Entscheidungen und To-dos macht.",
+  "help_skills_open": "Skills öffnen",
+  "help_skills_summary": "Wissen, das der Assistent bei Bedarf nutzt.",
+  "help_skills_title": "Skills",
+  "help_skills_use_body": "Ein Skill ist eine kurze Anleitung für eine bestimmte Art von Aufgabe. Wähle in einem Chat einen Skill, der mit dir geteilt wurde, oder lass den Assistenten ihn nutzen, wenn er passt.",
+  "help_title": "Hilfe",
+  "help_tour_new_title": "Neu in neema",
+  "help_tour_next": "Weiter",
+  "help_tour_progress": "{heading} · {step} von {count}",
+  "help_tour_show_me": "Zeig’s mir",
+  "help_tour_skip": "Überspringen",
+  "help_tour_welcome_body": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Neben dem Chatten kannst du ihn so einrichten, dass er arbeitet wie du. Das dauert etwa eine Minute: Hier ist das eine, was du wissen solltest.",
+        "countPlural=other": "Neben dem Chatten kannst du ihn so einrichten, dass er arbeitet wie du. Das dauert etwa eine Minute: Hier sind die {count} Dinge, die du wissen solltest."
+      }
+    }
+  ],
+  "help_tour_welcome_description": "Chatte mit einem Assistenten, der mit dir schreibt, Dinge nachschlägt und Aufgaben erledigt.",
+  "help_tour_welcome_title": "Willkommen bei neema",
   "images_activity_create_failed": [
     {
       "declarations": [

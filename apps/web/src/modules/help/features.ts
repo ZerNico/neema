@@ -8,6 +8,7 @@ import {
 import type { HugeiconsIcon } from "@hugeicons/react";
 import type { ComponentProps } from "react";
 import type { Capabilities, Capability } from "~/modules/groups/server/policy.ts";
+import { m } from "~/paraglide/messages.js";
 
 export interface Feature {
   /** Stored once seen; never rename a shipped key, or everyone sees it again. */
@@ -26,95 +27,107 @@ export interface Feature {
   open: string;
 }
 
+type Words = "useBody" | "title" | "summary" | "body" | "example" | "open";
+
+/**
+ * A feature as the registry holds it: its words as messages, read only where a
+ * page shows them, since the server imports this list for its keys alone.
+ */
+type FeatureEntry = Omit<Feature, Words> & {
+  useBody?: () => string;
+} & Record<Exclude<Words, "useBody">, () => string>;
+
 /**
  * Every concept someone meets in the app, in plain words. The welcome tour, the
  * "New in neema" tour and the Help page all read this list, so adding a feature
  * here is all it takes for existing users to be told about it once.
  */
-export const FEATURES: readonly Feature[] = [
+const FEATURES: readonly FeatureEntry[] = [
   {
     key: "agents",
     capability: "agentsUse",
     createCapability: "agentsCreate",
-    useBody:
-      "Pick an agent when you start a chat to use its instructions, documents and tools. Agents shared with you are ready to use without setting one up yourself.",
+    useBody: m.help_agents_use_body,
     icon: Robot01Icon,
-    title: "Agents",
-    summary: "Helpers set up for one kind of task.",
-    body: "An agent keeps how you want a task done: its instructions, the documents it may look at and the tools it may use. Pick one when you start a chat and it works that way every time.",
-    example:
-      "A “Contract reviewer” that checks every contract you share against your company’s rules.",
+    title: m.help_agents_title,
+    summary: m.help_agents_summary,
+    body: m.help_agents_body,
+    example: m.help_agents_example,
     href: "/agents",
-    open: "Open Agents",
+    open: m.help_agents_open,
   },
   {
     key: "knowledge",
     capability: "knowledgeUse",
     createCapability: "knowledgeCreate",
-    useBody:
-      "Choose a collection shared with you in a chat. The assistant can look things up in its documents and show where each answer came from.",
+    useBody: m.help_knowledge_use_body,
     icon: FolderLibraryIcon,
-    title: "Knowledge",
-    summary: "Your documents, ready to use in chats.",
-    body: "Put documents and notes into a collection. In a chat, the assistant can look things up in them and shows which document each answer came from.",
-    example:
-      "A “Company handbook” collection, so you can ask how many vacation days you have left.",
+    title: m.help_knowledge_title,
+    summary: m.help_knowledge_summary,
+    body: m.help_knowledge_body,
+    example: m.help_knowledge_example,
     href: "/knowledge",
-    open: "Open Knowledge",
+    open: m.help_knowledge_open,
   },
   {
     key: "skills",
     capability: "skillsUse",
     createCapability: "skillsCreate",
-    useBody:
-      "A skill is a short set of instructions for one kind of job. Choose a skill shared with you in a chat, or let the assistant pick it up when it fits.",
+    useBody: m.help_skills_use_body,
     icon: Book02Icon,
-    title: "Skills",
-    summary: "Know-how the assistant picks up when it’s needed.",
-    body: "A skill is a short set of instructions for one kind of job, like reviewing a contract. The assistant uses it on its own when it fits, or when you choose it in a chat.",
-    example: "A “Meeting notes” skill that turns any transcript into decisions and to-dos.",
+    title: m.help_skills_title,
+    summary: m.help_skills_summary,
+    body: m.help_skills_body,
+    example: m.help_skills_example,
     href: "/skills",
-    open: "Open Skills",
+    open: m.help_skills_open,
   },
   {
     key: "schedules",
     capability: "schedules",
     icon: Calendar03Icon,
-    title: "Schedules",
-    summary: "Tasks that run on their own.",
-    body: "Ask for something to happen regularly, like a news summary every weekday at 07:00. Each run starts a new chat, which you can open from the schedule.",
-    example: "“Every Monday at 08:00, sum up last week’s news about our industry.”",
+    title: m.help_schedules_title,
+    summary: m.help_schedules_summary,
+    body: m.help_schedules_body,
+    example: m.help_schedules_example,
     href: "/schedules",
-    open: "Open Schedules",
+    open: m.help_schedules_open,
   },
   {
     key: "memory",
     capability: "memory",
     icon: Brain02Icon,
-    title: "Memory",
-    summary: "Things the assistant remembers about you.",
-    body: "The assistant can save small facts you share, like how you like answers written, and use them in later chats. You can see, change or delete them in Settings.",
-    example: "“I prefer short answers” is remembered, and every later chat keeps to it.",
+    title: m.help_memory_title,
+    summary: m.help_memory_summary,
+    body: m.help_memory_body,
+    example: m.help_memory_example,
     href: "/settings/memory",
-    open: "Open Memory",
+    open: m.help_memory_open,
   },
 ];
 
 export const FEATURE_KEYS = FEATURES.map((feature) => feature.key);
 
-export const availableFeatures = (capabilities: Capabilities) =>
+export const availableFeatures = (capabilities: Capabilities): Feature[] =>
   FEATURES.filter((feature) => capabilities[feature.capability]).map((feature) => ({
-    ...feature,
-    body:
-      feature.createCapability && !capabilities[feature.createCapability]
-        ? (feature.useBody ?? feature.body)
-        : feature.body,
+    key: feature.key,
+    capability: feature.capability,
+    ...(feature.createCapability ? { createCapability: feature.createCapability } : {}),
+    icon: feature.icon,
+    href: feature.href,
+    title: feature.title(),
+    summary: feature.summary(),
+    body: (feature.createCapability && !capabilities[feature.createCapability]
+      ? (feature.useBody ?? feature.body)
+      : feature.body)(),
+    example: feature.example(),
+    open: feature.open(),
   }));
 
 /** What a person hasn't been shown yet, in the registry's order. */
-export const unseenFeatures = (
+export const unseenFeatures = <T extends { key: string }>(
   seen: readonly string[],
-  features: readonly Feature[] = FEATURES,
+  features: readonly T[],
 ) => {
   const known = new Set(seen);
   return features.filter((feature) => !known.has(feature.key));

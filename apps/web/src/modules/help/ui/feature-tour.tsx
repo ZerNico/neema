@@ -19,6 +19,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { cn } from "~/ui/utils";
 import { ReplayContext } from "./replay-tour-context.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Shows what someone hasn't been told about yet, once. Nothing seen means a
@@ -81,7 +82,7 @@ export function FeatureTourProvider({
             step={steps[Math.min(step, steps.length - 1)]!}
             index={Math.min(step, steps.length - 1)}
             count={steps.length}
-            heading={welcome ? "Welcome to neema" : "New in neema"}
+            heading={welcome ? m.help_tour_welcome_title() : m.help_tour_new_title()}
             onBack={() => setStep((current) => current - 1)}
             onNext={() => setStep((current) => current + 1)}
             onClose={close}
@@ -119,21 +120,17 @@ function TourStep({
           <div className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-2xl">
             <NeemaGlyph className="size-7" />
           </div>
-          <DialogTitle>Welcome to neema</DialogTitle>
-          <DialogDescription>
-            Chat with an assistant that can write, look things up and work through tasks with you.
-          </DialogDescription>
+          <DialogTitle>{m.help_tour_welcome_title()}</DialogTitle>
+          <DialogDescription>{m.help_tour_welcome_description()}</DialogDescription>
           <p className="text-sm leading-relaxed">
-            Besides chatting, you can set it up to work the way you do. This takes about a minute:
-            here are the {count - 1} things worth knowing about.
+            {m.help_tour_welcome_body({ count: count - 1 })}
           </p>
         </DialogHeader>
       ) : (
         <>
           <DialogHeader>
             <p className="text-muted-foreground text-xs">
-              {heading}
-              {count > 1 ? ` · ${index + 1} of ${count}` : null}
+              {count > 1 ? m.help_tour_progress({ heading, step: index + 1, count }) : heading}
             </p>
             <div className="bg-muted text-foreground flex size-12 items-center justify-center rounded-2xl">
               <HugeiconsIcon icon={step.feature.icon} strokeWidth={2} className="size-6" />
@@ -143,7 +140,7 @@ function TourStep({
           </DialogHeader>
           <p className="text-sm leading-relaxed">{step.feature.body}</p>
           <div className="bg-muted rounded-2xl px-4 py-3 text-sm leading-relaxed">
-            <span className="text-muted-foreground block text-xs">For example</span>
+            <span className="text-muted-foreground block text-xs">{m.help_for_example()}</span>
             {step.feature.example}
           </div>
           <Link
@@ -175,15 +172,19 @@ function TourStep({
         <div className="flex gap-2">
           {index > 0 ? (
             <Button variant="secondary" onClick={onBack}>
-              Back
+              {m.common_back()}
             </Button>
           ) : count > 1 ? (
             <Button variant="ghost" onClick={onClose}>
-              Skip
+              {m.help_tour_skip()}
             </Button>
           ) : null}
           <Button onClick={last ? onClose : onNext}>
-            {last ? "Done" : step.kind === "welcome" ? "Show me" : "Next"}
+            {last
+              ? m.common_done()
+              : step.kind === "welcome"
+                ? m.help_tour_show_me()
+                : m.help_tour_next()}
           </Button>
         </div>
       </DialogFooter>
