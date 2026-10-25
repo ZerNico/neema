@@ -28,7 +28,7 @@ export type IntegrationDecidedIn = typeof IntegrationDecidedIn.Type;
 export const IntegrationToolActivity = Schema.Struct({
   family: Schema.Literal("integration"),
   version: Schema.Literal(1),
-  /** Model-facing name (`int_…`); the prefix is the durable discriminator. */
+  /** Model-facing name (`int_…`); the stored family, not this prefix, says what the call is. */
   name: bounded(INTEGRATION_ACTIVITY_LIMITS.name),
   integrationId: bounded(32),
   /** The account that acted, as the person named it then; absent with one account or none. */
