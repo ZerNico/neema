@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { imageModelsQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 const NONE = "none";
 
@@ -34,12 +35,14 @@ export function ImageModelSettingRow({
   const [open, setOpen] = useState(false);
   if (models.length === 0 && !value) return null;
   const selected = models.find((model) => model.id === value);
-  const label = selected?.displayName ?? (value ? "Unavailable model" : "No preference");
+  const label =
+    selected?.displayName ??
+    (value ? m.images_setting_unavailable() : m.images_setting_no_preference());
   return (
     // Wraps in the narrow rail: the label keeps its line and the picker takes the rest.
     <ListRow className="flex-wrap">
       <div className="flex min-w-24 shrink-0 flex-col">
-        <span className="text-sm font-medium">Image model</span>
+        <span className="text-sm font-medium">{m.images_setting_title()}</span>
         <span className="text-muted-foreground text-xs">{description}</span>
       </div>
       <div className="flex min-w-0 flex-1 justify-end">
@@ -50,7 +53,7 @@ export function ImageModelSettingRow({
                 size="sm"
                 variant="outline"
                 className="w-full min-w-0 justify-between"
-                aria-label="Image model"
+                aria-label={m.images_setting_title()}
               />
             }
           >
@@ -65,7 +68,9 @@ export function ImageModelSettingRow({
                 setOpen(false);
               }}
             >
-              <DropdownMenuRadioItem value={NONE}>No preference</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value={NONE}>
+                {m.images_setting_no_preference()}
+              </DropdownMenuRadioItem>
               {models.map((model) => (
                 <DropdownMenuRadioItem key={model.id} value={model.id}>
                   <span className="flex min-w-0 flex-col">

@@ -15,6 +15,14 @@ import { GenuiActionsContext } from "~/modules/genui/ui/context.ts";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import type { ImageQuality } from "@chat/model-client";
+import { m } from "~/paraglide/messages.js";
+
+const QUALITY_LABELS = {
+  low: m.images_quality_low,
+  medium: m.images_quality_medium,
+  high: m.images_quality_high,
+} satisfies Record<ImageQuality, () => string>;
 
 /** "16:9" as the CSS ratio a placeholder holds while the image renders. */
 const cssRatio = (ratio: string | undefined) => {
@@ -41,8 +49,11 @@ export function ImageActivityBlock({
   // Mounted mid-call (a reload) without a start time counts from now.
   const [mountedAt] = useState(serverNow);
   const elapsed = useElapsed(activity.startedAt ?? mountedAt, running);
-  const verb = activity.editing ? "Editing" : "Creating";
-  const noun = activity.requested > 1 ? "images" : "image";
+  // Never fewer than one: a call that asked for none still draws one.
+  const count = Math.max(1, activity.requested);
+  const drawing = (activity.editing ? m.images_activity_editing : m.images_activity_creating)({
+    count,
+  });
 
   if (running)
     return (
@@ -50,7 +61,7 @@ export function ImageActivityBlock({
         <div className={activityRowClassName}>
           <ActivityFace
             icon={AiImageIcon}
-            label={`${verb} ${noun}`}
+            label={drawing}
             detail={activity.model || null}
             status="running"
           />
@@ -64,7 +75,7 @@ export function ImageActivityBlock({
             <div
               key={index}
               role="img"
-              aria-label={`${verb} ${noun}`}
+              aria-label={drawing}
               style={{ aspectRatio: cssRatio(activity.aspectRatio) }}
               className="bg-muted relative flex w-full items-center justify-center overflow-hidden rounded-2xl"
             >
@@ -94,8 +105,12 @@ export function ImageActivityBlock({
 
   if (files.length === 0) {
     const label = activity.refusal
-      ? `${activity.model || "The image model"} declined`
-      : `Couldn’t ${activity.editing ? "edit the" : "create the"} ${noun}`;
+      ? activity.model
+        ? m.images_activity_declined({ model: activity.model })
+        : m.images_activity_declined_unnamed()
+      : (activity.editing ? m.images_activity_edit_failed : m.images_activity_create_failed)({
+          count,
+        });
     const note = activity.refusal ?? activity.error;
     return (
       <div className="mb-3 space-y-1">
@@ -119,12 +134,14 @@ export function ImageActivityBlock({
       </ImageGrid>
       <figcaption className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs">
         <span>
-          {activity.editing ? "Edited" : "Made"} with {activity.model}
+          {(activity.editing ? m.images_activity_edited_with : m.images_activity_made_with)({
+            model: activity.model,
+          })}
         </span>
         {activity.quality ? (
           <span className="flex items-center gap-1.5">
             <span aria-hidden>·</span>
-            <span className="capitalize">{activity.quality}</span>
+            <span>{QUALITY_LABELS[activity.quality]()}</span>
           </span>
         ) : null}
         {activity.adjustments?.map((line) => (
@@ -174,7 +191,7 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
   if (failed)
     return (
       <p role="alert" className="text-muted-foreground bg-muted rounded-2xl p-4 text-sm">
-        This image could not be loaded.
+        {m.images_image_failed()}
       </p>
     );
 
@@ -184,7 +201,7 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={`Preview ${attachment.fileName}`}
+        aria-label={m.images_image_preview({ fileName: attachment.fileName })}
         className="focus-visible:ring-ring/30 block overflow-hidden rounded-2xl outline-none focus-visible:ring-3"
         onClick={(event) => {
           if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -194,7 +211,7 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
       >
         <img
           src={url}
-          alt={model ? `Image made with ${model}` : "Generated image"}
+          alt={model ? m.images_image_alt({ model }) : m.images_image_alt_unnamed()}
           // Its box is held from the stored size, so the grid does not jump when it arrives.
           width={size?.width}
           height={size?.height}
@@ -207,12 +224,17 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button variant="floating" size="icon-sm" aria-label="Edit image" onClick={edit} />
+                <Button
+                  variant="floating"
+                  size="icon-sm"
+                  aria-label={m.images_image_edit()}
+                  onClick={edit}
+                />
               }
             >
               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} aria-hidden />
             </TooltipTrigger>
-            <TooltipContent>Edit</TooltipContent>
+            <TooltipContent>{m.common_edit()}</TooltipContent>
           </Tooltip>
         ) : null}
         <Tooltip>
@@ -221,14 +243,14 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
               <a
                 href={url}
                 download={attachment.fileName}
-                aria-label="Download image"
+                aria-label={m.images_image_download()}
                 className={buttonVariants({ variant: "floating", size: "icon-sm" })}
               />
             }
           >
             <HugeiconsIcon icon={Download01Icon} strokeWidth={2} aria-hidden />
           </TooltipTrigger>
-          <TooltipContent>Download</TooltipContent>
+          <TooltipContent>{m.common_download()}</TooltipContent>
         </Tooltip>
       </div>
       <AttachmentPreviewDialog
@@ -240,7 +262,7 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
             {edit ? (
               <PreviewAction
                 icon={PencilEdit02Icon}
-                label="Edit"
+                label={m.common_edit()}
                 onClick={() => {
                   edit();
                   setPreviewOpen(false);
@@ -249,7 +271,7 @@ function GeneratedImage({ file, model }: { file: AssistantFile; model: string })
             ) : null}
             <PreviewAction
               icon={Download01Icon}
-              label="Download"
+              label={m.common_download()}
               href={url}
               download={attachment.fileName}
             />

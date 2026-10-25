@@ -119,6 +119,67 @@
   "custom_tools_error_conflict": "Dieses Modul wurde woanders geändert. Lade es neu, bevor du speicherst.",
   "custom_tools_error_slug_taken": "Der Slug {slug} wird schon verwendet.",
   "groups_error_name_taken": "Dieser Gruppenname ist schon vergeben",
+  "images_activity_create_failed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Das Bild konnte nicht erstellt werden",
+        "countPlural=other": "Die Bilder konnten nicht erstellt werden"
+      }
+    }
+  ],
+  "images_activity_creating": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Bild wird erstellt",
+        "countPlural=other": "Bilder werden erstellt"
+      }
+    }
+  ],
+  "images_activity_declined": "{model} hat abgelehnt",
+  "images_activity_declined_unnamed": "Das Bildmodell hat abgelehnt",
+  "images_activity_edit_failed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Das Bild konnte nicht bearbeitet werden",
+        "countPlural=other": "Die Bilder konnten nicht bearbeitet werden"
+      }
+    }
+  ],
+  "images_activity_edited_with": "Bearbeitet mit {model}",
+  "images_activity_editing": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Bild wird bearbeitet",
+        "countPlural=other": "Bilder werden bearbeitet"
+      }
+    }
+  ],
+  "images_activity_made_with": "Erstellt mit {model}",
+  "images_image_alt": "Mit {model} erstelltes Bild",
+  "images_image_alt_unnamed": "Erzeugtes Bild",
+  "images_image_download": "Bild herunterladen",
+  "images_image_edit": "Bild bearbeiten",
+  "images_image_failed": "Das Bild konnte nicht geladen werden.",
+  "images_image_preview": "Vorschau von {fileName}",
+  "images_menu_title": "Bildmodell",
+  "images_quality_high": "Hoch",
+  "images_quality_low": "Niedrig",
+  "images_quality_medium": "Mittel",
+  "images_setting_no_preference": "Keine Vorgabe",
+  "images_setting_title": "Bildmodell",
+  "images_setting_unavailable": "Nicht verfügbares Modell",
+  "images_test_connection_missing": "Beim Anbieter fehlen Endpunkt oder Schlüssel.",
+  "images_test_declined": "Abgelehnt: {message}",
+  "images_test_family_unhosted": "Dieser Anbieter bietet diese Modellfamilie nicht an.",
+  "images_test_provider_missing": "Anbieter nicht gefunden.",
   "language_automatic": "Automatisch",
   "language_automatic_description": "Folgt deinem Browser, gerade {language}",
   "language_error_save": "Die Sprache konnte nicht geändert werden.",

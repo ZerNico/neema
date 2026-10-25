@@ -5,6 +5,7 @@ import type { AssistantFile } from "~/modules/chat/assistant-output.ts";
 import type { ImageToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { GenuiActionsContext, type GenuiActions } from "~/modules/genui/ui/context.ts";
 import { ImageActivityBlock } from "./image-activity-block.tsx";
+import { m } from "~/paraglide/messages.js";
 
 const base: ImageToolActivity = {
   family: "image",
@@ -77,7 +78,7 @@ describe("ImageActivityBlock", () => {
     expect(screen.getAllByRole("img", { name: "Image made with GPT Image" })).toHaveLength(2);
     expect(screen.getByText("Made with GPT Image")).toBeInTheDocument();
     // Shown only when it was sent; capitalized by CSS, which jsdom does not apply.
-    expect(screen.getByText("high")).toBeInTheDocument();
+    expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByText("Made 3:2 instead of 16:9.")).toBeInTheDocument();
   });
 
@@ -111,6 +112,13 @@ describe("ImageActivityBlock", () => {
     expect(screen.getByRole("link", { name: "Download image" })).toHaveAttribute(
       "download",
       "a.png",
+    );
+  });
+
+  it("words the running row by count in German too", () => {
+    expect(m.images_activity_creating({ count: 1 }, { locale: "de" })).toBe("Bild wird erstellt");
+    expect(m.images_activity_creating({ count: 3 }, { locale: "de" })).toBe(
+      "Bilder werden erstellt",
     );
   });
 });

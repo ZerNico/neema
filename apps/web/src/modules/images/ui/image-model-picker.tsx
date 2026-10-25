@@ -9,6 +9,7 @@ import {
   DropdownMenuSubTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { imageModelsQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Which image model this chat draws with, as a submenu of the composer's plus
@@ -41,7 +42,7 @@ export function ImageModelMenu({
       <DropdownMenuSubTrigger disabled={disabled}>
         <HugeiconsIcon icon={AiImageIcon} strokeWidth={2} />
         {/* The label keeps its line; only the model's name gives way. */}
-        <span className="shrink-0">Image model</span>
+        <span className="shrink-0">{m.images_menu_title()}</span>
         <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs">
           {selected.displayName}
         </span>

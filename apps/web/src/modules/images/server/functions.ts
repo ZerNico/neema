@@ -13,6 +13,8 @@ import { connectionOf } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { availableImageModels } from "./resolve.ts";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -40,16 +42,19 @@ export const testImageModel = createServerFn({ method: "POST" })
       }),
     ),
   )
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    // Read in the request: the effect below runs on a fiber that does not carry it.
+    const locale = getLocale();
+    return runServerFn(
       Effect.gen(function* () {
         const provider = yield* (yield* ProviderRepo).getProviderWithKey(data.providerId);
-        if (!provider) return { ok: false as const, error: "Provider not found." };
+        if (!provider)
+          return { ok: false as const, error: m.images_test_provider_missing({}, { locale }) };
         if (!imageFamiliesFor(provider.preset).some((family) => family.id === data.imageFamily))
-          return { ok: false as const, error: "This provider does not host that family." };
+          return { ok: false as const, error: m.images_test_family_unhosted({}, { locale }) };
         const connection = connectionOf(provider);
         if (!connection)
-          return { ok: false as const, error: "The provider is missing its endpoint or key." };
+          return { ok: false as const, error: m.images_test_connection_missing({}, { locale }) };
         const family = imageFamily(data.imageFamily);
         const fitted = normalizeImageRequest(data.imageFamily, family.limits, {
           prompt: "A small red cube on a white table, soft daylight.",
@@ -71,7 +76,10 @@ export const testImageModel = createServerFn({ method: "POST" })
         if (result._tag === "Failure")
           return { ok: false as const, error: result.failure.message.slice(0, 300) };
         if (result.success.kind === "refused")
-          return { ok: false as const, error: `Declined: ${result.success.message}` };
+          return {
+            ok: false as const,
+            error: m.images_test_declined({ message: result.success.message }, { locale }),
+          };
         if (result.success.kind === "unusable")
           return { ok: false as const, error: result.success.message.slice(0, 300) };
         const image = result.success.images[0]!;
@@ -81,5 +89,5 @@ export const testImageModel = createServerFn({ method: "POST" })
           image: `data:${image.mediaType};base64,${Buffer.from(image.data).toString("base64")}`,
         };
       }),
-    ),
-  );
+    );
+  });
