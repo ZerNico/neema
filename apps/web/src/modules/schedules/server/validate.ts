@@ -17,8 +17,8 @@ import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { ScheduleRejected, ScheduleSettings, type ScheduleNotify } from "../schema.ts";
-import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
+import { ScheduleRejected, ScheduleSettings } from "../schema.ts";
+import { cadenceIssue, nextFireAt } from "./cron.ts";
 import type { DbTx } from "~/server/db.ts";
 
 export type ValidatedSchedule = Omit<
@@ -95,13 +95,9 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     return yield* new ScheduleRejected({ reason: "name must not be blank" });
   if (!settings.prompt.trim())
     return yield* new ScheduleRejected({ reason: "prompt must not be blank" });
-  const cronIssue = validateCron(settings.cron, settings.timezone);
-  if (cronIssue) return yield* new ScheduleRejected({ reason: `invalid schedule: ${cronIssue}` });
-  if (!isValidTimezone(settings.timezone))
-    return yield* new ScheduleRejected({ reason: "unknown timezone" });
+  const cadence = cadenceIssue(settings);
+  if (cadence) return yield* new ScheduleRejected({ reason: cadence });
   const endAt = settings.endAt ? new Date(settings.endAt) : null;
-  if (endAt && Number.isNaN(endAt.getTime()))
-    return yield* new ScheduleRejected({ reason: "invalid end time" });
   if (settings.modelId) {
     // A usable chat model, as a send requires: a fire would otherwise fall
     // back to the default without saying, and the page would name the wrong one.

@@ -8,7 +8,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ScheduleNotAvailable, ScheduleRejected, type ScheduleRunSummary } from "../schema.ts";
-import { isValidTimezone, previewFires, validateCron } from "./cron.ts";
+import { cadenceIssue, previewFires } from "./cron.ts";
 import { ScheduleFire, type FireOutcome } from "./fire.ts";
 import { ScheduleRepo, toSummary, type ScheduleRow } from "./repo.ts";
 import { ScheduleSettlement } from "./settle.ts";
@@ -263,10 +263,8 @@ export class ScheduleService extends Context.Service<
           yield* changed(userId, scheduleId);
         }),
         preview: Effect.fn("ScheduleService.preview")(function* (input) {
-          const issue = validateCron(input.cron, input.timezone);
-          if (issue) return yield* new ScheduleRejected({ reason: `invalid schedule: ${issue}` });
-          if (!isValidTimezone(input.timezone))
-            return yield* new ScheduleRejected({ reason: "unknown timezone" });
+          const issue = cadenceIssue(input);
+          if (issue) return yield* new ScheduleRejected({ reason: issue });
           const endAt = input.endAt ? new Date(input.endAt) : null;
           return previewFires(input.cron, input.timezone, 5, new Date(), endAt).map((at) =>
             at.toISOString(),

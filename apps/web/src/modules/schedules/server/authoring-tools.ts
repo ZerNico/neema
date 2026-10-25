@@ -13,6 +13,14 @@ import {
 import { ScheduleDraftActivityResult } from "../tool-schema.ts";
 import { SCHEDULE_AUTHORING_POLICY } from "./authoring-prompt.ts";
 import { validateCron } from "./cron.ts";
+
+/** The correction a model gets for a cron it should rewrite, or null when it parses. */
+const cronCorrection = (cron: string, timezone: string) => {
+  const issue = validateCron(cron, timezone);
+  return issue
+    ? `The cron field did not parse: ${issue}. Write a 5-field cron expression (minute hour day-of-month month day-of-week) interpreted in ${timezone}, and try again.`
+    : null;
+};
 import type { ScheduleDraftService } from "./draft-service.ts";
 import type { DbTx } from "~/server/db.ts";
 
@@ -199,14 +207,12 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
               changes: { ...decoded.value.changes, timezone: input.timeZone },
             }
           : decoded.value;
+      // An existing schedule's own zone is known only once its draft opens;
+      // the zone barely changes whether a cron parses, and Save checks it there.
       const cronIssue = opened.changes?.cron
-        ? validateCron(opened.changes.cron, opened.changes.timezone ?? "UTC")
+        ? cronCorrection(opened.changes.cron, opened.changes.timezone ?? "UTC")
         : null;
-      if (cronIssue)
-        return {
-          outcome: "invalid",
-          message: `The cron field did not parse: ${cronIssue}. Write a 5-field cron expression (minute hour day-of-month month day-of-week) and try again.`,
-        };
+      if (cronIssue) return { outcome: "invalid", message: cronIssue };
       const result = yield* drafts
         .open(
           input.userId,
@@ -240,14 +246,11 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       // A bad cron stored now would fail at save with no model in the loop;
       // reject here with a correction the model can act on immediately.
       if (decoded.value.changes.cron !== undefined) {
-        const timezone = decoded.value.changes.timezone ?? target.settings.timezone;
-        const issue = validateCron(decoded.value.changes.cron, timezone);
-        if (issue)
-          return {
-            outcome: "invalid",
-            ...session.reference(target),
-            message: `The cron field did not parse: ${issue}. Write a 5-field cron expression (minute hour day-of-month month day-of-week) interpreted in ${timezone}, and try again.`,
-          };
+        const issue = cronCorrection(
+          decoded.value.changes.cron,
+          decoded.value.changes.timezone ?? target.settings.timezone,
+        );
+        if (issue) return { outcome: "invalid", ...session.reference(target), message: issue };
       }
       const result = yield* drafts
         .patch(

@@ -53,6 +53,22 @@ const firesTooOften = (instance: Cron) => {
 const hasFarFutureRun = (cron: string, timezone: string) =>
   make(cron, timezone).nextRun(new Date("2030-01-01T00:00:00Z")) !== null;
 
+/**
+ * Why a cadence cannot be saved, or null: the zone first, since croner throws
+ * its own message for one it does not know.
+ */
+export const cadenceIssue = (cadence: {
+  cron: string;
+  timezone: string;
+  endAt?: string | null | undefined;
+}): string | null => {
+  if (!isValidTimezone(cadence.timezone)) return "unknown timezone";
+  const cronIssue = validateCron(cadence.cron, cadence.timezone);
+  if (cronIssue) return `invalid schedule: ${cronIssue}`;
+  if (cadence.endAt && Number.isNaN(new Date(cadence.endAt).getTime())) return "invalid end time";
+  return null;
+};
+
 export const isValidTimezone = (timezone: string): boolean => {
   try {
     // oxlint-disable-next-line no-new -- constructing it is the validation: an unknown zone throws
