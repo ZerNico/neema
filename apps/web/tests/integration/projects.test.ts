@@ -691,38 +691,54 @@ describe("project memory", () => {
     await db((d) => d.insert(conversations).values({ id: chat, userId: owner }));
     expect(
       await memory((s) =>
-        s.saveModel(owner, {
-          projectId: project.id,
-          content: "we ship on tuesdays",
-          sourceConversationId: chat,
-        }),
+        s.saveModel(
+          owner,
+          {
+            projectId: project.id,
+            content: "we ship on tuesdays",
+            sourceConversationId: chat,
+          },
+          () => Effect.void,
+        ),
       ),
     ).toEqual({ outcome: "unchanged" });
     expect(
       await memory((s) =>
-        s.saveModel(viewer, {
-          projectId: project.id,
-          content: "The logo is blue.",
-          sourceConversationId: chat,
-        }),
+        s.saveModel(
+          viewer,
+          {
+            projectId: project.id,
+            content: "The logo is blue.",
+            sourceConversationId: chat,
+          },
+          () => Effect.void,
+        ),
       ),
     ).toEqual({ outcome: "rejected", reason: "read_only" });
     expect(
       await memory((s) =>
-        s.saveModel(owner, {
-          projectId: project.id,
-          content: "My card is 4111 1111 1111 1111",
-          sourceConversationId: chat,
-        }),
+        s.saveModel(
+          owner,
+          {
+            projectId: project.id,
+            content: "My card is 4111 1111 1111 1111",
+            sourceConversationId: chat,
+          },
+          () => Effect.void,
+        ),
       ),
     ).toEqual({ outcome: "rejected", reason: "sensitive" });
     expect(
       await memory((s) =>
-        s.saveModel(owner, {
-          projectId: project.id,
-          content: "The logo is blue.",
-          sourceConversationId: chat,
-        }),
+        s.saveModel(
+          owner,
+          {
+            projectId: project.id,
+            content: "The logo is blue.",
+            sourceConversationId: chat,
+          },
+          () => Effect.void,
+        ),
       ),
     ).toEqual({ outcome: "created" });
     await memory((s) => s.update(owner, project.id, added.id, "We ship on Wednesdays."));

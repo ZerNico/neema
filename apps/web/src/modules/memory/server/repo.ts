@@ -17,7 +17,6 @@ import {
   type UpdateMemoryOutcome,
   type UpdateMemorySettingsInput,
 } from "../schema.ts";
-import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "./content-hash.ts";
 
 export type MemoryRow = typeof memories.$inferSelect;
@@ -116,6 +115,8 @@ export class MemoryRepo extends Context.Service<
         sourceConversationId: string;
         sourceMessageId: string;
         sourceMessageHash: string;
+        /** The answer's fence, taken first in the save's transaction. */
+        guard: (tx: DbTx) => Effect.Effect<unknown>;
       },
     ): Effect.Effect<SaveModelMemoryOutcome>;
   }
@@ -393,18 +394,17 @@ export class MemoryRepo extends Context.Service<
           sourceConversationId: string;
           sourceMessageId: string;
           sourceMessageHash: string;
+          guard: (tx: DbTx) => Effect.Effect<unknown>;
         },
       ) {
-        const fence = yield* GenerationFence;
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
               // The same fence every durable write in a generation takes
               // (`ChatRepo.generationWrite`), inside this transaction rather
               // than around it, and before the user advisory and source locks
-              // so it serializes with Stop, retry and the reaper. Null outside
-              // a generation: a manual save has no attempt to belong to.
-              if (fence) yield* lockGeneration(tx, fence);
+              // so it serializes with Stop, retry and the reaper.
+              yield* input.guard(tx);
               yield* lockUser(tx, userId);
 
               // Hold a shared row lock through the write. Admin updates take an

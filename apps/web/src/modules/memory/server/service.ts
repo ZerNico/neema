@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect";
+import type { DbTx } from "~/server/db.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { CapabilityDenied } from "~/modules/groups/errors.ts";
@@ -182,9 +183,11 @@ export class MemoryService extends Context.Service<
     ): Effect.Effect<UpdateMemoryOutcome, CapabilityDenied>;
     delete(userId: string, memoryId: string): Effect.Effect<DeleteMemoryOutcome, CapabilityDenied>;
     clear(userId: string): Effect.Effect<number, CapabilityDenied>;
+    /** The model's save; `guard` takes the answer's fence first inside the save's transaction. */
     saveModel(
       userId: string,
       input: SaveModelMemoryInput,
+      guard: (tx: DbTx) => Effect.Effect<unknown>,
     ): Effect.Effect<SaveModelMemoryOutcome, CapabilityDenied>;
   }
 >()("chat/memory/MemoryService") {
@@ -295,13 +298,14 @@ export class MemoryService extends Context.Service<
       const saveModel = Effect.fn("MemoryService.saveModel")(function* (
         userId: string,
         input: SaveModelMemoryInput,
+        guard: (tx: DbTx) => Effect.Effect<unknown>,
       ) {
         yield* requireMemory(userId);
         const prepared = prepareMemoryContent(input.content);
         if (!prepared.ok) {
           return { outcome: "rejected", reason: prepared.reason } as const;
         }
-        const outcome = yield* repo.saveModel(userId, { ...input, ...prepared });
+        const outcome = yield* repo.saveModel(userId, { ...input, ...prepared, guard });
         if (changed(outcome)) yield* publishChanged(userId);
         return outcome;
       });

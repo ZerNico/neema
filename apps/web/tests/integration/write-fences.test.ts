@@ -11,7 +11,7 @@ import {
   type ResearchFence,
 } from "~/modules/chat/server/research/repo.ts";
 import {
-  GenerationFence,
+  lockGeneration,
   type GenerationIdentity,
 } from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
@@ -97,15 +97,22 @@ const fixture = async () => {
     sourceMessageId,
     sourceMessageHash: hashSourceMessageContent(content),
   };
-  const save = Effect.flatMap(MemoryRepo, (repo) => repo.saveModel(userId, input));
-  const fenced = save.pipe(Effect.provideService(GenerationFence, identity));
+  const save = Effect.flatMap(MemoryRepo, (repo) =>
+    repo.saveModel(userId, { ...input, guard: () => Effect.void }),
+  );
+  /** The model's save under an attempt's fence, as the memory tool makes it. */
+  const saveAs = (owner: GenerationIdentity) =>
+    Effect.flatMap(MemoryRepo, (repo) =>
+      repo.saveModel(userId, { ...input, guard: (tx) => lockGeneration(tx, owner) }),
+    );
+  const fenced = saveAs(identity);
   const list = () =>
     runtime.runPromise(
       Effect.flatMap(Db, (db) =>
         db.select().from(memories).where(eq(memories.userId, userId)).pipe(Effect.orDie),
       ),
     );
-  return { userId, identity, fence, save, fenced, list };
+  return { userId, identity, fence, save, saveAs, fenced, list };
 };
 
 /** A lost research fence dies with its own message rather than a typed failure. */
@@ -160,12 +167,8 @@ describe("memory saves under the generation fence", () => {
   it.each(["userId", "conversationId", "messageId", "generationId"] as const)(
     "rejects a mismatched %s without writing memory",
     async (field) => {
-      const { identity, save, list } = await fixture();
-      expectFenceLoss(
-        await runtime.runPromiseExit(
-          save.pipe(Effect.provideService(GenerationFence, { ...identity, [field]: uuidv7() })),
-        ),
-      );
+      const { identity, saveAs, list } = await fixture();
+      expectFenceLoss(await runtime.runPromiseExit(saveAs({ ...identity, [field]: uuidv7() })));
       expect(await list()).toEqual([]);
     },
   );

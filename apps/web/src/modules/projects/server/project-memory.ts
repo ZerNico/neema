@@ -2,7 +2,6 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import { projectMemories, user } from "~/db/schema/index.ts";
-import { GenerationFence, lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import { prepareMemoryContent } from "~/modules/memory/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -122,12 +121,13 @@ export class ProjectMemoryService extends Context.Service<
       memoryId: string,
     ): Effect.Effect<void, ProjectMemoryError>;
     /**
-     * The model's save, under the generation's fence taken first inside the
+     * The model's save; `guard` takes the answer's fence first inside the
      * transaction, exactly like a personal memory save.
      */
     saveModel(
       userId: string,
       input: { projectId: string; content: string; sourceConversationId: string },
+      guard: (tx: DbTx) => Effect.Effect<unknown>,
     ): Effect.Effect<ProjectMemorySave>;
   }
 >()("chat/projects/ProjectMemoryService") {
@@ -235,13 +235,12 @@ export class ProjectMemoryService extends Context.Service<
           );
           yield* changed(projectId);
         }),
-        saveModel: Effect.fn("ProjectMemoryService.saveModel")(function* (userId, input) {
+        saveModel: Effect.fn("ProjectMemoryService.saveModel")(function* (userId, input, guard) {
           const prepared = prepare(input.content);
           if (!prepared.ok) return { outcome: "rejected" as const, reason: prepared.reason };
-          const fence = yield* GenerationFence;
           const outcome = yield* transaction((tx) =>
             Effect.gen(function* () {
-              if (fence) yield* lockGeneration(tx, fence);
+              yield* guard(tx);
               const role: ProjectRole | null = yield* access(userId, input.projectId, tx);
               if (!projectCan.edit(role)) return { outcome: "read_only" as const };
               yield* lockProject(tx, input.projectId);

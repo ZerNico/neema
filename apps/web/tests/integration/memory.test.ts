@@ -175,7 +175,11 @@ describe("saved memory repository", () => {
     const source = await createSource(userId);
     const automatic = await runtime.runPromise(
       MemoryService.use((service) =>
-        service.saveModel(userId, { ...source, content: "Prefers concise answers" }),
+        service.saveModel(
+          userId,
+          { ...source, content: "Prefers concise answers" },
+          () => Effect.void,
+        ),
       ),
     );
     if (automatic.outcome !== "created") throw new Error("expected created automatic memory");
@@ -199,11 +203,15 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, {
-            ...source,
-            memoryId: automatic.memory.id,
-            content: "Replace automatically",
-          }),
+          service.saveModel(
+            userId,
+            {
+              ...source,
+              memoryId: automatic.memory.id,
+              content: "Replace automatically",
+            },
+            () => Effect.void,
+          ),
         ),
       ),
     ).resolves.toEqual({ outcome: "protected" });
@@ -241,7 +249,7 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, { ...source, content: "Blocked" }),
+          service.saveModel(userId, { ...source, content: "Blocked" }, () => Effect.void),
         ),
       ),
     ).resolves.toEqual({ outcome: "disabled" });
@@ -255,7 +263,7 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, { ...source, content: "Still blocked" }),
+          service.saveModel(userId, { ...source, content: "Still blocked" }, () => Effect.void),
         ),
       ),
     ).resolves.toEqual({ outcome: "disabled" });
@@ -319,7 +327,11 @@ describe("saved memory repository", () => {
     const save = runtime
       .runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, { ...source, content: "Blocked during disable" }),
+          service.saveModel(
+            userId,
+            { ...source, content: "Blocked during disable" },
+            () => Effect.void,
+          ),
         ),
       )
       .finally(() => {
@@ -372,7 +384,11 @@ describe("saved memory repository", () => {
     const save = runtime
       .runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, { ...source, content: "Prefers concise answers" }),
+          service.saveModel(
+            userId,
+            { ...source, content: "Prefers concise answers" },
+            () => Effect.void,
+          ),
         ),
       )
       .finally(() => {
@@ -403,7 +419,9 @@ describe("saved memory repository", () => {
     );
 
     const saved = await runtime.runPromise(
-      MemoryService.use((service) => service.saveModel(userId, { ...source, content: "Concise" })),
+      MemoryService.use((service) =>
+        service.saveModel(userId, { ...source, content: "Concise" }, () => Effect.void),
+      ),
     );
     if (saved.outcome !== "created") throw new Error("expected created model memory");
 
@@ -418,11 +436,15 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, {
-            ...source,
-            memoryId: saved.memory.id,
-            content: "Replace automatically",
-          }),
+          service.saveModel(
+            userId,
+            {
+              ...source,
+              memoryId: saved.memory.id,
+              content: "Replace automatically",
+            },
+            () => Effect.void,
+          ),
         ),
       ),
     ).resolves.toEqual({ outcome: "protected" });
@@ -438,7 +460,9 @@ describe("saved memory repository", () => {
     );
     await expect(
       runtime.runPromise(
-        MemoryService.use((service) => service.saveModel(userId, { ...source, content: "Stale" })),
+        MemoryService.use((service) =>
+          service.saveModel(userId, { ...source, content: "Stale" }, () => Effect.void),
+        ),
       ),
     ).resolves.toEqual({ outcome: "source_changed" });
   });
@@ -448,7 +472,11 @@ describe("saved memory repository", () => {
     const originalSource = await createSource(userId, "I prefer concise answers");
     const saved = await runtime.runPromise(
       MemoryService.use((service) =>
-        service.saveModel(userId, { ...originalSource, content: "Prefers concise answers" }),
+        service.saveModel(
+          userId,
+          { ...originalSource, content: "Prefers concise answers" },
+          () => Effect.void,
+        ),
       ),
     );
     if (saved.outcome !== "created") throw new Error("expected created automatic memory");
@@ -470,11 +498,15 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, {
-            ...newSource,
-            memoryId: saved.memory.id,
-            content: "Prefers detailed answers",
-          }),
+          service.saveModel(
+            userId,
+            {
+              ...newSource,
+              memoryId: saved.memory.id,
+              content: "Prefers detailed answers",
+            },
+            () => Effect.void,
+          ),
         ),
       ),
     ).resolves.toMatchObject({ outcome: "updated", memory: { id: saved.memory.id } });
@@ -517,12 +549,12 @@ describe("saved memory repository", () => {
     const sourceB = await createSource(userId, "I like coffee");
     const automaticA = await runtime.runPromise(
       MemoryService.use((service) =>
-        service.saveModel(userId, { ...sourceA, content: "Likes tea" }),
+        service.saveModel(userId, { ...sourceA, content: "Likes tea" }, () => Effect.void),
       ),
     );
     const automaticB = await runtime.runPromise(
       MemoryService.use((service) =>
-        service.saveModel(userId, { ...sourceB, content: "Likes coffee" }),
+        service.saveModel(userId, { ...sourceB, content: "Likes coffee" }, () => Effect.void),
       ),
     );
     if (automaticA.outcome !== "created" || automaticB.outcome !== "created") {
@@ -532,11 +564,15 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, {
-            ...sourceA,
-            memoryId: automaticA.memory.id,
-            content: "Likes coffee",
-          }),
+          service.saveModel(
+            userId,
+            {
+              ...sourceA,
+              memoryId: automaticA.memory.id,
+              content: "Likes coffee",
+            },
+            () => Effect.void,
+          ),
         ),
       ),
     ).resolves.toMatchObject({ outcome: "updated", memory: { id: automaticB.memory.id } });
@@ -550,7 +586,11 @@ describe("saved memory repository", () => {
     const oldSource = await createSource(userId, "I prefer dark mode");
     const original = await runtime.runPromise(
       MemoryService.use((service) =>
-        service.saveModel(userId, { ...oldSource, content: "Prefers dark mode" }),
+        service.saveModel(
+          userId,
+          { ...oldSource, content: "Prefers dark mode" },
+          () => Effect.void,
+        ),
       ),
     );
     expect(original.outcome).toBe("created");
@@ -571,7 +611,11 @@ describe("saved memory repository", () => {
     await expect(
       runtime.runPromise(
         MemoryService.use((service) =>
-          service.saveModel(userId, { ...newSource, content: "Prefers dark mode" }),
+          service.saveModel(
+            userId,
+            { ...newSource, content: "Prefers dark mode" },
+            () => Effect.void,
+          ),
         ),
       ),
     ).resolves.toMatchObject({
@@ -694,7 +738,9 @@ describe("saved memory repository", () => {
       ),
     );
     const saved = await runtime.runPromise(
-      MemoryService.use((service) => service.saveModel(userId, { ...source, content: "Keep me" })),
+      MemoryService.use((service) =>
+        service.saveModel(userId, { ...source, content: "Keep me" }, () => Effect.void),
+      ),
     );
     expect(saved.outcome).toBe("created");
 

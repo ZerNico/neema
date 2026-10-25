@@ -8,6 +8,7 @@ import {
 } from "../schema.ts";
 import type { ProjectMemorySave } from "~/modules/projects/server/project-memory.ts";
 import type { MemoryService } from "./service.ts";
+import type { DbTx } from "~/server/db.ts";
 
 // The transport accepts anything the model emits: malformed input becomes a
 // tool result the model can react to, not a decode error that fails the
@@ -220,6 +221,8 @@ export function prepareMemoryTool(input: {
   sourceMessageId: string;
   sourceMessageHash: string;
   ordinals: ReadonlyMap<number, string>;
+  /** The answer's fence, taken first in the save's transaction. */
+  guard: (tx: DbTx) => Effect.Effect<unknown>;
 }): PreparedMemoryTool {
   let attempted = false;
 
@@ -260,13 +263,17 @@ export function prepareMemoryTool(input: {
     }
 
     return yield* input.memory
-      .saveModel(input.userId, {
-        ...(memoryId === undefined ? {} : { memoryId }),
-        content: content.value,
-        sourceConversationId: input.conversationId,
-        sourceMessageId: input.sourceMessageId,
-        sourceMessageHash: input.sourceMessageHash,
-      })
+      .saveModel(
+        input.userId,
+        {
+          ...(memoryId === undefined ? {} : { memoryId }),
+          content: content.value,
+          sourceConversationId: input.conversationId,
+          sourceMessageId: input.sourceMessageId,
+          sourceMessageHash: input.sourceMessageHash,
+        },
+        input.guard,
+      )
       .pipe(
         Effect.map(resultFor),
         Effect.catchCause((cause) =>

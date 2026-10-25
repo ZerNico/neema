@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { DbTx } from "~/server/db.ts";
 import type { Prompt } from "effect/ai";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
 import {
@@ -26,6 +27,8 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
   history: ReadonlyArray<MessageRow>;
   /** A temporary chat neither reads nor saves memory. */
   memoryDisabled?: boolean;
+  /** The answer's fence, taken first in a memory save's transaction. */
+  guard: (tx: DbTx) => Effect.Effect<unknown>;
 }) {
   if (input.memoryDisabled) return { memoryTools: undefined, messages: () => [], pastChats: false };
   const settings = yield* input.memory.getSettings(input.userId);
@@ -61,11 +64,11 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
           project: projectSave
             ? {
                 save: (content) =>
-                  input.projectMemory.saveModel(input.userId, {
-                    projectId: project.id,
-                    content,
-                    sourceConversationId: input.conversationId,
-                  }),
+                  input.projectMemory.saveModel(
+                    input.userId,
+                    { projectId: project.id, content, sourceConversationId: input.conversationId },
+                    input.guard,
+                  ),
               }
             : undefined,
           userId: input.userId,
@@ -73,6 +76,7 @@ export const prepareConversationContext = Effect.fn("chat.conversationContext")(
           sourceMessageId: sourceUserMessage.id,
           sourceMessageHash: hashSourceMessageContent(sourceUserMessage.content),
           ordinals: renderedMemory?.ordinals ?? new Map(),
+          guard: input.guard,
         })
       : undefined;
   const messages = () =>

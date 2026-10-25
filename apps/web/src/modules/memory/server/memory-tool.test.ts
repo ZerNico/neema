@@ -12,6 +12,9 @@ import type { MemoryService } from "./service.ts";
 
 type Handler = (params: SaveMemoryParams) => Effect.Effect<SaveMemoryResult>;
 
+/** Stands for the answer's fence; the save receives exactly this one. */
+const guard = () => Effect.void;
+
 const setup = (outcome: Parameters<typeof Effect.succeed>[0] = { outcome: "created" }) => {
   const saveModel = vi.fn(() => Effect.succeed(outcome as never));
   const group = prepareMemoryTool({
@@ -22,6 +25,7 @@ const setup = (outcome: Parameters<typeof Effect.succeed>[0] = { outcome: "creat
     sourceMessageId: "message-1",
     sourceMessageHash: "source-hash",
     ordinals: new Map([[1, "memory-1"]]),
+    guard,
   });
   return { saveModel, handler: group.group.handlers["save_memory"] as Handler };
 };
@@ -37,12 +41,17 @@ describe("prepareMemoryTool", () => {
       outcome: "created",
       message: "Saved for future conversations.",
     });
-    expect(saveModel).toHaveBeenCalledWith("user-1", {
-      content: "Prefers concise answers",
-      sourceConversationId: "conversation-1",
-      sourceMessageId: "message-1",
-      sourceMessageHash: "source-hash",
-    });
+    expect(saveModel).toHaveBeenCalledWith(
+      "user-1",
+      {
+        content: "Prefers concise answers",
+        sourceConversationId: "conversation-1",
+        sourceMessageId: "message-1",
+        sourceMessageHash: "source-hash",
+      },
+      // The answer's fence, passed through so the save takes it first.
+      guard,
+    );
   });
 
   it("resolves replacement ordinals inside the trusted handler closure", async () => {
@@ -55,6 +64,7 @@ describe("prepareMemoryTool", () => {
       expect.objectContaining({
         memoryId: "memory-1",
       }),
+      guard,
     );
   });
 
@@ -118,6 +128,7 @@ describe("prepareMemoryTool", () => {
       sourceMessageId: "message-1",
       sourceMessageHash: "source-hash",
       ordinals: new Map(),
+      guard,
     });
     const handler = group.group.handlers["save_memory"] as Handler;
     const result = await Effect.runPromise(handler({ content: "Fine" }));
@@ -163,6 +174,7 @@ describe("prepareMemoryTool", () => {
       sourceMessageId: "message-1",
       sourceMessageHash: "source-hash",
       ordinals: new Map(),
+      guard,
     });
     const result = await Effect.runPromiseExit(
       (prepared.group.handlers["save_memory"] as Handler)({ content: "Remember this" }),
@@ -182,6 +194,7 @@ describe("prepareMemoryTool", () => {
       sourceMessageId: "message-1",
       sourceMessageHash: "source-hash",
       ordinals: new Map(),
+      guard,
     });
 
     await expect(
@@ -271,6 +284,7 @@ describe("save_memory malformed parameters", () => {
     expect(saveModel).toHaveBeenCalledWith(
       "user-1",
       expect.not.objectContaining({ memoryId: expect.anything() }),
+      guard,
     );
   });
 

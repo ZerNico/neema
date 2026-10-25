@@ -772,6 +772,7 @@ export const prepareGenerationTools = (
       conversationId: input.conversationId,
       history: completed,
       memoryDisabled: temporary,
+      guard: writeGuard,
     });
     const { memoryTools } = conversationContext;
     // Offered in every kept chat, so the tool list stays the same turn to
