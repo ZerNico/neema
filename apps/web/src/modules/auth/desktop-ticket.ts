@@ -11,8 +11,6 @@ export const DESKTOP_TICKET_MINUTES = 3;
  */
 export const UNBOUND_TICKET = "Check that this is your code, then continue.";
 export const DESKTOP_SESSION_SECONDS = 90 * 24 * 60 * 60;
-/** Prefix the desktop shell appends to its user agent; the server keys on it. */
-export const DESKTOP_UA_MARKER = "ChatDesktop/";
 
 /** No 0/O, 1/I/L or U, so a code read aloud or retyped has one spelling. */
 export const TICKET_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
@@ -51,10 +49,6 @@ export function isTicketShaped(normalised: string): boolean {
   if (normalised.length !== TICKET_LENGTH) return false;
   for (const c of normalised) if (!TICKET_ALPHABET.includes(c)) return false;
   return true;
-}
-
-export function hasDesktopMarker(userAgent: string | null | undefined): boolean {
-  return typeof userAgent === "string" && userAgent.includes(DESKTOP_UA_MARKER);
 }
 
 const encoder = new TextEncoder();

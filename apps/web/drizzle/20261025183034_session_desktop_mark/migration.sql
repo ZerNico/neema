@@ -1,0 +1,1 @@
+ALTER TABLE "session" ADD COLUMN "desktop" boolean DEFAULT false NOT NULL;

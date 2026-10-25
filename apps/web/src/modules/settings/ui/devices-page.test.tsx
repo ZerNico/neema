@@ -36,6 +36,7 @@ const CHROME_UA =
 const session = (id: string, userAgent: string, at: string, current = false): DesktopSession => ({
   id,
   userAgent,
+  desktop: userAgent === DESKTOP_UA,
   ipAddress: "127.0.0.1",
   createdAt: at,
   updatedAt: at,
@@ -84,10 +85,14 @@ afterEach(() => {
 
 describe("describeSession", () => {
   it("names the desktop app by platform and browsers by name", () => {
-    expect(describeSession(DESKTOP_UA)).toBe("neema Desktop on macOS");
-    expect(describeSession(CHROME_UA)).toBe("Chrome on Windows");
-    expect(describeSession("ChatDesktop/1")).toBe("neema Desktop");
-    expect(describeSession(null)).toBe("Browser");
+    expect(describeSession(DESKTOP_UA, true)).toBe("neema Desktop on macOS");
+    expect(describeSession(CHROME_UA, false)).toBe("Chrome on Windows");
+    expect(describeSession("ChatDesktop/1", true)).toBe("neema Desktop");
+    expect(describeSession(null, false)).toBe("Browser");
+  });
+
+  it("trusts the session's mark, never a user agent claiming to be the app", () => {
+    expect(describeSession(DESKTOP_UA, false)).toBe("Chrome on macOS");
   });
 });
 

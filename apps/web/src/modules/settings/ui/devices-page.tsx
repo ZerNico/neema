@@ -14,7 +14,6 @@ import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.t
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { toastError } from "~/ui/error-toast.ts";
-import { hasDesktopMarker } from "~/modules/auth/desktop-ticket.ts";
 import { describeSession } from "./describe-session.ts";
 import { install, useInstallWay, type InstallWay } from "~/ui/install-prompt.ts";
 import { Button } from "~/ui/primitives/button";
@@ -80,11 +79,11 @@ export function DevicesPage() {
         <ListCard>
           {ordered.map((session) => {
             const { current } = session;
-            const label = describeSession(session.userAgent);
+            const label = describeSession(session.userAgent, session.desktop);
             return (
               <ListRow key={session.id}>
                 <HugeiconsIcon
-                  icon={hasDesktopMarker(session.userAgent) ? ComputerIcon : GlobeIcon}
+                  icon={session.desktop ? ComputerIcon : GlobeIcon}
                   strokeWidth={2}
                   className="text-muted-foreground size-5 shrink-0"
                 />

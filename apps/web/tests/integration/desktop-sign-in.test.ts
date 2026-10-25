@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { PgClient } from "@effect/sql-pg";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -385,6 +386,45 @@ describe("refreshing a desktop session", () => {
     expect((await new Client(DESKTOP_UA, browser.ip).refresh()).status).toBe(401);
   });
 
+  it("gives a browser that signed in with the shell's user agent no long lease", async () => {
+    const spoof = new Client(DESKTOP_UA, browser.ip);
+    const signedIn = await spoof.request("/sign-in/email", {
+      email: "nico@example.test",
+      password: "isolated-test-password-123",
+    });
+    expect(signedIn.status).toBe(200);
+    const stored = (await spoof.session()).body.session;
+    expect(stored.userAgent).toBe(DESKTOP_UA);
+    expect((await spoof.refresh()).status).toBe(403);
+    withinDays((await spoof.session()).body.session.expiresAt, 7);
+    const listed = (await spoof.devices()).body.find((d: { current: boolean }) => d.current);
+    expect(listed.desktop).toBe(false);
+  });
+
+  it("marks sessions from before the mark once, by the user agent they were made with", async () => {
+    const browserId = (await browser.session()).body.session.id as string;
+    const { body } = await browser.ticket();
+    expect((await desktop.redeem(body.ticket)).status).toBe(200);
+    const desktopId = (await desktop.session()).body.session.id as string;
+    await db.update(session).set({ desktop: false });
+    await pool.query(
+      readFileSync(
+        new URL(
+          "../../drizzle/20261025183038_session_desktop_mark_backfill/migration.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const marks = Object.fromEntries(
+      (await db.select({ id: session.id, desktop: session.desktop }).from(session)).map((row) => [
+        row.id,
+        row.desktop,
+      ]),
+    );
+    expect(marks).toEqual({ [browserId]: false, [desktopId]: true });
+  });
+
   it("refuses a browser session even when the request claims to be the shell", async () => {
     const spoof = new Client(DESKTOP_UA, browser.ip);
     spoof.cookies = new Map(browser.cookies);
@@ -421,6 +461,7 @@ describe("listing and revoking devices", () => {
         [
           "createdAt",
           "current",
+          "desktop",
           "expiresAt",
           "id",
           "ipAddress",
@@ -430,6 +471,12 @@ describe("listing and revoking devices", () => {
       );
     }
     expect(body.find((d: { id: string }) => d.id === desktopId).userAgent).toBe(DESKTOP_UA);
+    expect(body.map((d: { id: string; desktop: boolean }) => [d.id, d.desktop]).toSorted()).toEqual(
+      [
+        [browserId, false],
+        [desktopId, true],
+      ].toSorted(),
+    );
     expect(
       (await desktop.devices()).body.find((d: { id: string }) => d.id === desktopId).current,
     ).toBe(true);

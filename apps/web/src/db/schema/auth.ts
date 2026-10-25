@@ -1,7 +1,8 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 /**
- * Better Auth core tables (+ admin plugin fields on user).
+ * Better Auth core tables (+ admin plugin fields on user and session, and the
+ * desktop-sessions plugin's `desktop` mark on session).
  * Column shapes must stay in sync with better-auth's Drizzle adapter expectations.
  */
 
@@ -31,6 +32,8 @@ export const session = pgTable(
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     impersonatedBy: text("impersonated_by"),
+    // The desktop-sessions plugin's field: set only when a ticket is redeemed.
+    desktop: boolean().notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

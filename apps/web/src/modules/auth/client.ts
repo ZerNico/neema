@@ -83,6 +83,8 @@ export const refreshDesktopSession = () =>
 export interface DesktopSession {
   id: string;
   userAgent: string | null;
+  /** Minted by redeeming a ticket in the desktop app, whatever its user agent says. */
+  desktop: boolean;
   ipAddress: string | null;
   createdAt: string;
   updatedAt: string;

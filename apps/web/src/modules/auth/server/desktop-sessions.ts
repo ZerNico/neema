@@ -14,7 +14,6 @@ import {
   DESKTOP_TICKET_MINUTES,
   challengeOf,
   generateTicket,
-  hasDesktopMarker,
   hashTicket,
   isTicketShaped,
   normaliseTicket,
@@ -55,13 +54,16 @@ const encodeStored = Schema.encodeSync(Schema.fromJsonString(StoredTicket));
 const sameHash = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
+/** The plugin’s own field; the adapter’s session type does not carry plugin fields. */
+const markedDesktop = (session: object) => "desktop" in session && session.desktop === true;
+
 const desktopExpiry = () => new Date(Date.now() + DESKTOP_SESSION_SECONDS * 1000);
 
 /**
  * Sign-in for the desktop shell: the browser mints a short single-use ticket
  * and the shell redeems it for a session of its own, long-lived because a
  * desktop app is not expected to ask again every week. Tickets live in the
- * existing `verification` table, hashed, so no migration is needed.
+ * existing `verification` table, hashed; the session it mints is marked.
  */
 export const desktopSessions = ({
   approved,
@@ -74,6 +76,14 @@ export const desktopSessions = ({
 }) =>
   ({
     id: "desktop-sessions",
+    schema: {
+      session: {
+        fields: {
+          /** Set only by redeeming a ticket; marks the session the shell holds. */
+          desktop: { type: "boolean", required: true, defaultValue: false, input: false },
+        },
+      },
+    },
     endpoints: {
       createDesktopTicket: createAuthEndpoint(
         "/desktop/ticket",
@@ -133,11 +143,12 @@ export const desktopSessions = ({
           const user = await ctx.context.internalAdapter.findUserById(userId);
           if (!user || !(await approved(userId))) throw invalid();
           // `overrideAll` applies the override after the adapter's own 7-day
-          // default; without it the longer expiry is silently replaced.
+          // default; without it the longer expiry is silently replaced. The
+          // mark is what refresh and the device list read, never the user agent.
           const session = await ctx.context.internalAdapter.createSession(
             userId,
             false,
-            { expiresAt: desktopExpiry() },
+            { expiresAt: desktopExpiry(), desktop: true },
             true,
           );
           await setSessionCookie(ctx, { session, user }, false, {
@@ -161,9 +172,9 @@ export const desktopSessions = ({
         { method: "POST", use: [sessionMiddleware] },
         async (ctx) => {
           const { session, user } = ctx.context.session;
-          // Only a session minted by the shell (its stored UA carries the
-          // product token) gets the long lease.
-          if (!hasDesktopMarker(session.userAgent) || !(await approved(user.id))) {
+          // Only a session this plugin minted by redemption gets the long lease;
+          // any browser can send the shell's user agent.
+          if (!markedDesktop(session) || !(await approved(user.id))) {
             throw new APIError("FORBIDDEN", { message: "Only the desktop app can do this." });
           }
           const updated = await ctx.context.internalAdapter.updateSession(session.token, {
@@ -194,14 +205,15 @@ export const desktopSessions = ({
             onlyActiveSessions: true,
           });
           return ctx.json(
-            sessions.map(({ id, userAgent, ipAddress, createdAt, updatedAt, expiresAt }) => ({
-              id,
-              userAgent: userAgent ?? null,
-              ipAddress: ipAddress ?? null,
-              createdAt: createdAt.toISOString(),
-              updatedAt: updatedAt.toISOString(),
-              expiresAt: expiresAt.toISOString(),
-              current: id === session.id,
+            sessions.map((device) => ({
+              id: device.id,
+              userAgent: device.userAgent ?? null,
+              desktop: markedDesktop(device),
+              ipAddress: device.ipAddress ?? null,
+              createdAt: device.createdAt.toISOString(),
+              updatedAt: device.updatedAt.toISOString(),
+              expiresAt: device.expiresAt.toISOString(),
+              current: device.id === session.id,
             })),
           );
         },

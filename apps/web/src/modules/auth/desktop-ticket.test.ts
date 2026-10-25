@@ -4,7 +4,6 @@ import {
   createVerifier,
   formatTicket,
   generateTicket,
-  hasDesktopMarker,
   hashTicket,
   isTicketShaped,
   normaliseTicket,
@@ -52,11 +51,5 @@ describe("desktop ticket helpers", () => {
     const verifier = createVerifier();
     expect(verifier).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(createVerifier()).not.toBe(verifier);
-  });
-
-  it("spots the desktop shell by its user agent marker", () => {
-    expect(hasDesktopMarker("Mozilla/5.0 Electron/38 ChatDesktop/0.1.0")).toBe(true);
-    expect(hasDesktopMarker("Mozilla/5.0 Safari/605")).toBe(false);
-    expect(hasDesktopMarker(null)).toBe(false);
   });
 });

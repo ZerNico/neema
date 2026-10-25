@@ -93,10 +93,13 @@ the consent the verifier cannot supply for that path.
 Redemption creates a separate session for the desktop, ninety days long,
 and the shell renews it to a fresh ninety days on every authenticated mount
 through `/desktop/session/refresh`; Better Auth's own late refresh (from day 84) would otherwise re-set the cookie to the browser's seven days. Refresh
-keys on the **stored** session user agent from redemption, not the request
-header. That gate is a convenience, not a boundary: any authenticated
-browser can mint and redeem a ticket and hold a 90-day session that way.
-The Devices label "neema Desktop on …" reads that same stored token. Revoking
+keys on the session's `desktop` field, which the desktop-sessions plugin
+declares and sets only on redemption. A user agent is never consulted: any
+browser can send the shell's `ChatDesktop/` token, and a session signed in
+with it is still a seven-day browser session. The gate is a convenience, not
+a boundary: any authenticated browser can mint and redeem a ticket and hold a
+90-day session that way. The Devices label "neema Desktop on …" reads the
+same mark. Revoking
 either session leaves the other valid. After redeeming, the page does what
 `IdentityBoundary` does on an identity change: clear the query cache and
 replace the document.

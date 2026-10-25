@@ -493,8 +493,8 @@ Differs from most Effect 3 material online.
   never leaves the server.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
   ticket. The 90-day refresh and the Devices label "neema Desktop on …" key on
-  the `ChatDesktop/` token stored on that session at redemption, not on the
-  current request's user agent. A work attempt additionally stamps the sending
+  the session's `desktop` mark, which only that redemption sets, never on a
+  user agent, stored or sent. A work attempt additionally stamps the sending
   install's machine id onto its generation config — attempt metadata for the
   foreign-chat banner, never auth. See `docs/internals/desktop.md`.
 - The first signup claims a durable bootstrap owner before Better Auth inserts
