@@ -118,7 +118,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
 
             // Position in the list, never the timestamp: two messages of
             // the same turn can share a clock tick.
-            const index = all.findIndex((m) => m.id === input.throughMessageId);
+            const index = all.findIndex((row) => row.id === input.throughMessageId);
             if (index === -1) {
               return yield* new MessageNotFound({ messageId: input.throughMessageId });
             }
@@ -135,7 +135,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
             while (all[end]?.steeredIntoMessageId === target.id) end += 1;
             const prefix = all.slice(0, end);
             // A cloned streaming row would have no fiber to finish it.
-            if (prefix.some((m) => m.status === "streaming")) {
+            if (prefix.some((row) => row.status === "streaming")) {
               return yield* new BranchNotAllowed({
                 messageId: input.throughMessageId,
                 reason: localized(m.chat_error_message_still_generating),
@@ -192,7 +192,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 )
                 .pipe(Effect.orDie);
 
-            const clonedIds = new Map(prefix.map((m) => [m.id, uuidv7()] as const));
+            const clonedIds = new Map(prefix.map((row) => [row.id, uuidv7()] as const));
             const toolCalls = yield* tx
               .select()
               .from(messageToolCalls)
@@ -202,9 +202,9 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
             yield* tx
               .insert(messages)
               .values(
-                prefix.map((m) => ({
-                  ...m,
-                  id: clonedIds.get(m.id)!,
+                prefix.map((row) => ({
+                  ...row,
+                  id: clonedIds.get(row.id)!,
                   conversationId: branch.id,
                   generationId: null,
                   generationLeaseUntil: null,
@@ -213,11 +213,11 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                   opening: null,
                   // A steer sorts just before its answer, so the answer is
                   // always in the same prefix; point at the copy.
-                  steeredIntoMessageId: m.steeredIntoMessageId
-                    ? (clonedIds.get(m.steeredIntoMessageId) ?? null)
+                  steeredIntoMessageId: row.steeredIntoMessageId
+                    ? (clonedIds.get(row.steeredIntoMessageId) ?? null)
                     : null,
                   // The question an answer names is earlier, so in the prefix too.
-                  questionResponse: answerCopy(m.questionResponse, toolIds),
+                  questionResponse: answerCopy(row.questionResponse, toolIds),
                   // createdAt/completedAt/editedAt stay as they were: the
                   // branch shows the same history, day dividers included.
                 })),

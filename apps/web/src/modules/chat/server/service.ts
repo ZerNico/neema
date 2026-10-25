@@ -134,7 +134,7 @@ type WorkTurnReservationView = ReturnType<typeof reservationView>;
 /** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
 /** The question a turn answers: the last user message before it, past steers. */
 const turnQuestionIds = (before: ReadonlyArray<MessageRow>) => {
-  const question = before.findLast((m) => m.role === "user" && !m.steeredIntoMessageId);
+  const question = before.findLast((row) => row.role === "user" && !row.steeredIntoMessageId);
   return question ? [question.id] : [];
 };
 
@@ -931,9 +931,9 @@ function makeChatService() {
       // exists would be nonsense). Refuse while any later message still
       // streams, since its generation fiber would keep writing to deleted rows.
       const all = yield* repo.listMessages(input.conversationId);
-      const index = all.findIndex((m) => m.id === input.messageId);
+      const index = all.findIndex((row) => row.id === input.messageId);
       const after = all.slice(index + 1);
-      if (after.some((m) => m.status === "streaming")) {
+      if (after.some((row) => row.status === "streaming")) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
           reason: localized(m.chat_error_later_message_generating),
@@ -981,11 +981,11 @@ function makeChatService() {
         imageModelId: input.imageModelId,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
-        deleteMessageIds: after.map((m) => m.id),
+        deleteMessageIds: after.map((row) => row.id),
         // From the retried answer onward: a summary that ends at this message
         // describes the response about to be thrown away. Rows after it are
         // deleted and cascade, but this one keeps its id.
-        invalidateCheckpointThroughMessageIds: all.slice(index).map((m) => m.id),
+        invalidateCheckpointThroughMessageIds: all.slice(index).map((row) => row.id),
       });
       if (!restarted) {
         return yield* new RetryNotAllowed({
@@ -1043,8 +1043,8 @@ function makeChatService() {
         calls: yield* repo.listToolCalls([message.id]),
         compactions: yield* repo.listCompactionEvents([message.id]),
         steerTurns: all
-          .filter((m) => m.steeredIntoMessageId === message.id && m.status === "complete")
-          .map((m) => m.steerTurnIndex ?? -1),
+          .filter((row) => row.steeredIntoMessageId === message.id && row.status === "complete")
+          .map((row) => row.steerTurnIndex ?? -1),
         files: message.assistantOutput?.files ?? [],
         replay: message.providerReplay,
       });
@@ -1061,10 +1061,10 @@ function makeChatService() {
           ...turnQuestionIds(
             all.slice(
               0,
-              all.findIndex((m) => m.id === message.id),
+              all.findIndex((row) => row.id === message.id),
             ),
           ),
-          ...all.filter((m) => m.steeredIntoMessageId === message.id).map((m) => m.id),
+          ...all.filter((row) => row.steeredIntoMessageId === message.id).map((row) => row.id),
         ]);
         yield* validateAttachments(
           input.userId,
@@ -1140,7 +1140,7 @@ function makeChatService() {
       }
 
       const all = yield* repo.listMessages(input.conversationId);
-      const index = all.findIndex((m) => m.id === input.messageId);
+      const index = all.findIndex((row) => row.id === input.messageId);
       const prefix = index === -1 ? [] : all.slice(0, index + 1);
 
       // Everything above is a fast pre-check for a decent error; the clone
@@ -1160,8 +1160,8 @@ function makeChatService() {
       // leave the copy stuck on the placeholder forever. The source's own
       // title fiber only ever writes to the source.
       if (branch.title === null) {
-        const seed = prefix.find((m) => m.role === "user");
-        const firstAssistant = prefix.find((m) => m.role === "assistant");
+        const seed = prefix.find((row) => row.role === "user");
+        const firstAssistant = prefix.find((row) => row.role === "assistant");
         const attachmentFileNames = seed
           ? (yield* attachmentRepo.listForMessages([seed.id])).map((a) => a.fileName)
           : [];

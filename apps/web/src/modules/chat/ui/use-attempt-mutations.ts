@@ -392,7 +392,9 @@ export function useAttemptMutations({
 
   // Retry rewinds the conversation to that response: retrying anything but
   // the last one deletes the messages after it, so it asks first.
-  const lastAssistantId = [...data.messages].toReversed().find((m) => m.role === "assistant")?.id;
+  const lastAssistantId = [...data.messages]
+    .toReversed()
+    .find((row) => row.role === "assistant")?.id;
   const generating =
     sendMutation.isPending || answerMutation.isPending || stream.status === "streaming";
   const mutationPending =

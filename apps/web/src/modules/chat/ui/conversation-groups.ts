@@ -1,6 +1,7 @@
-import { m } from "~/paraglide/messages.js";
 // Sidebar bucketing by recency. The server already orders conversations
 // newest-first, so grouping only has to slice that order and never reorder it.
+
+import { m } from "~/paraglide/messages.js";
 
 export interface DatedConversation {
   readonly lastMessageAt: Date | string | number | null;
