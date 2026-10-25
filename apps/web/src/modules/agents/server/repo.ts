@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -17,6 +17,7 @@ import {
 import { Db, type DbTx } from "~/server/db.ts";
 import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
+import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import { AgentNotAvailable, AgentRejected } from "../errors.ts";
 import {
   AGENT_LIMITS,
@@ -84,6 +85,11 @@ export class AgentRepo extends Context.Service<
       input: UpdateAgentInput,
     ): Effect.Effect<void, AgentNotAvailable | AgentRejected>;
     remove(userId: string, agentId: string): Effect.Effect<boolean>;
+    /** The integrations named, as this person may use them now, in the order given. */
+    integrationsFor(
+      userId: string,
+      integrationIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<{ id: string; name: string | null; available: boolean }>>;
   }
 >()("chat/agents/AgentRepo") {
   static readonly layer = Layer.effect(
@@ -132,21 +138,19 @@ export class AgentRepo extends Context.Service<
             ...settings
           } = input;
           if (integrationIds.length) {
-            const existing = yield* tx
+            // On, and the author's to use: shared with them, or their own server.
+            const available = yield* tx
               .select({ id: integrationConfigs.id })
               .from(integrationConfigs)
               .where(
                 and(
                   inArray(integrationConfigs.id, [...integrationIds]),
-                  // Another person's own server is not theirs to name.
-                  or(
-                    isNull(integrationConfigs.ownerUserId),
-                    eq(integrationConfigs.ownerUserId, userId),
-                  ),
+                  eq(integrationConfigs.enabled, true),
+                  integrationUsableBy(userId),
                 ),
               );
-            if (existing.length !== new Set(integrationIds).size)
-              return yield* new AgentRejected({ reason: "a selected integration does not exist" });
+            if (available.length !== new Set(integrationIds).size)
+              return yield* new AgentRejected({ reason: "a selected integration is unavailable" });
           }
           if (skillIds.length) {
             const available = yield* tx
@@ -236,6 +240,26 @@ export class AgentRepo extends Context.Service<
           );
       return AgentRepo.of({
         saveInTransaction,
+        integrationsFor: Effect.fn("AgentRepo.integrationsFor")(function* (userId, integrationIds) {
+          if (integrationIds.length === 0) return [];
+          const rows = yield* db
+            .select({ id: integrationConfigs.id, name: integrationConfigs.name })
+            .from(integrationConfigs)
+            .where(
+              and(
+                inArray(integrationConfigs.id, [...integrationIds]),
+                eq(integrationConfigs.enabled, true),
+                integrationUsableBy(userId),
+              ),
+            )
+            .pipe(Effect.orDie);
+          // Named only when usable, as collections and skills are: another
+          // person's server is not the reader's to learn about.
+          return integrationIds.map((id) => {
+            const row = rows.find((entry) => entry.id === id);
+            return { id, name: row?.name ?? null, available: row !== undefined };
+          });
+        }),
         list: Effect.fn("AgentRepo.list")(function* (userId) {
           const rows = yield* db
             .select({

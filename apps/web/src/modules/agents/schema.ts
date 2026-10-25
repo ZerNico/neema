@@ -80,5 +80,5 @@ export interface AgentSelectionDetail extends AgentSummary {
   collections: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
   skills?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
   customTools?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
-  integrationIds?: ReadonlyArray<string>;
+  integrations?: ReadonlyArray<{ id: string; name: string | null; available: boolean }>;
 }

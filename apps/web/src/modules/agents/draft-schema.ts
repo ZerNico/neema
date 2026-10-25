@@ -50,7 +50,7 @@ export const agentDetailToSettings = (agent: AgentDetail): DraftSettings => ({
   collectionIds: agent.collections.map(({ id }) => id),
   skillIds: (agent.skills ?? []).map(({ id }) => id),
   customToolIds: (agent.customTools ?? []).map(({ id }) => id),
-  integrationIds: [...(agent.integrationIds ?? [])],
+  integrationIds: (agent.integrations ?? []).map(({ id }) => id),
 });
 
 export const AgentDraftIdInput = Schema.Struct({ draftId: EntityId });

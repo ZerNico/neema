@@ -10,6 +10,7 @@ import {
   agents,
   conversationAgents,
   conversations,
+  integrationConfigs,
   integrationConnections,
   knowledgeCollections,
   knowledgeDocuments,
@@ -28,6 +29,8 @@ import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { AgentRepo } from "~/modules/agents/server/repo.ts";
+import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
@@ -1098,6 +1101,40 @@ describe("connections", () => {
     });
     const mine = await outlineFor(userId);
     expect(mine?.connections[0]?.status).toBe("needs_reauth");
+  });
+});
+
+describe("agents naming integrations", () => {
+  const agentRepo = <A, E>(f: (repo: AgentRepo["Service"]) => Effect.Effect<A, E, Db>) =>
+    run(Effect.flatMap(AgentRepo, f).pipe(Effect.provide(AgentRepo.layer)));
+  const settings = { ...EMPTY_AGENT_DRAFT, name: "Docs agent", integrationIds: ["outline"] };
+  const setOutline = (changes: { enabled?: boolean; audience?: "private" | "instance" }) =>
+    insert((db) =>
+      db.update(integrationConfigs).set(changes).where(eq(integrationConfigs.id, "outline")),
+    );
+
+  it("saves only what the author may use, and shows each reader what they may", async () => {
+    await configure();
+    const author = await newUser();
+    const agentId = await agentRepo((repo) => repo.create(author, settings));
+    expect(await agentRepo((repo) => repo.integrationsFor(author, ["outline"]))).toEqual([
+      { id: "outline", name: "Outline", available: true },
+    ]);
+    try {
+      await setOutline({ audience: "private" });
+      const refused = await agentRepo((repo) => Effect.flip(repo.create(author, settings)));
+      expect(refused).toMatchObject({ reason: "a selected integration is unavailable" });
+      // Unshared, it is unavailable to a reader of the saved agent, and unnamed.
+      expect(await agentRepo((repo) => repo.integrationsFor(author, ["outline"]))).toEqual([
+        { id: "outline", name: null, available: false },
+      ]);
+      await setOutline({ audience: "instance", enabled: false });
+      const off = await agentRepo((repo) => Effect.flip(repo.create(author, settings)));
+      expect(off).toMatchObject({ reason: "a selected integration is unavailable" });
+    } finally {
+      await setOutline({ audience: "instance", enabled: true });
+    }
+    expect(agentId).toEqual(expect.any(String));
   });
 });
 

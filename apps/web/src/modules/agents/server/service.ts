@@ -150,6 +150,7 @@ export class AgentService extends Context.Service<
           const stored = customToolRows.find((tool) => tool.id === id);
           return { id, name: stored?.name ?? null, available: stored !== undefined };
         });
+        const integrations = yield* repo.integrationsFor(userId, integrationIds);
         yield* available(userId, agentId, ownerOnly);
         return {
           row,
@@ -164,7 +165,7 @@ export class AgentService extends Context.Service<
             collections,
             skills,
             customTools,
-            integrationIds,
+            integrations,
           } satisfies AgentSelectionDetail,
         };
       });

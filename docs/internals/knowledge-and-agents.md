@@ -100,7 +100,9 @@ whatever agent the conversation is associated with.
 - An agent grant never grants its collections or model — checked separately, and losing a
   selected collection fails the whole turn (`KnowledgeNotAvailable`), never a partial answer.
   An agent's integrations likewise grant nothing: each sender uses their own connection, and
-  a sender without one is simply not offered the tools.
+  a sender without one is simply not offered the tools. Saving checks them like the rest,
+  against the author: on and usable by them (`integrationUsableBy`). The detail shows each
+  as available or not for its reader, named only when it is.
   Agent instructions are a system-role `<agent-instructions>` block after application policy
   and memory, behind one line saying they cannot override that policy and grant nothing.
   Their own closing tag is neutralized; see `system-prompt.ts`.

@@ -10,7 +10,8 @@ import { ImageModelSettingRow } from "~/modules/images/ui/image-model-select.tsx
 import { AGENT_ICONS } from "~/modules/chat/ui/agent-icons.ts";
 import { PreferredModelRow } from "~/modules/chat/ui/preferred-model-row.tsx";
 import { usableCustomToolsQuery } from "~/modules/custom-tools/client/queries.ts";
-import { useIntegrationDirectory } from "~/modules/integrations/client/directory.ts";
+import { integrationLook } from "~/modules/integrations/client/directory.ts";
+import { myIntegrationsQuery } from "~/modules/integrations/client/queries.ts";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import { ResourcePicker } from "~/ui/resource-picker.tsx";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
@@ -29,7 +30,7 @@ import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 export const AgentSettingsFields = withForm({
   defaultValues: EMPTY_AGENT_DRAFT,
   render: function AgentSettingsFields({ form }) {
-    const integrations = useIntegrationDirectory();
+    const integrations = useQuery(myIntegrationsQuery);
     const customTools = useQuery(usableCustomToolsQuery);
     const [customToolPickerOpen, setCustomToolPickerOpen] = useState(false);
     const [customToolAnchor, setCustomToolAnchor] = useState<HTMLButtonElement | null>(null);
@@ -189,15 +190,24 @@ export const AgentSettingsFields = withForm({
           <form.Field name="integrationIds">
             {(field) => {
               const ids = field.state.value ?? [];
+              // What the author may attach now; saving refuses anything else.
+              const usable = (integrations.data ?? []).filter((entry) => entry.available);
+              const lost = ids.filter((id) => !usable.some((entry) => entry.id === id));
+              if (usable.length === 0 && lost.length === 0)
+                return (
+                  <p className="text-muted-foreground text-sm">
+                    No integrations are available to you yet.
+                  </p>
+                );
               return (
                 <ListCard>
-                  {integrations.list.map((integration) => (
+                  {usable.map((integration) => (
                     <ListRow key={integration.id}>
                       <IntegrationLogo integrationId={integration.id} variant="tile" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{integration.name}</p>
                         <p className="text-muted-foreground truncate text-xs">
-                          {integration.manifest.description}
+                          {integrationLook(integration)?.description}
                         </p>
                       </div>
                       <Switch
@@ -211,6 +221,25 @@ export const AgentSettingsFields = withForm({
                           )
                         }
                       />
+                    </ListRow>
+                  ))}
+                  {lost.map((id) => (
+                    <ListRow key={id}>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">Unavailable integration</p>
+                        <p className="text-muted-foreground truncate text-xs">
+                          Remove this dependency or ask an admin to share it with you.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Remove unavailable integration"
+                        onClick={() => field.handleChange(ids.filter((value) => value !== id))}
+                      >
+                        <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                      </Button>
                     </ListRow>
                   ))}
                 </ListCard>
