@@ -225,7 +225,7 @@ beforeEach(() => {
 
 /** Owns the model the way the views do: the chat's suggestion, a pick, the opened default. */
 function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
-  const { modelId, pick } = useModelChoice(initialModelId);
+  const { modelId, pick: pickModel } = useModelChoice(initialModelId);
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
   return (
@@ -233,14 +233,14 @@ function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
       <output data-testid="selected-default">{modelId ?? "none"}</output>
       <output data-testid="default-search">{searchEnabled ? "on" : "off"}</output>
       <output data-testid="selected-effort">{reasoningEffort ?? "default"}</output>
-      <button onClick={() => pick("text-only")}>Choose Alpha</button>
+      <button onClick={() => pickModel("text-only")}>Choose Alpha</button>
       <ChatInput
         value=""
         onValueChange={() => {}}
         onSubmit={() => {}}
         disabled={false}
         modelId={modelId}
-        onModelChange={pick}
+        onModelChange={pickModel}
         searchEnabled={searchEnabled}
         onSearchEnabledChange={setSearchEnabled}
         reasoningEffort={reasoningEffort}
