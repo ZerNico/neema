@@ -107,7 +107,11 @@ export const agentGroupGrants = pgTable(
   ],
 );
 
-/** Private agent contribution captured once for an execution attempt. */
+/**
+ * Private agent contribution captured once for an execution attempt: the
+ * whole revision, read under one lock, so nothing later in the attempt reads
+ * the agent again.
+ */
 export type ResolvedAgentConfig = {
   agentId: string;
   configRevision: number;
@@ -117,6 +121,10 @@ export type ResolvedAgentConfig = {
   collectionIds: ReadonlyArray<string>;
   skillIds?: ReadonlyArray<string>;
   customToolIds?: ReadonlyArray<string>;
+  /** Integrations it attached; each sender's own accounts of them come on. */
+  integrationIds: ReadonlyArray<string>;
+  /** Its preferred image model, used after the submission's pick and the chat's lock. */
+  imageModelId: string | null;
   searchEnabled: boolean;
   planEnabled: boolean;
 };

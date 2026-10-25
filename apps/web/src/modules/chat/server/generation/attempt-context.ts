@@ -92,6 +92,7 @@ export const loadAttemptContext = (
       userId: input.userId,
       conversationId: input.conversationId,
       grants: config.integrationGrants ?? null,
+      agentIntegrationIds: config.resolvedAgent?.integrationIds ?? null,
     });
     const runtimeContext = runtimeContextMessage(new Date(), input.timeZone);
     // Snapshot the model row up front: the ledger wants its display name

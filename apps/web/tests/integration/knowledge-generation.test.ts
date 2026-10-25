@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Deferred, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { Response, type Prompt } from "effect/ai";
 import { uuidv7 } from "uuidv7";
@@ -724,6 +725,51 @@ describe("knowledge-backed generations", () => {
     expect(
       (await exec(`select model_id from messages where id = '${first.assistantMessageId}'`)).rows,
     ).toEqual([{ model_id: smallModelId }]);
+  });
+
+  it("records the agent's whole revision, and backfills it on older rows", async () => {
+    const owner = await createUser();
+    const agentId = await makeAgent(owner);
+    const first = await send({ userId: owner, agentId });
+    await settle(first.assistantMessageId);
+    expect(await configRow(first.assistantMessageId)).toMatchObject({
+      resolved_agent: { skillIds: [], customToolIds: [], integrationIds: [], imageModelId: null },
+    });
+    // An older row: none of the later keys, an agent that has since gained a skill.
+    await exec(
+      `update message_generation_config set resolved_agent = resolved_agent - 'skillIds' - 'customToolIds' - 'integrationIds' - 'imageModelId' where message_id = '${first.assistantMessageId}'`,
+    );
+    // One whose agent is gone, and one that already has every key.
+    const gone = await send({ userId: owner, agentId });
+    await settle(gone.assistantMessageId);
+    await exec(
+      `update message_generation_config set resolved_agent = jsonb_set(resolved_agent - 'skillIds' - 'imageModelId', '{agentId}', '"gone"') where message_id = '${gone.assistantMessageId}'`,
+    );
+    const kept = await send({ userId: owner, agentId });
+    await settle(kept.assistantMessageId);
+    const keptBefore = await configRow(kept.assistantMessageId);
+    await exec(
+      `insert into agent_skills (agent_id, skill_id, position) values ('${agentId}', 'skill-later', 0)`,
+    );
+    await exec(
+      readFileSync(
+        new URL("../../drizzle/20261025182049_resolved_agent_revision/migration.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect((await configRow(first.assistantMessageId))?.resolved_agent).toMatchObject({
+      skillIds: ["skill-later"],
+      customToolIds: [],
+      integrationIds: [],
+      imageModelId: null,
+    });
+    expect((await configRow(gone.assistantMessageId))?.resolved_agent).toMatchObject({
+      skillIds: [],
+      customToolIds: [],
+      integrationIds: [],
+      imageModelId: null,
+    });
+    expect(await configRow(kept.assistantMessageId)).toEqual(keptBefore);
   });
 
   it("keeps a running attempt coherent while an edit changes the next attempt", async () => {

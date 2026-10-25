@@ -248,12 +248,23 @@ export const makeAttemptOptions = Effect.gen(function* () {
         // Counts settled answers only, so one still running counts once it settles and two
         // sends at once may both pass. Nothing is ever stopped halfway.
         yield* limits.check(input.userId, input.model.id, tx);
+        // The one read of the agent for this attempt, under its lock: every
+        // part of the revision the attempt uses comes from here.
+        const agent = defaults.agent
+          ? defaults.agent.agentId
+            ? yield* resolveAgentSelection({
+                tx,
+                userId: input.userId,
+                agentId: defaults.agent.agentId,
+              })
+            : yield* new AgentNotAvailable({ agentId: null })
+          : null;
         const imageModel = yield* resolveImageModel(tx, {
           userId: input.userId,
           conversationId: defaults.conversationId,
           lockId: defaults.imageModelId,
           explicitId: input.imageModelId,
-          agentId: defaults.agent?.agentId,
+          agentChoice: agent?.resolvedAgent.imageModelId,
           ...(input.attempt === "resume"
             ? { resumedId: continuation?.imageModel?.id ?? null }
             : {}),
@@ -319,15 +330,6 @@ export const makeAttemptOptions = Effect.gen(function* () {
         const editing = input.attempt === "edit";
         const editedCollections = editing ? input.collectionIds : undefined;
         const editedSkills = editing ? input.skillIds : undefined;
-        const agent = defaults.agent
-          ? defaults.agent.agentId
-            ? yield* resolveAgentSelection({
-                tx,
-                userId: input.userId,
-                agentId: defaults.agent.agentId,
-              })
-            : yield* new AgentNotAvailable({ agentId: null })
-          : null;
         const resolved = yield* resolveEffectiveGeneration({
           tx,
           userId: input.userId,

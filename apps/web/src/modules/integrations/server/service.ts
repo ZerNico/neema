@@ -291,6 +291,11 @@ export class IntegrationService extends Context.Service<
       userId: string;
       conversationId: string;
       grants: ReadonlyArray<IntegrationGrant> | null;
+      /**
+       * The integrations the attempt's own read of its agent attached, null
+       * without an agent. Never read live: the attempt's revision decides.
+       */
+      agentIntegrationIds: ReadonlyArray<string> | null;
     }): Effect.Effect<ReadonlyArray<OfferedIntegration>>;
     permissionsFor(
       userId: string,
@@ -549,6 +554,8 @@ export class IntegrationService extends Context.Service<
       const chatIntegrations = Effect.fn("IntegrationService.chatIntegrations")(function* (
         userId: string,
         conversationId: string | null,
+        // An attempt passes its agent snapshot; the composer reads the agent as it is now.
+        agentIntegrationIds?: ReadonlyArray<string> | null,
       ) {
         const usable = yield* usableConnections(userId);
         // Another person's chat reads as no chat: its toggles and agent are theirs.
@@ -561,7 +568,12 @@ export class IntegrationService extends Context.Service<
           : [];
         const chatId = owned?.id ?? null;
         const settings = chatId ? yield* repo.conversationSettings(chatId) : [];
-        const attached = chatId ? yield* repo.agentIntegrationIds(chatId) : null;
+        const attached =
+          agentIntegrationIds !== undefined
+            ? agentIntegrationIds
+            : chatId
+              ? yield* repo.agentIntegrationIds(chatId)
+              : null;
         return usable.map(({ connection, config }): ChatIntegration => {
           const own = settings.find((entry) => entry.connectionId === connection.id);
           // An agent names an integration, not anyone's account: all of theirs come with it.
@@ -689,7 +701,11 @@ export class IntegrationService extends Context.Service<
                   ),
                 },
               }))
-            : (yield* chatIntegrations(input.userId, input.conversationId))
+            : (yield* chatIntegrations(
+                input.userId,
+                input.conversationId,
+                input.agentIntegrationIds,
+              ))
                 .filter((entry) => entry.enabled)
                 .map((entry) => ({ connectionId: entry.connectionId, unattended: null }));
           const offers: OfferedIntegration[] = [];

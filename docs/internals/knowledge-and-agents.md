@@ -12,12 +12,15 @@ whatever agent the conversation is associated with.
   snapshot: no swap, reselect or removal afterward. No row means plain chat; a null agent FK is
   a deletion tombstone. `AgentNotAvailable` blocks new attempts on a deleted/inaccessible agent
   while history stays readable.
-- Every new attempt (send, retry, edit, structured answer, branches)
-  resolves the current revision/dependencies through ACL-aware `AgentRepo.get` inside the
-  attempt transaction, before any destructive reset. `message_generation_config` then captures
-  that private `resolvedAgent` provenance plus original `standaloneCollectionIds` separately;
-  future attempts reuse those inputs, never prior dependencies, and branches copy them as
-  history, not future defaults.
+- Every new attempt (send, retry, edit, structured answer, branches) reads the agent once,
+  through ACL-aware `AgentRepo.get` under a share lock inside the attempt transaction, before
+  any destructive reset. That read is the whole revision: collections, skills, custom tools,
+  integrations and image model. `message_generation_config` captures it as the private
+  `resolvedAgent` plus the original `standaloneCollectionIds` separately, and everything later
+  in the attempt (the image model choice, the custom tool and integration offer at generation
+  start) takes the agent's part from there, never from a second read. Future attempts reuse
+  those inputs, never prior dependencies, and branches copy them as history, not future
+  defaults. The composer alone reads the agent live.
 - Recipient projections never expose instructions or private execution records.
 - `update_plan` is an agent preference (`planEnabled`), tool-capable models only. Each call
   replaces the whole checklist, never a revision history, and a completed step is only the

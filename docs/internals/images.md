@@ -32,7 +32,8 @@ still does, beside the tool.
 
 - Each attempt resolves one image model in its transaction: what this submission picked (send,
   edit, retry, queue entry, a schedule's fire), else the chat's lock, else the agent's
-  preference, else the first in the admin's order the person may use. The result becomes the lock
+  preference as the attempt's one read of the agent recorded it, else the first in the admin's
+  order the person may use. The result becomes the lock
   (`conversations.image_model_id`) in the same transaction, so a deleted, disabled or forbidden
   model falls back once and the chat stays on its replacement.
 - An agent or schedule drafted in chat sets its image model like its chat model, from the

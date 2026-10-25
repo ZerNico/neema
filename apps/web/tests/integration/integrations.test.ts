@@ -1209,7 +1209,7 @@ describe("what a chat is offered", () => {
     const offered = (grants: ReadonlyArray<IntegrationGrant> | null) =>
       run(
         Effect.flatMap(IntegrationService, (s) =>
-          s.resolveOffer({ userId, conversationId, grants }),
+          s.resolveOffer({ userId, conversationId, grants, agentIntegrationIds: null }),
         ),
       ).then((offers) => offers.map((offer) => [offer.session.integration.id, offer.unattended]));
 
@@ -1266,6 +1266,32 @@ describe("what a chat is offered", () => {
     const asked = (conversation: string | null) =>
       run(Effect.flatMap(IntegrationService, (s) => s.chatIntegrations(stranger, conversation)));
     expect(await asked(conversationId)).toEqual(await asked(null));
+  });
+
+  it("offers an attempt what its own read of the agent attached, not the agent as it is now", async () => {
+    const userId = await newUser();
+    await connectKey(userId);
+    const conversationId = uuidv7();
+    const agentId = uuidv7();
+    await insert((db) =>
+      Effect.gen(function* () {
+        yield* db.insert(conversations).values({ id: conversationId, userId });
+        yield* db
+          .insert(agents)
+          .values({ id: agentId, userId, name: "Helper", instructions: "Help." });
+        yield* db.insert(conversationAgents).values({ conversationId, agentId });
+        yield* db.insert(agentIntegrations).values({ agentId, integrationId: "outline" });
+      }),
+    );
+    const offered = (agentIntegrationIds: ReadonlyArray<string> | null) =>
+      run(
+        Effect.flatMap(IntegrationService, (s) =>
+          s.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds }),
+        ),
+      ).then((offers) => offers.map((offer) => offer.session.integration.id));
+    // The live agent attaches Outline; the attempt's revision did not.
+    expect(await offered([])).toEqual([]);
+    expect(await offered(["outline"])).toEqual(["outline"]);
   });
 
   it("merges per-tool permissions and keeps a chat's allowances to that chat", async () => {
@@ -1429,7 +1455,7 @@ describe("approvals", () => {
         Effect.gen(function* () {
           const service = yield* IntegrationService;
           const approvals = yield* IntegrationApprovals;
-          const offered = yield* service.resolveOffer({ userId, conversationId, grants: null });
+          const offered = yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
           const prepared = prepareIntegrationTools({
             offered,
             indexer: createSourceIndexer([]),
@@ -1511,7 +1537,7 @@ describe("prepared calls", () => {
     Effect.gen(function* () {
       const service = yield* IntegrationService;
       const approvals = yield* IntegrationApprovals;
-      const offered = yield* service.resolveOffer({ userId, conversationId, grants });
+      const offered = yield* service.resolveOffer({ userId, conversationId, grants, agentIntegrationIds: null });
       const prepared = prepareIntegrationTools({
         offered,
         indexer: createSourceIndexer([]),
@@ -1568,7 +1594,7 @@ describe("prepared calls", () => {
         await run(
           Effect.gen(function* () {
             const service = yield* IntegrationService;
-            const offered = yield* service.resolveOffer({ userId, conversationId, grants: null });
+            const offered = yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
             let checks = 0;
             const prepared = prepareIntegrationTools({
               offered,
@@ -2379,7 +2405,7 @@ describe("several accounts of one integration", () => {
     run(
       Effect.gen(function* () {
         const integrations = yield* IntegrationService;
-        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants });
+        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants, agentIntegrationIds: null });
         const prepared = prepareIntegrationTools({
           offered,
           indexer: createSourceIndexer([]),
@@ -2659,7 +2685,7 @@ describe("several integrations of one type", () => {
       Effect.gen(function* () {
         const integrations = yield* IntegrationService;
         const approvals = yield* IntegrationApprovals;
-        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants: null });
+        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
         const prepared = prepareIntegrationTools({
           offered,
           indexer: createSourceIndexer([]),

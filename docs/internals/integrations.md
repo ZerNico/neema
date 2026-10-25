@@ -180,7 +180,8 @@ event, which brings the new account; it needs no deep link back.
 
 The offer is read as the generation starts (`resolveOffer`, beside custom tools) and held
 for it, per account. A chat's own choice (`conversation_integrations.enabled`) wins;
-otherwise an installed agent's attachments decide, and an agent names an integration, never
+otherwise an installed agent's attachments decide, as the attempt's one read of the agent
+recorded them (the composer shows the agent as it is now), and an agent names an integration, never
 someone's account, so all the sender's accounts of it come on; otherwise each account's "Turn
 on in new chats". An account that stopped working drops out rather than failing the turn.
 The choice is sticky per chat, not per message, because a changed tool list recaches the

@@ -91,6 +91,8 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
       collectionIds: stored.collectionIds,
       skillIds: stored.skillIds ?? [],
       customToolIds: stored.customToolIds,
+      integrationIds: stored.integrationIds,
+      imageModelId: stored.row.imageModelId,
       searchEnabled: stored.row.searchEnabled,
       planEnabled: stored.row.planEnabled,
     },

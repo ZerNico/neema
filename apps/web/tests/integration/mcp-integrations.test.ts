@@ -363,7 +363,7 @@ const makeDue = (integrationId: string) =>
 const offeredNames = (userId: string, conversationId: string, integrationId: string) =>
   run(
     Effect.flatMap(IntegrationService, (s) =>
-      s.resolveOffer({ userId, conversationId, grants: null }),
+      s.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null }),
     ),
   ).then((offers) =>
     offers
@@ -383,7 +383,7 @@ const toolsFor = (
     Effect.gen(function* () {
       const service = yield* IntegrationService;
       const approvals = yield* IntegrationApprovals;
-      const offered = (yield* service.resolveOffer({ userId, conversationId, grants: null })).map(
+      const offered = (yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null })).map(
         (offer) =>
           unattended
             ? { ...offer, unattended: { access: "write" as const, allowances: {} } }

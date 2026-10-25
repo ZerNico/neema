@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Effect, Option } from "effect";
-import { agents, conversations } from "~/db/schema/index.ts";
+import { conversations } from "~/db/schema/index.ts";
 import { ProviderRepo, type ImageModelRow } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { IMAGE_GENERATION_TOOL, imageGenerationEnabled } from "../settings.ts";
@@ -32,7 +32,8 @@ export const resolveImageModel = Effect.fn("images.resolveImageModel")(function*
     readonly conversationId: string | undefined;
     readonly lockId: string | null | undefined;
     readonly explicitId: string | null | undefined;
-    readonly agentId: string | null | undefined;
+    /** The installed agent's preference, from the attempt's own read of it. */
+    readonly agentChoice: string | null | undefined;
     /** Set on resume: the answer's own model, or null when it had none. */
     readonly resumedId?: string | null | undefined;
   },
@@ -45,15 +46,11 @@ export const resolveImageModel = Effect.fn("images.resolveImageModel")(function*
     const kept = usable(input.resumedId);
     return kept ? { id: kept.id, name: kept.displayName } : null;
   }
-  const agentChoice = input.agentId
-    ? (yield* tx
-        .select({ imageModelId: agents.imageModelId })
-        .from(agents)
-        .where(eq(agents.id, input.agentId))
-        .pipe(Effect.orDie))[0]?.imageModelId
-    : undefined;
   const chosen =
-    usable(input.explicitId) ?? usable(input.lockId) ?? usable(agentChoice) ?? available[0]!;
+    usable(input.explicitId) ??
+    usable(input.lockId) ??
+    usable(input.agentChoice) ??
+    available[0]!;
   if (input.conversationId && input.lockId !== chosen.id)
     yield* tx
       .update(conversations)
