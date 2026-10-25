@@ -551,7 +551,6 @@ export function useAttemptMutations({
       generating,
       confirmEdit,
       mutateQuestionEdit,
-      searchEnabled,
       reasoningEffort,
     ],
   );

@@ -981,8 +981,6 @@ describe("ChatView inline question answers", () => {
           messageId: "structured-user",
           modelId: "m1",
           reasoningEffort: null,
-          searchEnabled: false,
-          researchEnabled: false,
           timeZone: "Europe/Berlin",
           attachmentIds: [],
           questionResponse: revised,
@@ -1303,12 +1301,8 @@ describe("ChatView question handoff", () => {
           callId: "ask-1",
           response: { kind: "answers", answers: [{ selected: [0], custom: "" }] },
           modelId: "m2",
-          // Model Two has no native tool calling; search is still offered.
-          searchEnabled: true,
-          // The composer's effort goes along, as it does for a send and an edit.
+          // The composer's effort goes along; search and research stay the asking turn's.
           reasoningEffort: null,
-          // Answering a clarification is its own submission and has no toggle.
-          researchEnabled: false,
           timeZone: "Europe/Berlin",
         },
       }),

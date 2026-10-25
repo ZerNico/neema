@@ -1367,7 +1367,7 @@ describe("knowledge-backed generations", () => {
     script = () => Stream.make(text("first [^1]"), finish());
     const sent = await send({ userId: owner, collectionIds: [collectionId] });
     await settle(sent.assistantMessageId);
-    const retry = () =>
+    const retryAnswer = () =>
       Effect.flatMap(ChatService, (chat) =>
         chat.retryMessage({
           userId: owner,
@@ -1383,7 +1383,7 @@ describe("knowledge-backed generations", () => {
     );
     await drainIndexer();
     script = () => Stream.make(text("second [^1]"), finish());
-    await run(retry());
+    await run(retryAnswer());
     expect(await settle(sent.assistantMessageId)).toMatchObject({
       status: "complete",
       content: "second [^1]",
@@ -1398,13 +1398,13 @@ describe("knowledge-backed generations", () => {
       ),
     );
     await drainIndexer();
-    await run(retry());
+    await run(retryAnswer());
     expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
     expect(promptText(requests.at(-1)!.prompt)).not.toContain("Retry evidence.");
 
     // Without the collection there is nothing to answer from, so the answer stays.
     await run(Effect.flatMap(KnowledgeService, (service) => service.remove(owner, collectionId)));
-    const failure = await run(Effect.flip(retry()));
+    const failure = await run(Effect.flip(retryAnswer()));
     expect(failure).toMatchObject({ _tag: "KnowledgeNotAvailable" });
     expect(
       (await exec(`select status from messages where id = '${sent.assistantMessageId}'`)).rows[0],

@@ -23,8 +23,6 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
     conversationId: "c1",
     messageId: "u1",
     modelId: "m1",
-    searchEnabled: false,
-    researchEnabled: false,
     attachmentIds: [],
     questionResponse: { kind: "skip" },
   };
@@ -46,16 +44,12 @@ it("accepts supported reasoning efforts and defaults across submissions", () => 
     callId: "call1",
     response: { kind: "skip" },
     modelId: "m1",
-    searchEnabled: false,
-    researchEnabled: false,
   };
   const edit = { conversationId: "c1", messageId: "u1", ...generation };
   const structuredEdit = {
     conversationId: "c1",
     messageId: "u1",
     modelId: "m1",
-    searchEnabled: false,
-    researchEnabled: false,
     attachmentIds: [],
     questionResponse: { kind: "skip" },
   };
