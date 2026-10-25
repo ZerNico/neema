@@ -356,10 +356,13 @@ describe("durable scheduled attempts", () => {
           .select()
           .from(scheduleRuns)
           .where(eq(scheduleRuns.scheduleId, schedule.id));
-        return { expired, repeated, rows };
+        return { expired, repeated, rows, owner, abandoned: abandoned.id, scheduleId: schedule.id };
       }),
     );
-    expect(result.expired).toMatchObject([{ status: "error", conversationId: null }]);
+    // Each with the owner to tell, so the tick needs no lookup per run.
+    expect(result.expired).toEqual([
+      { id: result.abandoned, scheduleId: result.scheduleId, userId: result.owner },
+    ]);
     expect(result.repeated).toEqual([]);
     expect(result.rows.find((row) => row.id === result.expired[0]?.id)?.status).toBe("error");
     expect(result.rows.filter((row) => row.status === "pending")).toHaveLength(2);

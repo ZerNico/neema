@@ -133,8 +133,8 @@ export class ScheduleRepo extends Context.Service<
     finishRun(runId: string, status: "error" | "skipped", error: string): Effect.Effect<boolean>;
     /** Keep an active, unbound fire alive across slow pre-turn work. */
     renewRun(runId: string): Effect.Effect<void>;
-    /** An unbound fire whose lease lapsed cannot be replayed safely. */
-    expirePending(): Effect.Effect<RunRow[]>;
+    /** An unbound fire whose lease lapsed cannot be replayed safely. Each with its schedule's owner. */
+    expirePending(): Effect.Effect<Array<Pick<RunRow, "id" | "scheduleId"> & { userId: string }>>;
     /**
      * Atomically move due schedules to their next fire after now and return
      * the claimed rows. Claiming reschedules from now, so downtime costs one
@@ -388,13 +388,19 @@ export class ScheduleRepo extends Context.Service<
             })
             // A live fire renews its lease while waiting for the turn. A crashed
             // one cannot safely be replayed, even if its turn never became visible.
+            .from(schedules)
             .where(
               and(
+                eq(schedules.id, scheduleRuns.scheduleId),
                 eq(scheduleRuns.status, "pending"),
                 sql`${scheduleRuns.leaseUntil} <= clock_timestamp()`,
               ),
             )
-            .returning()
+            .returning({
+              id: scheduleRuns.id,
+              scheduleId: scheduleRuns.scheduleId,
+              userId: schedules.userId,
+            })
             .pipe(Effect.orDie);
         }),
         claimDue: Effect.fn("ScheduleRepo.claimDue")(function* (limit, nextFor) {

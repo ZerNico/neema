@@ -1,6 +1,4 @@
 import { Context, Duration, Effect, Exit, Layer, Schedule as EffectSchedule } from "effect";
-import { eq } from "drizzle-orm";
-import { schedules } from "~/db/schema/index.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -151,15 +149,8 @@ export class ScheduleService extends Context.Service<
 
       const tick: Effect.Effect<void> = Effect.suspend(() =>
         Effect.gen(function* () {
-          const expired = yield* repo.expirePending();
-          for (const run of expired) {
-            const row = yield* db
-              .select({ userId: schedules.userId })
-              .from(schedules)
-              .where(eq(schedules.id, run.scheduleId))
-              .pipe(Effect.orDie);
-            if (row[0]) yield* runChanged(row[0].userId, run.scheduleId, run.id);
-          }
+          for (const run of yield* repo.expirePending())
+            yield* runChanged(run.userId, run.scheduleId, run.id);
           // Answers the reaper ended, and turns a restart cut off, have no
           // turn left to settle them.
           yield* settlement.settle;
