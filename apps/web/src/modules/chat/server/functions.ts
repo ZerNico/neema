@@ -4,6 +4,8 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { refuse, type RefusalOverrides } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
@@ -169,7 +171,7 @@ export const reserveWorkTurn = createServerFn({ method: "POST" })
       ),
       {
         // Not the message's fault: the reservation no longer fits this chat.
-        InvalidMessage: (error) => ({ status: 409, body: error.reason }),
+        InvalidMessage: (error) => ({ status: 409, body: verbatim(error.reason) }),
       },
     ),
   );
@@ -234,27 +236,25 @@ const queueSubmission = (
 // chat surfaces say differently: a new message picks its agent, collections
 // and skills now; a continuing one reuses what its answers used, which may
 // have gone since.
-const gone = (body: string) => () => ({ status: 409, body });
+const gone = (body: Localized) => () => ({ status: 409, body });
+const missing = (body: Localized) => () => ({ status: 404, body });
 // Claimed by another message, or gone. The chip is stale either way.
-const attachmentGone = gone("An attachment is no longer available");
+const attachmentGone = gone(localized(m.chat_error_attachment_gone));
 const chosenNow: RefusalOverrides = {
-  AgentNotAvailable: () => ({ status: 404, body: "The selected agent is not available" }),
-  IntegrationNotAvailable: () => ({
-    status: 404,
-    body: "A selected integration is not available",
-  }),
-  KnowledgeNotAvailable: () => ({ status: 404, body: "A selected collection is not available" }),
-  SkillNotAvailable: () => ({ status: 404, body: "A selected skill is not available" }),
+  AgentNotAvailable: missing(localized(m.chat_error_selected_agent_unavailable)),
+  IntegrationNotAvailable: missing(localized(m.chat_error_selected_integration_unavailable)),
+  KnowledgeNotAvailable: missing(localized(m.chat_error_selected_collection_unavailable)),
+  SkillNotAvailable: missing(localized(m.chat_error_selected_skill_unavailable)),
   AttachmentNotAvailable: attachmentGone,
 };
 const usedBefore: RefusalOverrides = {
-  AgentNotAvailable: gone("This chat’s agent is no longer available"),
-  IntegrationNotAvailable: gone("An integration this answer used is no longer available"),
-  KnowledgeNotAvailable: gone("Knowledge this answer used is no longer available"),
-  SkillNotAvailable: gone("A skill this answer used is no longer available"),
+  AgentNotAvailable: gone(localized(m.chat_error_used_agent_gone)),
+  IntegrationNotAvailable: gone(localized(m.chat_error_used_integration_gone)),
+  KnowledgeNotAvailable: gone(localized(m.chat_error_used_knowledge_gone)),
+  SkillNotAvailable: gone(localized(m.chat_error_used_skill_gone)),
   AttachmentNotAvailable: attachmentGone,
 };
-const notStarted = () => refuse(409, "This message could not be started");
+const notStarted = () => refuse(409, localized(m.chat_error_not_started));
 
 export const queueMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
@@ -301,10 +301,14 @@ export const steerQueuedMessage = createServerFn({ method: "POST" })
         chat.steerQueuedMessage({ userId: context.session.user.id, ...data }),
       ),
       {
-        QueueEntryNotFound: gone("Queued message no longer exists"),
+        QueueEntryNotFound: gone(localized(m.chat_error_queued_message_gone)),
         AttachmentUnsupported: (error) => ({
           status: 400,
-          body: `The running answer can’t read ${error.fileName}: ${error.reason}`,
+          body: (locale) =>
+            m.chat_error_steer_file_unreadable(
+              { fileName: error.fileName, reason: error.reason },
+              { locale },
+            ),
         }),
       },
     ),

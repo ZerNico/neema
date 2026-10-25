@@ -1,14 +1,16 @@
 import type { Effect, ManagedRuntime } from "effect";
+import { getLocale } from "~/paraglide/runtime.js";
 import { type Refusable, type RefusalOverrides, refusing, type TypedErrors } from "./refusal.ts";
 import { runtime } from "./runtime.ts";
 
 /**
  * Runs a server function's effect on the app runtime, answering each expected
  * failure with its refusal (`refusal.ts`). An error the table does not know
- * fails to compile here rather than reaching the client as a 500.
+ * fails to compile here rather than reaching the client as a 500. The locale is
+ * read here, still in the request: the effect's fibers do not carry it.
  */
 export const runServerFn = <A, E extends Refusable>(
   effect: Effect.Effect<A, E, ManagedRuntime.ManagedRuntime.Services<typeof runtime>> &
     TypedErrors<E>,
   overrides?: RefusalOverrides,
-) => runtime.runPromise(refusing(effect, overrides));
+) => runtime.runPromise(refusing(effect, getLocale(), overrides));

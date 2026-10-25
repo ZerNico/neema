@@ -1,9 +1,12 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { localized, verbatim } from "~/i18n/localized.ts";
+import { QueueFull } from "~/modules/chat/errors.ts";
 import { SharingRateLimited } from "~/modules/sharing/errors.ts";
+import { m } from "~/paraglide/messages.js";
 import { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { UNEXPECTED_FAILURE, readServerError } from "~/server-error.ts";
-import { NOT_FOUND, refusing } from "./refusal.ts";
+import { NOT_FOUND, refuse, refusing } from "./refusal.ts";
 import { reportUnexpectedFailures } from "./unexpected-failure.ts";
 
 vi.mock("@tanstack/react-start", () => ({
@@ -41,9 +44,11 @@ const report: unknown = reportUnexpectedFailures;
 describe("refusing", () => {
   it("answers a known failure with its status and body", async () => {
     expect(
-      await refusalFrom(refusing(Effect.fail(new SkillRejected({ reason: "Name is taken" })))),
+      await refusalFrom(
+        refusing(Effect.fail(new SkillRejected({ reason: "Name is taken" })), "en"),
+      ),
     ).toEqual({ status: 400, body: "Name is taken", retryAfter: null });
-    expect(await refusalFrom(refusing(Effect.fail(new SharingRateLimited())))).toMatchObject({
+    expect(await refusalFrom(refusing(Effect.fail(new SharingRateLimited()), "en"))).toMatchObject({
       status: 429,
       retryAfter: "60",
     });
@@ -51,7 +56,7 @@ describe("refusing", () => {
 
   it("gives every miss the one 404 body the client treats as saying nothing", async () => {
     const refusal = await refusalFrom(
-      refusing(Effect.fail(new SkillNotAvailable({ skillId: "s1" }))),
+      refusing(Effect.fail(new SkillNotAvailable({ skillId: "s1" })), "de"),
     );
     expect(refusal).toMatchObject({ status: 404, body: NOT_FOUND });
     expect(readServerError(new Error(refusal.body)).reason).toBeNull();
@@ -60,21 +65,38 @@ describe("refusing", () => {
   it("lets a caller reword one tag", async () => {
     expect(
       await refusalFrom(
-        refusing(Effect.fail(new SkillNotAvailable({ skillId: "s1" })), {
-          SkillNotAvailable: () => ({ status: 404, body: "A selected skill is not available" }),
+        refusing(Effect.fail(new SkillNotAvailable({ skillId: "s1" })), "en", {
+          SkillNotAvailable: () => ({ status: 404, body: verbatim("Pick another skill") }),
         }),
       ),
-    ).toMatchObject({ status: 404, body: "A selected skill is not available" });
+    ).toMatchObject({ status: 404, body: "Pick another skill" });
+  });
+
+  it("words a refusal in the request's locale, also one decided inside the effect", async () => {
+    expect(
+      await refusalFrom(refusing(Effect.fail(new QueueFull({ conversationId: "c1" })), "de")),
+    ).toMatchObject({
+      status: 409,
+      body: "Zu viele Nachrichten in der Warteschlange",
+    });
+    const decided = refuse(409, localized(m.chat_error_not_started));
+    expect(await refusalFrom(refusing(decided, "de"))).toMatchObject({
+      status: 409,
+      body: "Diese Nachricht konnte nicht gestartet werden",
+    });
+    expect(await refusalFrom(refusing(decided, "en"))).toMatchObject({
+      body: "This message could not be started",
+    });
   });
 
   it("leaves a defect to the unexpected-failure path", async () => {
     const defect = new Error('relation "secret" does not exist');
-    const thrown = await rejection(Effect.runPromise(refusing(Effect.die(defect))));
+    const thrown = await rejection(Effect.runPromise(refusing(Effect.die(defect), "en")));
     expect(thrown).toBe(defect);
 
     const answered = await rejection(
       (report as Middleware)({
-        next: () => Effect.runPromise(refusing(Effect.die(defect))),
+        next: () => Effect.runPromise(refusing(Effect.die(defect), "en")),
       }),
     );
     if (!(answered instanceof Response)) throw new Error("expected a Response");

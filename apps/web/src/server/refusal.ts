@@ -1,4 +1,7 @@
 import { Effect } from "effect";
+import { english, type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
 import type { AgentChanged, AgentNotAvailable, AgentRejected } from "~/modules/agents/errors.ts";
 import type {
   AttachmentBusy,
@@ -70,10 +73,13 @@ import type { SkillConflict, SkillNotAvailable, SkillRejected } from "~/modules/
 import type { InvalidSearchProvider } from "~/modules/tools/server/search-provider-repo.ts";
 import type { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 
-/** How a server function answers a failure it expected: a status and a body the page may show. */
+/**
+ * How a server function answers a failure it expected: a status and a body the
+ * page may show, rendered in the request's locale at the boundary.
+ */
 export interface Refusal {
   readonly status: number;
-  readonly body: string;
+  readonly body: Localized;
   readonly headers?: Readonly<Record<string, string>>;
 }
 
@@ -155,40 +161,46 @@ export type RefusalTable = {
 /** Another wording for a tag where one caller's page needs it; the status is the caller's too. */
 export type RefusalOverrides = Partial<RefusalTable>;
 
-const notFound = (): Refusal => ({ status: 404, body: NOT_FOUND });
+const notFound = (): Refusal => ({ status: 404, body: verbatim(NOT_FOUND) });
 const because =
   (status: number) =>
-  (error: { readonly reason: string }): Refusal => ({ status, body: error.reason });
+  (error: { readonly reason: Localized | string }): Refusal => ({
+    status,
+    body: words(error.reason),
+  });
+// MIGRATION: modules still pass English strings; removed once every module is translated.
+const words = (body: Localized | string) => (typeof body === "string" ? verbatim(body) : body);
 
 const refusals: RefusalTable = {
   AccountIneligible: (error) =>
     error.reason === "unapproved"
-      ? { status: 403, body: NOT_APPROVED_BODY }
-      : { status: 401, body: UNAUTHENTICATED_BODY },
+      ? { status: 403, body: verbatim(NOT_APPROVED_BODY) }
+      : { status: 401, body: verbatim(UNAUTHENTICATED_BODY) },
   AgentNotAvailable: notFound,
   AgentRejected: because(400),
   AgentChanged: because(409),
   AttachmentNotAvailable: notFound,
-  AttachmentBusy: () => ({ status: 409, body: "Stop the answer in that chat first." }),
+  AttachmentBusy: () => ({ status: 409, body: localized(m.chat_error_attachment_busy) }),
   AttachmentRejected: (error) => ({
     status: error.cause === "size" ? 413 : 415,
-    body: error.reason,
+    body: words(error.reason),
   }),
-  AttachmentUnsupported: (error) => ({ status: 400, body: `${error.fileName}: ${error.reason}` }),
+  AttachmentUnsupported: (error) => ({
+    status: 400,
+    body: (locale) => `${error.fileName}: ${words(error.reason)(locale)}`,
+  }),
   BranchNotAllowed: because(409),
   CapabilitiesRejected: because(400),
-  CapabilityDenied: () => ({ status: 403, body: "Forbidden" }),
-  ConversationBusy: () => ({ status: 409, body: "A response is still generating" }),
+  CapabilityDenied: () => ({ status: 403, body: verbatim("Forbidden") }),
+  ConversationBusy: () => ({ status: 409, body: localized(m.chat_error_conversation_busy) }),
   ConversationNotFound: notFound,
-  CustomToolCompileFailed: (error) => ({ status: 400, body: error.message }),
-  CustomToolConflict: () => ({
-    status: 409,
-    body: "This module changed elsewhere; reload it before saving.",
-  }),
+  // The compiler's own diagnostics, in the language the code is written in.
+  CustomToolCompileFailed: (error) => ({ status: 400, body: verbatim(error.message) }),
+  CustomToolConflict: () => ({ status: 409, body: localized(m.custom_tools_error_conflict) }),
   CustomToolNotFound: notFound,
   CustomToolSlugTaken: (error) => ({
     status: 409,
-    body: `The slug ${error.slug} is already in use.`,
+    body: localized(m.custom_tools_error_slug_taken, { slug: error.slug }),
   }),
   DocumentNotAvailable: notFound,
   DocumentRejected: because(400),
@@ -197,7 +209,7 @@ const refusals: RefusalTable = {
   EditNotAllowed: because(409),
   FontRejected: because(400),
   GroupMemberNotFound: notFound,
-  GroupNameTaken: () => ({ status: 409, body: "Group name already taken" }),
+  GroupNameTaken: () => ({ status: 409, body: localized(m.groups_error_name_taken) }),
   GroupNotFound: notFound,
   IntegrationNotAvailable: notFound,
   InvalidDefaultModelOrder: because(400),
@@ -209,21 +221,24 @@ const refusals: RefusalTable = {
   LimitRejected: because(400),
   MailFailed: because(400),
   MessageNotFound: notFound,
-  ModelNotFound: () => ({ status: 400, body: "Unknown model" }),
-  NoActiveGeneration: () => ({ status: 409, body: "That response already finished" }),
+  ModelNotFound: () => ({ status: 400, body: localized(m.chat_error_model_not_found) }),
+  NoActiveGeneration: () => ({
+    status: 409,
+    body: localized(m.chat_error_no_active_generation),
+  }),
   ProjectNotAvailable: notFound,
   ProjectRejected: because(400),
   ProjectFileConflict: because(409),
   PushRejected: because(400),
   QuestionUnavailable: () => ({
     status: 409,
-    body: "These questions are no longer available. Refresh the conversation.",
+    body: localized(m.chat_error_question_unavailable),
   }),
   QueueEntryNotFound: () => ({
     status: 409,
-    body: "This queued message already started or was removed",
+    body: localized(m.chat_error_queue_entry_not_found),
   }),
-  QueueFull: () => ({ status: 409, body: "Too many messages are queued" }),
+  QueueFull: () => ({ status: 409, body: localized(m.chat_error_queue_full) }),
   ResumeNotAllowed: because(409),
   RetryNotAllowed: because(409),
   ScheduleChanged: because(409),
@@ -233,22 +248,22 @@ const refusals: RefusalTable = {
   SharedResourceNotAvailable: notFound,
   SharingRateLimited: () => ({
     status: 429,
-    body: "Too many sharing requests; try again shortly",
+    body: localized(m.sharing_error_rate_limited),
     headers: { "Retry-After": "60" },
   }),
-  SkillConflict: () => ({
-    status: 409,
-    body: "This skill changed in another editor. Your draft is preserved; review the current revision before saving.",
-  }),
+  SkillConflict: () => ({ status: 409, body: localized(m.skills_error_conflict) }),
   SkillNotAvailable: notFound,
   SkillRejected: because(400),
   StorageFull: because(413),
-  ToolUnavailable: (error) => ({ status: 400, body: `Web search unavailable: ${error.reason}` }),
+  ToolUnavailable: (error) => ({
+    status: 400,
+    body: localized(m.tools_error_web_search_unavailable, { reason: error.reason }),
+  }),
   UnhostedImageFamily: because(400),
   UsageLimitReached: because(429),
   WorkDesktopRequired: () => ({
     status: 409,
-    body: "This is a work chat; continue it from the desktop app",
+    body: localized(m.chat_error_work_desktop_required),
   }),
 };
 
@@ -258,28 +273,47 @@ export const refusalOf = <E extends Refusable>(error: E, overrides?: RefusalOver
   return (describe as (error: E) => Refusal)(error);
 };
 
-const responseOf = ({ body, ...init }: Refusal) => new Response(body, init);
+const responseOf = ({ body, ...init }: Refusal, locale: Locale) => new Response(body(locale), init);
 
 /**
  * A refusal the function decides itself, with no failure behind it, to throw
- * from plain code. Start answers a thrown Response as it is, and
- * `reportUnexpectedFailures` lets it pass.
+ * from plain code, which still runs in the request and so knows its locale.
+ * Start answers a thrown Response as it is, and `reportUnexpectedFailures`
+ * lets it pass.
  */
-export const refusal = (status: number, body: string) => responseOf({ status, body });
+export const refusal = (status: number, body: Localized | string) =>
+  responseOf({ status, body: words(body) }, getLocale());
+
+/** A refusal decided inside an effect, rendered by `refusing` once the request's locale is known. */
+class PendingRefusal {
+  constructor(readonly refusal: Refusal) {}
+  /** What a log shows if one escapes `refusing`. */
+  toString() {
+    return `Refused ${this.refusal.status}: ${english(this.refusal.body)}`;
+  }
+}
 
 /** The same refusal inside an effect. */
-export const refuse = (status: number, body: string) => Effect.die(refusal(status, body));
+export const refuse = (status: number, body: Localized | string) =>
+  Effect.die(new PendingRefusal({ status, body: words(body) }));
 
 /** An error channel typed `any` meets every constraint, so it is refused outright. */
 export type TypedErrors<E> = 0 extends 1 & E ? "the error channel is any" : unknown;
 
 /**
- * Turns every expected failure into its refusal. The error channel may hold
- * only tags the table knows, so a failure from another module cannot reach the
- * boundary unmapped and surface as an unexpected 500. Defects stay defects.
+ * Turns every expected failure into its refusal, worded in `locale`. The error
+ * channel may hold only tags the table knows, so a failure from another module
+ * cannot reach the boundary unmapped and surface as an unexpected 500. Other
+ * defects stay defects.
  */
 export const refusing = <A, E extends Refusable, R>(
   effect: Effect.Effect<A, E, R> & TypedErrors<E>,
+  locale: Locale,
   overrides?: RefusalOverrides,
 ): Effect.Effect<A, never, R> =>
-  effect.pipe(Effect.catch((error) => Effect.die(responseOf(refusalOf(error, overrides)))));
+  effect.pipe(
+    Effect.catch((error) => Effect.die(new PendingRefusal(refusalOf(error, overrides)))),
+    Effect.catchDefect((defect) =>
+      Effect.die(defect instanceof PendingRefusal ? responseOf(defect.refusal, locale) : defect),
+    ),
+  );
