@@ -29,37 +29,40 @@ export const OpenDocument = Schema.Struct({
 });
 export type OpenDocument = typeof OpenDocument.Type;
 const OpenDocumentField = Schema.optionalKey(OpenDocument);
-export const desktopSubmissionFields = {
+/**
+ * What the desktop app reports about the machine an attempt is sent from.
+ * Present only on a submission from the app; a Work attempt requires it.
+ */
+export const DesktopSubmission = Schema.Struct({
+  /** The app's execution session, which owns this attempt's local calls. */
+  executorId: EntityId,
+  /**
+   * Which machine sent the attempt. Stored per generation so the client can
+   * tell "this chat last worked here" from "elsewhere" and offer take-over.
+   * Display text only; names are never an address.
+   */
+  machine: Schema.optionalKey(
+    Schema.Struct({ id: EntityId, name: Schema.String.check(Schema.isMaxLength(64)) }),
+  ),
   /**
    * The folders reachable on the sending machine, by real absolute path. Paths
    * live in attempt-scoped prompt text and tool traffic, never in a row: the
    * generation config keeps the names alone, so the same conversation
    * continued on another machine resolves its own folders or none.
    */
-  desktopFolders: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
-        path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
-      }),
-    ).check(Schema.isMaxLength(32)),
-  ),
-  desktopCommands: Schema.optionalKey(Schema.Boolean),
-  desktopBrowser: Schema.optionalKey(Schema.Boolean),
-  fromDesktop: Schema.optionalKey(Schema.Boolean),
-  desktopExecutorId: Schema.optionalKey(EntityId),
-  /**
-   * Which machine sent the attempt. Stored per generation so the client can
-   * tell "this chat last worked here" from "elsewhere" and offer take-over.
-   * Display text only; names are never an address.
-   */
-  desktopMachineId: Schema.optionalKey(EntityId),
-  desktopMachineName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
-};
-const DesktopSubmission = Schema.Struct(desktopSubmissionFields);
-export type DesktopSubmission = {
-  [K in keyof typeof DesktopSubmission.Type]?: (typeof DesktopSubmission.Type)[K] | undefined;
-};
+  folders: Schema.Array(
+    Schema.Struct({
+      name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+      path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
+    }),
+  ).check(Schema.isMaxLength(32)),
+  /** False while the machine cannot sandbox, which withholds run_command. */
+  commands: Schema.Boolean,
+  /** Whether the app can drive embedded pages, which offers the browser tools. */
+  browser: Schema.Boolean,
+});
+export type DesktopSubmission = typeof DesktopSubmission.Type;
+const DesktopField = Schema.optionalKey(DesktopSubmission);
 
 const generationFields = {
   timeZone: TimeZone,
@@ -72,7 +75,7 @@ const generationFields = {
   searchEnabled: Schema.Boolean,
   /** Offers `deep_research` to the attempt; the model still chooses. */
   researchEnabled: Schema.Boolean,
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
   // Ordered: index = position in the message.
   attachmentIds: AttachmentIds,
   /**
@@ -127,7 +130,7 @@ const WorkspaceFiles = Schema.Array(
 
 const sendFields = {
   ...generationFields,
-  /** Names only; absolute workspace paths remain attempt-scoped desktop fields. */
+  /** Names only; absolute workspace paths stay in the attempt-scoped `desktop`. */
   workspaceFiles: Schema.optionalKey(WorkspaceFiles),
 };
 
@@ -191,7 +194,7 @@ export const AnswerQuestionInput = Schema.Struct({
   reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
 });
@@ -245,8 +248,8 @@ export const SearchChatsInput = Schema.Struct({
 });
 
 /**
- * Queueing snapshots an ordinary submission, files included. Desktop fields
- * are checked at queue time but never stored: a Work entry takes fresh ones
+ * Queueing snapshots an ordinary submission, files included. `desktop` is
+ * checked at queue time but never stored: a Work entry takes fresh ones
  * from the app that dispatches it.
  */
 export const QueueMessageInput = Schema.Struct({
@@ -258,7 +261,7 @@ export const QueueMessageInput = Schema.Struct({
   content: MessageContent,
   searchEnabled: Schema.Boolean,
   researchEnabled: Schema.Boolean,
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
   attachmentIds: AttachmentIds,
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
@@ -275,12 +278,12 @@ export const ReplaceQueueEntryInput = Schema.Struct({
 
 /**
  * Starts the next queued message. `force` is a person asking, which may start
- * after a stop; the desktop fields are how a Work chat's entry gets a machine.
+ * after a stop; `desktop` is how a Work chat's entry gets a machine.
  */
 export const DispatchQueueInput = Schema.Struct({
   conversationId: Schema.String,
   force: Schema.optionalKey(Schema.Boolean),
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
 });
 
 export const QueueEntryIdInput = Schema.Struct({
@@ -288,11 +291,11 @@ export const QueueEntryIdInput = Schema.Struct({
   entryId: Schema.String,
 });
 
-/** Sends one queued message now; the desktop fields give a Work entry its machine. */
+/** Sends one queued message now; `desktop` gives a Work entry its machine. */
 export const SendQueuedNowInput = Schema.Struct({
   conversationId: Schema.String,
   entryId: Schema.String,
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
 });
 
 export const SteerQueueEntryInput = Schema.Struct({
@@ -313,7 +316,7 @@ export const MessageIdInput = Schema.Struct({
  * sending one switches models for the new attempt ("retry with").
  */
 export const RetryMessageInput = Schema.Struct({
-  ...desktopSubmissionFields,
+  desktop: DesktopField,
   conversationId: Schema.String,
   messageId: Schema.String,
   modelId: Schema.optionalKey(Schema.String),
@@ -346,7 +349,7 @@ export const EditMessageInput = Schema.Union([
     reasoningEffort: Schema.optionalKey(Schema.NullOr(Schema.Literals(REASONING_EFFORTS))),
     searchEnabled: Schema.Boolean,
     researchEnabled: Schema.Boolean,
-    ...desktopSubmissionFields,
+    desktop: DesktopField,
     timeZone: TimeZone,
     openDocument: OpenDocumentField,
     attachmentIds: AttachmentIds,

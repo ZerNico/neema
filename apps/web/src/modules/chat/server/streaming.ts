@@ -10,7 +10,6 @@ import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { lookupsOf } from "../assistant-output.ts";
 import { GenerationFence, GenerationSettled, type GenerationIdentity } from "./generation-fence.ts";
 import { Context, Deferred, Duration, Effect, Layer, PubSub, Schedule, Stream } from "effect";
-import type { OpenDocument } from "../schema.ts";
 
 import { type PromptDeps } from "./prompt.ts";
 
@@ -37,6 +36,20 @@ export const SettledCheckInterval = Context.Reference<Duration.Duration>(
   { defaultValue: () => Duration.seconds(15) },
 );
 
+type StartGenerationInput = GenerationInput & {
+  /**
+   * Invoked inside the generation fiber once it reaches a terminal status.
+   * The engine cannot reach the chat service, so queue dispatch arrives
+   * this way rather than through a layer cycle.
+   */
+  onSettled?: (input: {
+    userId: string;
+    conversationId: string;
+    messageId: string;
+    status: "complete" | "error" | "aborted";
+  }) => Effect.Effect<void>;
+};
+
 /**
  * Runs assistant generations detached from any HTTP request, persists chunks
  * for resumability, and republishes them for live subscribers.
@@ -48,38 +61,7 @@ export class StreamEngine extends Context.Service<
      * Fire-and-forget: start generating the assistant message. Returns once
      * the generation fiber is forked (not when it finishes).
      */
-    startGeneration(input: {
-      userId: string;
-      conversationId: string;
-      messageId: string;
-      modelId: string;
-      searchEnabled: boolean;
-      generationId?: string | undefined;
-      desktopExecutorId?: string | undefined;
-      /**
-       * The folders the sending machine named, paths included. Never stored:
-       * the paths exist for this attempt's prompt and tool traffic alone.
-       */
-      desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
-      /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
-      deviceSessionId?: string | undefined;
-      timeZone?: string | undefined;
-      /** The document open in the panel, so it is the one the model reads first. */
-      openDocument?: OpenDocument | undefined;
-      /** Continue the answer from its stored rounds instead of starting it over. */
-      resume?: boolean | undefined;
-      /**
-       * Invoked inside the generation fiber once it reaches a terminal status.
-       * The engine cannot reach the chat service, so queue dispatch arrives
-       * this way rather than through a layer cycle.
-       */
-      onSettled?: (input: {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        status: "complete" | "error" | "aborted";
-      }) => Effect.Effect<void>;
-    }): Effect.Effect<void>;
+    startGeneration(input: StartGenerationInput): Effect.Effect<void>;
     /**
      * Winds a running generation down early, keeping whatever it has already
      * produced. One whose row exists but whose fiber has not registered yet
@@ -301,25 +283,9 @@ export class StreamEngine extends Context.Service<
         );
       });
 
-      const startGeneration = Effect.fn("StreamEngine.startGeneration")(function* (input: {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        modelId: string;
-        searchEnabled: boolean;
-        generationId?: string | undefined;
-        desktopExecutorId?: string | undefined;
-        deviceSessionId?: string | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-        resume?: boolean | undefined;
-        onSettled?: (input: {
-          userId: string;
-          conversationId: string;
-          messageId: string;
-          status: "complete" | "error" | "aborted";
-        }) => Effect.Effect<void>;
-      }) {
+      const startGeneration = Effect.fn("StreamEngine.startGeneration")(function* (
+        input: StartGenerationInput,
+      ) {
         const abort = yield* Deferred.make<void>();
         const message = yield* repo.getMessage(input.messageId);
         if (!input.generationId || message?.generationId !== input.generationId) return;
@@ -332,13 +298,13 @@ export class StreamEngine extends Context.Service<
             }
           : null;
         const owner: ExternalOwner | null =
-          input.desktopExecutorId && input.generationId
+          input.desktop && input.generationId
             ? {
                 userId: input.userId,
                 conversationId: input.conversationId,
                 messageId: input.messageId,
                 generationId: input.generationId,
-                executorId: input.desktopExecutorId,
+                executorId: input.desktop.executorId,
                 deviceSessionId: input.deviceSessionId,
               }
             : null;

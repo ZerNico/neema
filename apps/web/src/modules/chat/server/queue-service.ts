@@ -15,7 +15,8 @@ import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ChatRepo, type ResolveError } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
-import type { AttemptOptions, DesktopFolderRef } from "./attempt-options.ts";
+import type { AttemptOptions } from "./attempt-options.ts";
+import type { DesktopSubmission } from "../schema.ts";
 import type { makeConversationLifecycle } from "./conversation-lifecycle.ts";
 
 /** A text-and-files submission held for later, with the settings it was made under. */
@@ -26,7 +27,7 @@ export type QueueSubmission = {
   attachmentIds: ReadonlyArray<string>;
   input: QueuedTurnInput;
   /** Present when queued from the desktop app; a Work chat requires it. */
-  desktop?: DesktopDispatch | undefined;
+  desktop?: DesktopSubmission | undefined;
 };
 
 export type QueueSubmissionError =
@@ -36,23 +37,6 @@ export type QueueSubmissionError =
   | WorkDesktopRequired
   | AttachmentUnsupported
   | AttachmentNotAvailable;
-
-/**
- * What the desktop app reports when it queues or starts Work: which folders it
- * has attached, whether it can sandbox, and which running app it is. The
- * device session comes from the authenticated request, never the body.
- */
-export type DesktopDispatch = {
-  fromDesktop: boolean;
-  desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-  desktopCommands?: boolean | undefined;
-  desktopBrowser?: boolean | undefined;
-  desktopExecutorId: string;
-  /** Which machine runs it, so the chat names where its files are. */
-  desktopMachineId?: string | undefined;
-  desktopMachineName?: string | undefined;
-  deviceSessionId?: string | undefined;
-};
 
 /** What the queue strip says when a queued message could not start. */
 const queueFailure = (error: { readonly _tag: string }) => {
@@ -129,8 +113,7 @@ export const makeQueueService = (deps: {
       if (conversation.mode === "work" && !(yield* policy.can(input.userId, "work")))
         return yield* new InvalidMessage({ reason: "Work is not permitted" });
       // Queued Work runs on a machine, so it can only be handed over from one.
-      if (conversation.mode === "work" && !input.desktop?.fromDesktop)
-        return yield* new WorkDesktopRequired();
+      if (conversation.mode === "work" && !input.desktop) return yield* new WorkDesktopRequired();
       yield* validateGenerationOptions({
         userId: input.userId,
         modelId: input.input.modelId,
@@ -225,7 +208,13 @@ export const makeQueueService = (deps: {
       conversationId: string;
       force?: boolean | undefined;
       entryId?: string | undefined;
-      desktop?: DesktopDispatch | undefined;
+      /**
+       * What the dispatching app reports now: its folders, whether it can
+       * sandbox, and which running app it is. A Work entry needs it.
+       */
+      desktop?: DesktopSubmission | undefined;
+      /** See `ExternalOwner.deviceSessionId`; from the session, never the body. */
+      deviceSessionId?: string | undefined;
     }): Effect.fn.Return<
       { started: boolean },
       | ConversationNotFound
@@ -271,13 +260,7 @@ export const makeQueueService = (deps: {
               collectionIds: entry.input.collectionIds,
               skillIds: entry.input.skillIds,
               // Taken from the dispatching app now, never from queue time.
-              desktopFolders: input.desktop?.desktopFolders,
-              desktopCommands: input.desktop?.desktopCommands,
-              desktopBrowser: input.desktop?.desktopBrowser,
-              fromDesktop: input.desktop?.fromDesktop,
-              desktopExecutorId: input.desktop?.desktopExecutorId,
-              desktopMachineId: input.desktop?.desktopMachineId,
-              desktopMachineName: input.desktop?.desktopMachineName,
+              desktop: input.desktop,
             }),
         });
         // A replacement or reordered head needs fresh validation on the next dispatch.
@@ -293,11 +276,8 @@ export const makeQueueService = (deps: {
           searchEnabled: outcome.config.searchEnabled,
           timeZone: outcome.entry.input.timeZone,
           openDocument: outcome.entry.input.openDocument,
-          desktopExecutorId: input.desktop?.desktopExecutorId,
-          ...(input.desktop?.desktopFolders !== undefined
-            ? { desktopFolders: input.desktop.desktopFolders }
-            : {}),
-          deviceSessionId: input.desktop?.deviceSessionId,
+          desktop: input.desktop,
+          deviceSessionId: input.deviceSessionId,
           onSettled: ({ status }) =>
             status === "complete" ? drainQueue(input.userId, input.conversationId) : Effect.void,
         });
@@ -325,7 +305,13 @@ export const makeQueueService = (deps: {
       userId: string;
       conversationId: string;
       entryId: string;
-      desktop?: DesktopDispatch | undefined;
+      /**
+       * What the dispatching app reports now: its folders, whether it can
+       * sandbox, and which running app it is. A Work entry needs it.
+       */
+      desktop?: DesktopSubmission | undefined;
+      /** See `ExternalOwner.deviceSessionId`; from the session, never the body. */
+      deviceSessionId?: string | undefined;
     }) {
       const conversation = yield* repo.getConversation(input.userId, input.conversationId);
       // Only a desktop app can start Work. Without one, stopping the answer

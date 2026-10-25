@@ -162,8 +162,8 @@ unrelated call ID. A second device can observe progress but cannot claim work
 started by the first. A server restart loses authority and fails closed.
 
 The initiating session is a binding mechanism, not cryptographic attestation.
-`fromDesktop` is caller-supplied policy information. The connected server is
-trusted: its page has the bridge, and consent given in that page is the consent.
+The `desktop` report on a submission is caller-supplied policy information.
+The connected server is trusted: its page has the bridge, and consent given in that page is the consent.
 Grants scope what a chat or an answer may do; they are not a defence against the
 server itself, so main does not ask a second time what the page already asked.
 Trust is in what the app does, not in everything Chromium can: the window grants
@@ -241,16 +241,17 @@ uploads settle. Draft text and skill chips stay live through that wait.
 branch, along with that chat's permission level. Work needs the desktop app and a current [Work grant](feature-policy.md),
 not a folder: every work conversation has an app-managed workspace that
 materializes on demand, so ready-empty means the workspace is there and empty,
-never that the chat is unusable. Send, retry, edit and structured
-answers all submit current desktop capabilities and executor identity. Work
-attempts without them are refused before rows are created or reset. Retry never
-revives an old attached-folder or command setting. Plain chat ignores local-tool
-capability fields. Browser Work history remains readable, with continuation
-actions disabled and server policy enforced independently.
+never that the chat is unusable. Send, retry, resume, edit, structured answers
+and queue dispatch all submit one `desktop` report: executor identity, machine,
+folders and current capabilities. Work attempts without it are refused before
+rows are created or reset. Retry never revives an old attached-folder or
+command setting. Plain chat ignores the report. Browser Work history remains
+readable, with continuation actions disabled and server policy enforced
+independently.
 
-Each attempt is also stamped with the sending machine's id and display name
-(`desktop_machine_id` / `desktop_machine_name` on the generation config). The
-id is a per-install UUID the shell keeps in `machine.json`; a reinstall mints a
+Each attempt, retry and resume included, is stamped with the sending machine's
+id and display name (`desktop_machine_id` / `desktop_machine_name` on the
+generation config). The id is a per-install UUID the shell keeps in `machine.json`; a reinstall mints a
 new one, which is exactly the point: a chat whose latest attempt came from a
 machine this install does not know shows a dismissible banner naming it, with
 a take-over action that materializes this machine's workspace. Nothing is

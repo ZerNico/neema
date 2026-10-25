@@ -49,11 +49,10 @@ import { RESEARCH_TURN_BASE } from "./research/execution.ts";
 import { ConversationSweepInterval, QueueSweepInterval } from "./generation-fence.ts";
 import { fallbackTitle, generateConversationTitle, type TitleDeps } from "./title.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
-import { makeAttemptOptions, type DesktopFolderRef } from "./attempt-options.ts";
+import { makeAttemptOptions } from "./attempt-options.ts";
 import { makeConversationLifecycle } from "./conversation-lifecycle.ts";
 import {
   makeQueueService,
-  type DesktopDispatch,
   type QueueSubmission,
   type QueueSubmissionError,
 } from "./queue-service.ts";
@@ -67,14 +66,8 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveInte
     searchEnabled: boolean;
     researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null | undefined;
-    /** Folders attached on the machine this send came from. */
-    desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-    desktopCommands?: boolean | undefined;
-    desktopBrowser?: boolean | undefined;
-    fromDesktop?: boolean | undefined;
-    desktopExecutorId?: string | undefined;
-    desktopMachineId?: string | undefined;
-    desktopMachineName?: string | undefined;
+    /** What the desktop app reports about the machine this send came from. */
+    desktop?: DesktopSubmission | undefined;
     /**
      * Basenames of files the composer copied into the chat's workspace for
      * this send. Stored on the attempt's generation config; the transcript
@@ -166,7 +159,7 @@ export class ChatService extends Context.Service<
     >;
     /**
      * Starts the next queued message. A Work chat's entry needs `desktop`: the
-     * fresh fields of the app dispatching it. Without them it waits, since the
+     * fresh report of the app dispatching it. Without one it waits, since the
      * server cannot name a live machine on its own.
      */
     dispatchQueuedMessage(input: {
@@ -175,7 +168,8 @@ export class ChatService extends Context.Service<
       force?: boolean | undefined;
       /** Start this entry rather than the head; see `sendQueuedNow`. */
       entryId?: string | undefined;
-      desktop?: DesktopDispatch | undefined;
+      desktop?: DesktopSubmission | undefined;
+      deviceSessionId?: string | undefined;
     }): Effect.Effect<
       { started: boolean },
       | ConversationNotFound
@@ -194,7 +188,8 @@ export class ChatService extends Context.Service<
       userId: string;
       conversationId: string;
       entryId: string;
-      desktop?: DesktopDispatch | undefined;
+      desktop?: DesktopSubmission | undefined;
+      deviceSessionId?: string | undefined;
     }): Effect.Effect<
       { started: boolean },
       | ConversationNotFound
@@ -209,20 +204,19 @@ export class ChatService extends Context.Service<
      * Regenerates an assistant message in place (same id, fresh stream),
      * deleting every message after it. Retry rewinds the conversation.
      */
-    retryMessage(
-      input: DesktopSubmission & {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        /** Regenerate with this model instead of the one that answered before. */
-        modelId?: string | undefined;
-        /** Draw with this image model from now on; absent keeps the chat's own. */
-        imageModelId?: string | null | undefined;
-        deviceSessionId?: string | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-      },
-    ): Effect.Effect<
+    retryMessage(input: {
+      desktop?: DesktopSubmission | undefined;
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      /** Regenerate with this model instead of the one that answered before. */
+      modelId?: string | undefined;
+      /** Draw with this image model from now on; absent keeps the chat's own. */
+      imageModelId?: string | null | undefined;
+      deviceSessionId?: string | undefined;
+      timeZone?: string | undefined;
+      openDocument?: OpenDocument | undefined;
+    }): Effect.Effect<
       { assistantMessageId: string; generationId: string },
       | ConversationNotFound
       | MessageNotFound
@@ -244,18 +238,17 @@ export class ChatService extends Context.Service<
      * Continues the last answer after it failed or was stopped: same message,
      * a new generation that starts from what the answer already produced.
      */
-    resumeMessage(
-      input: DesktopSubmission & {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        /** Continue with this model instead of the one that answered before. */
-        modelId?: string | undefined;
-        deviceSessionId?: string | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-      },
-    ): Effect.Effect<
+    resumeMessage(input: {
+      desktop?: DesktopSubmission | undefined;
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      /** Continue with this model instead of the one that answered before. */
+      modelId?: string | undefined;
+      deviceSessionId?: string | undefined;
+      timeZone?: string | undefined;
+      openDocument?: OpenDocument | undefined;
+    }): Effect.Effect<
       { assistantMessageId: string },
       | ConversationNotFound
       | MessageNotFound
@@ -294,13 +287,7 @@ export class ChatService extends Context.Service<
         searchEnabled: boolean;
         researchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null | undefined;
-        desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-        desktopCommands?: boolean | undefined;
-        desktopBrowser?: boolean | undefined;
-        fromDesktop?: boolean | undefined;
-        desktopExecutorId?: string | undefined;
-        desktopMachineId?: string | undefined;
-        desktopMachineName?: string | undefined;
+        desktop?: DesktopSubmission | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
@@ -572,15 +559,7 @@ function makeChatService() {
           searchEnabled: input.searchEnabled,
           researchEnabled,
           reasoningEffort: input.reasoningEffort,
-          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
-          ...(input.desktopCommands !== undefined
-            ? { desktopCommands: input.desktopCommands }
-            : {}),
-          ...(input.desktopBrowser !== undefined ? { desktopBrowser: input.desktopBrowser } : {}),
-          ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
-          desktopExecutorId: input.desktopExecutorId,
-          desktopMachineId: input.desktopMachineId,
-          desktopMachineName: input.desktopMachineName,
+          desktop: input.desktop,
           workspaceFiles,
           model,
           searchAvailable,
@@ -602,8 +581,7 @@ function makeChatService() {
         workspaceFileNames: workspaceFiles,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
-        desktopExecutorId: input.desktopExecutorId,
-        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+        desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
       });
     });
@@ -620,8 +598,7 @@ function makeChatService() {
       workspaceFileNames?: ReadonlyArray<string> | undefined;
       timeZone?: string | undefined;
       openDocument?: OpenDocument | undefined;
-      desktopExecutorId?: string | undefined;
-      desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
+      desktop?: DesktopSubmission | undefined;
       deviceSessionId?: string | undefined;
       onSettled?: Effect.Effect<void> | undefined;
     }) {
@@ -638,8 +615,7 @@ function makeChatService() {
 
       if (turn.activatedNow)
         yield* engine.startGeneration({
-          desktopExecutorId: input.desktopExecutorId,
-          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+          desktop: input.desktop,
           deviceSessionId: input.deviceSessionId,
           userId: input.userId,
           conversationId: turn.conversation.id,
@@ -805,37 +781,29 @@ function makeChatService() {
       return (models.find((model) => model.isDefault) ?? models[0])?.id ?? null;
     });
 
-    const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (
-      input: DesktopSubmission & {
-        expectedMessages: HistorySnapshot;
-        deviceSessionId?: string | undefined;
-        userId: string;
-        conversationId: string;
-        assistantMessageId: string;
-        modelId: string;
-        imageModelId?: string | null | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-        deleteMessageIds: ReadonlyArray<string>;
-        invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-        edit?: EditContent & {
-          messageId: string;
-          attachmentIds: ReadonlyArray<string>;
-          searchEnabled: boolean;
-          researchEnabled: boolean;
-          reasoningEffort?: ReasoningEffort | null | undefined;
-          desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-          desktopCommands?: boolean | undefined;
-          desktopBrowser?: boolean | undefined;
-          fromDesktop?: boolean | undefined;
-          desktopExecutorId?: string | undefined;
-          desktopMachineId?: string | undefined;
-          desktopMachineName?: string | undefined;
-          skillIds?: ReadonlyArray<string> | undefined;
-          collectionIds?: ReadonlyArray<string> | undefined;
-        };
-      },
-    ) {
+    const restartAssistant = Effect.fn("ChatService.restartAssistant")(function* (input: {
+      desktop?: DesktopSubmission | undefined;
+      expectedMessages: HistorySnapshot;
+      deviceSessionId?: string | undefined;
+      userId: string;
+      conversationId: string;
+      assistantMessageId: string;
+      modelId: string;
+      imageModelId?: string | null | undefined;
+      timeZone?: string | undefined;
+      openDocument?: OpenDocument | undefined;
+      deleteMessageIds: ReadonlyArray<string>;
+      invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
+      edit?: EditContent & {
+        messageId: string;
+        attachmentIds: ReadonlyArray<string>;
+        searchEnabled: boolean;
+        researchEnabled: boolean;
+        reasoningEffort?: ReasoningEffort | null | undefined;
+        skillIds?: ReadonlyArray<string> | undefined;
+        collectionIds?: ReadonlyArray<string> | undefined;
+      };
+    }) {
       const model = yield* providers.getModel(input.modelId);
       if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
       const searchAvailable = yield* searchToolEnabled;
@@ -852,40 +820,17 @@ function makeChatService() {
             model,
             searchAvailable,
             imageModelId: input.imageModelId,
+            desktop: input.desktop,
             ...(input.edit
               ? {
                   attempt: "edit",
                   searchEnabled: input.edit.searchEnabled,
                   researchEnabled: input.edit.researchEnabled,
                   reasoningEffort: input.edit.reasoningEffort,
-                  desktopExecutorId: input.desktopExecutorId,
-                  desktopMachineId: input.edit.desktopMachineId,
-                  desktopMachineName: input.edit.desktopMachineName,
-                  ...(input.edit.desktopFolders !== undefined
-                    ? { desktopFolders: input.edit.desktopFolders }
-                    : {}),
-                  ...(input.edit.desktopCommands !== undefined
-                    ? { desktopCommands: input.edit.desktopCommands }
-                    : {}),
-                  ...(input.edit.desktopBrowser !== undefined
-                    ? { desktopBrowser: input.edit.desktopBrowser }
-                    : {}),
-                  ...(input.edit.fromDesktop !== undefined
-                    ? { fromDesktop: input.edit.fromDesktop }
-                    : {}),
                   ...(input.edit.skillIds ? { skillIds: input.edit.skillIds } : {}),
                   ...(input.edit.collectionIds ? { collectionIds: input.edit.collectionIds } : {}),
                 }
-              : {
-                  attempt: "retry",
-                  fromDesktop: input.fromDesktop,
-                  desktopExecutorId: input.desktopExecutorId,
-                  desktopFolders: input.desktopFolders,
-                  desktopCommands: input.desktopCommands,
-                  desktopBrowser: input.desktopBrowser,
-                  desktopMachineId: input.desktopMachineId,
-                  desktopMachineName: input.desktopMachineName,
-                }),
+              : { attempt: "retry" }),
           }),
           ...(input.edit
             ? {
@@ -908,8 +853,7 @@ function makeChatService() {
       });
 
       yield* engine.startGeneration({
-        desktopExecutorId: input.desktopExecutorId,
-        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+        desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,
@@ -929,18 +873,17 @@ function makeChatService() {
     // Reuses the message row so ids stay stable for subscribers and the
     // sidebar; chunks/tool calls are wiped, later messages deleted, and the
     // stream starts over.
-    const retryMessage = Effect.fn("ChatService.retryMessage")(function* (
-      input: DesktopSubmission & {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        modelId?: string | undefined;
-        imageModelId?: string | null | undefined;
-        deviceSessionId?: string | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-      },
-    ) {
+    const retryMessage = Effect.fn("ChatService.retryMessage")(function* (input: {
+      desktop?: DesktopSubmission | undefined;
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      modelId?: string | undefined;
+      imageModelId?: string | null | undefined;
+      deviceSessionId?: string | undefined;
+      timeZone?: string | undefined;
+      openDocument?: OpenDocument | undefined;
+    }) {
       yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -1014,12 +957,8 @@ function makeChatService() {
       }
 
       const restarted = yield* restartAssistant({
-        desktopExecutorId: input.desktopExecutorId,
+        desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
-        fromDesktop: input.fromDesktop,
-        desktopFolders: input.desktopFolders,
-        desktopCommands: input.desktopCommands,
-        desktopBrowser: input.desktopBrowser,
         expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
@@ -1046,17 +985,16 @@ function makeChatService() {
     // Resume is retry without the rewind: the same checks and attempt-time
     // resolution, but the answer keeps everything it produced and the new
     // generation continues from it.
-    const resumeMessage = Effect.fn("ChatService.resumeMessage")(function* (
-      input: DesktopSubmission & {
-        userId: string;
-        conversationId: string;
-        messageId: string;
-        modelId?: string | undefined;
-        deviceSessionId?: string | undefined;
-        timeZone?: string | undefined;
-        openDocument?: OpenDocument | undefined;
-      },
-    ) {
+    const resumeMessage = Effect.fn("ChatService.resumeMessage")(function* (input: {
+      desktop?: DesktopSubmission | undefined;
+      userId: string;
+      conversationId: string;
+      messageId: string;
+      modelId?: string | undefined;
+      deviceSessionId?: string | undefined;
+      timeZone?: string | undefined;
+      openDocument?: OpenDocument | undefined;
+    }) {
       yield* repo.research?.reap() ?? Effect.void;
       // ownership check
       yield* repo.getConversation(input.userId, input.conversationId);
@@ -1130,13 +1068,7 @@ function makeChatService() {
           searchAvailable: yield* searchToolEnabled,
           attempt: "retry",
           resume: true,
-          fromDesktop: input.fromDesktop,
-          desktopExecutorId: input.desktopExecutorId,
-          desktopFolders: input.desktopFolders,
-          desktopCommands: input.desktopCommands,
-          desktopBrowser: input.desktopBrowser,
-          desktopMachineId: input.desktopMachineId,
-          desktopMachineName: input.desktopMachineName,
+          desktop: input.desktop,
         }),
       });
       if (!claim.claimed) {
@@ -1153,8 +1085,7 @@ function makeChatService() {
         status: "streaming",
       });
       yield* engine.startGeneration({
-        desktopExecutorId: input.desktopExecutorId,
-        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+        desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,
@@ -1257,14 +1188,8 @@ function makeChatService() {
         searchEnabled: boolean;
         researchEnabled: boolean;
         reasoningEffort?: ReasoningEffort | null | undefined;
-        /** Folders attached on the machine this edit came from. */
-        desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-        desktopCommands?: boolean | undefined;
-        desktopBrowser?: boolean | undefined;
-        fromDesktop?: boolean | undefined;
-        desktopExecutorId?: string | undefined;
-        desktopMachineId?: string | undefined;
-        desktopMachineName?: string | undefined;
+        /** What the desktop app reports about the machine this edit came from. */
+        desktop?: DesktopSubmission | undefined;
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
@@ -1326,12 +1251,8 @@ function makeChatService() {
 
         const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
         const restarted = yield* restartAssistant({
-          desktopExecutorId: input.desktopExecutorId,
+          desktop: input.desktop,
           deviceSessionId: input.deviceSessionId,
-          fromDesktop: input.fromDesktop,
-          desktopFolders: input.desktopFolders,
-          desktopCommands: input.desktopCommands,
-          desktopBrowser: input.desktopBrowser,
           expectedMessages: all,
           userId: input.userId,
           conversationId: input.conversationId,
@@ -1351,13 +1272,6 @@ function makeChatService() {
             searchEnabled: input.searchEnabled,
             researchEnabled,
             reasoningEffort: input.reasoningEffort,
-            fromDesktop: input.fromDesktop,
-            desktopExecutorId: input.desktopExecutorId,
-            desktopMachineId: input.desktopMachineId,
-            desktopMachineName: input.desktopMachineName,
-            desktopFolders: input.desktopFolders,
-            desktopCommands: input.desktopCommands,
-            desktopBrowser: input.desktopBrowser,
             ...(input.skillIds ? { skillIds: input.skillIds } : {}),
             ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
           },
@@ -1389,15 +1303,7 @@ function makeChatService() {
           searchEnabled: input.searchEnabled,
           researchEnabled,
           reasoningEffort: input.reasoningEffort,
-          ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
-          ...(input.desktopCommands !== undefined
-            ? { desktopCommands: input.desktopCommands }
-            : {}),
-          ...(input.desktopBrowser !== undefined ? { desktopBrowser: input.desktopBrowser } : {}),
-          ...(input.fromDesktop !== undefined ? { fromDesktop: input.fromDesktop } : {}),
-          desktopExecutorId: input.desktopExecutorId,
-          desktopMachineId: input.desktopMachineId,
-          desktopMachineName: input.desktopMachineName,
+          desktop: input.desktop,
           model,
           searchAvailable,
           ...(input.skillIds ? { skillIds: input.skillIds } : {}),
@@ -1417,8 +1323,7 @@ function makeChatService() {
         messageId: created.message.id,
       });
       yield* engine.startGeneration({
-        desktopExecutorId: input.desktopExecutorId,
-        ...(input.desktopFolders !== undefined ? { desktopFolders: input.desktopFolders } : {}),
+        desktop: input.desktop,
         deviceSessionId: input.deviceSessionId,
         userId: input.userId,
         conversationId: input.conversationId,

@@ -297,12 +297,14 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
           dispatchQueuedMessage({
             data: {
               conversationId,
-              ...sendFieldsFor(status),
-              desktopExecutorId: executorId,
-              // Which machine runs the answer, as every other Work start says.
-              ...(machineId && machineName
-                ? { desktopMachineId: machineId, desktopMachineName: machineName }
-                : {}),
+              desktop: {
+                ...sendFieldsFor(status),
+                executorId,
+                // Which machine runs the answer, as every other Work start says.
+                ...(machineId && machineName
+                  ? { machine: { id: machineId, name: machineName } }
+                  : {}),
+              },
             },
           }),
         )

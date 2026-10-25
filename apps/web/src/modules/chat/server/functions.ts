@@ -43,7 +43,6 @@ import { MAPS_TOOL, readMaps } from "~/modules/genui/settings.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService } from "./service.ts";
-import type { DesktopFolderRef } from "./attempt-options.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -136,13 +135,7 @@ const startTurn = (
         content: data.content,
         researchEnabled: data.researchEnabled,
         searchEnabled: data.searchEnabled,
-        desktopFolders: data.desktopFolders,
-        desktopCommands: data.desktopCommands,
-        desktopBrowser: data.desktopBrowser,
-        fromDesktop: data.fromDesktop,
-        desktopExecutorId: data.desktopExecutorId,
-        desktopMachineId: data.desktopMachineId,
-        desktopMachineName: data.desktopMachineName,
+        desktop: data.desktop,
         workspaceFiles: data.workspaceFiles,
         deviceSessionId: session.session.id,
         timeZone: data.timeZone,
@@ -217,7 +210,7 @@ export const abortWorkTurn = createServerFn({ method: "POST" })
 /** The fields a queued submission carries, shared by queueing and editing. */
 const queueSubmission = (
   data: typeof QueueMessageInput.Type,
-  session: { user: { id: string }; session: { id: string } },
+  session: { user: { id: string } },
 ) => ({
   userId: session.user.id,
   conversationId: data.conversationId,
@@ -234,34 +227,8 @@ const queueSubmission = (
     timeZone: data.timeZone,
     openDocument: data.openDocument,
   },
-  desktop: desktopDispatch(data, session.session.id),
+  desktop: data.desktop,
 });
-
-/** Only a request from the desktop app names a machine; anything else is none. */
-const desktopDispatch = (
-  data: {
-    fromDesktop?: boolean;
-    desktopFolders?: ReadonlyArray<DesktopFolderRef>;
-    desktopCommands?: boolean;
-    desktopBrowser?: boolean;
-    desktopExecutorId?: string;
-    desktopMachineId?: string;
-    desktopMachineName?: string;
-  },
-  deviceSessionId: string,
-) =>
-  data.fromDesktop && data.desktopExecutorId
-    ? {
-        fromDesktop: true,
-        desktopFolders: data.desktopFolders,
-        desktopCommands: data.desktopCommands,
-        desktopBrowser: data.desktopBrowser,
-        desktopExecutorId: data.desktopExecutorId,
-        desktopMachineId: data.desktopMachineId,
-        desktopMachineName: data.desktopMachineName,
-        deviceSessionId,
-      }
-    : undefined;
 
 // The refusal table words most of a message's failures. Here only what the
 // chat surfaces say differently: a new message picks its agent, collections
@@ -353,7 +320,8 @@ export const dispatchQueuedMessage = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
           force: data.force,
-          desktop: desktopDispatch(data, context.session.session.id),
+          desktop: data.desktop,
+          deviceSessionId: context.session.session.id,
         }),
       ).pipe(
         // Other resolution failures read the same to a person: the queued
@@ -377,7 +345,8 @@ export const sendQueuedNow = createServerFn({ method: "POST" })
           userId: context.session.user.id,
           conversationId: data.conversationId,
           entryId: data.entryId,
-          desktop: desktopDispatch(data, context.session.session.id),
+          desktop: data.desktop,
+          deviceSessionId: context.session.session.id,
         }),
       ).pipe(
         // The reason is already on the entry; the person sees it in the strip.
@@ -404,13 +373,7 @@ export const answerQuestion = createServerFn({ method: "POST" })
           modelId: data.modelId,
           searchEnabled: data.searchEnabled,
           researchEnabled: data.researchEnabled,
-          desktopFolders: data.desktopFolders,
-          desktopCommands: data.desktopCommands,
-          desktopBrowser: data.desktopBrowser,
-          fromDesktop: data.fromDesktop,
-          desktopExecutorId: data.desktopExecutorId,
-          desktopMachineId: data.desktopMachineId,
-          desktopMachineName: data.desktopMachineName,
+          desktop: data.desktop,
           deviceSessionId: context.session.session.id,
           timeZone: data.timeZone,
           openDocument: data.openDocument,
@@ -430,14 +393,8 @@ export const retryMessage = createServerFn({ method: "POST" })
     runServerFn(
       ChatService.use((chat) =>
         chat.retryMessage({
-          fromDesktop: data.fromDesktop,
-          desktopExecutorId: data.desktopExecutorId,
-          desktopMachineId: data.desktopMachineId,
-          desktopMachineName: data.desktopMachineName,
+          desktop: data.desktop,
           deviceSessionId: context.session.session.id,
-          desktopFolders: data.desktopFolders,
-          desktopCommands: data.desktopCommands,
-          desktopBrowser: data.desktopBrowser,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,
@@ -458,14 +415,8 @@ export const resumeMessage = createServerFn({ method: "POST" })
     runServerFn(
       ChatService.use((chat) =>
         chat.resumeMessage({
-          fromDesktop: data.fromDesktop,
-          desktopExecutorId: data.desktopExecutorId,
-          desktopMachineId: data.desktopMachineId,
-          desktopMachineName: data.desktopMachineName,
+          desktop: data.desktop,
           deviceSessionId: context.session.session.id,
-          desktopFolders: data.desktopFolders,
-          desktopCommands: data.desktopCommands,
-          desktopBrowser: data.desktopBrowser,
           userId: context.session.user.id,
           conversationId: data.conversationId,
           messageId: data.messageId,

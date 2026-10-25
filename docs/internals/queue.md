@@ -14,7 +14,7 @@ A message sent while an answer is generating becomes a queue entry instead of be
 
 ## Work chats
 
-- The server has no registry of running desktop apps. An executor id exists only inside the app and reaches the server on a request. So the server never starts a queued Work entry: the sweep skips Work chats, and dispatch without desktop fields returns `{ started: false }`.
+- The server has no registry of running desktop apps. An executor id exists only inside the app and reaches the server on a request. So the server never starts a queued Work entry: the sweep skips Work chats, and dispatch without a `desktop` report returns `{ started: false }`.
 - The desktop work snapshot lists Work chats with an entry ready to start. The work host, mounted for the whole desktop app, starts each one with its own executor id and the folders attached at that moment, read through `folderStatus`. Queue entries store no executor, device session or folder list, since all three can be stale by the time an entry reaches the front. A queued Work message reads local files when it runs, not when it was queued.
 - In a browser, the strip says to open Chat Desktop rather than offering a button that cannot work.
 - Files dropped into the workspace never queue. Their send reserves the turn before any file becomes visible, and a live generation refuses that reservation, so a Work draft holding them keeps Stop until the answer ends. The entry would otherwise need the reservation protocol to span the wait.

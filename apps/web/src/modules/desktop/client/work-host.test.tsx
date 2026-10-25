@@ -462,16 +462,17 @@ it("starts queued Work with this app's executor and the folders attached now", a
     expect(api.dispatch).toHaveBeenCalledWith({
       data: {
         conversationId: "q1",
-        fromDesktop: true,
-        // The workspace first, as for any send; a folder that has gone missing
-        // is left out.
-        desktopFolders: [
-          { name: WORKSPACE_FOLDER_NAME, path: "/work/q1" },
-          { name: "site", path: "/code/site" },
-        ],
-        desktopCommands: true,
-        desktopBrowser: false,
-        desktopExecutorId: "executor",
+        desktop: {
+          // The workspace first, as for any send; a folder that has gone
+          // missing is left out.
+          folders: [
+            { name: WORKSPACE_FOLDER_NAME, path: "/work/q1" },
+            { name: "site", path: "/code/site" },
+          ],
+          commands: true,
+          browser: false,
+          executorId: "executor",
+        },
       },
     }),
   );

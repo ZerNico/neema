@@ -734,7 +734,7 @@ export const prepareAttemptPrompt = (env: {
         : null,
       research: !!researchTool,
       desktop: desktopTools
-        ? { folders: input.desktopFolders ?? [], commands: config.desktopCommands ?? false }
+        ? { folders: input.desktop?.folders ?? [], commands: config.desktopCommands ?? false }
         : null,
       browser: !!browserTools,
       interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)

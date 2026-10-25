@@ -20,22 +20,12 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   resolveAgentSelection,
+  desktopGenerationConfig,
   resolveEffectiveGeneration,
   resolveAttemptSkills,
 } from "./effective-config.ts";
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
-
-/**
- * One folder the sending machine named, by its real path. The path is the
- * model's address for everything inside; it flows through attempt-scoped
- * prompt text and tool traffic only, and is never written to a row.
- */
-export type DesktopFolderRef = DesktopSubmission["desktopFolders"] extends
-  | ReadonlyArray<infer F>
-  | undefined
-  ? F
-  : never;
 
 /**
  * What every attempt is checked against before anything is written, and the
@@ -206,15 +196,8 @@ export const makeAttemptOptions = Effect.gen(function* () {
         searchAvailable: boolean;
         collectionIds?: ReadonlyArray<string> | undefined;
         skillIds?: ReadonlyArray<string> | undefined;
-        /** Folders the sending machine reported; retry has no submission. */
-        desktopFolders?: ReadonlyArray<DesktopFolderRef> | undefined;
-        desktopCommands?: boolean | undefined;
-        desktopBrowser?: boolean | undefined;
-        fromDesktop?: boolean | undefined;
-        desktopExecutorId?: string | undefined;
-        /** Which machine this attempt is sent from; a retry re-stamps it. */
-        desktopMachineId?: string | undefined;
-        desktopMachineName?: string | undefined;
+        /** What the sending app reports now; a retry re-reports it too. */
+        desktop?: DesktopSubmission | undefined;
         /** Files this send copied into the workspace; only a send carries them. */
         workspaceFiles?: ReadonlyArray<string> | undefined;
         /** A queued choice was valid when submitted, but policy may have changed. */
@@ -308,21 +291,11 @@ export const makeAttemptOptions = Effect.gen(function* () {
           return yield* new InvalidMessage({ reason: "Work is not permitted" });
         if ((input.workspaceFiles?.length ?? 0) > 0 && defaults.mode !== "work")
           return yield* new InvalidMessage({ reason: "workspace files require Work" });
-        const desktopFolderEntries =
-          defaults.mode === "work" && input.desktopFolders && input.desktopFolders.length > 0
-            ? input.desktopFolders
-            : null;
-        // What the sending app could do, kept for Work alone: these flags are
-        // the one place the stream learns whether a machine tool is offered.
-        const desktopCommands = defaults.mode === "work" && !!input.desktopCommands;
-        const desktopBrowser = defaults.mode === "work" && !!input.desktopBrowser;
-        if (defaults.mode === "work" && (!input.fromDesktop || !input.desktopExecutorId))
-          return yield* new WorkDesktopRequired();
-        // Re-stamped on every attempt, retry included: the banner must
-        // name the machine the chat actually last worked on.
-        const desktopMachineId = defaults.mode === "work" ? (input.desktopMachineId ?? null) : null;
-        const desktopMachineName =
-          defaults.mode === "work" ? (input.desktopMachineName ?? null) : null;
+        // Kept for Work alone, and re-stamped on every attempt, retry included:
+        // the stream learns from it whether a machine tool is offered, and the
+        // banner must name the machine the chat actually last worked on.
+        const desktop = defaults.mode === "work" ? input.desktop : undefined;
+        if (defaults.mode === "work" && !desktop) return yield* new WorkDesktopRequired();
         // An edit that submits a selection is changing it, so it cannot take the
         // replay shortcut below: new collections need a rebuilt manifest.
         const editing = input.attempt === "edit";
@@ -347,11 +320,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
             searchEnabled,
             researchEnabled,
             reasoningEffort,
-            desktopFolders: desktopFolderEntries?.map((folder) => folder.name) ?? null,
-            desktopCommands,
-            desktopBrowser,
-            desktopMachineId,
-            desktopMachineName,
+            ...desktopGenerationConfig(desktop),
             // Only a fresh send adds files; retry and edit replay the list.
             workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
             integrationGrants: input.integrationGrants ?? null,
@@ -382,11 +351,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
           searchEnabled,
           researchEnabled,
           reasoningEffort,
-          desktopFolders: desktopFolderEntries,
-          desktopCommands,
-          desktopBrowser,
-          desktopMachineId,
-          desktopMachineName,
+          desktop,
           workspaceFiles: input.workspaceFiles ?? continuation?.workspaceFiles ?? [],
           model: input.model,
           searchAvailable: input.searchAvailable,

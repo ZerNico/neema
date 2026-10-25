@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { DesktopSubmission } from "~/modules/chat/schema.ts";
 import { useSyncExternalStore } from "react";
 import {
   CancelledError,
@@ -252,20 +253,12 @@ export const useFolder = (conversationId: string): FolderState | null => {
   };
 };
 
-export interface DesktopSendFields {
-  /** Submission policy information, not cryptographic proof of a desktop client. */
-  readonly fromDesktop: true;
-  /**
-   * The folders this chat can reach, by name and real path. The path is the
-   * model's address for everything inside and crosses as attempt-scoped prompt
-   * text; the server persists the names alone.
-   */
-  readonly desktopFolders?: ReadonlyArray<{ name: string; path: string }>;
-  /** False while this machine cannot sandbox, which withholds run_command. */
-  readonly desktopCommands: boolean;
-  /** Whether this app can drive embedded pages, which offers the browser tools. */
-  readonly desktopBrowser: boolean;
-}
+/**
+ * What a message reports about this machine before the app names itself. The
+ * folder paths cross as attempt-scoped prompt text; the server persists the
+ * names alone. Submission policy information, not proof of a desktop client.
+ */
+export type DesktopSendFields = Omit<DesktopSubmission, "executorId" | "machine">;
 
 /**
  * Whether a work chat may act right now: the machine answered about its
@@ -299,11 +292,10 @@ export const sendFieldsFor = (status: FolderStatus): DesktopSendFields => {
   // root every absolute path in the workspace falls under.
   const folders = [{ name: WORKSPACE_FOLDER_NAME, path: status.workspace.path }, ...attached];
   return {
-    fromDesktop: true,
-    desktopFolders: folders,
-    desktopCommands: status.sandbox.kind === "ready",
+    folders,
+    commands: status.sandbox.kind === "ready",
     // A shell that can show pages but not drive them gets no browser tools.
-    desktopBrowser: readDesktopBrowser()?.agent !== undefined,
+    browser: readDesktopBrowser()?.agent !== undefined,
   };
 };
 
@@ -344,17 +336,20 @@ export const requireWorkFolder = (working: boolean, folder: FolderState | null) 
   return fields;
 };
 
-export const desktopAttemptFields = async (fields: DesktopSendFields | null) => {
+export const desktopAttemptFields = async (
+  fields: DesktopSendFields | null,
+): Promise<{ desktop?: DesktopSubmission }> => {
   const client = desktopClient();
   if (!fields || !client) return {};
   const session = await Effect.runPromise(client.executionSession(undefined));
   return {
-    ...fields,
-    desktopExecutorId: session.id,
-    // Which machine sent this attempt. The site stamps it onto the generation
-    // so another machine opening the chat later can say where the files are.
-    desktopMachineId: session.machineId,
-    desktopMachineName: session.machineName,
+    desktop: {
+      ...fields,
+      executorId: session.id,
+      // Which machine sent this attempt. The site stamps it onto the generation
+      // so another machine opening the chat later can say where the files are.
+      machine: { id: session.machineId, name: session.machineName },
+    },
   };
 };
 

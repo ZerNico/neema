@@ -547,7 +547,7 @@ export const observePart = (
           // SDK handlers run concurrently with this observer.
           // Release them only after the owned registration exists.
           const ready = callRowReady(part.id);
-          if (!input.desktopExecutorId || !input.generationId) {
+          if (!input.desktop || !input.generationId) {
             yield* Deferred.succeed(ready, undefined);
             return;
           }
@@ -556,7 +556,7 @@ export const observePart = (
             conversationId: input.conversationId,
             messageId: input.messageId,
             generationId: input.generationId,
-            executorId: input.desktopExecutorId,
+            executorId: input.desktop.executorId,
             deviceSessionId: input.deviceSessionId,
             name: part.name,
             args,

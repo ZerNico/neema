@@ -196,7 +196,9 @@ describe("useConversationQueue", () => {
   it("sends this app's desktop fields with Send now and Send next", async () => {
     vi.mocked(sendQueuedNow).mockResolvedValue({ started: true });
     vi.mocked(dispatchQueuedMessage).mockResolvedValue({ started: true });
-    const fields = { fromDesktop: true, desktopExecutorId: "exec-1" } as const;
+    const fields = {
+      desktop: { executorId: "exec-1", folders: [], commands: false, browser: false },
+    };
     const { result } = render({ attemptFields: async () => fields });
     act(() => result.current.queue.onSendNow("a"));
     act(() => result.current.queue.onDispatch());

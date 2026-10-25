@@ -11,6 +11,7 @@ import { COMPACTION_CONFIG, computeBudget } from "./compaction.ts";
 import type { GenerationConfig } from "./repo.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { DbTx } from "~/server/db.ts";
+import type { DesktopSubmission } from "../schema.ts";
 
 export type KnowledgeMode = "none" | "context" | "retrieval";
 
@@ -99,6 +100,20 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
 });
 
 /**
+ * What an attempt keeps of the desktop report. Folder names alone: paths stay
+ * on the machine that granted them, so a conversation continued elsewhere
+ * resolves its own folders. The machine stamp names where the chat last worked.
+ */
+export const desktopGenerationConfig = (desktop: DesktopSubmission | undefined) => ({
+  desktopFolders:
+    desktop && desktop.folders.length > 0 ? desktop.folders.map((folder) => folder.name) : null,
+  desktopCommands: desktop?.commands ?? false,
+  desktopBrowser: desktop?.browser ?? false,
+  desktopMachineId: desktop?.machine?.id ?? null,
+  desktopMachineName: desktop?.machine?.name ?? null,
+});
+
+/**
  * Resolves what an attempt will run with from its current agent contribution
  * and the original standalone collections chosen in the composer.
  *
@@ -118,13 +133,8 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     /** Whether `deep_research` is offered to this attempt. */
     researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null;
-    /** Folders the sending machine reported; absent when it had none. */
-    desktopFolders?: ReadonlyArray<{ name: string; path: string }> | null | undefined;
-    desktopCommands?: boolean | undefined;
-    desktopBrowser?: boolean | undefined;
-    /** Which machine sent it; stamped for the foreign-chat banner. */
-    desktopMachineId?: string | null | undefined;
-    desktopMachineName?: string | null | undefined;
+    /** What the sending app reported, for a Work attempt only. */
+    desktop?: DesktopSubmission | undefined;
     /** Workspace files this turn's send claimed; the resolver threads them through. */
     workspaceFiles?: ReadonlyArray<string> | undefined;
     model: { contextLength: number | null | undefined };
@@ -175,13 +185,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       researchEnabled: input.researchEnabled,
       reasoningEffort: input.reasoningEffort ?? null,
       planEnabled,
-      // The column holds names alone: paths stay on the machine that granted
-      // them, so a conversation continued elsewhere resolves its own folders.
-      desktopFolders: input.desktopFolders?.map((folder) => folder.name) ?? null,
-      desktopCommands: input.desktopCommands ?? false,
-      desktopBrowser: input.desktopBrowser ?? false,
-      desktopMachineId: input.desktopMachineId ?? null,
-      desktopMachineName: input.desktopMachineName ?? null,
+      ...desktopGenerationConfig(input.desktop),
       workspaceFiles: [...(input.workspaceFiles ?? [])],
     } satisfies GenerationConfig;
   },

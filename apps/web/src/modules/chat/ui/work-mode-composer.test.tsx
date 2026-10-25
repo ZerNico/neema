@@ -210,23 +210,21 @@ describe("work mode", () => {
     await type("Use this folder");
     await userEvent.click(sendButton());
     expect(sent).toHaveBeenLastCalledWith({
-      fromDesktop: true,
-      desktopFolders: [
+      folders: [
         { name: "workspace", path: "/data/workspaces/chat" },
         { name: "site", path: "/home/user/site" },
       ],
-      desktopCommands: true,
-      desktopBrowser: false,
+      commands: true,
+      browser: false,
     });
     await userEvent.click(screen.getByRole("button", { name: "site" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Detach site" }));
     await type("Continue without files");
     await userEvent.click(sendButton());
     expect(sent).toHaveBeenLastCalledWith({
-      fromDesktop: true,
-      desktopFolders: [{ name: "workspace", path: "/data/workspaces/chat" }],
-      desktopCommands: true,
-      desktopBrowser: false,
+      folders: [{ name: "workspace", path: "/data/workspaces/chat" }],
+      commands: true,
+      browser: false,
     });
   });
   it("is not offered in a browser, where it could not be honoured", () => {

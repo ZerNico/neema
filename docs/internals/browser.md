@@ -139,7 +139,7 @@ In Work chats, the model gets `browser_tabs`, `browser_open`, `browser_navigate`
 `browser_snapshot` and `browser_wait_for` to read and move, and `browser_click`, `browser_type`,
 `browser_press`, `browser_scroll`, `browser_select` and `browser_evaluate` to act. They are desktop tools: the same family, envelope,
 `ExternalCompletion` wait and result shape as the file tools. Only two things differ: they are
-offered when the sending app reports `desktopBrowser`, meaning its shell has the bridge's
+offered when the sending app reports `desktop.browser`, meaning its shell has the bridge's
 `agent` surface, whatever folders the chat has, and the page runs them itself (`browser/client/execute-browser.ts`) rather than
 through the Work RPC. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
 ([files](files.md#files-into-tools)), shown to a vision model and offered by reference. The

@@ -8,7 +8,7 @@ import { extractUserMessageUrls } from "~/modules/tools/server/user-urls.ts";
 import type { Source } from "~/modules/tools/schema.ts";
 import { mergeSources } from "~/modules/tools/sources.ts";
 import { uiStateContextMessage } from "~/modules/genui/server/ui-state-context.ts";
-import type { OpenDocument } from "../../schema.ts";
+import type { DesktopSubmission, OpenDocument } from "../../schema.ts";
 import { GenerationFence } from "../generation-fence.ts";
 import { resumeFirstTurn, type HistorySteer } from "../prompt.ts";
 import type { ProviderReplay } from "../provider-replay.ts";
@@ -30,11 +30,17 @@ export interface GenerationInput {
   modelId: string;
   searchEnabled: boolean;
   generationId?: string | undefined;
-  desktopExecutorId?: string | undefined;
-  desktopFolders?: ReadonlyArray<{ name: string; path: string }> | undefined;
+  /**
+   * The sending app's report, folder paths included. Never stored: the paths
+   * exist for this attempt's prompt and tool traffic alone.
+   */
+  desktop?: DesktopSubmission | undefined;
+  /** See `ExternalOwner.deviceSessionId`; taken from the session, not the body. */
   deviceSessionId?: string | undefined;
   timeZone?: string | undefined;
+  /** The document open in the panel, so it is the one the model reads first. */
   openDocument?: OpenDocument | undefined;
+  /** Continue the answer from its stored rounds instead of starting it over. */
   resume?: boolean | undefined;
 }
 

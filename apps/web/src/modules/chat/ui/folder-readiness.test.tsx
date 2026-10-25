@@ -199,16 +199,16 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await userEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() =>
     expect(sent).toHaveBeenCalledWith({
-      fromDesktop: true,
-      desktopFolders: [
-        { name: "workspace", path: "/data/workspaces/a" },
-        { name: "site", path: "/home/user/site" },
-      ],
-      desktopCommands: true,
-      desktopBrowser: false,
-      desktopExecutorId: "executor",
-      desktopMachineId: "machine-a",
-      desktopMachineName: "Test Mac",
+      desktop: {
+        folders: [
+          { name: "workspace", path: "/data/workspaces/a" },
+          { name: "site", path: "/home/user/site" },
+        ],
+        commands: true,
+        browser: false,
+        executorId: "executor",
+        machine: { id: "machine-a", name: "Test Mac" },
+      },
     }),
   );
   await userEvent.click(screen.getByRole("button", { name: "site" }));
@@ -217,13 +217,13 @@ it("blocks submission during a picker and uses its result for the next Work atte
   await userEvent.type(screen.getByRole("textbox"), "Continue{Enter}");
   await waitFor(() =>
     expect(sent).toHaveBeenLastCalledWith({
-      fromDesktop: true,
-      desktopFolders: [{ name: "workspace", path: "/data/workspaces/a" }],
-      desktopCommands: true,
-      desktopBrowser: false,
-      desktopExecutorId: "executor",
-      desktopMachineId: "machine-a",
-      desktopMachineName: "Test Mac",
+      desktop: {
+        folders: [{ name: "workspace", path: "/data/workspaces/a" }],
+        commands: true,
+        browser: false,
+        executorId: "executor",
+        machine: { id: "machine-a", name: "Test Mac" },
+      },
     }),
   );
 });
@@ -482,12 +482,12 @@ it("rejects unresolved Work attempts before session IPC, while ready-empty remai
     reply({ id: "executor", machineId: "machine-a", machineName: "Test Mac" }),
   );
   expect(await desktopAttemptFields(requireWorkFolder(true, result.current))).toEqual({
-    fromDesktop: true,
-    desktopFolders: [{ name: "workspace", path: "/data/workspaces/a" }],
-    desktopCommands: true,
-    desktopBrowser: false,
-    desktopExecutorId: "executor",
-    desktopMachineId: "machine-a",
-    desktopMachineName: "Test Mac",
+    desktop: {
+      folders: [{ name: "workspace", path: "/data/workspaces/a" }],
+      commands: true,
+      browser: false,
+      executorId: "executor",
+      machine: { id: "machine-a", name: "Test Mac" },
+    },
   });
 });

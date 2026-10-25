@@ -5270,10 +5270,11 @@ describe("queued turns", () => {
           conversationId: seed.conversation.id,
           entryId: chosen.id,
           desktop: {
-            fromDesktop: true,
-            desktopExecutorId: "executor-now",
-            desktopMachineId: "machine-b",
-            desktopMachineName: "Second Mac",
+            executorId: "executor-now",
+            machine: { id: "machine-b", name: "Second Mac" },
+            folders: [],
+            commands: false,
+            browser: false,
           },
         });
         const next = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
@@ -5474,10 +5475,12 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           desktop: {
-            fromDesktop: true,
-            desktopExecutorId: "executor-now",
-            deviceSessionId: "device-1",
+            executorId: "executor-now",
+            folders: [],
+            commands: false,
+            browser: false,
           },
+          deviceSessionId: "device-1",
         });
         yield* Deferred.await(reached);
         const owners = yield* external.owners();
@@ -5610,7 +5613,12 @@ describe("resumable streaming pipeline", () => {
             messageId: seed.assistant.id,
             modelId: "fake",
             searchEnabled: false,
-            desktopExecutorId: "test-executor",
+            desktop: {
+              executorId: "test-executor",
+              folders: [],
+              commands: false,
+              browser: false,
+            },
           });
           const events = yield* engine
             .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -8939,10 +8947,12 @@ describe("local tools on the user's machine", () => {
         searchEnabled: false,
         researchEnabled: false,
         attachmentIds: [],
-        fromDesktop: true,
-        desktopExecutorId: "desktop-test-session",
-        desktopFolders: [folder],
-        desktopCommands,
+        desktop: {
+          executorId: "desktop-test-session",
+          folders: [folder],
+          commands: desktopCommands,
+          browser: false,
+        },
       }),
     );
 
@@ -8992,13 +9002,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [
-              { name: "workspace", path: `/data/workspaces/${conversationId}` },
-              folder,
-            ],
-            desktopCommands: true,
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [{ name: "workspace", path: `/data/workspaces/${conversationId}` }, folder],
+              commands: true,
+              browser: false,
+            },
             workspaceFiles: ["report.pdf"],
           };
           const first = yield* service.sendMessage(input);
@@ -9140,9 +9149,12 @@ describe("local tools on the user's machine", () => {
               userId: seed.userId,
               conversationId: seed.conversation.id,
               messageId: sent.assistantMessageId,
-              fromDesktop: true,
-              desktopExecutorId: "reservation-fence-retry",
-              desktopCommands: true,
+              desktop: {
+                executorId: "reservation-fence-retry",
+                folders: [],
+                commands: true,
+                browser: false,
+              },
             })
             .pipe(Effect.result);
           const edit = yield* service
@@ -9155,10 +9167,12 @@ describe("local tools on the user's machine", () => {
               searchEnabled: false,
               researchEnabled: false,
               attachmentIds: [],
-              fromDesktop: true,
-              desktopExecutorId: "reservation-fence-edit",
-              desktopFolders: [folder],
-              desktopCommands: true,
+              desktop: {
+                executorId: "reservation-fence-edit",
+                folders: [folder],
+                commands: true,
+                browser: false,
+              },
             })
             .pipe(Effect.result);
           const branch = yield* service
@@ -9216,10 +9230,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "collision-test",
-            desktopFolders: [folder],
-            desktopCommands: true,
+            desktop: {
+              executorId: "collision-test",
+              folders: [folder],
+              commands: true,
+              browser: false,
+            },
           })
           .pipe(Effect.result);
         const collision = yield* repo
@@ -9341,10 +9357,12 @@ describe("local tools on the user's machine", () => {
               ...answerInput(seed),
               searchEnabled: false,
               researchEnabled: false,
-              fromDesktop: true,
-              desktopExecutorId: "answer-session",
-              desktopFolders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
-              desktopCommands: false,
+              desktop: {
+                executorId: "answer-session",
+                folders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
+                commands: false,
+                browser: false,
+              },
             });
             yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
             expect(
@@ -9365,10 +9383,12 @@ describe("local tools on the user's machine", () => {
                 kind: "answers",
                 answers: [{ selected: [], custom: "Current choice" }],
               },
-              fromDesktop: true,
-              desktopExecutorId: "edit-answer-session",
-              desktopFolders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
-              desktopCommands: true,
+              desktop: {
+                executorId: "edit-answer-session",
+                folders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
+                commands: true,
+                browser: false,
+              },
             });
             yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
             const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
@@ -9435,9 +9455,12 @@ describe("local tools on the user's machine", () => {
             userId: seed.userId,
             conversationId: seed.conversation.id,
             messageId: sent.assistantMessageId,
-            fromDesktop: true,
-            desktopExecutorId: "another-current-session",
-            desktopCommands: false,
+            desktop: {
+              executorId: "another-current-session",
+              folders: [],
+              commands: false,
+              browser: false,
+            },
           }),
         ),
       );
@@ -9463,10 +9486,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "current-edit-session",
-            desktopFolders: [{ name: "current-folder", path: "/home/test/current-folder" }],
-            desktopCommands: true,
+            desktop: {
+              executorId: "current-edit-session",
+              folders: [{ name: "current-folder", path: "/home/test/current-folder" }],
+              commands: true,
+              browser: false,
+            },
           }),
         ),
       );
@@ -9477,6 +9502,67 @@ describe("local tools on the user's machine", () => {
       expect(edited?.desktopFolders).toEqual(["current-folder"]);
       expect(edited?.desktopCommands).toBe(true);
       expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).toContain("run_command");
+    } finally {
+      authoringScript = null;
+    }
+  }, 60_000);
+
+  it("stamps the sending machine on a retried and a resumed answer", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    const fromMachine = (id: string, name: string) => ({
+      executorId: `executor-${id}`,
+      machine: { id, name },
+      folders: [folder],
+      commands: false,
+      browser: false,
+    });
+    try {
+      const stamps = await runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* ChatService;
+          const repo = yield* ChatRepo;
+          const engine = yield* StreamEngine;
+          const settle = (messageId: string) => Stream.runDrain(engine.subscribe(messageId, 0));
+          const stamp = (messageId: string) =>
+            Effect.map(repo.getGenerationConfig(messageId), (config) => ({
+              id: config.desktopMachineId,
+              name: config.desktopMachineName,
+            }));
+          const sent = yield* send(seed);
+          const messageId = sent.assistantMessageId;
+          yield* settle(messageId);
+          const before = yield* stamp(messageId);
+          yield* service.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId,
+            desktop: fromMachine("machine-r", "Retry Mac"),
+          });
+          yield* settle(messageId);
+          const retried = yield* stamp(messageId);
+          // Only a stopped or failed answer can be continued.
+          yield* (yield* Db)
+            .update(messages)
+            .set({ status: "aborted" })
+            .where(eq(messages.id, messageId));
+          yield* service.resumeMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId,
+            desktop: fromMachine("machine-s", "Resume Mac"),
+          });
+          yield* settle(messageId);
+          return { before, retried, resumed: yield* stamp(messageId) };
+        }),
+      );
+      expect(stamps.before).toEqual({ id: null, name: null });
+      expect(stamps.retried).toEqual({ id: "machine-r", name: "Retry Mac" });
+      expect(stamps.resumed).toEqual({ id: "machine-s", name: "Resume Mac" });
     } finally {
       authoringScript = null;
     }
@@ -9569,9 +9655,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: false,
+            },
             workspaceFiles: ["dump.sql.gz"],
           }),
         ),
@@ -9602,9 +9691,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: false,
+            },
             workspaceFiles: [],
           }),
         ),
@@ -9650,10 +9742,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            ...(folders.length > 0 ? { desktopFolders: folders } : {}),
-            desktopBrowser,
+            desktop: {
+              executorId: "desktop-test-session",
+              folders,
+              commands: false,
+              browser: desktopBrowser,
+            },
           }),
         ),
       );
@@ -9730,10 +9824,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
-            desktopBrowser: true,
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: true,
+            },
           }),
         ),
       );
@@ -9786,9 +9882,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: false,
+            },
           }),
         ),
       );
@@ -9867,9 +9966,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopBrowser: true,
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [],
+              commands: false,
+              browser: true,
+            },
           }),
         ),
       );
@@ -9942,9 +10044,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: false,
+            },
           }),
         ),
       );
@@ -10140,10 +10245,13 @@ describe("local tools on the user's machine", () => {
                 searchEnabled: false,
                 researchEnabled: false,
                 attachmentIds: [],
-                fromDesktop: true,
-                desktopExecutorId: "executor-1",
+                desktop: {
+                  executorId: "executor-1",
+                  folders: [folder],
+                  commands: false,
+                  browser: false,
+                },
                 deviceSessionId,
-                desktopFolders: [folder],
               });
               return { conversation, messageId: sent.assistantMessageId };
             }),
@@ -10253,9 +10361,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopFolders: [folder],
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [folder],
+              commands: false,
+              browser: false,
+            },
           }),
         ),
       );
@@ -10312,9 +10423,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
-            desktopCommands: false,
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [],
+              commands: false,
+              browser: false,
+            },
           }),
         ),
       );
@@ -10341,10 +10455,12 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            fromDesktop: true,
-            desktopExecutorId: "ignored-session",
-            desktopFolders: [{ name: "ignored-folder", path: "/home/test/ignored-folder" }],
-            desktopCommands: true,
+            desktop: {
+              executorId: "ignored-session",
+              folders: [{ name: "ignored-folder", path: "/home/test/ignored-folder" }],
+              commands: true,
+              browser: false,
+            },
           }),
         ),
       );
@@ -10381,8 +10497,12 @@ describe("local tools on the user's machine", () => {
             conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
             content: "Read my readme.",
-            fromDesktop: true,
-            desktopExecutorId: "desktop-test-session",
+            desktop: {
+              executorId: "desktop-test-session",
+              folders: [],
+              commands: false,
+              browser: false,
+            },
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],

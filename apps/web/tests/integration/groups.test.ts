@@ -560,7 +560,12 @@ describe("generation-time enforcement", () => {
             content: "Continue the task",
             attachmentIds: [],
             input: { modelId, searchEnabled: false, researchEnabled: false },
-            desktop: { fromDesktop: true, desktopExecutorId: "test-machine" },
+            desktop: {
+              executorId: "test-machine",
+              folders: [],
+              commands: false,
+              browser: false,
+            },
           })
           .pipe(Effect.flip);
         return { denied, entries: yield* repo.listQueue(conversation.id) };
