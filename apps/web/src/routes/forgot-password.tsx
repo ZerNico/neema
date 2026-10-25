@@ -16,10 +16,13 @@ import {
 import { buttonVariants } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
-const ForgotSchema = Schema.Struct({
-  email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const forgotSchema = () =>
+  Schema.Struct({
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+  });
 
 export const Route = createFileRoute("/forgot-password")({
   beforeLoad: async ({ context }) => {
@@ -34,7 +37,7 @@ function ForgotPasswordPage() {
 
   const form = useAppForm({
     defaultValues: { email: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(ForgotSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(forgotSchema()) },
     onSubmit: async ({ value }) => {
       setServerError(null);
       // The answer is the same for every address, so nobody learns who has an account.
@@ -43,7 +46,7 @@ function ForgotPasswordPage() {
         redirectTo: "/reset-password",
       });
       if (error) {
-        setServerError(error.message ?? "Could not send the link.");
+        setServerError(error.message ?? m.app_forgot_error());
         return;
       }
       setSentTo(value.email);
@@ -54,11 +57,9 @@ function ForgotPasswordPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{sentTo ? "Check your email" : "Reset password"}</CardTitle>
+          <CardTitle>{sentTo ? m.app_register_check_email() : m.app_forgot_title()}</CardTitle>
           {sentTo ? (
-            <CardDescription>
-              If {sentTo} has an account, a link to reset its password is on the way.
-            </CardDescription>
+            <CardDescription>{m.app_forgot_sent({ email: sentTo })}</CardDescription>
           ) : null}
         </CardHeader>
         {sentTo ? null : (
@@ -71,18 +72,20 @@ function ForgotPasswordPage() {
               }}
             >
               <form.AppField name="email">
-                {(field) => <field.TextField label="Email" type="email" autoComplete="email" />}
+                {(field) => (
+                  <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                )}
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">Send link</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.app_forgot_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           </CardContent>
         )}
         <CardFooter>
           <Link to="/login" className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}>
-            Back to sign in
+            {m.app_auth_back_to_sign_in()}
           </Link>
         </CardFooter>
       </Card>

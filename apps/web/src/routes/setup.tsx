@@ -18,14 +18,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { m } from "~/paraglide/messages.js";
 
-const SetupSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1, { message: "Enter your name." })),
-  email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
-  password: Schema.String.check(
-    Schema.isMinLength(8, { message: "Password must be at least 8 characters." }),
-  ),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const setupSchema = () =>
+  Schema.Struct({
+    name: Schema.String.check(Schema.isMinLength(1, { message: m.app_auth_name_required() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    password: Schema.String.check(
+      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+    ),
+  });
 
 /**
  * The first account on an instance, and the only page that creates one. Sign-in
@@ -52,12 +55,12 @@ function SetupPage() {
 
   const form = useAppForm({
     defaultValues: { name: "", email: "", password: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(SetupSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(setupSchema()) },
     onSubmit: async ({ value }) => {
       setServerError(null);
       const { data, error } = await authClient.signUp.email(value);
       if (error) {
-        setServerError(error.message ?? "Could not create the account.");
+        setServerError(error.message ?? m.app_register_error());
         return;
       }
       // Someone who set the instance up a moment earlier gets an ordinary
@@ -81,8 +84,8 @@ function SetupPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Set up neema</CardTitle>
-          <CardDescription>This account will be the admin.</CardDescription>
+          <CardTitle>{m.app_setup_title()}</CardTitle>
+          <CardDescription>{m.app_setup_description()}</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -93,18 +96,24 @@ function SetupPage() {
             }}
           >
             <form.AppField name="name">
-              {(field) => <field.TextField label="Name" autoComplete="name" />}
+              {(field) => <field.TextField label={m.common_name()} autoComplete="name" />}
             </form.AppField>
             <form.AppField name="email">
-              {(field) => <field.TextField label="Email" type="email" autoComplete="email" />}
+              {(field) => (
+                <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+              )}
             </form.AppField>
             <form.AppField name="password">
               {(field) => (
-                <field.TextField label="Password" type="password" autoComplete="new-password" />
+                <field.TextField
+                  label={m.app_auth_password()}
+                  type="password"
+                  autoComplete="new-password"
+                />
               )}
             </form.AppField>
             <Field>
-              <FieldLabel htmlFor={modeId}>Who can join</FieldLabel>
+              <FieldLabel htmlFor={modeId}>{m.app_setup_who_can_join()}</FieldLabel>
               <Select
                 value={mode}
                 onValueChange={(value) => value && setMode(value)}
@@ -125,7 +134,7 @@ function SetupPage() {
             </Field>
             {serverError ? <FieldError>{serverError}</FieldError> : null}
             <form.AppForm>
-              <form.SubmitButton className="w-full">Create admin account</form.SubmitButton>
+              <form.SubmitButton className="w-full">{m.app_setup_submit()}</form.SubmitButton>
             </form.AppForm>
           </form>
         </CardContent>

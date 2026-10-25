@@ -4,6 +4,7 @@ import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { AUTHORIZE_PATH, unpackQuery } from "~/modules/mcp-server/authorize-query.ts";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { Button } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Sends a person through `/login` and back, then asks the authorization
@@ -36,12 +37,10 @@ function SignInAgain() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in again</CardTitle>
+          <CardTitle>{m.app_oauth_continue_title()}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground text-sm">
-            The app you’re connecting asks for a fresh sign-in before it gets access.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.app_oauth_continue_description()}</p>
         </CardContent>
         <CardFooter className="flex flex-col gap-2">
           <Button
@@ -52,10 +51,10 @@ function SignInAgain() {
               window.location.assign(`/login?redirect=${encodeURIComponent(back)}`);
             }}
           >
-            Sign in again
+            {m.app_oauth_continue_submit()}
           </Button>
           <Button variant="ghost" className="w-full" onClick={() => window.location.assign("/")}>
-            Cancel
+            {m.common_cancel()}
           </Button>
         </CardFooter>
       </Card>

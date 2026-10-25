@@ -6,6 +6,7 @@ import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
+import { m } from "~/paraglide/messages.js";
 
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -41,10 +42,10 @@ function DesktopSignInRoute() {
       <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>Sign in to neema Desktop</CardTitle>
+            <CardTitle>{m.app_desktop_sign_in_title()}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground text-sm">Open this page in your browser.</p>
+            <p className="text-muted-foreground text-sm">{m.app_desktop_sign_in_in_browser()}</p>
           </CardContent>
         </Card>
       </AuthScreen>

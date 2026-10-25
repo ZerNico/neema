@@ -2,6 +2,7 @@ import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { SectionShell } from "~/ui/page-shell.tsx";
 import { ADMIN_SECTIONS } from "~/modules/admin/sections.ts";
 import { BUILD_LABEL } from "~/build-info.ts";
+import { m } from "~/paraglide/messages.js";
 
 export const Route = createFileRoute("/_app/admin")({
   beforeLoad: ({ context }) => {
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/_app/admin")({
 function AdminLayout() {
   return (
     <SectionShell
-      title="Admin"
+      title={m.ui_page_admin()}
       rootPath="/admin"
       items={ADMIN_SECTIONS}
       footer={`neema ${BUILD_LABEL}`}

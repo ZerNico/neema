@@ -16,6 +16,7 @@ import { EmptyState } from "~/ui/page-shell.tsx";
 import { RouteStatusScreen } from "~/ui/route-error.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
+import { m } from "~/paraglide/messages.js";
 
 export const Route = createFileRoute("/_app/chat/$conversationId")({
   // Start the conversation and composer queries together so the model label
@@ -93,7 +94,7 @@ function ChatPage() {
 function ChatPending() {
   return (
     <div className="flex h-full items-center justify-center">
-      <Spinner aria-label="Loading conversation" className="size-5 text-muted-foreground" />
+      <Spinner aria-label={m.app_chat_loading()} className="size-5 text-muted-foreground" />
     </div>
   );
 }
@@ -103,12 +104,12 @@ function ChatNotFound() {
     <RouteStatusScreen>
       <EmptyState
         icon={BubbleChatCancelIcon}
-        title="Chat not found"
-        description="This chat may have been deleted or the link is no longer available."
+        title={m.app_chat_not_found_title()}
+        description={m.app_chat_not_found_description()}
         className="w-full max-w-lg"
         action={
           <Link to="/chats" className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Back to chats
+            {m.ui_route_back_to_chats()}
           </Link>
         }
       />

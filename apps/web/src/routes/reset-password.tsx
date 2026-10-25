@@ -15,12 +15,15 @@ import {
 import { buttonVariants } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
-const ResetSchema = Schema.Struct({
-  password: Schema.String.check(
-    Schema.isMinLength(8, { message: "Password must be at least 8 characters." }),
-  ),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const resetSchema = () =>
+  Schema.Struct({
+    password: Schema.String.check(
+      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+    ),
+  });
 
 /** Better Auth sends the emailed link here with a token, or with an error once it lapsed. */
 export const Route = createFileRoute("/reset-password")({
@@ -36,13 +39,13 @@ function ResetPasswordPage() {
 
   const form = useAppForm({
     defaultValues: { password: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(ResetSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(resetSchema()) },
     onSubmit: async ({ value }) => {
       if (!token) return;
       setServerError(null);
       const { error } = await authClient.resetPassword({ newPassword: value.password, token });
       if (error) {
-        setServerError(error.message ?? "Could not reset the password.");
+        setServerError(error.message ?? m.app_reset_error());
         return;
       }
       await navigate({ to: "/login" });
@@ -53,10 +56,8 @@ function ResetPasswordPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Choose a new password</CardTitle>
-          {token ? null : (
-            <CardDescription>This link has expired or was already used.</CardDescription>
-          )}
+          <CardTitle>{m.app_reset_title()}</CardTitle>
+          {token ? null : <CardDescription>{m.app_reset_link_expired()}</CardDescription>}
         </CardHeader>
         {token ? (
           <CardContent>
@@ -70,7 +71,7 @@ function ResetPasswordPage() {
               <form.AppField name="password">
                 {(field) => (
                   <field.TextField
-                    label="New password"
+                    label={m.app_reset_new_password()}
                     type="password"
                     autoComplete="new-password"
                   />
@@ -78,7 +79,7 @@ function ResetPasswordPage() {
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">Save password</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.app_reset_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           </CardContent>
@@ -88,7 +89,7 @@ function ResetPasswordPage() {
             to={token ? "/login" : "/forgot-password"}
             className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
           >
-            {token ? "Back to sign in" : "Send a new link"}
+            {token ? m.app_auth_back_to_sign_in() : m.app_reset_send_new_link()}
           </Link>
         </CardFooter>
       </Card>

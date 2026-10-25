@@ -20,14 +20,17 @@ import {
 import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
+import { m } from "~/paraglide/messages.js";
 
-const RegisterSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1, { message: "Enter your name." })),
-  email: Schema.String.check(Schema.isMinLength(3, { message: "Enter your email." })),
-  password: Schema.String.check(
-    Schema.isMinLength(8, { message: "Password must be at least 8 characters." }),
-  ),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const registerSchema = () =>
+  Schema.Struct({
+    name: Schema.String.check(Schema.isMinLength(1, { message: m.app_auth_name_required() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    password: Schema.String.check(
+      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+    ),
+  });
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
@@ -51,7 +54,7 @@ function RegisterPage() {
 
   const form = useAppForm({
     defaultValues: { name: "", email: "", password: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(RegisterSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(registerSchema()) },
     onSubmit: async ({ value }) => {
       setServerError(null);
       const { data, error } = await authClient.signUp.email({
@@ -61,7 +64,7 @@ function RegisterPage() {
         callbackURL: destination,
       });
       if (error) {
-        setServerError(error.message ?? "Could not create the account.");
+        setServerError(error.message ?? m.app_register_error());
         return;
       }
       // With verification required there is no session until the link is opened.
@@ -81,9 +84,9 @@ function RegisterPage() {
       <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>Check your email</CardTitle>
+            <CardTitle>{m.app_register_check_email()}</CardTitle>
             <CardDescription>
-              We sent a link to {awaitingProof}. Open it to finish creating your account.
+              {m.app_register_check_email_description({ email: awaitingProof })}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -95,7 +98,7 @@ function RegisterPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Create account</CardTitle>
+          <CardTitle>{m.app_register_title()}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <SignInProviders
@@ -112,37 +115,41 @@ function RegisterPage() {
               }}
             >
               <form.AppField name="name">
-                {(field) => <field.TextField label="Name" autoComplete="name" />}
+                {(field) => <field.TextField label={m.common_name()} autoComplete="name" />}
               </form.AppField>
               <form.AppField name="email">
-                {(field) => <field.TextField label="Email" type="email" autoComplete="email" />}
+                {(field) => (
+                  <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                )}
               </form.AppField>
               <form.AppField name="password">
                 {(field) => (
-                  <field.TextField label="Password" type="password" autoComplete="new-password" />
+                  <field.TextField
+                    label={m.app_auth_password()}
+                    type="password"
+                    autoComplete="new-password"
+                  />
                 )}
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">Create account</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.app_register_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           ) : null}
           {!options.passwordSignup && providers.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              This instance isn’t taking new accounts.
-            </p>
+            <p className="text-muted-foreground text-sm">{m.app_register_closed()}</p>
           ) : null}
         </CardContent>
         <CardFooter>
           <p className="text-muted-foreground text-sm">
-            Already have an account?{" "}
+            {m.app_register_have_account()}{" "}
             <Link
               to="/login"
               search={redirectSearch(redirect)}
               className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
             >
-              Sign in
+              {m.app_register_sign_in()}
             </Link>
           </p>
         </CardFooter>

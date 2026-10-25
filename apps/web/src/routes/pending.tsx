@@ -5,6 +5,7 @@ import { authClient, meQuery } from "~/modules/auth/client.ts";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
+import { m } from "~/paraglide/messages.js";
 
 export const Route = createFileRoute("/pending")({
   beforeLoad: async ({ context }) => {
@@ -29,13 +30,11 @@ function PendingPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{rejected ? "Account declined" : "Waiting for approval"}</CardTitle>
+          <CardTitle>{rejected ? m.app_pending_declined_title() : m.app_pending_title()}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">
-            {rejected
-              ? "An admin declined this account. Ask whoever runs this instance if you think that’s a mistake."
-              : "Your account is set up. An admin of this instance has to let it in before you can start a chat."}
+            {rejected ? m.app_pending_declined_description() : m.app_pending_description()}
           </p>
         </CardContent>
         <CardFooter>
@@ -50,7 +49,7 @@ function PendingPage() {
               window.location.assign("/login");
             }}
           >
-            Sign out
+            {m.app_pending_sign_out()}
           </Button>
         </CardFooter>
       </Card>

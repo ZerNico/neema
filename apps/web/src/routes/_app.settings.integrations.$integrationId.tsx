@@ -6,6 +6,7 @@ import {
   personalServersQuery,
 } from "~/modules/integrations/client/queries.ts";
 import { IntegrationSettingsPage } from "~/modules/integrations/ui/integrations-settings-page.tsx";
+import { m } from "~/paraglide/messages.js";
 
 interface ConnectResult {
   connected?: string;
@@ -33,11 +34,13 @@ function IntegrationRoute() {
   const { queryClient } = Route.useRouteContext();
   useEffect(() => {
     if (!search.connected && !search.error) return;
-    const name =
-      queryClient
-        .getQueryData(myIntegrationsQuery.queryKey)
-        ?.find((integration) => integration.id === integrationId)?.name ?? "The integration";
-    if (search.connected) toast.success(`${name} is connected.`);
+    const name = queryClient
+      .getQueryData(myIntegrationsQuery.queryKey)
+      ?.find((integration) => integration.id === integrationId)?.name;
+    if (search.connected)
+      toast.success(
+        name ? m.app_integration_connected({ name }) : m.app_integration_connected_unnamed(),
+      );
     else if (search.error) toast.error(search.error);
     void navigate({
       to: "/settings/integrations/$integrationId",

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { announceSignIn } from "~/modules/integrations/client/sign-in-channel.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/card.tsx";
+import { m } from "~/paraglide/messages.js";
 
 interface Landing {
   attempt?: string;
@@ -33,14 +34,16 @@ function SignInLanding() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{error ? "Sign-in didn’t finish" : "Signed in"}</CardTitle>
+          <CardTitle>
+            {error ? m.app_integration_sign_in_failed_title() : m.app_integration_signed_in_title()}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {/* Never the error itself: anyone can link here with any text in the address. */}
           <p className="text-muted-foreground text-sm">
             {error
-              ? "Go back to the app to see why and try again."
-              : "You can close this window and go back to the app."}
+              ? m.app_integration_sign_in_failed_description()
+              : m.app_integration_signed_in_description()}
           </p>
         </CardContent>
       </Card>
