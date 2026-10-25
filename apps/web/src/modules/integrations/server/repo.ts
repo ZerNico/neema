@@ -199,8 +199,9 @@ export class IntegrationRepo extends Context.Service<
     sweepDrafts(left: { ownerUserId: string } | { olderThanMs: number }): Effect.Effect<void>;
     /**
      * Removes an integration with everything that only meant something with it
-     * (connections, grants, chat and agent settings, through their foreign keys)
-     * and takes it out of schedules. Refused while knowledge sources mirror it.
+     * (connections, sharing, chat and agent settings, through their foreign
+     * keys). A schedule's grant stays, naming nothing, so its next run ends
+     * with a reason. Refused while knowledge sources mirror it.
      */
     deleteConfig(
       id: string,

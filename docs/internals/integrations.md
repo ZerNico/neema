@@ -34,8 +34,10 @@ citation, an agent's attachments) through one directory of every integration's i
 name; a deleted one falls back to its stored label.
 
 Deleting an integration refuses while a knowledge source mirrors it (a restricting foreign
-key), and lets foreign keys remove its connections, sharing, schedule grants, chat and agent
-settings and allowance counters. Past
+key), and lets foreign keys remove its connections, sharing, chat and agent settings and
+allowance counters. A schedule's grant on it stays, naming nothing (`on delete set null`), so
+the next run ends with a reason instead of answering without it, and the editor shows it until
+the owner turns it off. Past
 answers keep their rows and labels.
 
 ## Manifest and adapter
@@ -258,8 +260,9 @@ editor sets them; a chat draft leaves them out, which keeps what is saved, becau
 not grant itself authority. A fire copies them into the generation config, where they replace
 the chat's choices entirely and nothing ever waits: anything beyond the grant is refused to the
 model. The fire first checks every granted account and ends the run as an error when one is
-gone, the way a lost collection does. Disconnecting an account leaves its grant without one
-(`on delete set null`), which the editor shows and a save refuses until the owner turns it off.
+gone, the way a lost collection does. Disconnecting an account leaves its grant without one,
+and deleting the integration without either (`on delete set null`), which the editor shows
+and a save refuses until the owner turns it off.
 Connecting again hands that grant to the owner's account only while it is their only one there,
 the schedule has no other grant waiting on that integration and the account holds none of its
 own, as a knowledge source does; otherwise it waits for the owner to choose. A person retrying

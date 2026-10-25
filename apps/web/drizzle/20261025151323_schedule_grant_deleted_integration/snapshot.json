@@ -1,0 +1,69 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "3bb452d2-0fa0-4100-9c88-e38acde17b8f",
+  "prevIds": [
+    "b52d4a6c-1e51-496e-acde-3705d889ebb6"
+  ],
+  "footprints": [
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "schedule_integration_grants",
+        "integration_id"
+      ],
+      "writes": [
+        "s|colprop|public.schedule_integration_grants.integration_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.integration_id"
+      ],
+      "sqlHash": "70f1e20c2f8bdb95"
+    },
+    {
+      "statementType": "recreate_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "schedule_integration_grants"
+      ],
+      "writes": [
+        "s|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "n|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "e|fk|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey",
+        "n|con|public.schedule_integration_grants.schedule_integration_grants_KmhvgRXvANwW_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.schedule_integration_grants",
+        "n|sch|public",
+        "n|tbl|public.integration_configs",
+        "n|sch|public",
+        "n|col|public.schedule_integration_grants.integration_id",
+        "n|col|public.integration_configs.id",
+        "e|uniqueness|public.integration_configs.id"
+      ],
+      "sqlHash": "0db56a78a568db6c"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"schedule_integration_grants\",\"integration_id\"]",
+      "set": {
+        "notNull": false
+      }
+    },
+    {
+      "op": "alter",
+      "key": "fks\u0000[\"public\",\"schedule_integration_grants\",\"schedule_integration_grants_KmhvgRXvANwW_fkey\"]",
+      "set": {
+        "onDelete": "SET NULL"
+      }
+    }
+  ]
+}

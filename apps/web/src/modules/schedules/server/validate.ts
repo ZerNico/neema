@@ -46,6 +46,8 @@ export type ValidatedSchedule = Omit<
  */
 export const normalizeGrant = (grant: ScheduleGrant): IntegrationGrant | string => {
   // Kept on the schedule so the editor shows it; never saved again.
+  if (grant.integrationId === null)
+    return "an integration this schedule used was deleted: turn it off";
   if (grant.connectionId === null)
     return "an account this schedule used was disconnected: turn it off or connect it again";
   const entries = Object.entries(grant.allowances ?? {});

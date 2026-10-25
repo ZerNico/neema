@@ -205,7 +205,11 @@ export const ScheduleSettingsFields = withForm({
                         {grant?.connectionId ? (
                           <ScheduleAllowanceFields
                             kind={integration.kind}
-                            grant={{ ...grant, connectionId: grant.connectionId }}
+                            grant={{
+                              ...grant,
+                              connectionId: grant.connectionId,
+                              integrationId: integration.id,
+                            }}
                             onChange={(next) => field.handleChange([...rest, next])}
                           />
                         ) : null}
@@ -216,7 +220,10 @@ export const ScheduleSettingsFields = withForm({
                     const integration = integrations.data?.find(
                       (entry) => entry.id === grant.integrationId,
                     );
-                    const title = integration?.name ?? "An integration";
+                    const deleted = grant.integrationId === null;
+                    const title = deleted
+                      ? "Deleted integration"
+                      : (integration?.name ?? "An integration");
                     return (
                       <ListRow key={key}>
                         {integration ? (
@@ -225,7 +232,9 @@ export const ScheduleSettingsFields = withForm({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{title}</p>
                           <p className="text-muted-foreground truncate text-xs">
-                            Its account was disconnected: turn this off or runs will fail.
+                            {deleted
+                              ? "It was deleted: turn this off or runs will fail."
+                              : "Its account was disconnected: turn this off or runs will fail."}
                           </p>
                         </div>
                         <Button

@@ -87,9 +87,11 @@ export const scheduleIntegrationGrants = pgTable(
     connectionId: text("connection_id").references(() => integrationConnections.id, {
       onDelete: "set null",
     }),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrationConfigs.id, { onDelete: "cascade" }),
+    // Null once the integration was deleted: the grant stays so a fire ends with
+    // a reason and the editor shows it, until the owner turns it off.
+    integrationId: text("integration_id").references(() => integrationConfigs.id, {
+      onDelete: "set null",
+    }),
     access: text({ enum: ["read", "write"] }).notNull(),
     allowances: jsonb().$type<NonNullable<IntegrationGrant["allowances"]>>(),
   },

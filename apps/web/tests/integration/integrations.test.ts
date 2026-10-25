@@ -27,6 +27,7 @@ import { outlineCall } from "~/modules/integrations/outline/server/client.ts";
 import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
+import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
@@ -2660,9 +2661,20 @@ describe("several integrations of one type", () => {
       { connectionId: accountB, integrationId: "outline-2", access: "write" },
     ]);
     await service((s) => s.deleteIntegration("outline-2"));
-    // A schedule keeps its other grants and loses only the deleted one.
+    // The deleted one's grant stays, naming nothing, so the next run ends with a
+    // reason and the editor shows it; the other grant is untouched.
     expect(await grantsOf(scheduleId)).toEqual([
       { connectionId: accountA, integrationId: "outline", access: "read" },
+      { connectionId: null, integrationId: null, access: "write" },
+    ]);
+    const saved = await run(
+      Effect.flatMap(ScheduleRepo, (repo) => repo.get(userId, scheduleId)).pipe(
+        Effect.provide(ScheduleRepo.layer),
+      ),
+    );
+    expect(saved?.integrationGrants).toEqual([
+      { connectionId: accountA, integrationId: "outline", access: "read" },
+      { connectionId: null, integrationId: null, access: "write" },
     ]);
     const left = await service((s) => s.listForUser(userId));
     expect(left.map((entry) => entry.id)).not.toContain("outline-2");

@@ -18,6 +18,10 @@ export type FireOutcome =
  */
 const BUSY_RETRY = { schedule: Schedule.spaced("15 seconds"), times: 20 } as const;
 
+/** Null names an integration that was deleted, which nothing can name any more. */
+const grantUnavailable = (name: string | null) =>
+  Effect.fail({ _tag: "GrantUnavailable" as const, name });
+
 /**
  * The one place the scheduler calls into chat. A fire is a plain
  * `runScheduledTurn`; this indirection keeps ScheduleService's layer graph off
@@ -79,33 +83,34 @@ export class ScheduleFire extends Context.Service<
           : fresh(row, runId);
       // A granted integration that cannot be used ends the run with a reason,
       // like a lost collection, rather than answering without it unannounced.
-      // Named by its integration, which the reason below looks up.
+      // A lost account is named by its integration, which the reason looks up.
       const grantsUsable = (row: ScheduleRow) =>
-        Effect.forEach(row.integrationGrants, ({ connectionId, ...grant }) =>
-          connectionId === null
-            ? Effect.fail(new IntegrationNotAvailable({ integrationId: grant.integrationId }))
-            : integrations.session(row.userId, connectionId).pipe(
-                Effect.as({ ...grant, connectionId }),
-                Effect.mapError(
-                  () => new IntegrationNotAvailable({ integrationId: grant.integrationId }),
-                ),
-              ),
+        Effect.forEach(row.integrationGrants, ({ connectionId, integrationId, ...grant }) =>
+          Effect.gen(function* () {
+            if (integrationId === null) return yield* grantUnavailable(null);
+            if (connectionId === null) return yield* new IntegrationNotAvailable({ integrationId });
+            yield* integrations
+              .session(row.userId, connectionId)
+              .pipe(Effect.mapError(() => new IntegrationNotAvailable({ integrationId })));
+            const usable: IntegrationGrant = { ...grant, integrationId, connectionId };
+            return usable;
+          }),
         );
       const fire: ScheduleFire["Service"] = (row, runId) =>
         grantsUsable(row)
           .pipe(
             Effect.andThen((integrationGrants) => start({ ...row, integrationGrants }, runId)),
             Effect.catchTag("IntegrationNotAvailable", (error) =>
-              integrations.directory(row.userId).pipe(
-                Effect.flatMap((directory) =>
-                  Effect.fail({
-                    _tag: "GrantUnavailable" as const,
-                    name:
+              integrations
+                .directory(row.userId)
+                .pipe(
+                  Effect.flatMap((directory) =>
+                    grantUnavailable(
                       directory.find((entry) => entry.id === error.integrationId)?.name ??
-                      error.integrationId,
-                  }),
+                        error.integrationId,
+                    ),
+                  ),
                 ),
-              ),
             ),
           )
           .pipe(
@@ -179,7 +184,10 @@ export class ScheduleFire extends Context.Service<
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: `${error.name} is not connected or needs reconnecting`,
+                  reason:
+                    error.name === null
+                      ? "an integration this schedule uses was deleted"
+                      : `${error.name} is not connected or needs reconnecting`,
                 }),
             }),
             // The remaining failures are composer-path errors a scheduled turn

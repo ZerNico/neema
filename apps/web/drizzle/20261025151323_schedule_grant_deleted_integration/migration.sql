@@ -1,0 +1,2 @@
+ALTER TABLE "schedule_integration_grants" ALTER COLUMN "integration_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "schedule_integration_grants" DROP CONSTRAINT "schedule_integration_grants_KmhvgRXvANwW_fkey", ADD CONSTRAINT "schedule_integration_grants_KmhvgRXvANwW_fkey" FOREIGN KEY ("integration_id") REFERENCES "integration_configs"("id") ON DELETE SET NULL;
