@@ -7,7 +7,6 @@ import {
   DialogFooter,
   DialogClose,
 } from "~/ui/primitives/dialog";
-import { FileValidationIcon } from "@hugeicons/core-free-icons";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { useState } from "react";
@@ -25,7 +24,7 @@ import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { ScanReadingRow } from "~/modules/pdf/ui/scan-reading-row.tsx";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { useAppForm } from "~/ui/form/app-form.ts";
-import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
 import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
@@ -281,7 +280,7 @@ function DocumentParserSection() {
   const { data: tool } = useSuspenseQuery(documentParserToolQuery);
   const invalidate = useInvalidateTools();
 
-  const config = (tool?.config ?? {}) as { maxChars?: number; maxPages?: number };
+  const config = tool.config as { maxChars?: number; maxPages?: number };
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) =>
@@ -315,18 +314,6 @@ function DocumentParserSection() {
       await invalidate();
     },
   });
-
-  if (!tool) {
-    return (
-      <Section title="Document parsing">
-        <EmptyState
-          icon={FileValidationIcon}
-          title="This tool isn’t set up yet"
-          description="Document parsing will appear here once it is available on this instance."
-        />
-      </Section>
-    );
-  }
 
   return (
     <Section title="Document parsing">

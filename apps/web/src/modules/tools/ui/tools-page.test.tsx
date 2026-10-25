@@ -97,7 +97,7 @@ const defaultProviders = [
 ];
 
 /** What `getToolSettings` answers on a refetch, by tool. */
-const settings: Record<string, PublicTool | null> = {};
+const settings: Record<string, PublicTool> = {};
 
 const renderPage = ({
   webSearch = tool("web_search", { maxResults: 8 }),
@@ -106,10 +106,10 @@ const renderPage = ({
   maps = tool("maps", {}),
   providers = defaultProviders,
 }: {
-  webSearch?: ReturnType<typeof tool> | null;
-  officeFiles?: ReturnType<typeof tool> | null;
-  interactiveUi?: ReturnType<typeof tool> | null;
-  maps?: ReturnType<typeof tool> | null;
+  webSearch?: ReturnType<typeof tool>;
+  officeFiles?: ReturnType<typeof tool>;
+  interactiveUi?: ReturnType<typeof tool>;
+  maps?: ReturnType<typeof tool>;
   providers?: Provider[];
 } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -124,7 +124,7 @@ const renderPage = ({
     interactive_ui: interactiveUi,
     maps,
   });
-  vi.mocked(getToolSettings).mockImplementation(async ({ data }) => settings[data.tool] ?? null);
+  vi.mocked(getToolSettings).mockImplementation(async ({ data }) => settings[data.tool]!);
   vi.mocked(listSearchProviders).mockResolvedValue(providers);
   client.setQueryData(["admin", "tools", "search-providers"], providers);
   client.setQueryData(["admin", "tools", "memory"], memory);
@@ -471,13 +471,6 @@ describe("ToolsPage", () => {
         description: "Boom.",
       }),
     );
-  });
-
-  it("shows an empty state when the tool row is missing", () => {
-    renderPage({ webSearch: null, officeFiles: null });
-    expect(screen.getAllByText("This tool isn’t set up yet")).toHaveLength(2);
-    expect(screen.queryByText(/migrations/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Office files enabled" })).toBeNull();
   });
 
   it("switches Office file editing off", async () => {

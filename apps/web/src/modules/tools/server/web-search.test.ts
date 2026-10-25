@@ -31,7 +31,7 @@ const config = { maxResults: 5, researchMaxSearchQueries: 80 };
 const FakeRepo = Layer.succeed(
   ToolsRepo,
   ToolsRepo.of({
-    getTool: () => Effect.succeed(null),
+    getTool: () => Effect.die("unused"),
     getKnowledgeSearch: () => Effect.succeed(null),
     getWebSearch: () => Effect.succeed({ enabled: true, config, providers: [searxng] }),
     getDocumentParser: () => Effect.succeed(null),

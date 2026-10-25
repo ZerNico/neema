@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import { proxyMap } from "~/modules/genui/server/map-proxy.ts";
 import { MAPS_TOOL, readMaps } from "~/modules/genui/settings.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
@@ -20,8 +20,7 @@ export const Route = createFileRoute("/api/map/$")({
         if (!session) return unauthorized();
         const settings = await runtime.runPromise(
           Effect.gen(function* () {
-            const tools = yield* Effect.serviceOption(ToolsRepo);
-            return readMaps(Option.isSome(tools) ? yield* tools.value.getTool(MAPS_TOOL) : null);
+            return readMaps(yield* (yield* ToolsRepo).getTool(MAPS_TOOL));
           }),
         );
         if (!settings.enabled) return new Response("Not found", { status: 404 });

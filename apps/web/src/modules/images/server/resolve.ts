@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import { conversations } from "~/db/schema/index.ts";
 import { ProviderRepo, type ImageModelRow } from "~/modules/providers/server/repo.ts";
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
@@ -10,10 +10,7 @@ import type { DbTx } from "~/server/db.ts";
 export const availableImageModels = Effect.fn("images.availableImageModels")(function* (
   userId: string,
 ) {
-  const tools = yield* Effect.serviceOption(ToolsRepo);
-  const enabled = imageGenerationEnabled(
-    Option.isSome(tools) ? yield* tools.value.getTool(IMAGE_GENERATION_TOOL) : null,
-  );
+  const enabled = imageGenerationEnabled(yield* (yield* ToolsRepo).getTool(IMAGE_GENERATION_TOOL));
   if (!enabled) return [] as ReadonlyArray<ImageModelRow>;
   return yield* (yield* ProviderRepo).listImageModelsFor(userId);
 });

@@ -121,7 +121,7 @@ export class KnowledgeSearch extends Context.Service<
         if (target && covered < versionIds.length) {
           degradedReason =
             "semantic indexing is incomplete; keyword search covers the remaining documents";
-        } else if (!target && (yield* tools.getTool("knowledge_search"))?.enabled) {
+        } else if (!target && (yield* tools.getTool("knowledge_search")).enabled) {
           degradedReason =
             "semantic search needs an approved, available embedding connection; keyword results only";
         }

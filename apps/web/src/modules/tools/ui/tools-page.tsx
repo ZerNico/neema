@@ -1,20 +1,11 @@
 import { NumberField } from "./tool-fields.tsx";
 import { useInvalidateTools } from "../client/use-invalidate-tools.ts";
 import { integerBetween } from "./integer-between.ts";
-import {
-  Brain02Icon,
-  DashboardSquare01Icon,
-  MapsIcon,
-  GlobalSearchIcon,
-  Link01Icon,
-  AiImageIcon,
-  Presentation01Icon,
-} from "@hugeicons/core-free-icons";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
 import { toast } from "sonner";
 import { useAppForm } from "~/ui/form/app-form.ts";
-import { EmptyState, FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
+import { FormActions, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { SaveLabel, SaveStatus } from "~/ui/save-status.tsx";
 import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Switch } from "~/ui/primitives/switch";
@@ -73,14 +64,6 @@ function MemorySection() {
     onError: (error) => toastError("Could not update memory.", error),
   });
 
-  if (!tool) {
-    return (
-      <Section title="Memory">
-        <EmptyState icon={Brain02Icon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
-
   return (
     <Section title="Memory">
       <ListCard>
@@ -107,7 +90,7 @@ function MemorySection() {
 function WebSearchSection() {
   const { data: tool } = useSuspenseQuery(webSearchToolQuery);
   const invalidate = useInvalidateTools();
-  const config = (tool?.config ?? {}) as Partial<WebSearchConfig>;
+  const config = tool.config as Partial<WebSearchConfig>;
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "web_search", enabled } }),
@@ -142,14 +125,6 @@ function WebSearchSection() {
       await invalidate();
     },
   });
-
-  if (!tool) {
-    return (
-      <Section title="Web search">
-        <EmptyState icon={GlobalSearchIcon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
 
   return (
     <Section title="Web search">
@@ -234,7 +209,7 @@ function UrlReaderSection() {
   const { data: tool } = useSuspenseQuery(urlReaderToolQuery);
   const invalidate = useInvalidateTools();
 
-  const config = (tool?.config ?? {}) as { perPageCharCap?: number };
+  const config = tool.config as { perPageCharCap?: number };
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => updateToolSettings({ data: { tool: "read_url", enabled } }),
@@ -260,14 +235,6 @@ function UrlReaderSection() {
       await invalidate();
     },
   });
-
-  if (!tool) {
-    return (
-      <Section title="URL reader">
-        <EmptyState icon={Link01Icon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
 
   return (
     <Section title="URL reader">
@@ -341,14 +308,6 @@ function OfficeFilesSection() {
     onError: (error) => toastError("Could not update Office files.", error),
   });
 
-  if (!tool) {
-    return (
-      <Section title="Office files">
-        <EmptyState icon={Presentation01Icon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
-
   return (
     <Section title="Office files">
       <ListCard>
@@ -391,14 +350,6 @@ function ImageGenerationSection() {
     onError: (error) => toastError("Could not update image generation.", error),
   });
 
-  if (!tool) {
-    return (
-      <Section title="Image generation">
-        <EmptyState icon={AiImageIcon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
-
   return (
     <Section title="Image generation">
       <ListCard>
@@ -435,14 +386,6 @@ function InteractiveUiSection() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: interactiveUiToolQuery.queryKey }),
     onError: (error) => toastError("Could not update interactive answers.", error),
   });
-
-  if (!tool) {
-    return (
-      <Section title="Interactive answers">
-        <EmptyState icon={DashboardSquare01Icon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
 
   const settings = readInteractiveUi(tool);
   return (
@@ -494,14 +437,6 @@ function MapsSection() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: mapsToolQuery.queryKey }),
     onError: (error) => toastError("Could not update maps.", error),
   });
-
-  if (!tool) {
-    return (
-      <Section title="Maps">
-        <EmptyState icon={MapsIcon} title="This tool isn’t set up yet" />
-      </Section>
-    );
-  }
 
   const settings = readMaps(tool);
   return (

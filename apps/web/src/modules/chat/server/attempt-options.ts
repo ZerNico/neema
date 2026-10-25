@@ -9,6 +9,7 @@ import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachm
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
@@ -77,6 +78,7 @@ const integrationGrantsOf = (attempt: Attempt) =>
  */
 export const makeAttemptOptions = Effect.gen(function* () {
   const providers = yield* ProviderRepo;
+  const tools = yield* ToolsRepo;
   const webSearch = yield* WebSearchExecutor;
   const urlReaderOption = yield* Effect.serviceOption(UrlReaderExecutor);
   const policy = yield* FeaturePolicy;
@@ -354,6 +356,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
         Effect.provideService(KnowledgeRepo, knowledge),
         Effect.provideService(AgentRepo, agents),
         Effect.provideService(ProviderRepo, providers),
+        Effect.provideService(ToolsRepo, tools),
       );
 
   return { searchToolEnabled, validateGenerationOptions, validateAttachments, resolver };

@@ -58,16 +58,15 @@ const httpsUrl = (value: unknown, fallback: string): string => {
  * earlier answers keep rendering: they are stored text, and hiding them would
  * change history.
  */
-export function readInteractiveUi(tool: ToolRow | null): InteractiveUiSettings {
-  const enabled = tool?.enabled ?? true;
-  return { enabled, images: enabled && tool?.config.images !== false };
+export function readInteractiveUi(tool: ToolRow): InteractiveUiSettings {
+  return { enabled: tool.enabled, images: tool.enabled && tool.config.images !== false };
 }
 
 /** Off means no route tool, no lookups for blocks (they say maps are off) and no tiles. */
-export function readMaps(tool: ToolRow | null): MapSettings {
-  const config = tool?.config ?? {};
+export function readMaps(tool: ToolRow): MapSettings {
+  const config = tool.config;
   return {
-    enabled: tool?.enabled ?? true,
+    enabled: tool.enabled,
     services: {
       styleLight: httpsUrl(config.styleLight, MAP_SERVICE_DEFAULTS.styleLight),
       styleDark: httpsUrl(config.styleDark, MAP_SERVICE_DEFAULTS.styleDark),

@@ -216,8 +216,7 @@ export class MemoryService extends Context.Service<
         preferences: MemoryPreferences,
       ) {
         const globalEnabled =
-          (yield* tools.getTool("memory"))?.enabled === true &&
-          (yield* policy.can(userId, "memory"));
+          (yield* tools.getTool("memory")).enabled && (yield* policy.can(userId, "memory"));
         return {
           ...preferences,
           globalEnabled,

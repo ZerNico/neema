@@ -257,16 +257,10 @@ describe("saved memory repository", () => {
     await runtime.runPromise(
       Db.use((db) => db.delete(tools).where(eq(tools.name, "memory")).pipe(Effect.orDie)),
     );
+    // Every tools row is seeded: a missing one is a broken install, never "off".
     await expect(
       runtime.runPromise(MemoryService.use((service) => service.getSettings(userId))),
-    ).resolves.toMatchObject({ globalEnabled: false, effectiveAutoSaveEnabled: false });
-    await expect(
-      runtime.runPromise(
-        MemoryService.use((service) =>
-          service.saveModel(userId, { ...source, content: "Still blocked" }, () => Effect.void),
-        ),
-      ),
-    ).resolves.toEqual({ outcome: "disabled" });
+    ).rejects.toThrow('The seeded tools row "memory" is missing.');
 
     // Restore the seeded row for the remaining sequential tests.
     await runtime.runPromise(

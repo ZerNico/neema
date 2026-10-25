@@ -4,7 +4,7 @@ An answer can contain ` ```ui ` blocks: Svelte-like markup the model writes, dra
 
 ## Admin settings
 
-- Interactive answers have one switch and an images switch, kept in the `interactive_ui` row of the tools registry (`genui/settings.ts`). Maps have their own `maps` row and section, with the services they use: they serve more than blocks, since the route tool works in any chat. Neither reads the other. A missing row means on. Each attempt reads both once, like the Office files switch.
+- Interactive answers have one switch and an images switch, kept in the `interactive_ui` row of the tools registry (`genui/settings.ts`). Maps have their own `maps` row and section, with the services they use: they serve more than blocks, since the route tool works in any chat. Neither reads the other. Both rows are seeded, so a missing one fails loudly instead of meaning on. Each attempt reads both once, like the Office files switch.
 - Interactive answers off means new answers are not offered the skill and no images are looked up for them. Blocks already in earlier answers keep rendering: they are stored text, and hiding them would change history. A model that writes a block without the skill still gets it drawn, since nothing in the transcript is filtered, and its maps still resolve while maps are on.
 
 ## The language

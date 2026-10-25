@@ -249,12 +249,8 @@ export const prepareGenerationTools = (
     // Admins can switch interactive answers, or only their images, off in
     // Tools, and maps apart from both. Read once per attempt, so a change
     // applies to the next answer.
-    const interactiveUi = readInteractiveUi(
-      Option.isSome(toolRegistry) ? yield* toolRegistry.value.getTool(INTERACTIVE_UI_TOOL) : null,
-    );
-    const maps = readMaps(
-      Option.isSome(toolRegistry) ? yield* toolRegistry.value.getTool(MAPS_TOOL) : null,
-    );
+    const interactiveUi = readInteractiveUi(yield* toolRegistry.getTool(INTERACTIVE_UI_TOOL));
+    const maps = readMaps(yield* toolRegistry.getTool(MAPS_TOOL));
     // Images named by the answer's ```ui blocks, looked up while it streams.
     // Only with the search this attempt was offered; otherwise each query
     // is recorded as needing it, so the reader is told why.
@@ -406,11 +402,9 @@ export const prepareGenerationTools = (
           })
         : null;
     // Admins switch Office file editing off in Tools; read per attempt so
-    // it applies to the next answer. A missing row keeps the default, on.
-    const officeFiles = Option.isSome(toolRegistry)
-      ? yield* toolRegistry.value.getTool("office_files")
-      : null;
-    const officeOffered = (officeFiles?.enabled ?? true) && Option.isSome(database);
+    // it applies to the next answer.
+    const officeFiles = yield* toolRegistry.getTool("office_files");
+    const officeOffered = officeFiles.enabled && Option.isSome(database);
     const officeEditors = officeOffered ? runnableOfficeFamilies(processors) : [];
     // Admin-authored tools are resolved once as this generation starts,
     // then held stable for its remaining tool rounds. An edit or deletion

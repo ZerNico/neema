@@ -4,7 +4,12 @@ import { Db } from "~/server/db.ts";
 import { tools } from "~/db/schema/index.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { KnowledgeSearchConfig } from "~/modules/knowledge/schema.ts";
-import { DocumentParserConfig, UrlReaderConfig, WebSearchConfig } from "../schema.ts";
+import {
+  DocumentParserConfig,
+  UrlReaderConfig,
+  WebSearchConfig,
+  type ToolSettingsInput,
+} from "../schema.ts";
 import { loadEnabledSearchProviders } from "./search-provider-repo.ts";
 import type { SearchProviderSnapshot } from "./search-providers/types.ts";
 
@@ -13,6 +18,9 @@ type ToolRow = typeof tools.$inferSelect;
  * Tool rows safe for admin clients: ciphertext replaced by a boolean.
  */
 export type PublicTool = Omit<ToolRow, "secretCiphertext"> & { secretConfigured: boolean };
+
+/** Every row the migrations seed. Nothing deletes one, so a missing row is a broken install. */
+export type SeededToolName = ToolSettingsInput["tool"] | "knowledge_search";
 
 const toPublic = ({ secretCiphertext, ...rest }: ToolRow): PublicTool => ({
   ...rest,
@@ -27,7 +35,8 @@ const decodeKnowledgeSearchConfig = Schema.decodeUnknownEffect(KnowledgeSearchCo
 export class ToolsRepo extends Context.Service<
   ToolsRepo,
   {
-    getTool(name: string): Effect.Effect<PublicTool | null>;
+    /** A seeded row's settings; dies when the row is missing rather than guessing a default. */
+    getTool(name: SeededToolName): Effect.Effect<PublicTool>;
     /**
      * Internal: decoded web_search config and the enabled providers in order,
      * with decrypted secrets, for execution.
@@ -93,7 +102,9 @@ export class ToolsRepo extends Context.Service<
       return ToolsRepo.of({
         getTool: Effect.fn("ToolsRepo.getTool")(function* (name) {
           const row = yield* getRow(name);
-          return row ? toPublic(row) : null;
+          if (!row)
+            return yield* Effect.die(new Error(`The seeded tools row "${name}" is missing.`));
+          return toPublic(row);
         }),
 
         getWebSearch: Effect.fn("ToolsRepo.getWebSearch")(function* () {

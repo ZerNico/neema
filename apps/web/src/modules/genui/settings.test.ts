@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { MAP_SERVICE_DEFAULTS, readInteractiveUi, readMaps } from "./settings.ts";
 
 describe("readInteractiveUi", () => {
-  it("defaults to on when the row is missing", () => {
-    expect(readInteractiveUi(null)).toEqual({ enabled: true, images: true });
-  });
-
   it("keeps images on unless switched off", () => {
     expect(readInteractiveUi({ enabled: true, config: {} })).toMatchObject({ images: true });
     expect(readInteractiveUi({ enabled: true, config: { images: false } })).toEqual({
@@ -23,8 +19,11 @@ describe("readInteractiveUi", () => {
 });
 
 describe("readMaps", () => {
-  it("defaults to on with the public services when the row is missing", () => {
-    expect(readMaps(null)).toEqual({ enabled: true, services: MAP_SERVICE_DEFAULTS });
+  it("uses the public services when none are set", () => {
+    expect(readMaps({ enabled: true, config: {} })).toEqual({
+      enabled: true,
+      services: MAP_SERVICE_DEFAULTS,
+    });
   });
 
   it("follows its own switch, whatever interactive answers do", () => {

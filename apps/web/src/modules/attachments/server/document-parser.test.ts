@@ -56,7 +56,7 @@ const harness = (
       Layer.succeed(
         ToolsRepo,
         ToolsRepo.of({
-          getTool: () => Effect.succeed(null),
+          getTool: () => Effect.die("unused"),
           getKnowledgeSearch: () => Effect.succeed(null),
           getWebSearch: () => Effect.succeed(null),
           getUrlReader: () => Effect.succeed(null),

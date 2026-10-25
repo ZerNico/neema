@@ -264,7 +264,7 @@ export class UrlReaderExecutor extends Context.Service<
       });
 
       const availability = Effect.fn("UrlReaderExecutor.availability")(function* () {
-        const tool = yield* repo.getTool("read_url");
+        const tool = yield* repo.getUrlReader();
         return { configured: tool !== null, enabled: tool?.enabled ?? false };
       });
 
