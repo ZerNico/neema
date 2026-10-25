@@ -2,12 +2,10 @@ import { addressableByEmailSql } from "~/modules/auth/server/account-eligibility
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { groups, groupMembers, user } from "~/db/schema/index.ts";
-import { KnowledgeNotAvailable, SharingNotAllowed } from "~/modules/knowledge/errors.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import type { Capability } from "~/modules/groups/policy.ts";
-import { SharingRateLimited } from "../errors.ts";
+import { SharedResourceNotAvailable, SharingNotAllowed, SharingRateLimited } from "../errors.ts";
 import { sharingResources } from "./resources.ts";
 import type { ResourceGrants, SharedResource, SharingChange, ShareRecipient } from "../schema.ts";
 import { escapeLike } from "~/server/sql.ts";
@@ -15,16 +13,10 @@ import { escapeLike } from "~/server/sql.ts";
 /** One page of the picker; the query narrows it rather than paging. */
 const RECIPIENT_LIMIT = 20;
 
-type SharingError = KnowledgeNotAvailable | SharingNotAllowed;
-// Custom tools are admin-only, so no member column can let one be shared.
+type SharingError = SharedResourceNotAvailable | SharingNotAllowed;
+/** The group right that lets a member share this kind; admin-managed kinds have none. */
 const shareColumn = (kind: SharedResource["kind"]) =>
-  kind === "agent"
-    ? groupMembers.shareAgents
-    : kind === "collection"
-      ? groupMembers.shareKnowledge
-      : kind === "skill"
-        ? groupMembers.shareSkills
-        : null;
+  sharingResources[kind].personal?.shareRight ?? null;
 
 /** Shared policy, separate FK-backed grant tables for each resource type. */
 export class SharingService extends Context.Service<
@@ -33,7 +25,7 @@ export class SharingService extends Context.Service<
     detail(
       userId: string,
       resource: SharedResource,
-    ): Effect.Effect<ResourceGrants, KnowledgeNotAvailable>;
+    ): Effect.Effect<ResourceGrants, SharedResourceNotAvailable>;
     change(
       userId: string,
       resource: SharedResource,
@@ -48,17 +40,9 @@ export class SharingService extends Context.Service<
       const db = yield* Db;
       const policy = yield* FeaturePolicy;
       const bus = yield* SyncBus;
-      // Custom tools and integrations are admin-managed; no member capability applies.
-      const createCapability: Record<SharedResource["kind"], Capability | null> = {
-        agent: "agentsCreate",
-        collection: "knowledgeCreate",
-        skill: "skillsCreate",
-        customTool: null,
-        integration: null,
-      };
       const mayManage = (userId: string, resource: SharedResource) =>
         Effect.suspend(() => {
-          const capability = createCapability[resource.kind];
+          const capability = sharingResources[resource.kind].personal?.create;
           return capability ? policy.can(userId, capability) : Effect.succeed(true);
         });
       // Per-runtime throttle on grant-by-email, bounded even for many accounts.
@@ -90,9 +74,9 @@ export class SharingService extends Context.Service<
       return SharingService.of({
         detail: Effect.fn("SharingService.detail")(function* (userId, resource) {
           if (!(yield* mayManage(userId, resource)))
-            return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+            return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
           const [owner] = yield* owned(userId, resource).pipe(Effect.orDie);
-          if (!owner) return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+          if (!owner) return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
           const [actor] = yield* db
             .select({ role: user.role })
             .from(user)
@@ -126,7 +110,7 @@ export class SharingService extends Context.Service<
             .limit(200)
             .pipe(Effect.orDie);
           if ((yield* owned(userId, resource).pipe(Effect.orDie)).length === 0)
-            return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+            return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
           return { audience: owner.audience, canPublish, users, groups: granted, eligibleGroups };
         }),
         // Names and email addresses of other accounts, for the sharing picker.
@@ -153,13 +137,13 @@ export class SharingService extends Context.Service<
         }),
         change: Effect.fn("SharingService.change")(function* (userId, resource, change) {
           if (!(yield* mayManage(userId, resource)))
-            return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+            return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                const capability = createCapability[resource.kind];
+                const capability = sharingResources[resource.kind].personal?.create;
                 if (capability && !(yield* policy.can(userId, capability, tx)))
-                  return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+                  return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
                 const [actor] = yield* tx
                   .select({ role: user.role })
                   .from(user)
@@ -180,7 +164,7 @@ export class SharingService extends Context.Service<
                   )
                   .for("update");
                 if (!actor || rows.length === 0)
-                  return yield* new KnowledgeNotAvailable({ resourceId: resource.id });
+                  return yield* new SharedResourceNotAvailable({ resourceId: resource.id });
                 switch (change.action) {
                   case "email": {
                     yield* admitLookup(userId);

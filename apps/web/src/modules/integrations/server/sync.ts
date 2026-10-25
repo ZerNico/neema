@@ -1,4 +1,5 @@
 import { leaseFor } from "~/server/sql.ts";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { alias } from "drizzle-orm/pg-core";
 import { and, count, eq, inArray, isNull, lte, ne, notExists, or, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Schedule as EffectSchedule, Semaphore } from "effect";
@@ -11,7 +12,6 @@ import {
   type KnowledgeSourceStats,
 } from "~/db/schema/index.ts";
 import { KNOWLEDGE_LIMITS } from "~/modules/knowledge/schema.ts";
-import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import {
   KnowledgeRepo,
   lockKnowledgeSource,
@@ -162,7 +162,9 @@ function make(background: boolean) {
             eq(integrationConnections.userId, knowledgeCollections.userId),
           ),
         )
-        .where(and(eq(knowledgeSources.collectionId, collectionId), collectionReadable(userId)))
+        .where(
+          and(eq(knowledgeSources.collectionId, collectionId), readableBy("collection", userId)),
+        )
         .pipe(Effect.orDie);
       return rows.map((row) => {
         const owner = row.owner === userId;

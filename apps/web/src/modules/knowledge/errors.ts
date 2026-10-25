@@ -16,7 +16,3 @@ export class KnowledgeRejected extends Schema.TaggedError<KnowledgeRejected>()(
 ) {}
 
 /** Sharing into a group the caller is not allowed to share into. */
-export class SharingNotAllowed extends Schema.TaggedError<SharingNotAllowed>()(
-  "SharingNotAllowed",
-  { reason: Schema.String },
-) {}

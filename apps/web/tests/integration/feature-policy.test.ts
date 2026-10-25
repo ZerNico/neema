@@ -1,4 +1,5 @@
 import { PgClient } from "@effect/sql-pg";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { eq, sql } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,8 +13,6 @@ import {
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
-import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
-import { skillReadable } from "~/modules/skills/server/access.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { capabilityAllowedSql, FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
@@ -127,16 +126,16 @@ describe("feature policy", () => {
           const [agent] = yield* db
             .select({ id: agents.id })
             .from(agents)
-            .where(sql`${agents.id} = ${agentId} and ${agentReadable(recipient)}`);
+            .where(sql`${agents.id} = ${agentId} and ${readableBy("agent", recipient)}`);
           const [skill] = yield* db
             .select({ id: skills.id })
             .from(skills)
-            .where(sql`${skills.id} = ${skillId} and ${skillReadable(recipient)}`);
+            .where(sql`${skills.id} = ${skillId} and ${readableBy("skill", recipient)}`);
           const [collection] = yield* db
             .select({ id: knowledgeCollections.id })
             .from(knowledgeCollections)
             .where(
-              sql`${knowledgeCollections.id} = ${collectionId} and ${collectionReadable(recipient)}`,
+              sql`${knowledgeCollections.id} = ${collectionId} and ${readableBy("collection", recipient)}`,
             );
           return [Boolean(agent), Boolean(skill), Boolean(collection)];
         }),

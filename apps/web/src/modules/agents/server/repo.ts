@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -13,8 +14,6 @@ import {
   user,
   agentIntegrations,
 } from "~/db/schema/index.ts";
-import { agentReadable, collectionReadable } from "~/modules/knowledge/server/access.ts";
-import { skillReadable } from "~/modules/skills/server/access.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
@@ -153,7 +152,7 @@ export class AgentRepo extends Context.Service<
             const available = yield* tx
               .select({ id: skills.id })
               .from(skills)
-              .where(and(inArray(skills.id, [...skillIds]), skillReadable(userId)));
+              .where(and(inArray(skills.id, [...skillIds]), readableBy("skill", userId)));
             if (available.length !== skillIds.length)
               return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
           }
@@ -172,7 +171,7 @@ export class AgentRepo extends Context.Service<
               .where(
                 and(
                   inArray(knowledgeCollections.id, [...collectionIds]),
-                  collectionReadable(userId),
+                  readableBy("collection", userId),
                 ),
               );
             if (available.length !== collectionIds.length)
@@ -254,7 +253,7 @@ export class AgentRepo extends Context.Service<
             })
             .from(agents)
             .innerJoin(user, eq(user.id, agents.userId))
-            .where(agentReadable(userId))
+            .where(readableBy("agent", userId))
             .orderBy(asc(agents.name), asc(agents.id))
             .pipe(Effect.orDie);
           return rows.map(({ row, ownerName }) => summarizeAgent(row, ownerName, userId));
@@ -288,7 +287,7 @@ export class AgentRepo extends Context.Service<
             })
             .from(agents)
             .innerJoin(user, eq(user.id, agents.userId))
-            .where(and(eq(agents.id, agentId), agentReadable(userId)))
+            .where(and(eq(agents.id, agentId), readableBy("agent", userId)))
             .pipe(Effect.orDie);
           return result ?? null;
         }),

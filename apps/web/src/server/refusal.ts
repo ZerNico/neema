@@ -41,11 +41,7 @@ import type {
   GroupNotFound,
 } from "~/modules/groups/errors.ts";
 import type { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
-import type {
-  KnowledgeNotAvailable,
-  KnowledgeRejected,
-  SharingNotAllowed,
-} from "~/modules/knowledge/errors.ts";
+import type { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
 import type { LimitRejected, StorageFull, UsageLimitReached } from "~/modules/limits/errors.ts";
 import type { MailFailed } from "~/modules/notifications/server/mail.ts";
 import type { PushRejected } from "~/modules/notifications/server/push.ts";
@@ -61,7 +57,11 @@ import type {
   UnhostedImageFamily,
 } from "~/modules/providers/default-models.ts";
 import type { ScheduleNotAvailable, ScheduleRejected } from "~/modules/schedules/schema.ts";
-import type { SharingRateLimited } from "~/modules/sharing/errors.ts";
+import type {
+  SharedResourceNotAvailable,
+  SharingNotAllowed,
+  SharingRateLimited,
+} from "~/modules/sharing/errors.ts";
 import type { SkillConflict, SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import type { InvalidSearchProvider } from "~/modules/tools/server/search-provider-repo.ts";
 import type { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
@@ -129,6 +129,7 @@ export type Refusable =
   | ScheduleNotAvailable
   | ScheduleRejected
   | SharingNotAllowed
+  | SharedResourceNotAvailable
   | SharingRateLimited
   | SkillConflict
   | SkillNotAvailable
@@ -221,6 +222,7 @@ const refusals: RefusalTable = {
   ScheduleNotAvailable: notFound,
   ScheduleRejected: because(400),
   SharingNotAllowed: because(400),
+  SharedResourceNotAvailable: notFound,
   SharingRateLimited: () => ({
     status: 429,
     body: "Too many sharing requests; try again shortly",

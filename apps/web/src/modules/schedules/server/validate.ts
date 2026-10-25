@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Effect, Schema } from "effect";
 import {
   conversations,
@@ -14,9 +15,7 @@ import { parseMailbox } from "~/modules/integrations/mailbox.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { collectionReadable } from "~/modules/knowledge/server/access.ts";
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { skillReadable } from "~/modules/skills/server/access.ts";
 import { ScheduleRejected, ScheduleSettings, type ScheduleNotify } from "../schema.ts";
 import { isValidTimezone, nextFireAt, validateCron } from "./cron.ts";
 import type { DbTx } from "~/server/db.ts";
@@ -214,7 +213,7 @@ export const checkScheduleResources = (
       const available = yield* tx
         .select({ id: skills.id })
         .from(skills)
-        .where(and(inArray(skills.id, settings.skillIds), skillReadable(userId)));
+        .where(and(inArray(skills.id, settings.skillIds), readableBy("skill", userId)));
       if (available.length !== settings.skillIds.length)
         return yield* new ScheduleRejected({ reason: "a selected skill is unavailable" });
     }
@@ -223,7 +222,10 @@ export const checkScheduleResources = (
         .select({ id: knowledgeCollections.id })
         .from(knowledgeCollections)
         .where(
-          and(inArray(knowledgeCollections.id, settings.collectionIds), collectionReadable(userId)),
+          and(
+            inArray(knowledgeCollections.id, settings.collectionIds),
+            readableBy("collection", userId),
+          ),
         );
       if (available.length !== settings.collectionIds.length)
         return yield* new ScheduleRejected({ reason: "a selected collection is unavailable" });

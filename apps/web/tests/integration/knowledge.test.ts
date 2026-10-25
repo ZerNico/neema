@@ -4241,7 +4241,7 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
       );
       expect(details).toMatchObject({
         _tag: "Failure",
-        failure: { _tag: "KnowledgeNotAvailable" },
+        failure: { _tag: "SharedResourceNotAvailable" },
       });
       const denied = await run(
         Effect.flatMap(SharingService, (service) =>
@@ -4250,7 +4250,10 @@ describe.each(["agent", "collection"] as const)("%s sharing boundary", (kind) =>
           ),
         ),
       );
-      expect(denied).toMatchObject({ _tag: "Failure", failure: { _tag: "KnowledgeNotAvailable" } });
+      expect(denied).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "SharedResourceNotAvailable" },
+      });
     }
     await change(owner, resource, { action: "revokeUser", userId: recipient });
     expect(await visible(recipient, resource)).toBeNull();

@@ -1,4 +1,5 @@
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { and, asc, count, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
@@ -19,7 +20,6 @@ import { Db, type DbTx } from "~/server/db.ts";
 import type { CollectionSummary, KnowledgeDocument, KnowledgePassage } from "../schema.ts";
 import { KNOWLEDGE_LIMITS } from "../schema.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "../errors.ts";
-import { collectionReadable } from "./access.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { type DocumentChunk } from "./chunking.ts";
 import { readEmbeddingTarget, type EmbeddingTarget } from "./embedding-connection.ts";
@@ -218,7 +218,7 @@ const lockCollectionOfDocument = (tx: DbTx, userId: string, documentId: string) 
     .pipe(Effect.map(([collection]) => collection));
 
 const readableCollection = (userId: string, collectionId: string) =>
-  and(eq(knowledgeCollections.id, collectionId), collectionReadable(userId));
+  and(eq(knowledgeCollections.id, collectionId), readableBy("collection", userId));
 
 const summarize = (
   row: typeof knowledgeCollections.$inferSelect & { ownerName: string | null },
@@ -537,7 +537,7 @@ export class KnowledgeRepo extends Context.Service<
           })
           .from(knowledgeCollections)
           .innerJoin(user, eq(user.id, knowledgeCollections.userId))
-          .where(collectionReadable(userId))
+          .where(readableBy("collection", userId))
           .orderBy(asc(knowledgeCollections.name))
           .pipe(Effect.orDie);
         return rows.map((row) =>
@@ -718,7 +718,12 @@ export class KnowledgeRepo extends Context.Service<
             knowledgeEmbeddingJobs,
             eq(knowledgeEmbeddingJobs.versionId, knowledgeDocumentVersions.id),
           )
-          .where(and(eq(knowledgeDocuments.collectionId, collectionId), collectionReadable(userId)))
+          .where(
+            and(
+              eq(knowledgeDocuments.collectionId, collectionId),
+              readableBy("collection", userId),
+            ),
+          )
           .orderBy(asc(knowledgeDocuments.title), asc(knowledgeDocuments.id))
           .pipe(Effect.orDie);
 
@@ -1147,7 +1152,10 @@ export class KnowledgeRepo extends Context.Service<
           )
           .leftJoin(knowledgeDocumentVersions, eq(knowledgeDocumentVersions.id, displayedVersionId))
           .where(
-            and(inArray(knowledgeCollections.id, [...collectionIds]), collectionReadable(userId)),
+            and(
+              inArray(knowledgeCollections.id, [...collectionIds]),
+              readableBy("collection", userId),
+            ),
           )
           .orderBy(asc(knowledgeDocuments.title), asc(knowledgeDocuments.id))
           .pipe(Effect.orDie);
@@ -1197,7 +1205,7 @@ export class KnowledgeRepo extends Context.Service<
             and(
               inArray(knowledgeDocumentVersions.id, [...versionIds]),
               eq(knowledgeDocumentVersions.status, "ready"),
-              collectionReadable(userId),
+              readableBy("collection", userId),
             ),
           )
           .pipe(Effect.orDie);
@@ -1244,7 +1252,7 @@ export class KnowledgeRepo extends Context.Service<
                 .where(
                   and(
                     inArray(knowledgeCollections.id, [...collectionIds]),
-                    collectionReadable(userId),
+                    readableBy("collection", userId),
                   ),
                 )
                 .pipe(Effect.orDie);
@@ -1456,7 +1464,7 @@ export class KnowledgeRepo extends Context.Service<
               )
               .where(
                 and(
-                  collectionReadable(userId),
+                  readableBy("collection", userId),
                   eq(knowledgeDocumentVersions.status, "ready"),
                   or(
                     ...batch.map((reference) =>
@@ -1718,7 +1726,7 @@ export class KnowledgeRepo extends Context.Service<
               knowledgeCollections,
               eq(knowledgeCollections.id, knowledgeDocuments.collectionId),
             )
-            .where(and(eq(knowledgeDocuments.id, documentId), collectionReadable(userId)))
+            .where(and(eq(knowledgeDocuments.id, documentId), readableBy("collection", userId)))
             .pipe(
               Effect.map((rows) => rows[0] ?? null),
               Effect.orDie,
@@ -1748,7 +1756,7 @@ export class KnowledgeRepo extends Context.Service<
                 eq(knowledgeDocumentVersions.id, reference.versionId),
                 eq(knowledgeDocuments.id, reference.documentId),
                 eq(knowledgeCollections.id, reference.collectionId),
-                collectionReadable(userId),
+                readableBy("collection", userId),
               ),
             )
             .pipe(

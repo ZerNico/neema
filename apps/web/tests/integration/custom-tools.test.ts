@@ -308,7 +308,7 @@ describe("sharing a person's own MCP server", () => {
           .pipe(Effect.flip);
       }),
     );
-    expect(failure._tag).toBe("KnowledgeNotAvailable");
+    expect(failure._tag).toBe("SharedResourceNotAvailable");
   });
 });
 

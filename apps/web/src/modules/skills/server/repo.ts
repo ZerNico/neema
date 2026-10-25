@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -17,7 +18,6 @@ import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, type ValidatedSkillPackage } from "../package.ts";
 import type { SkillManifestEntry, SkillSummary } from "../schema.ts";
-import { skillReadable } from "./access.ts";
 
 type Revision = typeof skillRevisions.$inferSelect;
 export interface StoredSkillFile {
@@ -103,7 +103,7 @@ export const resolveSkillManifest = (
       const [row] = yield* tx
         .select()
         .from(skills)
-        .where(and(eq(skills.id, skillId), skillReadable(userId)))
+        .where(and(eq(skills.id, skillId), readableBy("skill", userId)))
         .for("share");
       if (!row) return yield* new SkillNotAvailable({ skillId });
       const [revision] = yield* tx
@@ -206,7 +206,7 @@ export class SkillRepo extends Context.Service<
         const rows = yield* db
           .select({ id: skills.id })
           .from(skills)
-          .where(and(inArray(skills.id, [...ids]), skillReadable(userId)))
+          .where(and(inArray(skills.id, [...ids]), readableBy("skill", userId)))
           .pipe(Effect.orDie);
         for (const id of ids)
           if (!rows.some((row) => row.id === id))
@@ -236,7 +236,7 @@ export class SkillRepo extends Context.Service<
                 eq(skillRevisions.revision, skills.revision),
               ),
             )
-            .where(and(skillReadable(userId), eq(skillRevisions.manualOnly, false)))
+            .where(and(readableBy("skill", userId), eq(skillRevisions.manualOnly, false)))
             .orderBy(asc(skills.name), asc(skills.id))
             .limit(SKILL_LIMITS.catalogue + exclude.length)
             .pipe(Effect.orDie);
@@ -279,7 +279,7 @@ export class SkillRepo extends Context.Service<
             .select({ skill: skills, ownerName: user.name })
             .from(skills)
             .innerJoin(user, eq(user.id, skills.userId))
-            .where(skillReadable(userId))
+            .where(readableBy("skill", userId))
             .orderBy(asc(skills.name), asc(skills.id))
             .pipe(Effect.orDie);
           return rows.map((row) => summary({ ...row.skill, ownerName: row.ownerName }, userId));
@@ -289,7 +289,7 @@ export class SkillRepo extends Context.Service<
             .select({ skill: skills, ownerName: user.name })
             .from(skills)
             .innerJoin(user, eq(user.id, skills.userId))
-            .where(and(eq(skills.id, skillId), skillReadable(userId)))
+            .where(and(eq(skills.id, skillId), readableBy("skill", userId)))
             .pipe(Effect.orDie);
           if (!row) return yield* new SkillNotAvailable({ skillId });
           return summary({ ...row.skill, ownerName: row.ownerName }, userId);
@@ -323,7 +323,7 @@ export class SkillRepo extends Context.Service<
             .select({ id: skills.id })
             .from(skillRevisions)
             .innerJoin(skills, eq(skills.id, skillRevisions.skillId))
-            .where(and(eq(skillRevisions.id, revisionId), skillReadable(userId)))
+            .where(and(eq(skillRevisions.id, revisionId), readableBy("skill", userId)))
             .pipe(Effect.orDie);
           return row !== undefined;
         }),
