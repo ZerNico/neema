@@ -39,10 +39,9 @@ import type { IntegrationApprovals } from "./approvals.ts";
 import type { ConnectedSession } from "./credentials.ts";
 import type { IntegrationAuthFailed } from "../errors.ts";
 
+/** One account offered to an attempt; several of one integration share its tools. */
 export interface OfferedIntegration {
-  /** The account it acts as; several of one integration share its tools. */
-  readonly connectionId: string;
-  readonly integrationId: string;
+  /** Names the account and its integration; nothing here repeats them. */
   readonly session: ConnectedSession;
   /** The connection's limit as offered, to tell the model; calls check it fresh. */
   readonly scope: ReadonlyArray<string> | null;
@@ -234,9 +233,9 @@ export function prepareIntegrationTools(input: {
   // Accounts of one integration share its tools; with two or more the call names one.
   const byIntegration = new Map<string, OfferedIntegration[]>();
   for (const offer of input.offered) {
-    const group = byIntegration.get(offer.integrationId);
+    const group = byIntegration.get(offer.session.integration.id);
     if (group) group.push(offer);
-    else byIntegration.set(offer.integrationId, [offer]);
+    else byIntegration.set(offer.session.integration.id, [offer]);
   }
 
   const lazy: Array<{ family: IntegrationToolFamily; summary: string }> = [];
@@ -358,14 +357,17 @@ export function prepareIntegrationTools(input: {
   ): Effect.Effect<IntegrationModelResult> {
     const manifest = findIntegrationType(offer.session.integration.kind)!;
     const integrationName = offer.session.integration.name;
-    const several = (byIntegration.get(offer.integrationId)?.length ?? 1) > 1;
+    const several = (byIntegration.get(offer.session.integration.id)?.length ?? 1) > 1;
     // Named with its account when there are several, so the model hears which one refused.
     const name = several ? `${integrationName} (${label})` : integrationName;
     const prepare = tool.prepare;
-    const changes = changesFor(offer.connectionId);
+    const changes = changesFor(offer.session.connectionId);
     const shared = offer.session.authKind === "shared";
     const account = shared || offer.session.authKind === "none" ? null : label;
-    accountByCall.set(context.toolCallId, { connectionId: offer.connectionId, name: account });
+    accountByCall.set(context.toolCallId, {
+      connectionId: offer.session.connectionId,
+      name: account,
+    });
     const refusal = (refused: Refusal) => {
       switch (refused.reason) {
         case "blocked":
@@ -404,7 +406,7 @@ export function prepareIntegrationTools(input: {
     };
     const currentConsent = (reach: Reach | null) =>
       Effect.gen(function* () {
-        const now = yield* input.permissionsFor(offer.connectionId);
+        const now = yield* input.permissionsFor(offer.session.connectionId);
         return consentFor({
           access: tool.access,
           permission: permissionFor(tool, now.permissions),
@@ -498,8 +500,8 @@ export function prepareIntegrationTools(input: {
                       callId,
                       conversationId: input.owner.conversationId,
                       messageId: input.owner.messageId,
-                      integrationId: offer.integrationId,
-                      connectionId: offer.connectionId,
+                      integrationId: offer.session.integration.id,
+                      connectionId: offer.session.connectionId,
                       account,
                       tool: tool.name,
                       label: tool.label,
@@ -542,8 +544,8 @@ export function prepareIntegrationTools(input: {
           callId,
           conversationId: input.owner.conversationId,
           messageId: input.owner.messageId,
-          integrationId: offer.integrationId,
-          connectionId: offer.connectionId,
+          integrationId: offer.session.integration.id,
+          connectionId: offer.session.connectionId,
           account,
           tool: tool.name,
           label: tool.label,
@@ -569,7 +571,7 @@ export function prepareIntegrationTools(input: {
         if (after.kind === "refuse") return refusal(after);
         if (after.kind === "ask" && before.kind !== "ask")
           return failure("This action now needs approval. Ask the user before trying again.", true);
-        const session = yield* input.sessionFor(offer.connectionId);
+        const session = yield* input.sessionFor(offer.session.connectionId);
         if (
           !session ||
           session.connectionId !== offer.session.connectionId ||
@@ -595,7 +597,7 @@ export function prepareIntegrationTools(input: {
         // Unattended, each call reaching people takes one of the run's few
         // uses before it goes out, so parallel calls cannot overshoot the cap.
         const counted = offer.unattended !== null && allowance !== undefined;
-        if (counted && !(yield* input.allowanceUses.reserve(offer.connectionId, allowance)))
+        if (counted && !(yield* input.allowanceUses.reserve(offer.session.connectionId, allowance)))
           return failure(
             `Not permitted: a scheduled run may ${allowance.label.toLowerCase()} at most ${allowance.cap} times, and this one has. ${instead}`,
             true,
@@ -603,7 +605,7 @@ export function prepareIntegrationTools(input: {
         const execute = call.execute.pipe(
           Effect.tapError((error) =>
             counted && notSent(error)
-              ? input.allowanceUses.release(offer.connectionId, allowance)
+              ? input.allowanceUses.release(offer.session.connectionId, allowance)
               : Effect.void,
           ),
         );
@@ -611,8 +613,8 @@ export function prepareIntegrationTools(input: {
           Effect.map((result): IntegrationModelResult => {
             const sources = (result.sources ?? []).map((source): IntegrationSource => ({
               kind: "integration",
-              integrationId: offer.integrationId,
-              index: input.indexer.indexForIntegration(offer.integrationId, source.url),
+              integrationId: offer.session.integration.id,
+              index: input.indexer.indexForIntegration(offer.session.integration.id, source.url),
               title: source.title.slice(0, 200),
               url: source.url,
               snippet: source.snippet.slice(0, 500),

@@ -367,7 +367,7 @@ const offeredNames = (userId: string, conversationId: string, integrationId: str
     ),
   ).then((offers) =>
     offers
-      .filter((offer) => offer.integrationId === integrationId)
+      .filter((offer) => offer.session.integration.id === integrationId)
       .flatMap((offer) => offer.session.tools.map((tool) => tool.name)),
   );
 

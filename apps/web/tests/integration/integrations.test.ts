@@ -1132,7 +1132,7 @@ describe("what a chat is offered", () => {
         Effect.flatMap(IntegrationService, (s) =>
           s.resolveOffer({ userId, conversationId, grants }),
         ),
-      ).then((offers) => offers.map((offer) => [offer.integrationId, offer.unattended]));
+      ).then((offers) => offers.map((offer) => [offer.session.integration.id, offer.unattended]));
 
     expect(await offered(null)).toEqual([["outline", null]]);
     await run(
@@ -2360,7 +2360,7 @@ describe("several accounts of one integration", () => {
     const { userId, ada, bo } = await twoAccounts();
     const conversationId = await newConversation(userId);
     const { offered, prepared, list } = await toolsIn(userId, conversationId, null);
-    expect(offered.map((offer) => offer.connectionId)).toEqual([ada, bo]);
+    expect(offered.map((offer) => offer.session.connectionId)).toEqual([ada, bo]);
     expect([...prepared.names.keys()].filter((name) => name.endsWith("__list"))).toEqual([
       "int_outline__list",
     ]);
@@ -2386,7 +2386,7 @@ describe("several accounts of one integration", () => {
       s.setConversationIntegration(userId, conversationId, bo, { enabled: false }),
     );
     const alone = await toolsIn(userId, conversationId, null);
-    expect(alone.offered.map((offer) => offer.connectionId)).toEqual([ada]);
+    expect(alone.offered.map((offer) => offer.session.connectionId)).toEqual([ada]);
     expect(alone.prepared.names.get("int_outline__list")?.chooses).toBe(false);
     const plain = await keysDuring(() => run(alone.list({}, { toolCallId: "plain" })));
     expect(plain.result).toMatchObject({ ok: true });
@@ -2460,7 +2460,7 @@ describe("several accounts of one integration", () => {
     const { offered } = await toolsIn(userId, conversationId, [
       { connectionId: bo, integrationId: "outline", access: "read" },
     ]);
-    expect(offered.map((offer) => [offer.connectionId, offer.unattended?.access])).toEqual([
+    expect(offered.map((offer) => [offer.session.connectionId, offer.unattended?.access])).toEqual([
       [bo, "read"],
     ]);
   });

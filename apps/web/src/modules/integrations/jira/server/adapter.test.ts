@@ -436,8 +436,6 @@ describe("a connection limited to some projects", () => {
     const tools = prepareIntegrationTools({
       offered: [
         {
-          connectionId: "c",
-          integrationId: "jira",
           session: connected,
           scope: ["PROJ"],
           unattended: null,
@@ -517,8 +515,6 @@ describe("a connection limited to some projects", () => {
     const tools = prepareIntegrationTools({
       offered: [
         {
-          connectionId: "c",
-          integrationId: "jira",
           session: connected,
           scope: ["OPS"],
           unattended: null,

@@ -220,8 +220,6 @@ describe("sending under a schedule's allowance", () => {
     const prepared = prepareIntegrationTools({
       offered: [
         {
-          connectionId: "connection",
-          integrationId: "outlook",
           session,
           scope: null,
           unattended,
@@ -321,8 +319,6 @@ describe("sending under a schedule's allowance", () => {
     const prepared = prepareIntegrationTools({
       offered: [
         {
-          connectionId: "connection",
-          integrationId: "outlook",
           session,
           scope: null,
           unattended: { access: "write", allowances: { send: ["ana@example.com"] } },
@@ -457,8 +453,6 @@ describe("several accounts of one integration", () => {
     const reserved: string[] = [];
     const prepared = prepareIntegrationTools({
       offered: accounts.map((account) => ({
-        connectionId: account.connectionId,
-        integrationId: "outlook",
         session: account,
         scope: null,
         unattended: null,

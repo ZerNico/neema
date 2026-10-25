@@ -35,7 +35,7 @@ import { fieldValues, readFields } from "../fields.ts";
 import type { IntegrationManifest, IntegrationToolInfo, ToolAccess } from "../manifest.ts";
 import type { IntegrationAdapter, OfferedTool } from "./adapter.ts";
 import { findAdapterType } from "./adapters.ts";
-import { shippedTools } from "./tools.ts";
+import { shippedTools, type OfferedIntegration } from "./tools.ts";
 import {
   IntegrationRepo,
   idFromName,
@@ -73,17 +73,6 @@ export interface ChatIntegration {
   enabled: boolean;
   /** What `enabled` would be without this chat's own choice. */
   defaultEnabled: boolean;
-}
-
-export interface ResolvedOffer {
-  connectionId: string;
-  integrationId: string;
-  session: ConnectedSession;
-  /** The connection's limit as the generation starts, to tell the model; calls read it fresh. */
-  scope: ReadonlyArray<string> | null;
-  unattended: UnattendedGrant;
-  /** As the generation starts; a blocked tool is not offered at all. */
-  permissions: Record<string, ToolPermission>;
 }
 
 /** What decides one call, read fresh each time so a change applies mid-answer. */
@@ -302,7 +291,7 @@ export class IntegrationService extends Context.Service<
       userId: string;
       conversationId: string;
       grants: ReadonlyArray<IntegrationGrant> | null;
-    }): Effect.Effect<ReadonlyArray<ResolvedOffer>>;
+    }): Effect.Effect<ReadonlyArray<OfferedIntegration>>;
     permissionsFor(
       userId: string,
       conversationId: string,
@@ -474,7 +463,7 @@ export class IntegrationService extends Context.Service<
       });
 
       const credentials = yield* makeCredentials({ toolsOf, changed });
-      const { available, sessionFor } = credentials;
+      const { available, openSession, sessionFor } = credentials;
       const listings = yield* makeToolListings({ credentials });
       /** Lists each one, all of them even when one fails, then says what failed first. */
       const listEach = Effect.fn(function* (
@@ -713,22 +702,20 @@ export class IntegrationService extends Context.Service<
             : (yield* chatIntegrations(input.userId, input.conversationId))
                 .filter((entry) => entry.enabled)
                 .map((entry) => ({ connectionId: entry.connectionId, unattended: null }));
-          const offers: ResolvedOffer[] = [];
+          const offers: OfferedIntegration[] = [];
           for (const entry of chosen) {
             // An account gone since the turn was accepted drops out of the
             // offer, like a disabled custom tool, rather than failing it.
-            const session = yield* sessionFor(input.userId, entry.connectionId).pipe(Effect.option);
-            if (session._tag === "Some") {
-              const connection = yield* repo.getConnection(input.userId, entry.connectionId);
+            const opened = yield* openSession(input.userId, entry.connectionId).pipe(Effect.option);
+            if (opened._tag === "Some") {
+              const { session, connection } = opened.value;
               offers.push({
-                connectionId: entry.connectionId,
-                integrationId: session.value.integration.id,
-                session: session.value,
-                scope: findIntegrationType(session.value.integration.kind)?.scope
-                  ? (connection?.scope ?? null)
+                session,
+                scope: findIntegrationType(session.integration.kind)?.scope
+                  ? connection.scope
                   : null,
                 unattended: entry.unattended,
-                permissions: connection?.toolPermissions ?? {},
+                permissions: connection.toolPermissions,
               });
             }
           }

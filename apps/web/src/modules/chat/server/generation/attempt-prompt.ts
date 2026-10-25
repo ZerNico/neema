@@ -726,8 +726,9 @@ export const prepareAttemptPrompt = (env: {
             ...new Set(
               [...integrationTools.names.values()].map(
                 (entry) =>
-                  integrationOffer.find((offer) => offer.integrationId === entry.integrationId)
-                    ?.session.integration.name ?? entry.integrationId,
+                  integrationOffer.find(
+                    (offer) => offer.session.integration.id === entry.integrationId,
+                  )?.session.integration.name ?? entry.integrationId,
               ),
             ),
           ]

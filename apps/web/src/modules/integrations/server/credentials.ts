@@ -509,8 +509,8 @@ export const makeCredentials = (deps: {
         return yield* new IntegrationRequestFailed({ status: null, message: result.message });
       });
 
-    /** A working session as one of this person's accounts. */
-    const sessionFor = Effect.fn("IntegrationService.session")(function* (
+    /** A working session as one of this person's accounts, with the row it was made from. */
+    const openSession = Effect.fn("IntegrationService.session")(function* (
       userId: string,
       connectionId: string,
     ) {
@@ -551,8 +551,11 @@ export const makeCredentials = (deps: {
               .pipe(Effect.map((current) => (current ? current.scope : [])))
           : Effect.succeed(null),
       };
-      return session;
+      return { session, connection };
     });
+
+    const sessionFor = (userId: string, connectionId: string) =>
+      openSession(userId, connectionId).pipe(Effect.map(({ session }) => session));
 
     /**
      * Reconnecting an account must sign in as that same account: another one
@@ -583,16 +586,5 @@ export const makeCredentials = (deps: {
         });
     });
 
-    /** A session as any working account of theirs, oldest first, for work that is not a person's own call. */
-    const anySessionFor = Effect.fn(function* (userId: string, integrationId: string) {
-      const listed = yield* repo.listForUser(userId, integrationId);
-      const accounts = listed.find((entry) => entry.config.id === integrationId)?.connections ?? [];
-      for (const account of accounts) {
-        const session = yield* sessionFor(userId, account.id).pipe(Effect.option);
-        if (session._tag === "Some") return session.value;
-      }
-      return yield* new IntegrationNotAvailable({ integrationId });
-    });
-
-    return { available, discoveredSecret, sessionFor, anySessionFor, sameAccount };
+    return { available, discoveredSecret, openSession, sessionFor, sameAccount };
   });
