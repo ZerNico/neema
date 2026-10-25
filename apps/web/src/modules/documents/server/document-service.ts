@@ -840,7 +840,6 @@ export class DocumentService extends Context.Service<
             const outcome = yield* transaction((tx) =>
               Effect.gen(function* () {
                 if (guard) yield* guard(tx);
-                yield* requireDocuments(userId, tx);
                 const locked = yield* documents.lock(tx, userId, documentId);
                 if (locked.revision !== entry.revision) return yield* new StaleEntry();
                 const decided = yield* decide(entry.doc, locked, openThreads(entry));
@@ -1079,7 +1078,6 @@ export class DocumentService extends Context.Service<
         const parsed = yield* decode(PushDocumentInput, "invalid document update")(input);
         return yield* exclusive(parsed.documentId)(
           Effect.gen(function* () {
-            yield* requireDocuments(userId);
             const { entry, document } = yield* load(userId, parsed.documentId);
             const clientId = personClient(userId, parsed.clientId);
             // Refused before the steps touch anything: a reader's cursor may move, their text may not.
@@ -1142,7 +1140,6 @@ export class DocumentService extends Context.Service<
           .transaction((tx) =>
             Effect.gen(function* () {
               if (!(yield* originatingSessionEligible(tx, options.sessionId, userId))) return false;
-              if (!(yield* policy.can(userId, "documents", tx))) return false;
               return Boolean(yield* documents.get(userId, documentId, tx));
             }),
           )
@@ -1247,7 +1244,6 @@ export class DocumentService extends Context.Service<
       ) =>
         exclusive(documentId)(
           Effect.gen(function* () {
-            yield* requireDocuments(userId);
             const { entry } = yield* load(userId, documentId);
             const comments = yield* transaction((tx) =>
               Effect.gen(function* () {
@@ -1554,20 +1550,15 @@ export class DocumentService extends Context.Service<
 
       return DocumentService.of({
         get: Effect.fn(function* (userId, documentId) {
-          return (yield* policy.can(userId, "documents"))
-            ? yield* documents.get(userId, documentId)
-            : null;
+          return yield* documents.get(userId, documentId);
         }),
         list: Effect.fn(function* (userId, owner) {
-          return (yield* policy.can(userId, "documents"))
-            ? yield* documents.list(userId, owner)
-            : [];
+          return yield* documents.list(userId, owner);
         }),
         remove: Effect.fn("DocumentService.remove")(function* (userId, documentId) {
           const removed = yield* exclusive(documentId)(
             transaction((tx) =>
               Effect.gen(function* () {
-                yield* requireDocuments(userId, tx);
                 const document = yield* documents.lock(tx, userId, documentId);
                 if (!document.projectId)
                   return yield* new DocumentRejected({
@@ -1584,7 +1575,6 @@ export class DocumentService extends Context.Service<
           const renamed = yield* exclusive(documentId)(
             transaction((tx) =>
               Effect.gen(function* () {
-                yield* requireDocuments(userId, tx);
                 yield* documents.lock(tx, userId, documentId);
                 return yield* documents.write(tx, userId, documentId, { title });
               }),
@@ -1603,7 +1593,6 @@ export class DocumentService extends Context.Service<
           );
           const spent = yield* transaction((tx) =>
             Effect.gen(function* () {
-              yield* requireDocuments(userId, tx);
               // The row lock holds off a delete until the claim commits.
               const document = yield* documents.lock(tx, userId, input.documentId);
               return yield* claimImages(tx, userId, document.id, ownerOf(document), plan, [
@@ -1618,7 +1607,6 @@ export class DocumentService extends Context.Service<
         }),
         create,
         versions: Effect.fn("DocumentService.versions")(function* (userId, documentId) {
-          if (!(yield* policy.can(userId, "documents"))) return null;
           const loaded = yield* exclusive(documentId)(load(userId, documentId)).pipe(
             Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
           );
@@ -1632,7 +1620,6 @@ export class DocumentService extends Context.Service<
           });
         }),
         versionAt: Effect.fn("DocumentService.versionAt")(function* (userId, documentId, revision) {
-          if (!(yield* policy.can(userId, "documents"))) return null;
           return yield* exclusive(documentId)(
             Effect.gen(function* () {
               const { entry, document } = yield* load(userId, documentId);
@@ -1648,7 +1635,6 @@ export class DocumentService extends Context.Service<
           ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
         }),
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {
-          if (!(yield* policy.can(userId, "documents"))) return null;
           return yield* exclusive(documentId)(
             load(userId, documentId).pipe(
               Effect.map(({ entry, document }) => ({

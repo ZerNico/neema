@@ -1,3 +1,4 @@
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { and, asc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -31,9 +32,11 @@ type Reader = Pick<DbTx, "select">;
 
 /**
  * The reader's standing on the document in scope: a chat's document is its
- * owner's alone, a project's follows the project role. Null means no access.
+ * owner's alone, a project's follows the project role. Null means no access,
+ * which is also every document while the documents feature is off for them.
  */
 const accessSql = (userId: string) => sql<ProjectRole | null>`(case
+  when not (${capabilityAllowedSql(userId, "documents")}) then null
   when ${documents.conversationId} is not null then (
     select 'owner' from ${conversations}
     where ${conversations.id} = ${documents.conversationId} and ${ownedConversation(userId)}
