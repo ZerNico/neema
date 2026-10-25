@@ -6,18 +6,27 @@ export const SharedResource = Schema.Struct({
   id: EntityId,
 });
 export type SharedResource = typeof SharedResource.Type;
-export const ShareEmailInput = Schema.Struct({
+/** One change to who may use a resource; each is checked against the caller's sharing rights. */
+export const SharingChange = Schema.Union([
+  Schema.Struct({
+    action: Schema.Literal("email"),
+    email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
+  }),
+  Schema.Struct({ action: Schema.Literal("group"), groupId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("revokeUser"), userId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("revokeGroup"), groupId: EntityId }),
+  Schema.Struct({
+    action: Schema.Literal("publish"),
+    audience: Schema.Literals(["private", "instance"]),
+  }),
+]);
+export type SharingChange = typeof SharingChange.Type;
+export const ChangeSharingInput = Schema.Struct({
   ...SharedResource.fields,
-  email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
+  change: SharingChange,
 });
-export const ShareGroupInput = Schema.Struct({ ...SharedResource.fields, groupId: EntityId });
-export const RevokeUserInput = Schema.Struct({ ...SharedResource.fields, userId: EntityId });
 export const RecipientSearchInput = Schema.Struct({
   q: Schema.String.check(Schema.isMaxLength(200)),
-});
-export const PublishResourceInput = Schema.Struct({
-  ...SharedResource.fields,
-  audience: Schema.Literals(["private", "instance"]),
 });
 /** A signed-in account offered by the sharing picker. */
 export interface ShareRecipient {

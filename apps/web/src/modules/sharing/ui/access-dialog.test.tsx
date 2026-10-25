@@ -4,26 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccessDialog } from "./access-dialog.tsx";
 import type { ResourceGrants } from "../schema.ts";
-import {
-  getResourceSharing,
-  searchShareRecipients,
-  publishResource,
-  revokeResourceGroup,
-  revokeResourceUser,
-  shareResourceWithEmail,
-  shareResourceWithGroup,
-} from "../server/functions.ts";
+import { getResourceSharing, searchShareRecipients, changeSharing } from "../server/functions.ts";
 import { toast } from "sonner";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 
 vi.mock("../server/functions.ts", () => ({
   getResourceSharing: vi.fn(),
   searchShareRecipients: vi.fn(),
-  shareResourceWithEmail: vi.fn(),
-  shareResourceWithGroup: vi.fn(),
-  revokeResourceUser: vi.fn(),
-  revokeResourceGroup: vi.fn(),
-  publishResource: vi.fn(),
+  changeSharing: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.stubGlobal(
@@ -86,13 +74,13 @@ describe("AccessDialog", () => {
 
   it("picks a person out of the directory and grants by their account email", async () => {
     const user = userEvent.setup();
-    vi.mocked(shareResourceWithEmail).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({}, [DANA]);
     await user.click(screen.getByRole("combobox", { name: "Add people or groups" }));
     await user.click(await screen.findByRole("option", { name: /Dana Lee/ }));
     await waitFor(() =>
-      expect(shareResourceWithEmail).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", email: "dana@example.com" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "email", email: "dana@example.com" } },
       }),
     );
   });
@@ -116,9 +104,7 @@ describe("AccessDialog", () => {
 
   it("reports a refused grant without closing the panel", async () => {
     const user = userEvent.setup();
-    vi.mocked(shareResourceWithEmail).mockRejectedValueOnce(
-      new Error("No account for that email."),
-    );
+    vi.mocked(changeSharing).mockRejectedValueOnce(new Error("No account for that email."));
     setup({}, [DANA]);
     await user.click(screen.getByRole("combobox", { name: "Add people or groups" }));
     await user.click(await screen.findByRole("option", { name: /Dana Lee/ }));
@@ -127,14 +113,14 @@ describe("AccessDialog", () => {
 
   it("offers eligible groups beside people and grants the chosen one", async () => {
     const user = userEvent.setup();
-    vi.mocked(shareResourceWithGroup).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({ eligibleGroups: [{ id: "g1", name: "Support" }] }, [DANA]);
     await user.click(screen.getByRole("combobox", { name: "Add people or groups" }));
     expect(await screen.findByRole("option", { name: /Dana Lee/ })).toBeVisible();
     await user.click(screen.getByRole("option", { name: /Support/ }));
     await waitFor(() =>
-      expect(shareResourceWithGroup).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", groupId: "g1" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "group", groupId: "g1" } },
       }),
     );
   });
@@ -151,8 +137,7 @@ describe("AccessDialog", () => {
 
   it("removes a grant and says the other ways in are unaffected", async () => {
     const user = userEvent.setup();
-    vi.mocked(revokeResourceUser).mockResolvedValue(undefined as never);
-    vi.mocked(revokeResourceGroup).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({ users: [DANA], groups: [{ groupId: "g1", name: "Support" }] });
     expect(
       within(screen.getByRole("list", { name: "Access" })).getAllByRole("listitem"),
@@ -161,8 +146,8 @@ describe("AccessDialog", () => {
     expect(screen.queryByText(/still have access/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remove access for Dana Lee" }));
     await waitFor(() =>
-      expect(revokeResourceUser).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", userId: "u1" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "revokeUser", userId: "u1" } },
       }),
     );
     await waitFor(() =>
@@ -172,15 +157,15 @@ describe("AccessDialog", () => {
     );
     await user.click(screen.getByRole("button", { name: "Remove access for Support" }));
     await waitFor(() =>
-      expect(revokeResourceGroup).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", groupId: "g1" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "revokeGroup", groupId: "g1" } },
       }),
     );
   });
 
   it("says plainly when a removed person had no other way in", async () => {
     const user = userEvent.setup();
-    vi.mocked(revokeResourceUser).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({ users: [DANA] });
     await user.click(screen.getByRole("button", { name: "Remove access for Dana Lee" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Removed Dana Lee."));
@@ -188,14 +173,14 @@ describe("AccessDialog", () => {
 
   it("confirms before letting everyone signed in use it, and not on the way back", async () => {
     const user = userEvent.setup();
-    vi.mocked(publishResource).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({ canPublish: true });
     await user.click(screen.getByRole("combobox", { name: "General access" }));
     await user.click(await screen.findByRole("option", { name: "Everyone signed in" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(/does not become public on the internet/);
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(publishResource).not.toHaveBeenCalled();
+    expect(changeSharing).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("combobox", { name: "General access" }));
     await user.click(await screen.findByRole("option", { name: "Everyone signed in" }));
@@ -203,22 +188,22 @@ describe("AccessDialog", () => {
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Give access" }),
     );
     await waitFor(() =>
-      expect(publishResource).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", audience: "instance" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "publish", audience: "instance" } },
       }),
     );
   });
 
   it("narrows access without a confirmation and explains what everyone signed in means", async () => {
     const user = userEvent.setup();
-    vi.mocked(publishResource).mockResolvedValue(undefined as never);
+    vi.mocked(changeSharing).mockResolvedValue(undefined as never);
     setup({ canPublish: true, audience: "instance" });
     expect(screen.getByText(/not public on the internet/)).toBeVisible();
     await user.click(screen.getByRole("combobox", { name: "General access" }));
     await user.click(await screen.findByRole("option", { name: "Only people and groups you add" }));
     await waitFor(() =>
-      expect(publishResource).toHaveBeenCalledWith({
-        data: { kind: "agent", id: "a1", audience: "private" },
+      expect(changeSharing).toHaveBeenCalledWith({
+        data: { kind: "agent", id: "a1", change: { action: "publish", audience: "private" } },
       }),
     );
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();

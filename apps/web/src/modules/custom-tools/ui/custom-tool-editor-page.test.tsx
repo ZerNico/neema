@@ -49,11 +49,7 @@ vi.mock("~/modules/sharing/server/functions.ts", () => ({
     eligibleGroups: [],
   }),
   searchShareRecipients: vi.fn().mockResolvedValue([]),
-  shareResourceWithEmail: vi.fn(),
-  shareResourceWithGroup: vi.fn(),
-  revokeResourceUser: vi.fn(),
-  revokeResourceGroup: vi.fn(),
-  publishResource: vi.fn(),
+  changeSharing: vi.fn(),
 }));
 vi.mock("~/ui/confirm-context.ts", () => ({ useConfirm: () => confirm }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));

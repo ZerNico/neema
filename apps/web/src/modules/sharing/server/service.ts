@@ -9,20 +9,13 @@ import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import type { Capability } from "~/modules/groups/policy.ts";
 import { SharingRateLimited } from "../errors.ts";
 import { sharingResources } from "./resources.ts";
-import type { ResourceGrants, SharedResource, ShareRecipient } from "../schema.ts";
+import type { ResourceGrants, SharedResource, SharingChange, ShareRecipient } from "../schema.ts";
 import { escapeLike } from "~/server/sql.ts";
 
 /** One page of the picker; the query narrows it rather than paging. */
 const RECIPIENT_LIMIT = 20;
 
 type SharingError = KnowledgeNotAvailable | SharingNotAllowed;
-type Change =
-  | { action: "email"; email: string }
-  | { action: "group"; groupId: string }
-  | { action: "revokeUser"; userId: string }
-  | { action: "revokeGroup"; groupId: string }
-  | { action: "publish"; audience: "private" | "instance" };
-
 // Custom tools are admin-only, so no member column can let one be shared.
 const shareColumn = (kind: SharedResource["kind"]) =>
   kind === "agent"
@@ -44,7 +37,7 @@ export class SharingService extends Context.Service<
     change(
       userId: string,
       resource: SharedResource,
-      change: Change,
+      change: SharingChange,
     ): Effect.Effect<void, SharingError | SharingRateLimited>;
     recipients(userId: string, q: string): Effect.Effect<ReadonlyArray<ShareRecipient>>;
   }

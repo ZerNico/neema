@@ -37,11 +37,7 @@ vi.mock("~/modules/knowledge/server/functions.ts", () => ({
 }));
 vi.mock("~/modules/sharing/server/functions.ts", () => ({
   getResourceSharing: vi.fn(),
-  shareResourceWithEmail: vi.fn(),
-  shareResourceWithGroup: vi.fn(),
-  revokeResourceUser: vi.fn(),
-  revokeResourceGroup: vi.fn(),
-  publishResource: vi.fn(),
+  changeSharing: vi.fn(),
 }));
 const navigation = vi.hoisted(() => ({
   navigate: vi.fn(),

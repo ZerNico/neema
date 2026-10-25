@@ -5,13 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { resourceSharingQuery, shareRecipientsQuery } from "../client/queries.ts";
 import type { SharedResource } from "../schema.ts";
-import {
-  publishResource,
-  revokeResourceGroup,
-  revokeResourceUser,
-  shareResourceWithEmail,
-  shareResourceWithGroup,
-} from "../server/functions.ts";
+import { changeSharing } from "../server/functions.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { initials } from "~/ui/initials";
 import { ErrorState } from "~/ui/page-shell.tsx";
@@ -107,7 +101,8 @@ export function AccessDialog({
   const [confirming, setConfirming] = useState(false);
 
   const share = useMutation({
-    mutationFn: (value: string) => shareResourceWithEmail({ data: { ...resource, email: value } }),
+    mutationFn: (value: string) =>
+      changeSharing({ data: { ...resource, change: { action: "email", email: value } } }),
     onSuccess: async () => {
       setAddError(null);
       await invalidate();
@@ -117,7 +112,7 @@ export function AccessDialog({
   });
   const shareGroup = useMutation({
     mutationFn: (group: EligibleGroup) =>
-      shareResourceWithGroup({ data: { ...resource, groupId: group.id } }),
+      changeSharing({ data: { ...resource, change: { action: "group", groupId: group.id } } }),
     onSuccess: async (_result, group) => {
       setAddError(null);
       await invalidate();
@@ -127,7 +122,9 @@ export function AccessDialog({
   });
   const revokeUser = useMutation({
     mutationFn: (user: { userId: string; name: string }) =>
-      revokeResourceUser({ data: { ...resource, userId: user.userId } }),
+      changeSharing({
+        data: { ...resource, change: { action: "revokeUser", userId: user.userId } },
+      }),
     onSuccess: async (_result, user) => {
       await invalidate();
       // Grants are additive, so this row was not necessarily their only way in.
@@ -143,13 +140,15 @@ export function AccessDialog({
   });
   const revokeGroup = useMutation({
     mutationFn: (group: { groupId: string }) =>
-      revokeResourceGroup({ data: { ...resource, groupId: group.groupId } }),
+      changeSharing({
+        data: { ...resource, change: { action: "revokeGroup", groupId: group.groupId } },
+      }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not remove access.", error),
   });
   const publish = useMutation({
     mutationFn: (audience: "private" | "instance") =>
-      publishResource({ data: { ...resource, audience } }),
+      changeSharing({ data: { ...resource, change: { action: "publish", audience } } }),
     onSuccess: invalidate,
     onError: (error) => toastError("Could not change general access.", error),
   });
