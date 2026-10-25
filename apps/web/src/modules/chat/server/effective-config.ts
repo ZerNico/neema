@@ -64,7 +64,6 @@ export const fitsDirectContext = (input: {
 
 /** One coherent live agent contribution, private to this attempt. */
 export interface AgentSelection {
-  readonly agentId: string | null;
   readonly resolvedAgent: ResolvedAgentConfig;
 }
 
@@ -83,7 +82,6 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
   const stored = yield* agents.get(input.userId, input.agentId, input.tx);
   if (!stored) return yield* new AgentNotAvailable({ agentId: input.agentId });
   return {
-    agentId: stored.row.id,
     resolvedAgent: {
       agentId: stored.row.id,
       configRevision: stored.row.configRevision,
@@ -175,7 +173,7 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     return {
       standaloneSkillIds: [...(input.skillIds ?? [])],
       skills: skillManifest,
-      agentId: input.agent?.agentId ?? null,
+      agentId: resolvedAgent?.agentId ?? null,
       resolvedAgent,
       standaloneCollectionIds: [...(input.collectionIds ?? [])],
       collectionIds,
