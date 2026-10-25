@@ -55,6 +55,10 @@
   "custom_tools_error_conflict": "Dieses Modul wurde woanders geändert. Lade es neu, bevor du speicherst.",
   "custom_tools_error_slug_taken": "Der Slug {slug} wird schon verwendet.",
   "groups_error_name_taken": "Dieser Gruppenname ist schon vergeben",
+  "language_automatic": "Automatisch",
+  "language_automatic_description": "Folgt deinem Browser, gerade {language}",
+  "language_error_save": "Die Sprache konnte nicht geändert werden.",
+  "language_title": "Sprache",
   "sharing_error_rate_limited": "Zu viele Freigaben auf einmal. Versuch es gleich noch mal",
   "skills_error_conflict": "Dieser Skill wurde in einem anderen Editor geändert. Dein Entwurf bleibt erhalten. Sieh dir die aktuelle Fassung an, bevor du speicherst.",
   "tools_error_web_search_unavailable": "Websuche nicht verfügbar: {reason}"

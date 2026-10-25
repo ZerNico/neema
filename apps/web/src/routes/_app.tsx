@@ -13,6 +13,7 @@ import { useIdentityBoundary } from "~/modules/auth/identity-context.ts";
 import { cacheOwnerOf, type SessionIdentity } from "~/modules/auth/identity.ts";
 import { setDeviceCacheOwner } from "~/modules/cache/client/device-cache.ts";
 import { meQuery, useSessionUser } from "~/modules/auth/client.ts";
+import { alignLanguage } from "~/modules/language/client/language.ts";
 import { AppSidebar } from "~/modules/chat/ui/app-sidebar.tsx";
 import { conversationsInfiniteQuery } from "~/modules/chat/client/queries.ts";
 import { sidebarPinsQuery } from "~/modules/navigation/client/queries.ts";
@@ -58,7 +59,10 @@ export const Route = createFileRoute("/_app")({
       const { user, identity } = me;
       // Known before anything renders, so a cache can be read for the first frame.
       // Browser only: on a server, module state would be shared by every request.
-      if (typeof window !== "undefined") setDeviceCacheOwner(cacheOwnerOf(identity));
+      if (typeof window !== "undefined") {
+        setDeviceCacheOwner(cacheOwnerOf(identity));
+        await alignLanguage(context.queryClient);
+      }
       await feed;
       return { user, identity };
     } catch (error) {

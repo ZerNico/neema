@@ -55,6 +55,7 @@ import { ApiKeys } from "~/modules/api-keys/server/service.ts";
 import { ConnectedApps } from "~/modules/mcp-server/server/connected-apps.ts";
 import { ScheduleService } from "~/modules/schedules/server/service.ts";
 import { ScheduleSettlement } from "~/modules/schedules/server/settle.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { PageExtractor } from "~/modules/tools/server/extraction.ts";
@@ -97,6 +98,7 @@ const ReposLayer = Layer.mergeAll(
   ScheduleRepo.layer,
   ConnectedApps.layer,
   ApiKeys.layer,
+  LanguageRepo.layer,
 ).pipe(Layer.provideMerge(AttachmentRepo.layer), Layer.provideMerge(InfraLayer));
 const ToolsLayer = Layer.mergeAll(
   WebSearchExecutor.layer,

@@ -1,7 +1,22 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render as renderInto, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chooseLanguage } from "~/modules/language/server/functions.ts";
 import { themeInitScript } from "~/ui/theme.tsx";
 import { AppearancePage } from "./appearance-page.tsx";
+
+vi.mock("~/modules/language/server/functions.ts", () => ({
+  getLanguage: vi.fn(),
+  chooseLanguage: vi.fn().mockResolvedValue(undefined),
+  noteBrowserLanguage: vi.fn(),
+}));
+
+const render = (page: ReactElement) => {
+  const client = new QueryClient();
+  client.setQueryData(["language"], { chosen: null });
+  return renderInto(<QueryClientProvider client={client}>{page}</QueryClientProvider>);
+};
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ to, children }: { to: string; children?: unknown }) => (
@@ -54,6 +69,23 @@ describe("AppearancePage mode", () => {
     expect(localStorage.getItem("theme")).toBe("dark");
     expect(document.documentElement).toHaveClass("dark");
     expect(screen.getByRole("radio", { name: /Dark/ })).toHaveAttribute("aria-checked", "true");
+  });
+});
+
+describe("AppearancePage language", () => {
+  it("follows the browser until a language is chosen, then saves it to the account", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...location, reload });
+    render(<AppearancePage />);
+    expect(screen.getByRole("radio", { name: "Automatic" })).toBeChecked();
+    expect(screen.getByText("Follows your browser, now English")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Deutsch" }));
+
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(chooseLanguage).toHaveBeenCalledWith({ data: { chosen: "de" } });
+    expect(document.cookie).toContain("language=de");
+    document.cookie = "language=; path=/; max-age=0";
   });
 });
 

@@ -1,6 +1,7 @@
 import { ComputerIcon, Moon02Icon, Sun03Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import { LanguageSection } from "~/modules/language/ui/language-section.tsx";
 import { Page, Section } from "~/ui/page-shell.tsx";
 import {
   COLOR_SCHEMES,
@@ -34,7 +35,7 @@ const MODES: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
 
 const GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3";
 
-/** How the app looks on this device: which theme, and light or dark. */
+/** How the app looks on this device, and the language it reads in everywhere. */
 export function AppearancePage() {
   const scheme = useColorScheme();
   const mode = useTheme();
@@ -72,6 +73,7 @@ export function AppearancePage() {
           ))}
         </div>
       </Section>
+      <LanguageSection />
     </Page>
   );
 }

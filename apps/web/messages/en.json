@@ -55,6 +55,10 @@
   "custom_tools_error_conflict": "This module changed elsewhere. Reload it before saving.",
   "custom_tools_error_slug_taken": "The slug {slug} is already in use.",
   "groups_error_name_taken": "Group name already taken",
+  "language_automatic": "Automatic",
+  "language_automatic_description": "Follows your browser, now {language}",
+  "language_error_save": "Could not change the language.",
+  "language_title": "Language",
   "sharing_error_rate_limited": "Too many sharing requests. Try again shortly",
   "skills_error_conflict": "This skill changed in another editor. Your draft is kept. Review the current revision before saving.",
   "tools_error_web_search_unavailable": "Web search unavailable: {reason}"
