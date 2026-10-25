@@ -13,7 +13,7 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import { scheduleAuthoringRequest } from "../authoring.ts";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
-import { ScheduleSettings, type ScheduleNotify } from "../schema.ts";
+import { ScheduleSettings, scheduleToSettings } from "../schema.ts";
 import {
   deleteSchedule,
   pauseSchedule,
@@ -41,7 +41,6 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
-import type { ScheduleGrant } from "~/modules/integrations/grant.ts";
 
 /** Today's runs by clock time, older ones by day, like the chats list. */
 const runStamp = (date: Date) => {
@@ -49,43 +48,6 @@ const runStamp = (date: Date) => {
   return day === "Today" ? clockLabel(date) : day;
 };
 
-const scheduleToSettings = (schedule: {
-  name: string;
-  scheduleText: string;
-  cron: string;
-  timezone: string;
-  endAt: Date | null;
-  prompt: string;
-  modelId: string | null;
-  agentId: string | null;
-  imageModelId?: string | null;
-  searchEnabled: boolean;
-  researchEnabled: boolean;
-  collectionIds: string[];
-  skillIds: string[];
-  chatMode: "new" | "same";
-  chatId: string | null;
-  integrationGrants: ReadonlyArray<ScheduleGrant>;
-  notify: ScheduleNotify;
-}): ScheduleSettings => ({
-  name: schedule.name,
-  scheduleText: schedule.scheduleText,
-  cron: schedule.cron,
-  timezone: schedule.timezone,
-  endAt: schedule.endAt ? schedule.endAt.toISOString() : null,
-  prompt: schedule.prompt,
-  modelId: schedule.modelId,
-  agentId: schedule.agentId,
-  imageModelId: schedule.imageModelId ?? null,
-  searchEnabled: schedule.searchEnabled,
-  researchEnabled: schedule.researchEnabled,
-  collectionIds: [...schedule.collectionIds],
-  skillIds: [...schedule.skillIds],
-  chatMode: schedule.chatMode,
-  chatId: schedule.chatId,
-  integrationGrants: schedule.integrationGrants.map((grant) => ({ ...grant })),
-  notify: schedule.notify,
-});
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {
   const detail = useQuery({ ...scheduleQuery(scheduleId), retry: false });

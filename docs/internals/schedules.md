@@ -44,8 +44,8 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   it: the composer's first section (attachments, desktop, clarification answers) has no
   meaning for an unattended turn, and threading an origin flag would leak those invariants
   into the scheduler. The shared tail (createTurn, publish, startGeneration, title fork) is
-  extracted; the scheduled call passes `conversationId: undefined` so `createTurn` writes the
-  conversation row with `conversations.scheduleId` set.
+  extracted. The scheduled call passes `target: { kind: "new" }`, so `createTurn` writes the
+  conversation row with `conversations.scheduleId` set, or `{ kind: "existing" }` in `same` mode.
 - Run conversations are ordinary sidebar chats, marked with a calendar
   (`listConversations.scheduled`: created by a schedule, or a schedule's `chatId`), because a
   run hidden on the schedule page is a run nobody finds. `conversations.scheduleId` means
@@ -56,7 +56,7 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
 - A fire's own attempt is unattended, found by its run row naming that message and
   generation, so it is never offered `ask_user`: nobody would answer, and the question
   would be the whole answer. A person's retry or edit in the run chat is theirs and is.
-- `same` mode fires `createTurn` with `{ kind: "existing" }`. An agent cannot change after a
+- In `same` mode an agent cannot change after a
   chat's creation, so an existing chat keeps its own agent and the schedule's `agentId` only
   applies to chats a fire creates. Work chats run their tools in the desktop app, which an
   unattended fire never has, so they are refused at save (`checkScheduleResources`) and
@@ -80,8 +80,8 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   `schedule_integration_grants` caps each account at read or read and write, and a fire is offered
   exactly those, refusing rather than asking for anything more. Contacting people (sending
   mail, inviting to events) needs an allowance listing the exact addresses, at most a few
-  calls per run. Only the editor writes grants; see
-  [integrations](integrations.md#schedules-decide-in-advance).
+  calls per run. Only the person writes grants, in the editor or the draft panel; the model's
+  draft tools cannot name them. See [integrations](integrations.md#schedules-decide-in-advance).
 - Deleting a schedule keeps its chats: `conversations.schedule_id` is `on delete set null`,
   since they sit in the sidebar like any other chat. The run history goes with the schedule;
   an in-flight fire finishes in its chat. Pause and resume touch only `paused`
@@ -103,15 +103,24 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
 
 - Schedule drafts live in the same `conversation_drafts` store as agent drafts
   (`kind: 'schedule'`); the tools (`draft_schedule`, `read_schedule_draft`,
-  `update_schedule_draft`) mirror the agent ones, including the alias map for near-miss field
-  names, except that a `cron` change is validated against the draft's timezone at patch time:
-  a bad cron stored now would fail at save with no model in the loop, so the tool rejects it
-  with a correction instead. `list_agent_options` is shared, not forked — its kinds are
-  exactly what a schedule needs.
+  `list_schedule_options`, `update_schedule_draft`) mirror the agent ones, including the alias
+  map for near-miss field names, except that a `cron` change is validated against the draft's
+  timezone at patch time: a bad cron stored now would fail at save with no model in the loop,
+  so the tool rejects it with a correction instead. Each kind has its own options tool over one
+  listing (`drafts/server/resource-options.ts`), because the two families are offered and
+  loaded separately: a person may draft schedules without being allowed to author agents.
+- A draft holds every setting, as working text that may still be blank. No key means "keep
+  what is saved": a missing one was read two ways before, and a draft could switch a `same`
+  schedule back to a new chat each fire.
 - Save validates (cron parses, timezone is IANA, prompt non-blank, model accessible, agent
   owned, collections/skills readable), writes the schedule with its first `nextFireAt`
   computed from now, and stamps the target/saved receipt in one transaction; `schedule.changed`
   and `draft.changed` publish afterwards. Reload re-snapshots from the live schedule.
+- `schedules.config_revision` moves with every settings write, a fire adopting its chat
+  included, and never with a claim, pause or resume. A draft records the revision it opened
+  from and saves only over that one, else `schedule_changed` asks for a reload: without it a
+  draft opened before a first fire wrote its null `chatId` back, and the next fire made yet
+  another chat. `updated_at` cannot serve, since every claim moves it.
 - Sync events: `schedule.changed { scheduleId }` and `schedule.run.changed { scheduleId,
   runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
   `["schedule-runs", id]`.

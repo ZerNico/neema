@@ -1,16 +1,25 @@
 import { Schema, Struct } from "effect";
-import { ScheduleSettings } from "./schema.ts";
+import { SCHEDULE_TEXT_LIMITS, ScheduleSettings } from "./schema.ts";
 import type { ConversationDraft } from "~/modules/drafts/draft-schema.ts";
 import { EntityId } from "~/entity-id.ts";
 
+const draftText = (max: number) => Schema.String.check(Schema.isMaxLength(max));
+
 /** Working input retains unfinished text; only the explicit Save validates a schedule. */
-export const ScheduleDraftSettings = ScheduleSettings;
+export const ScheduleDraftSettings = Schema.Struct({
+  ...ScheduleSettings.fields,
+  name: draftText(SCHEDULE_TEXT_LIMITS.name),
+  scheduleText: draftText(SCHEDULE_TEXT_LIMITS.scheduleText),
+  cron: draftText(SCHEDULE_TEXT_LIMITS.cron),
+  timezone: draftText(SCHEDULE_TEXT_LIMITS.timezone),
+  prompt: draftText(SCHEDULE_TEXT_LIMITS.prompt),
+});
 export type ScheduleDraftSettings = typeof ScheduleDraftSettings.Type;
 export const ScheduleDraftPatch = ScheduleDraftSettings.mapFields(Struct.map(Schema.optionalKey));
 export type ScheduleDraftPatch = typeof ScheduleDraftPatch.Type;
 /**
  * What the model may change. Integration grants are authority a run uses with
- * nobody present, so only the person sets them, in the editor or draft panel.
+ * nobody present, so only the person sets them, in the editor or the draft panel.
  */
 export const ScheduleModelPatch = ScheduleDraftPatch.mapFields(Struct.omit(["integrationGrants"]));
 export type ScheduleModelPatch = typeof ScheduleModelPatch.Type;
@@ -31,6 +40,7 @@ export const EMPTY_SCHEDULE_DRAFT: ScheduleDraftSettings = {
   skillIds: [],
   chatMode: "new",
   chatId: null,
+  integrationGrants: [],
   notify: "always",
 };
 

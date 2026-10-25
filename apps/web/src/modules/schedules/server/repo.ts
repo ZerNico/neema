@@ -58,33 +58,35 @@ const replaceGrants = (tx: DbTx, scheduleId: string, grants: IntegrationGrant[])
 const CLAIM_BATCH = 25;
 const SETTLE_BATCH = 50;
 
+/** Every setting a schedule row holds, as an editor writes them. */
+type ScheduleSettingsWrite = Pick<
+  ScheduleColumns,
+  | "name"
+  | "prompt"
+  | "scheduleText"
+  | "cron"
+  | "timezone"
+  | "endAt"
+  | "modelId"
+  | "agentId"
+  | "imageModelId"
+  | "searchEnabled"
+  | "researchEnabled"
+  | "collectionIds"
+  | "skillIds"
+  | "notify"
+  | "chatMode"
+  | "chatId"
+  | "nextFireAt"
+> & { integrationGrants: IntegrationGrant[] };
+
 export class ScheduleRepo extends Context.Service<
   ScheduleRepo,
   {
     list(userId: string): Effect.Effect<ScheduleColumns[]>;
     get(userId: string, scheduleId: string, tx?: DbTx): Effect.Effect<ScheduleRow | null>;
     insert(
-      input: {
-        userId: string;
-        name: string;
-        prompt: string;
-        scheduleText: string;
-        cron: string;
-        timezone: string;
-        endAt: Date | null;
-        modelId: string | null;
-        agentId: string | null;
-        imageModelId?: string | null;
-        searchEnabled: boolean;
-        researchEnabled: boolean;
-        collectionIds: string[];
-        skillIds: string[];
-        chatMode: "new" | "same";
-        chatId: string | null;
-        integrationGrants?: IntegrationGrant[];
-        notify?: ScheduleRow["notify"];
-        nextFireAt: Date | null;
-      },
+      input: ScheduleSettingsWrite & { userId: string },
       tx?: DbTx,
     ): Effect.Effect<ScheduleRow>;
     /**
@@ -97,37 +99,24 @@ export class ScheduleRepo extends Context.Service<
     adoptChat(scheduleId: string, chatId: string, replacing: string | null): Effect.Effect<void>;
     /** The owner's schedule that keeps running in this chat, if any. */
     findByChat(userId: string, chatId: string): Effect.Effect<ScheduleRow | null>;
+    /**
+     * Replaces every setting and grant and moves the config revision. With
+     * `expectedRevision`, only over that revision; null when the schedule is
+     * gone or has moved on.
+     */
     update(
       userId: string,
       scheduleId: string,
-      changes: Partial<
-        Pick<
-          ScheduleRow,
-          | "name"
-          | "prompt"
-          | "scheduleText"
-          | "cron"
-          | "timezone"
-          | "endAt"
-          | "modelId"
-          | "agentId"
-          | "imageModelId"
-          | "searchEnabled"
-          | "researchEnabled"
-          | "collectionIds"
-          | "skillIds"
-          | "notify"
-          | "chatMode"
-          | "chatId"
-          | "paused"
-          | "nextFireAt"
-        >
-      > & {
-        /** Replaces every grant; absent keeps them. */
-        integrationGrants?: IntegrationGrant[];
-      },
-      tx?: DbTx,
+      settings: ScheduleSettingsWrite,
+      tx: DbTx,
+      expectedRevision?: number,
     ): Effect.Effect<ScheduleRow | null>;
+    setPaused(
+      userId: string,
+      scheduleId: string,
+      paused: boolean,
+      nextFireAt: Date | null,
+    ): Effect.Effect<boolean>;
     remove(userId: string, scheduleId: string): Effect.Effect<void>;
     listRuns(
       userId: string,
@@ -229,7 +218,7 @@ export class ScheduleRepo extends Context.Service<
                 .values({ id: uuidv7(), ...input })
                 .returning()
                 .pipe(Effect.orDie);
-              yield* replaceGrants(write, row!.id, integrationGrants ?? []);
+              yield* replaceGrants(write, row!.id, integrationGrants);
               const [stored] = yield* withGrants(write, [row!]);
               return stored!;
             }),
@@ -249,7 +238,11 @@ export class ScheduleRepo extends Context.Service<
         adoptChat: Effect.fn("ScheduleRepo.adoptChat")(function* (scheduleId, chatId, replacing) {
           yield* db
             .update(schedules)
-            .set({ chatId, updatedAt: new Date() })
+            .set({
+              chatId,
+              configRevision: sql`${schedules.configRevision} + 1`,
+              updatedAt: new Date(),
+            })
             .where(
               and(
                 eq(schedules.id, scheduleId),
@@ -264,33 +257,50 @@ export class ScheduleRepo extends Context.Service<
         update: Effect.fn("ScheduleRepo.update")(function* (
           userId,
           scheduleId,
-          { integrationGrants, ...changes },
+          { integrationGrants, nextFireAt, ...settings },
           tx,
+          expectedRevision,
         ) {
-          const next = changes.nextFireAt;
-          // A paused schedule has no next fire, whichever edit sets one.
-          const nextFireAt =
-            next instanceof Date && changes.paused === undefined
-              ? sql`case when ${schedules.paused} then null else ${next.toISOString()}::timestamptz end`
-              : next;
-          return yield* inTx(tx, (write) =>
-            Effect.gen(function* () {
-              const [row] = yield* write
-                .update(schedules)
-                .set({
-                  ...changes,
-                  ...(nextFireAt === undefined ? {} : { nextFireAt }),
-                  updatedAt: new Date(),
-                })
-                .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
-                .returning()
-                .pipe(Effect.orDie);
-              if (!row) return null;
-              if (integrationGrants) yield* replaceGrants(write, row.id, integrationGrants);
-              const [stored] = yield* withGrants(write, [row]);
-              return stored ?? null;
-            }),
-          );
+          const [row] = yield* tx
+            .update(schedules)
+            .set({
+              ...settings,
+              // A paused schedule has no next fire, whichever edit sets one.
+              nextFireAt: nextFireAt
+                ? sql`case when ${schedules.paused} then null else ${nextFireAt.toISOString()}::timestamptz end`
+                : null,
+              configRevision: sql`${schedules.configRevision} + 1`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(schedules.id, scheduleId),
+                eq(schedules.userId, userId),
+                expectedRevision === undefined
+                  ? undefined
+                  : eq(schedules.configRevision, expectedRevision),
+              ),
+            )
+            .returning()
+            .pipe(Effect.orDie);
+          if (!row) return null;
+          yield* replaceGrants(tx, row.id, integrationGrants);
+          const [stored] = yield* withGrants(tx, [row]);
+          return stored ?? null;
+        }),
+        setPaused: Effect.fn("ScheduleRepo.setPaused")(function* (
+          userId,
+          scheduleId,
+          paused,
+          nextFireAt,
+        ) {
+          const rows = yield* db
+            .update(schedules)
+            .set({ paused, nextFireAt, updatedAt: new Date() })
+            .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
+            .returning({ id: schedules.id })
+            .pipe(Effect.orDie);
+          return rows.length > 0;
         }),
         remove: Effect.fn("ScheduleRepo.remove")(function* (userId, scheduleId) {
           yield* db

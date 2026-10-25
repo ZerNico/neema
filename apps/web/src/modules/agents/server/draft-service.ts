@@ -46,23 +46,16 @@ const agentConfig = (
   kind: "agent",
   empty: EMPTY_AGENT_DRAFT,
   // Editing an existing agent starts from its stored settings, so the model
-  // and the user review the live configuration, not a blank form.
-  initialSettings: (agentId, tx) =>
-    agents
-      .get(userId, agentId, tx)
-      .pipe(
-        Effect.map((target) => (target ? storedAgentToDraftSettings(target) : EMPTY_AGENT_DRAFT)),
+  // and the user review the live configuration, not a blank form. Only an
+  // owned agent; a shared one is the recipient's to read, not to edit.
+  readTarget: (agentId, tx) =>
+    agents.get(userId, agentId, tx).pipe(
+      Effect.map((target) =>
+        target && target.row.userId === userId
+          ? { settings: storedAgentToDraftSettings(target), revision: target.row.configRevision }
+          : null,
       ),
-  // The target must be an owned agent; the current revision becomes the
-  // draft's optimistic-concurrency baseline for its first save.
-  checkTarget: (agentId, tx) =>
-    agents
-      .get(userId, agentId, tx)
-      .pipe(
-        Effect.map((target) =>
-          target && target.row.userId === userId ? target.row.configRevision : null,
-        ),
-      ),
+    ),
 });
 
 export class AgentDraftService extends Context.Service<

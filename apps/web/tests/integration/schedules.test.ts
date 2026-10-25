@@ -87,16 +87,42 @@ const insert = Effect.fn("test.insertSchedule")(function* (
     endAt: null,
     modelId: null,
     agentId: null,
+    imageModelId: null,
     searchEnabled: false,
     researchEnabled: false,
     chatMode: "new",
     chatId: null,
     collectionIds: [],
     skillIds: [],
+    integrationGrants: [],
+    notify: "always",
     nextFireAt: null,
     ...changes,
   });
 });
+
+/** An editor's save of `row` with `changes`, every other setting as it stands. */
+const edit = (row: ScheduleRow, changes: Partial<Pick<ScheduleRow, "chatId" | "nextFireAt">>) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const repo = yield* ScheduleRepo;
+    const {
+      id: _id,
+      userId,
+      paused: _paused,
+      lastFiredAt: _lastFiredAt,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      configRevision: _configRevision,
+      integrationGrants: _grants,
+      ...settings
+    } = (yield* repo.get(row.userId, row.id))!;
+    return yield* db
+      .transaction((tx) =>
+        repo.update(userId, row.id, { ...settings, integrationGrants: [], ...changes }, tx),
+      )
+      .pipe(Effect.orDie);
+  });
 
 // The claim is the whole scheduler: due-ness by DB clock, SKIP LOCKED, and
 // rescheduling from now, so downtime costs one catch-up fire.
@@ -207,11 +233,11 @@ describe("schedule claims", () => {
         const paused = yield* insert(userId, { nextFireAt: null, paused: true });
         const running = yield* insert(userId, { nextFireAt: null });
         const next = new Date(Date.now() + 3_600_000);
-        yield* repo.update(userId, paused.id, { nextFireAt: next });
-        yield* repo.update(userId, running.id, { nextFireAt: next });
+        yield* edit(paused, { nextFireAt: next });
+        yield* edit(running, { nextFireAt: next });
         // Resuming sets both at once, and the given time stands.
         const resumed = yield* insert(userId, { nextFireAt: null, paused: true });
-        yield* repo.update(userId, resumed.id, { paused: false, nextFireAt: next });
+        yield* repo.setPaused(userId, resumed.id, false, next);
         return {
           paused: (yield* repo.get(userId, paused.id))!.nextFireAt,
           running: (yield* repo.get(userId, running.id))!.nextFireAt?.getTime(),
@@ -1043,7 +1069,7 @@ describe("schedule removal", () => {
         yield* repo.adoptChat(same.id, second, first);
         const adopted = (yield* repo.get(userId, same.id))!.chatId;
         // A fire that saw `first` must not undo an edit that picked another chat.
-        yield* repo.update(userId, same.id, { chatId: edited });
+        yield* edit(same, { chatId: edited });
         yield* repo.adoptChat(same.id, second, first);
         return { adopted, afterEdit: (yield* repo.get(userId, same.id))!.chatId, second, edited };
       }),
@@ -1072,6 +1098,7 @@ describe("schedule removal", () => {
           checkScheduleResources(db as never, userId, {
             skillIds: [],
             collectionIds: [],
+            integrationGrants: [],
             chatId,
           }).pipe(
             Effect.match({

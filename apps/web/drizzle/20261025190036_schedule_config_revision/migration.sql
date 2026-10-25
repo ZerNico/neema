@@ -1,0 +1,1 @@
+ALTER TABLE "schedules" ADD COLUMN "config_revision" integer DEFAULT 1 NOT NULL;

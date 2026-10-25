@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
 import { integrationConfigs, integrationConnections } from "./integrations.ts";
@@ -46,6 +55,12 @@ export const schedules = pgTable(
       .default("new"),
     chatId: text("chat_id").references(() => conversations.id, { onDelete: "set null" }),
     paused: boolean().notNull().default(false),
+    /**
+     * Moves with every change to the settings an editor shows, a fire adopting
+     * its chat included, so a draft saves only over what it was opened from.
+     * Claims, pausing and resuming leave it alone.
+     */
+    configRevision: integer("config_revision").notNull().default(1),
     /**
      * When a fire tells its owner: `always` once each run ends, `conditional`
      * only if the answer calls `notify_user`, `off` never. A failed run tells

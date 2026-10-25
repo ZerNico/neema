@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "d64c0102-519b-47d3-9237-d7ee59357285",
+  "prevIds": [
+    "d1fbd6d8-ba5a-472a-9a71-c568c10c506c"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "schedules",
+        "config_revision"
+      ],
+      "writes": [
+        "s|col|public.schedules.config_revision",
+        "n|col|public.schedules.config_revision",
+        "e|col|public.schedules.config_revision"
+      ],
+      "reads": [
+        "n|tbl|public.schedules",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "schedules",
+        "name": "config_revision",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "1",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

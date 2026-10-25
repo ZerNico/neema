@@ -44,8 +44,8 @@ const FIRST_RUN: ChatChoice = { id: null, title: "Start one on the first run" };
 export const ScheduleChatField = withForm({
   defaultValues: EMPTY_SCHEDULE_DRAFT,
   render: function ScheduleChatField({ form }) {
-    const chatMode = useStore(form.store, (state) => state.values.chatMode ?? "new");
-    const chatId = useStore(form.store, (state) => state.values.chatId ?? null);
+    const chatMode = useStore(form.store, (state) => state.values.chatMode);
+    const chatId = useStore(form.store, (state) => state.values.chatId);
     const recent = useInfiniteQuery({
       ...conversationsInfiniteQuery(""),
       enabled: chatMode === "same",

@@ -23,18 +23,12 @@ import type { DbTx } from "~/server/db.ts";
 
 export type ValidatedSchedule = Omit<
   ScheduleSettings,
-  "endAt" | "collectionIds" | "skillIds" | "chatMode" | "chatId" | "integrationGrants" | "notify"
+  "endAt" | "collectionIds" | "skillIds" | "integrationGrants"
 > & {
-  /** Absent keeps what is saved, or the column default on a new schedule. */
-  notify?: ScheduleNotify;
-  /** Absent keeps what is saved; see ScheduleSettings. */
-  integrationGrants?: IntegrationGrant[];
+  integrationGrants: IntegrationGrant[];
   endAt: Date | null;
   collectionIds: string[];
   skillIds: string[];
-  chatMode: "new" | "same";
-  /** Always null in `new` mode, so a stale pick never lingers on the row. */
-  chatId: string | null;
 };
 
 /**
@@ -133,8 +127,8 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
       return yield* new ScheduleRejected({ reason: "selected agent is unavailable" });
   }
   const { integrationGrants, ...fields } = settings;
-  const grants = integrationGrants?.map(normalizeGrant);
-  const invalid = grants?.find((grant) => typeof grant === "string");
+  const grants = integrationGrants.map(normalizeGrant);
+  const invalid = grants.find((grant) => typeof grant === "string");
   if (invalid) return yield* new ScheduleRejected({ reason: invalid });
   const validated: ValidatedSchedule = {
     ...fields,
@@ -142,19 +136,15 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     endAt,
     collectionIds: [...new Set(settings.collectionIds)],
     skillIds: [...new Set(settings.skillIds)],
-    chatMode: settings.chatMode ?? "new",
-    chatId: settings.chatMode === "same" ? (settings.chatId ?? null) : null,
-    ...(grants
-      ? {
-          integrationGrants: [
-            ...new Map(
-              grants
-                .filter((grant) => typeof grant !== "string")
-                .map((grant) => [grant.connectionId, grant]),
-            ).values(),
-          ],
-        }
-      : {}),
+    // Always null in `new` mode, so a stale pick never lingers on the row.
+    chatId: settings.chatMode === "same" ? settings.chatId : null,
+    integrationGrants: [
+      ...new Map(
+        grants
+          .filter((grant) => typeof grant !== "string")
+          .map((grant) => [grant.connectionId, grant]),
+      ).values(),
+    ],
   };
   return validated;
 });
@@ -169,7 +159,7 @@ export const checkScheduleResources = (
     // A grant needs a working account of the person's own now, on the
     // integration it names, the way a collection needs to be readable; a fire
     // rechecks it.
-    for (const grant of settings.integrationGrants ?? []) {
+    for (const grant of settings.integrationGrants) {
       const [found] = yield* tx
         .select({
           connection: integrationConnections,

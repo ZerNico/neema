@@ -61,6 +61,7 @@ const schedule = {
   endAt: null,
   modelId: null,
   agentId: null,
+  imageModelId: null,
   searchEnabled: false,
   researchEnabled: false,
   collectionIds: [],

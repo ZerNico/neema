@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_SCHEDULE_DRAFT, ScheduleDraftPatch, ScheduleDraftSettings } from "./draft-schema.ts";
 
 describe("schedule draft settings", () => {
-  it("accepts a complete draft and rejects missing or over-limit fields", () => {
+  it("accepts unfinished text and rejects missing or over-limit fields", () => {
     const draft = {
       ...EMPTY_SCHEDULE_DRAFT,
       name: "Standup summary",
@@ -13,14 +13,17 @@ describe("schedule draft settings", () => {
       prompt: "Summarize yesterday's threads.",
     };
     expect(Schema.decodeUnknownSync(ScheduleDraftSettings)(draft)).toEqual(draft);
+    // A draft is working input: only Save requires the text to be there.
+    expect(Schema.is(ScheduleDraftSettings)(EMPTY_SCHEDULE_DRAFT)).toBe(true);
+    expect(Schema.is(ScheduleDraftSettings)({ ...draft, name: "", cron: "", prompt: "" })).toBe(
+      true,
+    );
     for (const input of [
-      { ...draft, name: "" },
       { ...draft, name: "x".repeat(201) },
-      { ...draft, scheduleText: "" },
-      { ...draft, cron: "" },
-      { ...draft, timezone: "" },
-      { ...draft, prompt: "" },
+      { ...draft, cron: "x".repeat(101) },
       { ...draft, prompt: "x".repeat(8001) },
+      { ...draft, chatMode: undefined },
+      { ...draft, integrationGrants: undefined },
       { ...draft, modelId: "" },
       { ...draft, skillIds: Array.from({ length: 21 }, (_, i) => String(i)) },
       { ...draft, collectionIds: Array.from({ length: 6 }, (_, i) => String(i)) },

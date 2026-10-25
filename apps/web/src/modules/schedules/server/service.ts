@@ -221,48 +221,40 @@ export class ScheduleService extends Context.Service<
           return row;
         }),
         update: Effect.fn("ScheduleService.update")(function* (userId, scheduleId, input) {
-          yield* get(userId, scheduleId);
           const settings = yield* validate(userId, input);
           const row = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
                   return yield* new ScheduleNotAvailable({ scheduleId });
-                if (!(yield* repo.get(userId, scheduleId, tx)))
-                  return yield* new ScheduleNotAvailable({ scheduleId });
                 yield* checkScheduleResources(tx, userId, settings);
-                return yield* repo.update(
+                const updated = yield* repo.update(
                   userId,
                   scheduleId,
-                  {
-                    ...settings,
-                    nextFireAt: firstFireAt(settings),
-                  },
+                  { ...settings, nextFireAt: firstFireAt(settings) },
                   tx,
                 );
+                if (!updated) return yield* new ScheduleNotAvailable({ scheduleId });
+                return updated;
               }),
             )
             .pipe(
               Effect.catchTag("EffectDrizzleQueryError", Effect.die),
               Effect.catchTag("SqlError", Effect.die),
             );
-          if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
           yield* changed(userId, row.id);
           return row;
         }),
         pause: Effect.fn("ScheduleService.pause")(function* (userId, scheduleId) {
           yield* get(userId, scheduleId);
-          const row = yield* repo.update(userId, scheduleId, { paused: true, nextFireAt: null });
-          if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
+          if (!(yield* repo.setPaused(userId, scheduleId, true, null)))
+            return yield* new ScheduleNotAvailable({ scheduleId });
           yield* changed(userId, scheduleId);
         }),
         resume: Effect.fn("ScheduleService.resume")(function* (userId, scheduleId) {
           const current = yield* get(userId, scheduleId);
-          const row = yield* repo.update(userId, scheduleId, {
-            paused: false,
-            nextFireAt: firstFireAt(current),
-          });
-          if (!row) return yield* new ScheduleNotAvailable({ scheduleId });
+          if (!(yield* repo.setPaused(userId, scheduleId, false, firstFireAt(current))))
+            return yield* new ScheduleNotAvailable({ scheduleId });
           yield* changed(userId, scheduleId);
         }),
         remove: Effect.fn("ScheduleService.remove")(function* (userId, scheduleId) {

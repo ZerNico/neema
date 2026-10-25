@@ -27,6 +27,7 @@ const row = (integrationGrants: ScheduleGrant[]): ScheduleRow => ({
   chatMode: "new",
   chatId: null,
   paused: false,
+  configRevision: 1,
   notify: "always",
   nextFireAt: null,
   lastFiredAt: null,

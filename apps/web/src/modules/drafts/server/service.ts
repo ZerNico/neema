@@ -18,13 +18,14 @@ export interface DraftKindConfig<S> {
   /** A fresh draft's settings; also the blank-reuse baseline for `open`. */
   empty: S;
   /**
-   * Settings for a new draft editing `targetId`: a snapshot of the target, or
-   * the empty draft for a creation. Runs inside the open transaction after
-   * `checkTarget` has passed.
+   * The target a new draft edits, read once inside the open transaction: its
+   * settings, which the draft starts from, and its config revision, which the
+   * draft's first save must still find. Null when it is not the person's to edit.
    */
-  initialSettings?(targetId: string, tx: DbTx): Effect.Effect<S, DraftError>;
-  /** Rejection text when the target of `open` is not usable; null when fine. */
-  checkTarget?: (targetId: string, tx: DbTx) => Effect.Effect<number | null, DraftError>;
+  readTarget(
+    targetId: string,
+    tx: DbTx,
+  ): Effect.Effect<{ settings: S; revision: number } | null, DraftError>;
 }
 
 export interface OpenDraftInput {
@@ -198,16 +199,9 @@ export class DraftService extends Context.Service<
                         }
                       : { outcome: "read" as const, draft: locked };
                   }
-                  const targetRevision =
-                    targetId !== null && config.checkTarget
-                      ? yield* config.checkTarget(targetId, tx)
-                      : null;
-                  if (targetId !== null && config.checkTarget && targetRevision === null)
+                  const target = targetId === null ? null : yield* config.readTarget(targetId, tx);
+                  if (targetId !== null && target === null)
                     return { outcome: "target_unavailable" as const };
-                  const base =
-                    targetId !== null && config.initialSettings
-                      ? yield* config.initialSettings(targetId, tx)
-                      : config.empty;
                   return {
                     outcome: "drafted" as const,
                     draft: (yield* drafts.initialize(
@@ -216,9 +210,9 @@ export class DraftService extends Context.Service<
                       input.conversationId,
                       input.createdByMessageId,
                       config.kind,
-                      { ...base, ...input.changes },
+                      { ...(target?.settings ?? config.empty), ...input.changes },
                       targetId,
-                      targetRevision,
+                      target?.revision ?? null,
                     )) as ConversationDraft<S>,
                   };
                 }),

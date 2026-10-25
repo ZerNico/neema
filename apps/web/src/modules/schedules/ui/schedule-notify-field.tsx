@@ -23,7 +23,7 @@ const MODES = [
 export const ScheduleNotifyField = withForm({
   defaultValues: EMPTY_SCHEDULE_DRAFT,
   render: function ScheduleNotifyField({ form }) {
-    const notify = useStore(form.store, (state) => state.values.notify ?? "always");
+    const notify = useStore(form.store, (state) => state.values.notify);
     return (
       <div className="flex flex-col gap-3">
         <FieldLabel>Notify me</FieldLabel>

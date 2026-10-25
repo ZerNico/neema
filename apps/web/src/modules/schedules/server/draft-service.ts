@@ -27,8 +27,8 @@ import {
   type SaveScheduleDraftResult,
   type ScheduleDraft,
 } from "../draft-schema.ts";
-import { ScheduleNotAvailable } from "../schema.ts";
-import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
+import { ScheduleNotAvailable, scheduleToSettings } from "../schema.ts";
+import { ScheduleRepo } from "./repo.ts";
 import { checkScheduleResources, firstFireAt, validateScheduleSettings } from "./validate.ts";
 
 // The generic store keeps settings opaque; every row this service touches is
@@ -40,24 +40,6 @@ const asSchedule = (draft: ConversationDraft): ScheduleDraft => ({
   settings: draft.settings as ScheduleDraftSettings,
 });
 
-const scheduleToSettings = (row: ScheduleRow): ScheduleDraftSettings => ({
-  name: row.name,
-  scheduleText: row.scheduleText,
-  cron: row.cron,
-  timezone: row.timezone,
-  endAt: row.endAt ? row.endAt.toISOString() : null,
-  prompt: row.prompt,
-  modelId: row.modelId,
-  agentId: row.agentId,
-  imageModelId: row.imageModelId,
-  searchEnabled: row.searchEnabled,
-  researchEnabled: row.researchEnabled,
-  collectionIds: [...row.collectionIds],
-  skillIds: [...row.skillIds],
-  chatMode: row.chatMode,
-  chatId: row.chatId,
-  notify: row.notify,
-});
 
 export class ScheduleDraftService extends Context.Service<
   ScheduleDraftService,
@@ -118,19 +100,19 @@ export class ScheduleDraftService extends Context.Service<
         { onExcessProperty: "error" },
       );
 
-      // A schedule draft's save receipt is the draft revision it last wrote;
-      // schedules have no config revision, so targetRevision stays null.
       const config = (userId: string): DraftKindConfig<ScheduleDraftSettings> => ({
         kind: "schedule",
         empty: EMPTY_SCHEDULE_DRAFT,
         // Editing an existing schedule starts from its stored settings, so the
         // model and the user review the live configuration, not a blank form.
-        initialSettings: (scheduleId, tx) =>
+        readTarget: (scheduleId, tx) =>
           repo
             .get(userId, scheduleId, tx)
-            .pipe(Effect.map((row) => (row ? scheduleToSettings(row) : EMPTY_SCHEDULE_DRAFT))),
-        checkTarget: (scheduleId, tx) =>
-          repo.get(userId, scheduleId, tx).pipe(Effect.map((row) => (row ? 1 : null))),
+            .pipe(
+              Effect.map((row) =>
+                row ? { settings: scheduleToSettings(row), revision: row.configRevision } : null,
+              ),
+            ),
       });
 
       const changedSchedule = (userId: string, scheduleId: string) =>
@@ -191,7 +173,11 @@ export class ScheduleDraftService extends Context.Service<
                 // older request once succeeded.
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };
-                if (draft.savedDraftRevision === draft.revision && draft.targetId !== null)
+                if (
+                  draft.savedDraftRevision === draft.revision &&
+                  draft.targetId !== null &&
+                  draft.targetRevision !== null
+                )
                   return { outcome: "saved" as const, draft, scheduleId: draft.targetId };
                 const saved = yield* Effect.gen(function* () {
                   const settings = yield* validateScheduleSettings(
@@ -202,26 +188,25 @@ export class ScheduleDraftService extends Context.Service<
                   yield* checkScheduleResources(tx, userId, settings);
                   if (draft.targetId === null) {
                     const row = yield* repo.insert(
-                      {
-                        userId,
-                        ...settings,
-                        nextFireAt: firstFireAt(settings),
-                      },
+                      { userId, ...settings, nextFireAt: firstFireAt(settings) },
                       tx,
                     );
-                    return { outcome: "saved" as const, scheduleId: row.id };
+                    return { outcome: "saved" as const, scheduleId: row.id, row };
                   }
+                  // Only over the schedule as the draft found it: an edit
+                  // elsewhere, or a fire adopting its chat, would otherwise be
+                  // silently written back.
                   const row = yield* repo.update(
                     userId,
                     draft.targetId,
-                    {
-                      ...settings,
-                      nextFireAt: firstFireAt(settings),
-                    },
+                    { ...settings, nextFireAt: firstFireAt(settings) },
                     tx,
+                    draft.targetRevision ?? 0,
                   );
-                  if (!row) return yield* new ScheduleNotAvailable({ scheduleId: draft.targetId });
-                  return { outcome: "saved" as const, scheduleId: row.id };
+                  if (row) return { outcome: "saved" as const, scheduleId: row.id, row };
+                  return (yield* repo.get(userId, draft.targetId, tx))
+                    ? { outcome: "schedule_changed" as const }
+                    : yield* new ScheduleNotAvailable({ scheduleId: draft.targetId });
                 }).pipe(
                   Effect.catchTag("ScheduleNotAvailable", () =>
                     Effect.succeed({ outcome: "schedule_unavailable" as const }),
@@ -234,6 +219,7 @@ export class ScheduleDraftService extends Context.Service<
                 const updated = asSchedule(
                   yield* core.write(tx, draft.id, {
                     targetId: saved.scheduleId,
+                    targetRevision: saved.row.configRevision,
                     savedDraftRevision: draft.revision,
                   }),
                 );
@@ -252,8 +238,6 @@ export class ScheduleDraftService extends Context.Service<
           return result;
         }),
         reload: Effect.fn("ScheduleDraftService.reload")(function* (userId, input) {
-          if (!(yield* policy.can(userId, "schedules")))
-            return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
           const parsed = yield* revisionInput(input);
           const result = yield* db
             .transaction((tx) =>
@@ -271,6 +255,7 @@ export class ScheduleDraftService extends Context.Service<
                   draft: asSchedule(
                     yield* core.write(tx, draft.id, {
                       settings: scheduleToSettings(target),
+                      targetRevision: target.configRevision,
                       revision: draft.revision + 1,
                     }),
                   ),
