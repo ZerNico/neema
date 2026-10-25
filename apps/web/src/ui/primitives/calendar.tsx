@@ -5,6 +5,8 @@ import { cn } from "cn";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeftIcon, ArrowRightIcon, ArrowDownIcon } from "@hugeicons/core-free-icons";
+import { de } from "react-day-picker/locale";
+import { getLocale } from "~/paraglide/runtime.js";
 
 function Calendar({
   className,
@@ -20,6 +22,8 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>["variant"];
 }) {
   const defaultClassNames = getDefaultClassNames();
+  // The page's language unless the caller names one; English is the picker's own.
+  const dayLocale = locale ?? (getLocale() === "de" ? de : undefined);
 
   return (
     <DayPicker
@@ -31,9 +35,9 @@ function Calendar({
         className,
       )}
       captionLayout={captionLayout}
-      locale={locale}
+      locale={dayLocale}
       formatters={{
-        formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "short" }),
+        formatMonthDropdown: (date) => date.toLocaleString(dayLocale?.code, { month: "short" }),
         ...formatters,
       }}
       classNames={{
