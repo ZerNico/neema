@@ -1,7 +1,9 @@
 import { Effect, Option } from "effect";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { WordProcessor } from "~/modules/word/server/runtime.ts";
-import { DocumentRejected } from "../schema.ts";
+import type { Localized } from "~/i18n/localized.ts";
+import type { Locale } from "~/paraglide/runtime.js";
+import { DocumentRejected, foreignReason } from "../schema.ts";
 import { DocumentService, type DocumentWriteGuard } from "./document-service.ts";
 import { readWordDocument, titleFromFile } from "./word-import.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
@@ -17,6 +19,8 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
     readonly owner: { projectId: string } | { conversationId: string; createdByMessageId: string };
     readonly title?: string | undefined;
     readonly by: "user" | "model";
+    /** The language a title made up for it is in. */
+    readonly locale?: Locale | undefined;
     readonly file: {
       readonly name: string;
       readonly mediaType: string;
@@ -30,11 +34,11 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
   const storage = yield* StorageQuota;
   // A picture the import may not store is dropped quietly by the reader, but a person's full
   // storage is theirs to hear: it fails the import with the reason. The model's are kept.
-  let full: string | null = null;
+  let full: Localized | null = null;
   const read = yield* readWordDocument(input.file, Option.getOrNull(word), userId, (image) =>
     (input.by === "user" ? storage.admit(userId, [image.bytes]) : Effect.void).pipe(
       // Its pictures are the uploader's files while it is read, like any they add.
-      Effect.tapError((refused) => Effect.sync(() => (full ??= refused.reason))),
+      Effect.tapError((refused) => Effect.sync(() => (full ??= foreignReason(refused.reason)))),
       Effect.andThen(
         attachments.upload({
           userId,
@@ -48,7 +52,7 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
     ),
   ).pipe(Effect.mapError((reason) => new DocumentRejected({ reason })));
   if (full !== null) return yield* new DocumentRejected({ reason: full });
-  const title = input.title?.trim() || read.title || titleFromFile(read.name);
+  const title = input.title?.trim() || read.title || titleFromFile(read.name, input.locale);
   const created = yield* DocumentService.use((service) =>
     service.create(
       userId,

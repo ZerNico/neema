@@ -5,6 +5,7 @@ import { PgClient } from "@effect/sql-pg";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -165,7 +166,7 @@ describe("a document's version history", () => {
     );
     expect(Exit.isFailure(pushed) && Cause.squash(pushed.cause)).toMatchObject({
       _tag: "DocumentRejected",
-      reason: "invalid document step",
+      reason: expect.toSatisfy((reason: Localized) => english(reason) === "invalid document step"),
     });
   });
 

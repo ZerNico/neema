@@ -19,6 +19,7 @@ import {
 import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { conversations, documents, documentSteps, messages, user } from "~/db/schema/index.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import {
@@ -54,6 +55,11 @@ let database: TestDatabase;
 type Services = Db | DocumentRepo | DocumentService;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 let appLayer: Layer.Layer<Services, unknown>;
+/** A refusal's reason, matched in the English the model reads. */
+const saying = (text: string | RegExp) =>
+  expect.toSatisfy((reason: Localized) =>
+    typeof text === "string" ? english(reason) === text : text.test(english(reason)),
+  );
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 const events: Array<{ userId: string | null; event: SyncEvent }> = [];
 let publishingFails = false;
@@ -540,7 +546,7 @@ describe("person and model writing together", () => {
           ],
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "DocumentRejected", reason: "invalid document step" });
+    ).rejects.toMatchObject({ _tag: "DocumentRejected", reason: saying("invalid document step") });
     expect(await storedSteps(created.id)).toHaveLength(0);
     expect(await get(owner, created)).toEqual(created);
   });
@@ -684,7 +690,7 @@ describe("ownership, limits and sync", () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
     const huge = "x".repeat(DOCUMENT_LIMITS.chars + 1);
-    const overCap = { _tag: "DocumentRejected", reason: expect.stringContaining("exceeds") };
+    const overCap = { _tag: "DocumentRejected", reason: saying(/exceeds/) };
     await expect(
       service((s) => s.create(owner, { conversationId, title: "Huge", content: huge })),
     ).rejects.toMatchObject(overCap);
@@ -850,7 +856,7 @@ describe("ownership, limits and sync", () => {
       ),
     ).rejects.toMatchObject({
       _tag: "DocumentRejected",
-      reason: expect.stringContaining("blocks"),
+      reason: saying(/blocks/),
     });
     expect(await markdownOf(owner, created)).toBe("small");
   });
@@ -960,7 +966,10 @@ describe("comments", () => {
           quote: "Write",
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "DocumentRejected", reason: "that thread ID is taken" });
+    ).rejects.toMatchObject({
+      _tag: "DocumentRejected",
+      reason: saying("that thread ID is taken"),
+    });
   });
 
   it("keeps a thread with its replies, resolves it, and lets only its author delete it", async () => {

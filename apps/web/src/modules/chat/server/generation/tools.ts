@@ -1,3 +1,4 @@
+import type { Localized } from "~/i18n/localized.ts";
 import type { WordDocumentFile } from "~/modules/documents/server/document-tools.ts";
 import { readWordDocument } from "~/modules/documents/server/word-import.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
@@ -178,7 +179,9 @@ export const prepareGenerationTools = (
       writeGuard,
     });
     // Set once the attempt's file resolver exists, below; a call reads it when it runs.
-    let wordFiles: ((reference: string) => Effect.Effect<WordDocumentFile, string>) | null = null;
+    let wordFiles:
+      | ((reference: string) => Effect.Effect<WordDocumentFile, Localized | string>)
+      | null = null;
     const documents = yield* prepareDocumentTools({
       service: documentService,
       readWordFile: (reference) =>

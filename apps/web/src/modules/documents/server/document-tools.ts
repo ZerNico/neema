@@ -17,6 +17,7 @@ import { EDITED_MEANWHILE, type DocumentService, type LiveEdit } from "./documen
 import { readPartialObject, type PartialField } from "./partial-json.ts";
 import { titleFromFile, type ImportedText } from "./word-import.ts";
 import { EntityId } from "~/entity-id.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
 import type { DbTx } from "~/server/db.ts";
 
 /** A Word file read for a document to start from, its pictures already stored. */
@@ -24,7 +25,7 @@ export interface WordDocumentFile {
   name: string;
   title: string | null;
   imported: ImportedText;
-  dropped: string[];
+  dropped: Localized[];
 }
 
 /** Above this the focused document is sent as a window of blocks, not whole. */
@@ -319,7 +320,9 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
   askingThread?: string | undefined;
   writeGuard: (tx: DbTx) => Effect.Effect<unknown>;
   /** Reads a Word file the sender may read, by reference, for a document to start from. */
-  readWordFile?: ((reference: string) => Effect.Effect<WordDocumentFile, string>) | undefined;
+  readWordFile?:
+    | ((reference: string) => Effect.Effect<WordDocumentFile, Localized | string>)
+    | undefined;
   /** The lighter fence for the many small writes of an edit streaming in. */
   liveGuard?: ((tx: DbTx) => Effect.Effect<unknown>) | undefined;
   project?: DocumentProject | null | undefined;
@@ -760,12 +763,12 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             input.writeGuard,
           )
           .pipe(
-            Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+            Effect.catchTag("DocumentRejected", (error) => Effect.succeed(english(error.reason))),
             Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
           );
         // Someone typed into it as it streamed: their text stays, and the
         // document as it stands is what the model sees next.
-        if (written === EDITED_MEANWHILE) {
+        if (written === english(EDITED_MEANWHILE)) {
           const current = yield* refresh().pipe(
             Effect.andThen(
               Effect.sync(() => known.find((each) => each.id === preview.created!.id)),
@@ -817,7 +820,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       )
       .pipe(
         Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(english(error.reason))),
       );
     if (result === null)
       return { outcome: "unavailable", message: "This chat cannot hold documents." };
@@ -837,7 +840,13 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       return { outcome: "unavailable", message: "Files cannot be read in this chat." };
     const file = yield* Effect.result(input.readWordFile(fileReference));
     if (EffectResult.isFailure(file))
-      return { outcome: "invalid", message: file.failure.slice(0, 600) };
+      return {
+        outcome: "invalid",
+        message: (typeof file.failure === "string" ? file.failure : english(file.failure)).slice(
+          0,
+          600,
+        ),
+      };
     const title = requestedTitle ?? file.success.title ?? titleFromFile(file.success.name);
     // A preview made before the file was named is not this document.
     const preview = claimCreate(title);
@@ -866,7 +875,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       )
       .pipe(
         Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(english(error.reason))),
       );
     if (result === null)
       return { outcome: "unavailable", message: "This chat cannot hold documents." };
@@ -879,10 +888,11 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       ...reference(result.document),
       ...(dropped.length
         ? {
-            message: `Left out, since a document cannot hold them: ${dropped.join(", ")}.`.slice(
-              0,
-              600,
-            ),
+            message:
+              `Left out, since a document cannot hold them: ${dropped.map(english).join(", ")}.`.slice(
+                0,
+                600,
+              ),
           }
         : {}),
     };
@@ -982,7 +992,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           )
     ).pipe(
       Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
-      Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+      Effect.catchTag("DocumentRejected", (error) => Effect.succeed(english(error.reason))),
     );
     if (result === null) return unavailable;
     if (typeof result === "string")
@@ -1127,7 +1137,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       )
       .pipe(
         Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)),
-        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(error.reason)),
+        Effect.catchTag("DocumentRejected", (error) => Effect.succeed(english(error.reason))),
       );
     if (result === null) return unavailable;
     if (typeof result === "string")

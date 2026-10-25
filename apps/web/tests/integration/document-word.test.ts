@@ -9,6 +9,8 @@ import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { Localized } from "~/i18n/localized.ts";
+import type { Locale } from "~/paraglide/runtime.js";
 import { attachments, documentImages, documents, limitSettings, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
@@ -182,8 +184,11 @@ const importWord = (
       file: { ...file, mediaType: "" },
     }),
   );
-const refusal = (exit: Exit.Exit<unknown, unknown>) =>
-  Exit.isFailure(exit) ? (Cause.squash(exit.cause) as { reason?: string }).reason : "created";
+const refusal = (exit: Exit.Exit<unknown, unknown>, locale: Locale = "en") => {
+  if (!Exit.isFailure(exit)) return "created";
+  const { reason } = Cause.squash(exit.cause) as { reason?: Localized | string };
+  return typeof reason === "function" ? reason(locale) : reason;
+};
 
 describe("downloading a document as Word", () => {
   it("gives a reader the stored document, with its images, and nobody else anything", async () => {
@@ -357,7 +362,7 @@ describe("starting a document from a Word file", () => {
       const bytes = wordFile("See ![Dot](/api/documents/old/images/dot)\n\nShip it.", false);
       const exit = await importWord(owner, projectId, { name: "Plan.docx", bytes });
       expect(Exit.isFailure(exit)).toBe(true);
-      expect(JSON.stringify(exit)).toMatch(/Not enough storage/);
+      expect(refusal(exit)).toMatch(/Not enough storage/);
     } finally {
       await run(
         Effect.flatMap(Db, (db) =>
@@ -434,8 +439,13 @@ describe("starting a document from a Word file", () => {
       Array.from({ length: 5_001 }, (_, index) => `Line ${index}`).join("\n\n"),
       false,
     );
-    expect(refusal(await importWord(owner, projectId, { name: "Long.docx", bytes: long }))).toBe(
+    const tooLong = await importWord(owner, projectId, { name: "Long.docx", bytes: long });
+    expect(refusal(tooLong)).toBe(
       "This Word file is too long for a document: it has 5,001 paragraphs, list items and tables, and a document holds 5,000.",
+    );
+    // The worker writes English; a German reader gets the same facts in German.
+    expect(refusal(tooLong, "de")).toBe(
+      "Diese Word-Datei ist zu lang für ein Dokument: Sie hat 5.001 Absätze, Listenpunkte und Tabellen, ein Dokument fasst 5.000.",
     );
     expect(
       refusal(

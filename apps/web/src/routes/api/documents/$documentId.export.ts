@@ -9,6 +9,8 @@ import {
   wordFileName,
 } from "~/modules/documents/server/word-export.ts";
 import { WordError } from "~/modules/word/errors.ts";
+import { wordFailure } from "~/modules/word/server/failure.ts";
+import { getLocale } from "~/paraglide/runtime.js";
 import { WordProcessor } from "~/modules/word/server/runtime.ts";
 import { approvedSession, unauthorized } from "~/server/approved-route.ts";
 import { runtime } from "~/server/runtime.ts";
@@ -23,6 +25,8 @@ export const Route = createFileRoute("/api/documents/$documentId/export")({
       GET: async ({ request, params }) => {
         const session = await approvedSession(request);
         if (!session) return unauthorized();
+        // Read in the request: the effect's fibers do not carry its locale.
+        const locale = getLocale();
         const prepared = await runtime.runPromise(
           Effect.gen(function* () {
             const documents = yield* DocumentService;
@@ -37,7 +41,7 @@ export const Route = createFileRoute("/api/documents/$documentId/export")({
             );
             return {
               title: read.document.title,
-              input: wordExportInput(read.document.title, read.doc, read.comments, images),
+              input: wordExportInput(read.document.title, read.doc, read.comments, images, locale),
               word: yield* WordProcessor,
             };
           }),
@@ -49,7 +53,7 @@ export const Route = createFileRoute("/api/documents/$documentId/export")({
             request.signal,
             { owner: session.user.id },
           );
-          const name = wordFileName(prepared.title);
+          const name = wordFileName(prepared.title, locale);
           return new Response(new Uint8Array(bytes), {
             headers: {
               "content-type": DOCX_MEDIA_TYPE,
@@ -58,7 +62,8 @@ export const Route = createFileRoute("/api/documents/$documentId/export")({
             },
           });
         } catch (error) {
-          if (error instanceof WordError) return new Response(error.message, { status: 422 });
+          if (error instanceof WordError)
+            return new Response(wordFailure(error)(locale), { status: 422 });
           throw error;
         }
       },

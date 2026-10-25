@@ -1,5 +1,12 @@
 import { Schema } from "effect";
 import { EntityId } from "~/entity-id.ts";
+import {
+  type Localized as LocalizedText,
+  Localized,
+  localized,
+  verbatim,
+} from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 export const DOCUMENT_LIMITS = {
   chars: 200_000,
@@ -52,7 +59,7 @@ export type DocumentImageInput = typeof DocumentImageInput.Type;
 export const documentImagePath = (documentId: string, attachmentId: string) =>
   `/api/documents/${encodeURIComponent(documentId)}/images/${encodeURIComponent(attachmentId)}`;
 /** One answer for every refused claim, so it never tells whether the upload exists. */
-export const IMAGE_REFUSED = "That file can’t go in this document";
+export const IMAGE_REFUSED = localized(m.documents_error_image_refused);
 /** Exactly one owner: a chat, or a project. */
 export const CreateDocumentInput = Schema.Struct({
   conversationId: Schema.optionalKey(EntityId),
@@ -214,5 +221,8 @@ export class DocumentNotAvailable extends Schema.TaggedError<DocumentNotAvailabl
   },
 ) {}
 export class DocumentRejected extends Schema.TaggedError<DocumentRejected>()("DocumentRejected", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}
+/** A reason another module gave, worded already or still an English string. */
+export const foreignReason = (reason: LocalizedText | string): LocalizedText =>
+  typeof reason === "string" ? verbatim(reason) : reason;

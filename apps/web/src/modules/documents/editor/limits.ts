@@ -1,4 +1,6 @@
 import type { Node } from "@tiptap/pm/model";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { DOCUMENT_LIMITS } from "../schema.ts";
 import { isBlock } from "./block-ids.ts";
 
@@ -27,11 +29,12 @@ export const treeSize = (doc: Node) => {
 export type TreeSize = ReturnType<typeof treeSize>;
 
 /** Why a tree is past the size limits, or null. The server and the editor both ask this. */
-export const overCap = (doc: Node, size: TreeSize = treeSize(doc)) => {
+export const overCap = (doc: Node, size: TreeSize = treeSize(doc)): Localized | null => {
   if (size.blocks > DOCUMENT_LIMITS.blocks)
-    return `document exceeds ${DOCUMENT_LIMITS.blocks} blocks`;
-  if (size.attributes > DOCUMENT_LIMITS.chars) return "document holds too much hidden data";
+    return localized(m.documents_error_too_many_blocks, { max: DOCUMENT_LIMITS.blocks });
+  if (size.attributes > DOCUMENT_LIMITS.chars)
+    return localized(m.documents_error_too_much_hidden_data);
   if (size.text > DOCUMENT_LIMITS.chars)
-    return `document exceeds ${DOCUMENT_LIMITS.chars} characters`;
+    return localized(m.documents_error_too_many_chars, { max: DOCUMENT_LIMITS.chars });
   return null;
 };

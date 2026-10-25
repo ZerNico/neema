@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { blockView, commentsView } from "~/modules/documents/editor/tree.ts";
 import { placement, type TreeEdit } from "~/modules/documents/editor/tree-edit.ts";
@@ -228,7 +229,7 @@ export const editDocument = defineTool({
         .pipe(
           Effect.catchTag("DocumentNotAvailable", missing),
           Effect.catchTag("DocumentRejected", (error) =>
-            Effect.fail(refused(`Edit refused: ${error.reason}.`)),
+            Effect.fail(refused(`Edit refused: ${english(error.reason)}.`)),
           ),
         );
       if (!("touched" in applied)) return yield* refused(explainEdit(applied));
@@ -270,7 +271,7 @@ export const createDocument = defineTool({
           ),
         ),
         Effect.catchTag("DocumentRejected", (error) =>
-          Effect.fail(refused(`Can't create it: ${error.reason}.`)),
+          Effect.fail(refused(`Can't create it: ${english(error.reason)}.`)),
         ),
       );
       return result(`Created “${created.document.title}” (${created.document.id}).`, {

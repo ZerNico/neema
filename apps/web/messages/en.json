@@ -464,6 +464,30 @@
   "documents_editor_undo": "Undo",
   "documents_editor_version_history": "Version history",
   "documents_editor_word_count": "Word count",
+  "documents_error_changed": "document changed; reload it",
+  "documents_error_chat_document_delete": "a chat's document goes with the answer that made it",
+  "documents_error_comment_not_own": "only your own or the assistant's comments",
+  "documents_error_edited_meanwhile": "someone edited the document while it was being written",
+  "documents_error_file_unreadable": "this file could not be read as a document",
+  "documents_error_image_refused": "That file can’t go in this document",
+  "documents_error_invalid_comment": "invalid comment",
+  "documents_error_invalid_document": "invalid document",
+  "documents_error_invalid_step": "invalid document step",
+  "documents_error_invalid_thread": "invalid thread",
+  "documents_error_invalid_update": "invalid document update",
+  "documents_error_markdown_unreadable": "this Markdown could not be read as a document",
+  "documents_error_no_thread": "no such thread",
+  "documents_error_one_owner": "a document belongs to a chat or a project",
+  "documents_error_read_only": "this document is read-only for you",
+  "documents_error_reply_to_root": "reply to a thread's first comment",
+  "documents_error_thread_deleted": "that thread was deleted",
+  "documents_error_thread_taken": "that thread ID is taken",
+  "documents_error_too_many_blocks": "document exceeds {max} blocks",
+  "documents_error_too_many_chars": "document exceeds {max} characters",
+  "documents_error_too_many_comments": "this document has too many comments",
+  "documents_error_too_much_hidden_data": "document holds too much hidden data",
+  "documents_error_unavailable": "documents are unavailable",
+  "documents_error_update_too_large": "document update is too large",
   "documents_export_markdown": "Export as Markdown",
   "documents_export_pdf": "Export as PDF",
   "documents_export_unsaved": "Your latest changes aren’t saved yet.",
@@ -487,6 +511,164 @@
   "documents_footnote_use_theirs": "Use theirs",
   "documents_image_add_failed": "Could not add the image",
   "documents_image_add_some_failed": "Could not add every image",
+  "documents_import_dropped_comments_over_limit": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a comment past the document’s limit",
+        "countPlural=*": "{count} comments past the document’s limit"
+      }
+    }
+  ],
+  "documents_import_dropped_comments_shortened": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a comment shortened",
+        "countPlural=*": "{count} comments shortened"
+      }
+    }
+  ],
+  "documents_import_dropped_equations": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "an equation, kept as its text",
+        "countPlural=*": "{count} equations, kept as their text"
+      }
+    }
+  ],
+  "documents_import_dropped_headers_footers": "headers and footers",
+  "documents_import_dropped_large_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a picture too large to keep",
+        "countPlural=*": "{count} pictures too large to keep"
+      }
+    }
+  ],
+  "documents_import_dropped_linked_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a linked picture",
+        "countPlural=*": "{count} linked pictures"
+      }
+    }
+  ],
+  "documents_import_dropped_nested_tables": "tables inside tables, kept as their text",
+  "documents_import_dropped_old_format_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a picture or object in an older format",
+        "countPlural=*": "{count} pictures or objects in an older format"
+      }
+    }
+  ],
+  "documents_import_dropped_shapes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a chart, diagram or shape",
+        "countPlural=*": "{count} charts, diagrams or shapes"
+      }
+    }
+  ],
+  "documents_import_dropped_table_of_contents": "a table of contents, which Word rebuilds from the headings",
+  "documents_import_dropped_text_boxes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a text box",
+        "countPlural=*": "{count} text boxes"
+      }
+    }
+  ],
+  "documents_import_dropped_unshowable_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "a picture in a format a document can’t show",
+        "countPlural=*": "{count} pictures in formats a document can’t show"
+      }
+    }
+  ],
+  "documents_import_dropped_unstored_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} picture the app couldn’t store",
+        "countPlural=*": "{count} pictures the app couldn’t store"
+      }
+    }
+  ],
+  "documents_import_expected_word_file": "Expected a Word file and a project",
+  "documents_import_no_word_runtime": "Word files cannot be read on this server.",
+  "documents_import_not_word_file": "{name} is not a Word file.",
+  "documents_import_old_word_file": "{name} is an older Word file; save it as .docx first.",
+  "documents_import_too_large": "A Word file can be at most {max} MB.",
   "documents_link_add": "Add link",
   "documents_link_address": "Link address",
   "documents_link_invalid": "Use a web or email address.",
@@ -1475,5 +1657,48 @@
   "ui_theme_system": "System",
   "ui_undo": "Undo",
   "ui_view_label": "View",
-  "ui_view_preview": "Preview"
+  "ui_view_preview": "Preview",
+  "word_error_busy": "Word processing is busy; retry later.",
+  "word_error_cancelled": "Word processing was cancelled.",
+  "word_error_embedded": "Documents with embedded objects or controls aren't supported.",
+  "word_error_exited": "Word processing stopped unexpectedly ({reason}).",
+  "word_error_expands_too_far": "This Word file expands past the size the app can open.",
+  "word_error_failed": "Word processing failed.",
+  "word_error_import_too_many_blocks": [
+    {
+      "declarations": [
+        "input count",
+        "input max",
+        "local countShown = count: number",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "This Word file is too long for a document: it has {countShown} paragraphs, list items and tables, and a document holds {maxShown}."
+      }
+    }
+  ],
+  "word_error_import_too_many_chars": [
+    {
+      "declarations": [
+        "input count",
+        "input max",
+        "local countShown = count: number",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "This Word file is too long for a document: it has {countShown} characters, and a document holds {maxShown}."
+      }
+    }
+  ],
+  "word_error_macros": "Macro-enabled documents aren't supported; save it as .docx without macros.",
+  "word_error_not_openable": "This is not a Word file the app can open.",
+  "word_error_not_openable_detail": "This is not a Word file the app can open: {detail}",
+  "word_error_stopped": "Word processing has stopped.",
+  "word_error_timeout": "Word processing timed out.",
+  "word_error_too_large": "A Word file can be at most {max} MiB.",
+  "word_error_too_many_blocks": "A Word file can have at most {max} paragraphs and tables.",
+  "word_error_too_many_parts": "A Word file can have at most {max} parts.",
+  "word_error_unreadable": "{name} could not be read."
 }

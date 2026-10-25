@@ -1,7 +1,11 @@
 import { Effect } from "effect";
 import { MAX_ATTACHMENT_BYTES } from "~/modules/attachments/constants.ts";
-import { WordError } from "~/modules/word/errors.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { baseLocale, type Locale } from "~/paraglide/runtime.js";
+import { wordReadFailure } from "~/modules/word/server/failure.ts";
 import {
+  type Dropped,
   IMAGE_REF,
   type ImportedThread,
   type TreeNode,
@@ -69,14 +73,40 @@ export const placeImported = (
   return place(imported.tree) ?? { type: "doc", content: [] };
 };
 
-/** A refusal a person or the model can act on, from any failure reading the file. */
-const reason = (name: string, error: unknown) =>
-  error instanceof WordError ? error.message : `${name} could not be read.`;
+/** What a file held that a document cannot, as a phrase to list. */
+const droppedText = ({ kind, count }: Dropped): Localized => {
+  switch (kind) {
+    case "headersAndFooters":
+      return localized(m.documents_import_dropped_headers_footers);
+    case "tableOfContents":
+      return localized(m.documents_import_dropped_table_of_contents);
+    case "nestedTables":
+      return localized(m.documents_import_dropped_nested_tables);
+    case "commentsOverLimit":
+      return localized(m.documents_import_dropped_comments_over_limit, { count });
+    case "commentsShortened":
+      return localized(m.documents_import_dropped_comments_shortened, { count });
+    case "oldFormatPictures":
+      return localized(m.documents_import_dropped_old_format_pictures, { count });
+    case "textBoxes":
+      return localized(m.documents_import_dropped_text_boxes, { count });
+    case "shapes":
+      return localized(m.documents_import_dropped_shapes, { count });
+    case "linkedPictures":
+      return localized(m.documents_import_dropped_linked_pictures, { count });
+    case "unshowablePictures":
+      return localized(m.documents_import_dropped_unshowable_pictures, { count });
+    case "largePictures":
+      return localized(m.documents_import_dropped_large_pictures, { count });
+    case "equations":
+      return localized(m.documents_import_dropped_equations, { count });
+  }
+};
 
 /**
  * Reads a Word file for a document to start from, in a Word worker whose
  * package checks and timeout guard the parse, and stores its pictures as the
- * reader's own uploads. Fails with a sentence to show.
+ * reader's own uploads. Fails with a sentence to show, worded for whoever reads it.
  */
 export const readWordDocument = <E, R>(
   file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
@@ -88,17 +118,17 @@ export const readWordDocument = <E, R>(
     name: string;
   }) => Effect.Effect<string, E, R>,
 ): Effect.Effect<
-  { name: string; title: string | null; imported: ImportedText; dropped: string[] },
-  string,
+  { name: string; title: string | null; imported: ImportedText; dropped: Localized[] },
+  Localized,
   R
 > =>
   Effect.gen(function* () {
     const { name } = file;
     if (/\.(?:doc|dot)$/i.test(name))
-      return yield* Effect.fail(`${name} is an older Word file; save it as .docx first.`);
+      return yield* Effect.fail(localized(m.documents_import_old_word_file, { name }));
     if (!/\.docx$/i.test(name) && file.mediaType !== DOCX_MEDIA_TYPE)
-      return yield* Effect.fail(`${name} is not a Word file.`);
-    if (!runtime) return yield* Effect.fail("Word files cannot be read on this server.");
+      return yield* Effect.fail(localized(m.documents_import_not_word_file, { name }));
+    if (!runtime) return yield* Effect.fail(localized(m.documents_import_no_word_runtime));
     const read: WordAsDocument = yield* Effect.tryPromise({
       try: () =>
         runtime.run(
@@ -117,7 +147,7 @@ export const readWordDocument = <E, R>(
           undefined,
           { owner },
         ),
-      catch: (error) => reason(name, error),
+      catch: (error) => wordReadFailure(name, error),
     });
     const stored: string[] = [];
     let unstored = 0;
@@ -148,17 +178,17 @@ export const readWordDocument = <E, R>(
         threads: read.threads,
       },
       dropped: [
-        ...read.dropped,
+        ...read.dropped.map(droppedText),
         ...(unstored
-          ? [`${unstored} picture${unstored === 1 ? "" : "s"} the app couldn’t store`]
+          ? [localized(m.documents_import_dropped_unstored_pictures, { count: unstored })]
           : []),
       ],
     };
   });
 
 /** A title from a file name, for a document started from it without one. */
-export const titleFromFile = (name: string) =>
+export const titleFromFile = (name: string, locale: Locale = baseLocale) =>
   name
     .replace(/\.[^.]+$/, "")
     .trim()
-    .slice(0, DOCUMENT_LIMITS.title) || "Document";
+    .slice(0, DOCUMENT_LIMITS.title) || m.documents_fallback_title({}, { locale });

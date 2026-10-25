@@ -19,6 +19,7 @@ import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { Route } from "~/routes/api/documents/$documentId.images.$attachmentId.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -102,8 +103,11 @@ const refusal = (result: Exit.Exit<string, unknown>) => {
   const error = Cause.squash(result.cause);
   return error instanceof Error && "_tag" in error ? String(error._tag) : String(error);
 };
-const reason = (result: Exit.Exit<string, unknown>) =>
-  Exit.isFailure(result) ? (Cause.squash(result.cause) as { reason?: string }).reason : undefined;
+const reason = (result: Exit.Exit<string, unknown>) => {
+  if (Exit.isSuccess(result)) return undefined;
+  const { reason: why } = Cause.squash(result.cause) as { reason?: Localized | string };
+  return typeof why === "function" ? english(why) : why;
+};
 
 /** A project with an owner, an editor and a viewer, and one blank document in it. */
 const projectDocument = async () => {
@@ -189,7 +193,7 @@ describe("claiming a document image", () => {
     expect(await claimOf(image.id)).toHaveLength(1);
     expect((await attachmentRow(image.id))?.userId).toBe(owner);
     // Claimed once: neither this document nor another may take it again.
-    expect(reason(await addImage(owner, documentId, image.id))).toBe(IMAGE_REFUSED);
+    expect(reason(await addImage(owner, documentId, image.id))).toBe(english(IMAGE_REFUSED));
   });
 
   it("claims an editor's upload as the project owner's copy and spends the original", async () => {
@@ -207,7 +211,7 @@ describe("claiming a document image", () => {
     // The editor's upload is gone with its bytes, so it cannot be claimed again.
     expect(await attachmentRow(image.id)).toBeNull();
     expect(await storedBytes(original!.storageKey)).toBe(false);
-    expect(reason(await addImage(editor, documentId, image.id))).toBe(IMAGE_REFUSED);
+    expect(reason(await addImage(editor, documentId, image.id))).toBe(english(IMAGE_REFUSED));
   });
 
   it("gives one upload to only one of two documents claiming it at once", async () => {
@@ -280,9 +284,9 @@ describe("claiming a document image", () => {
     const stranger = await createUser();
 
     const ownersImage = await upload(owner, png(2));
-    expect(reason(await addImage(editor, documentId, ownersImage.id))).toBe(IMAGE_REFUSED);
+    expect(reason(await addImage(editor, documentId, ownersImage.id))).toBe(english(IMAGE_REFUSED));
     // An unknown id gets the very same answer, so the refusal reveals nothing.
-    expect(reason(await addImage(editor, documentId, uuidv7()))).toBe(IMAGE_REFUSED);
+    expect(reason(await addImage(editor, documentId, uuidv7()))).toBe(english(IMAGE_REFUSED));
 
     const viewersImage = await upload(viewer, png(3));
     expect(reason(await addImage(viewer, documentId, viewersImage.id))).toBe(
@@ -304,7 +308,7 @@ describe("claiming a document image", () => {
         }),
       ),
     );
-    expect(reason(await addImage(editor, documentId, text.id))).toBe(IMAGE_REFUSED);
+    expect(reason(await addImage(editor, documentId, text.id))).toBe(english(IMAGE_REFUSED));
 
     for (const id of [ownersImage.id, viewersImage.id, strangersImage.id, text.id])
       // oxlint-disable-next-line eslint/no-await-in-loop -- A handful of reads.

@@ -23,6 +23,8 @@ import {
   type DocumentComment,
   type EditableDocument,
 } from "../schema.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 type DocumentRow = typeof documents.$inferSelect;
 type DocumentWrite = Partial<
@@ -359,7 +361,7 @@ export class DocumentRepo extends Context.Service<
             .pipe(Effect.orDie);
           if (!row?.access) return yield* new DocumentNotAvailable({ documentId });
           if (!projectCan.edit(row.access))
-            return yield* new DocumentRejected({ reason: "this document is read-only for you" });
+            return yield* new DocumentRejected({ reason: localized(m.documents_error_read_only) });
           return toDocument(row);
         }),
         appendSteps: Effect.fn("DocumentRepo.appendSteps")(function* (tx, rows) {

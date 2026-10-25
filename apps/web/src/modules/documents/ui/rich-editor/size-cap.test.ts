@@ -35,7 +35,7 @@ describe("size cap", () => {
 
   it("lets a document already over a limit shrink, but not grow", () => {
     const state = stateOf(formula(DOCUMENT_LIMITS.chars + 10), documentSchema.text("ab"));
-    expect(overCap(state.doc)).toBe("document holds too much hidden data");
+    expect(overCap(state.doc)?.("en")).toBe("document holds too much hidden data");
     const end = state.doc.content.size - 1;
     expect(allowed(state, (tr) => tr.delete(end - 1, end))).toBe(true);
     // Text is under its own limit, so typing more of it makes nothing worse.
@@ -54,6 +54,7 @@ describe("size cap", () => {
       null,
       Array.from({ length: 5_001 }, () => empty),
     );
-    expect(overCap(doc)).toBe(`document exceeds ${DOCUMENT_LIMITS.blocks} blocks`);
+    expect(overCap(doc)?.("en")).toBe(`document exceeds ${DOCUMENT_LIMITS.blocks} blocks`);
+    expect(overCap(doc)?.("de")).toBe("das Dokument überschreitet 5.000 Blöcke");
   });
 });

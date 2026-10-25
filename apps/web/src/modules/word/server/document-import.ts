@@ -32,6 +32,7 @@ import { CALLOUT_LABELS, LEVEL_TWIPS, MATH_FONT, TASK_BOXES } from "./document-e
 import {
   IMAGE_REF,
   type DocumentBounds,
+  type DroppedKind,
   type ImportedThread,
   type TreeMark,
   type TreeNode,
@@ -91,8 +92,6 @@ const isOn = (node: XmlElement) => {
   const value = attributeOf(node, "val");
   return value === undefined || !["0", "false", "off", "none"].includes(value.toLowerCase());
 };
-const plural = (count: number, one: string, many: string) =>
-  count === 1 ? `${/^[aeiou]/i.test(one) ? "an" : "a"} ${one}` : `${count} ${many}`;
 
 /** Which kind of picture a document can show, from its bytes. */
 const pictureType = (bytes: Uint8Array) => {
@@ -205,7 +204,7 @@ class WordReader {
   readonly #notes = { footnote: new Map<string, string>(), endnote: new Map<string, string>() };
   readonly #images = new Map<string, number>();
   readonly #imageList: WordAsDocument["images"] = [];
-  readonly #lost = new Map<string, number>();
+  readonly #lost = new Map<DroppedKind, number>();
   /** Open complex fields, outermost first: their instruction, and whether their result has begun. */
   readonly #fields: Array<{ instruction: string; result: boolean }> = [];
   /** Comment ranges open where the reader is, by Word comment id. */
@@ -264,10 +263,8 @@ class WordReader {
       headers(this.doc).some((part) => part.text.trim()) ||
       footers(this.doc).some((part) => part.text.trim())
     )
-      this.lose("headers and footers");
-    const lost = [...this.#lost].map(([what, count]) =>
-      what.includes("|") ? plural(count, ...(what.split("|") as [string, string])) : what,
-    );
+      this.lose("headersAndFooters");
+    const lost = [...this.#lost].map(([kind, count]) => ({ kind, count }));
     const name = title(this.doc)?.trim();
     return {
       title: name ? name.slice(0, 200) : null,
@@ -278,9 +275,8 @@ class WordReader {
     };
   }
 
-  /** `what` is a phrase, or `one|many` to count. */
-  private lose(what: string, count = 1) {
-    this.#lost.set(what, (this.#lost.get(what) ?? 0) + count);
+  private lose(kind: DroppedKind, count = 1) {
+    this.#lost.set(kind, (this.#lost.get(kind) ?? 0) + count);
   }
 
   /** Refuses a file past the document's limits rather than storing part of it. */
@@ -421,9 +417,8 @@ class WordReader {
       }
       total += 1;
     }
-    if (over)
-      this.lose("comment past the document’s limit|comments past the document’s limit", over);
-    if (clipped) this.lose("comment shortened|comments shortened", clipped);
+    if (over) this.lose("commentsOverLimit", over);
+    if (clipped) this.lose("commentsShortened", clipped);
   }
 
   // -------------------------------------------------------------------------
@@ -562,7 +557,7 @@ class WordReader {
             field.result = true;
             if (/^\s*TOC\b/.test(field.instruction)) {
               this.#toc = true;
-              this.lose("a table of contents, which Word rebuilds from the headings");
+              this.lose("tableOfContents");
             }
           }
           continue;
@@ -584,7 +579,7 @@ class WordReader {
           this.drawing(piece.node);
           break;
         case "legacy":
-          this.lose("picture or object in an older format|pictures or objects in an older format");
+          this.lose("oldFormatPictures");
           break;
         case "note": {
           const note = this.#notes[piece.notes].get(piece.id);
@@ -629,8 +624,8 @@ class WordReader {
   private drawing(node: XmlElement) {
     const blip = elementsNamed(node, "blip")[0];
     if (!blip) {
-      if (elementsNamed(node, "txbxContent").length) this.lose("text box|text boxes");
-      else this.lose("chart, diagram or shape|charts, diagrams or shapes");
+      if (elementsNamed(node, "txbxContent").length) this.lose("textBoxes");
+      else this.lose("shapes");
       return;
     }
     const embed = attributeOf(blip, "embed");
@@ -643,18 +638,16 @@ class WordReader {
         : null;
     const data = part ? this.doc.opc.parts.get(part)?.data : undefined;
     if (!part || !data) {
-      this.lose("linked picture|linked pictures");
+      this.lose("linkedPictures");
       return;
     }
     const mediaType = pictureType(data);
     if (!mediaType) {
-      this.lose(
-        "picture in a format a document can’t show|pictures in formats a document can’t show",
-      );
+      this.lose("unshowablePictures");
       return;
     }
     if (data.length > this.bounds.imageBytes) {
-      this.lose("picture too large to keep|pictures too large to keep");
+      this.lose("largePictures");
       return;
     }
     let index = this.#images.get(part);
@@ -721,7 +714,7 @@ class WordReader {
             each.children.map((child) => (child.kind === "text" ? child.value : "")).join(""),
           )
           .join("");
-        this.lose("equation, kept as its text|equations, kept as their text");
+        this.lose("equations");
         this.text(text, {}, link);
         return;
       }
@@ -1094,7 +1087,7 @@ class WordReader {
           ? this.blocks(cell.paragraphs, false).map(withoutBold)
           : this.blocks(cell.paragraphs, false);
         for (const extra of nested) {
-          this.lose("tables inside tables, kept as their text");
+          this.lose("nestedTables");
           if (extra.node.kind === "element")
             for (const line of elementsNamed(extra.node, "tr"))
               content.push({
@@ -1129,7 +1122,7 @@ class WordReader {
         /^\s*TOC\b/.test(xmlText({ ...each, name: { ...each.name, local: "t" } })),
       );
     if (isToc) {
-      this.lose("a table of contents, which Word rebuilds from the headings");
+      this.lose("tableOfContents");
       return [];
     }
     return elementsNamed(node, "p").flatMap((paragraph) => {

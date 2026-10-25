@@ -64,9 +64,28 @@ export interface WordAsDocument {
   tree: TreeNode;
   images: Array<{ bytes: Uint8Array; mediaType: string }>;
   threads: ImportedThread[];
-  /** What the file held that a document cannot, one phrase each. */
-  dropped: string[];
+  /** What the file held that a document cannot, by kind, worded by whoever reads it. */
+  dropped: Dropped[];
 }
+
+/** A kind of content a document cannot hold, and how many of it a file had. */
+export interface Dropped {
+  kind: DroppedKind;
+  count: number;
+}
+export type DroppedKind =
+  | "headersAndFooters"
+  | "commentsOverLimit"
+  | "commentsShortened"
+  | "tableOfContents"
+  | "oldFormatPictures"
+  | "textBoxes"
+  | "shapes"
+  | "linkedPictures"
+  | "unshowablePictures"
+  | "largePictures"
+  | "equations"
+  | "nestedTables";
 
 /** Where an imported image's bytes sit until the app stores them. */
 export const IMAGE_REF = "image:";

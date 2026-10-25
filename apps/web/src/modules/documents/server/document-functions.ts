@@ -1,6 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
@@ -100,21 +103,27 @@ export const createProjectDocumentFromWord = createServerFn({ method: "POST" })
     const projectId = data.get("projectId");
     const title = data.get("title");
     if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
-      throw refusal(400, "Expected a Word file and a project");
+      throw refusal(400, localized(m.documents_import_expected_word_file));
     if (file.size > WORD_LIMITS.compressedBytes)
       throw refusal(
         413,
-        `A Word file can be at most ${WORD_LIMITS.compressedBytes / 1024 / 1024} MB.`,
+        localized(m.documents_import_too_large, {
+          max: WORD_LIMITS.compressedBytes / 1024 / 1024,
+        }),
       );
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return runServerFn(
+    // Read while still in the request: the effect's fibers do not carry it.
+    const locale = getLocale();
+    const created = await runServerFn(
       createFromWord(context.session.user.id, {
         owner: { projectId },
         title: typeof title === "string" ? title.slice(0, DOCUMENT_LIMITS.title) : undefined,
         by: "user",
+        locale,
         file: { name: file.name, mediaType: file.type, bytes },
       }),
     );
+    return { ...created, dropped: created.dropped.map((text) => text(locale)) };
   });
 /** A chat's or a project's document, renamed by someone who may edit it. */
 export const renameDocument = createServerFn({ method: "POST" })

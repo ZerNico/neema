@@ -464,6 +464,52 @@
   "documents_editor_undo": "Rückgängig",
   "documents_editor_version_history": "Versionsverlauf",
   "documents_editor_word_count": "Wortanzahl",
+  "documents_error_changed": "das Dokument wurde geändert, lade es neu",
+  "documents_error_chat_document_delete": "ein Chat-Dokument lässt sich nur mit der Antwort löschen, die es erstellt hat",
+  "documents_error_comment_not_own": "nur eigene Kommentare oder die des Assistenten",
+  "documents_error_edited_meanwhile": "jemand hat das Dokument bearbeitet, während es geschrieben wurde",
+  "documents_error_file_unreadable": "diese Datei konnte nicht als Dokument gelesen werden",
+  "documents_error_image_refused": "Diese Datei kann nicht in dieses Dokument",
+  "documents_error_invalid_comment": "ungültiger Kommentar",
+  "documents_error_invalid_document": "ungültiges Dokument",
+  "documents_error_invalid_step": "ungültiger Bearbeitungsschritt",
+  "documents_error_invalid_thread": "ungültiger Thread",
+  "documents_error_invalid_update": "ungültige Dokumentänderung",
+  "documents_error_markdown_unreadable": "dieses Markdown konnte nicht als Dokument gelesen werden",
+  "documents_error_no_thread": "diesen Thread gibt es nicht",
+  "documents_error_one_owner": "ein Dokument gehört zu einem Chat oder einem Projekt",
+  "documents_error_read_only": "dieses Dokument kannst du nur lesen",
+  "documents_error_reply_to_root": "antworte auf den ersten Kommentar eines Threads",
+  "documents_error_thread_deleted": "dieser Thread wurde gelöscht",
+  "documents_error_thread_taken": "diese Thread-ID ist bereits vergeben",
+  "documents_error_too_many_blocks": [
+    {
+      "declarations": [
+        "input max",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "das Dokument überschreitet {maxShown} Blöcke"
+      }
+    }
+  ],
+  "documents_error_too_many_chars": [
+    {
+      "declarations": [
+        "input max",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "das Dokument überschreitet {maxShown} Zeichen"
+      }
+    }
+  ],
+  "documents_error_too_many_comments": "dieses Dokument hat zu viele Kommentare",
+  "documents_error_too_much_hidden_data": "das Dokument enthält zu viele versteckte Daten",
+  "documents_error_unavailable": "Dokumente sind nicht verfügbar",
+  "documents_error_update_too_large": "die Dokumentänderung ist zu groß",
   "documents_export_markdown": "Als Markdown exportieren",
   "documents_export_pdf": "Als PDF exportieren",
   "documents_export_unsaved": "Deine letzten Änderungen sind noch nicht gespeichert.",
@@ -487,6 +533,164 @@
   "documents_footnote_use_theirs": "Diese Fassung übernehmen",
   "documents_image_add_failed": "Das Bild konnte nicht hinzugefügt werden",
   "documents_image_add_some_failed": "Nicht alle Bilder konnten hinzugefügt werden",
+  "documents_import_dropped_comments_over_limit": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein Kommentar über dem Limit des Dokuments",
+        "countPlural=*": "{count} Kommentare über dem Limit des Dokuments"
+      }
+    }
+  ],
+  "documents_import_dropped_comments_shortened": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein gekürzter Kommentar",
+        "countPlural=*": "{count} gekürzte Kommentare"
+      }
+    }
+  ],
+  "documents_import_dropped_equations": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "eine Formel, als Text übernommen",
+        "countPlural=*": "{count} Formeln, als Text übernommen"
+      }
+    }
+  ],
+  "documents_import_dropped_headers_footers": "Kopf- und Fußzeilen",
+  "documents_import_dropped_large_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein zu großes Bild",
+        "countPlural=*": "{count} zu große Bilder"
+      }
+    }
+  ],
+  "documents_import_dropped_linked_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein verknüpftes Bild",
+        "countPlural=*": "{count} verknüpfte Bilder"
+      }
+    }
+  ],
+  "documents_import_dropped_nested_tables": "Tabellen in Tabellen, als Text übernommen",
+  "documents_import_dropped_old_format_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein Bild oder Objekt in einem älteren Format",
+        "countPlural=*": "{count} Bilder oder Objekte in einem älteren Format"
+      }
+    }
+  ],
+  "documents_import_dropped_shapes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein Diagramm, eine Grafik oder eine Form",
+        "countPlural=*": "{count} Diagramme, Grafiken oder Formen"
+      }
+    }
+  ],
+  "documents_import_dropped_table_of_contents": "ein Inhaltsverzeichnis, das Word aus den Überschriften neu erstellt",
+  "documents_import_dropped_text_boxes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein Textfeld",
+        "countPlural=*": "{count} Textfelder"
+      }
+    }
+  ],
+  "documents_import_dropped_unshowable_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "ein Bild in einem Format, das ein Dokument nicht anzeigen kann",
+        "countPlural=*": "{count} Bilder in Formaten, die ein Dokument nicht anzeigen kann"
+      }
+    }
+  ],
+  "documents_import_dropped_unstored_pictures": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Bild, das die App nicht speichern konnte",
+        "countPlural=*": "{count} Bilder, die die App nicht speichern konnte"
+      }
+    }
+  ],
+  "documents_import_expected_word_file": "Erwartet werden eine Word-Datei und ein Projekt",
+  "documents_import_no_word_runtime": "Word-Dateien können auf diesem Server nicht gelesen werden.",
+  "documents_import_not_word_file": "{name} ist keine Word-Datei.",
+  "documents_import_old_word_file": "{name} ist eine ältere Word-Datei. Speichere sie zuerst als .docx.",
+  "documents_import_too_large": "Eine Word-Datei darf höchstens {max} MB groß sein.",
   "documents_link_add": "Link hinzufügen",
   "documents_link_address": "Linkadresse",
   "documents_link_invalid": "Gib eine Web- oder E-Mail-Adresse ein.",
@@ -1472,5 +1676,70 @@
   "ui_theme_system": "System",
   "ui_undo": "Rückgängig",
   "ui_view_label": "Ansicht",
-  "ui_view_preview": "Vorschau"
+  "ui_view_preview": "Vorschau",
+  "word_error_busy": "Die Word-Verarbeitung ist ausgelastet. Versuch es später noch einmal.",
+  "word_error_cancelled": "Die Word-Verarbeitung wurde abgebrochen.",
+  "word_error_embedded": "Dokumente mit eingebetteten Objekten oder Steuerelementen werden nicht unterstützt.",
+  "word_error_exited": "Die Word-Verarbeitung wurde unerwartet beendet ({reason}).",
+  "word_error_expands_too_far": "Entpackt ist diese Word-Datei größer, als die App öffnen kann.",
+  "word_error_failed": "Die Word-Verarbeitung ist fehlgeschlagen.",
+  "word_error_import_too_many_blocks": [
+    {
+      "declarations": [
+        "input count",
+        "input max",
+        "local countShown = count: number",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "Diese Word-Datei ist zu lang für ein Dokument: Sie hat {countShown} Absätze, Listenpunkte und Tabellen, ein Dokument fasst {maxShown}."
+      }
+    }
+  ],
+  "word_error_import_too_many_chars": [
+    {
+      "declarations": [
+        "input count",
+        "input max",
+        "local countShown = count: number",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "Diese Word-Datei ist zu lang für ein Dokument: Sie hat {countShown} Zeichen, ein Dokument fasst {maxShown}."
+      }
+    }
+  ],
+  "word_error_macros": "Dokumente mit Makros werden nicht unterstützt. Speichere es ohne Makros als .docx.",
+  "word_error_not_openable": "Das ist keine Word-Datei, die die App öffnen kann.",
+  "word_error_not_openable_detail": "Das ist keine Word-Datei, die die App öffnen kann: {detail}",
+  "word_error_stopped": "Die Word-Verarbeitung wurde beendet.",
+  "word_error_timeout": "Die Word-Verarbeitung hat zu lange gedauert.",
+  "word_error_too_large": "Eine Word-Datei darf höchstens {max} MiB groß sein.",
+  "word_error_too_many_blocks": [
+    {
+      "declarations": [
+        "input max",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "Eine Word-Datei darf höchstens {maxShown} Absätze und Tabellen haben."
+      }
+    }
+  ],
+  "word_error_too_many_parts": [
+    {
+      "declarations": [
+        "input max",
+        "local maxShown = max: number"
+      ],
+      "selectors": [],
+      "match": {
+        "": "Eine Word-Datei darf höchstens {maxShown} Bestandteile haben."
+      }
+    }
+  ],
+  "word_error_unreadable": "{name} konnte nicht gelesen werden."
 }

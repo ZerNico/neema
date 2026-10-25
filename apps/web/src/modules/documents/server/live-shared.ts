@@ -7,11 +7,14 @@ import {
   DOCUMENT_LIMITS,
   DocumentNotAvailable,
   DocumentRejected,
+  foreignReason,
   type CommentInput,
   type DeleteCommentInput,
   type EditableDocument,
   type ResolveThreadInput,
 } from "../schema.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import type { DocumentRepo } from "./document-repo.ts";
 
 /**
@@ -70,7 +73,8 @@ export const lockProjectForEditing = (tx: DbTx, userId: string, projectId: strin
     Effect.asVoid,
     Effect.catchTags({
       ProjectNotAvailable: () => Effect.fail(new DocumentNotAvailable({})),
-      ProjectRejected: ({ reason }) => Effect.fail(new DocumentRejected({ reason })),
+      ProjectRejected: ({ reason }) =>
+        Effect.fail(new DocumentRejected({ reason: foreignReason(reason) })),
     }),
   );
 
@@ -84,10 +88,12 @@ export const personComment = (documents: Repo, userId: string, input: CommentInp
   Effect.gen(function* () {
     const existing = yield* documents.comments(input.documentId, tx);
     if (existing.length >= DOCUMENT_LIMITS.comments)
-      return yield* new DocumentRejected({ reason: "this document has too many comments" });
+      return yield* new DocumentRejected({
+        reason: localized(m.documents_error_too_many_comments),
+      });
     const thread = existing.find((each) => each.id === input.threadId);
     if (thread && thread.threadId !== thread.id)
-      return yield* new DocumentRejected({ reason: "reply to a thread's first comment" });
+      return yield* new DocumentRejected({ reason: localized(m.documents_error_reply_to_root) });
     // A new thread's ID is the client's; one taken elsewhere is refused, not a crash.
     const added = yield* documents.addComment(tx, {
       id: thread ? uuidv7() : input.threadId,
@@ -99,7 +105,8 @@ export const personComment = (documents: Repo, userId: string, input: CommentInp
       quote: thread ? null : (input.quote ?? null),
       toAssistant: input.toAssistant ?? false,
     });
-    if (!added) return yield* new DocumentRejected({ reason: "that thread ID is taken" });
+    if (!added)
+      return yield* new DocumentRejected({ reason: localized(m.documents_error_thread_taken) });
     return !thread;
   });
 
@@ -108,7 +115,9 @@ export const threadResolution = (documents: Repo, input: ResolveThreadInput) => 
     .resolveThread(tx, input.documentId, input.threadId, input.resolved)
     .pipe(
       Effect.flatMap((found) =>
-        found ? Effect.void : Effect.fail(new DocumentRejected({ reason: "no such thread" })),
+        found
+          ? Effect.void
+          : Effect.fail(new DocumentRejected({ reason: localized(m.documents_error_no_thread) })),
       ),
     );
 
@@ -121,7 +130,7 @@ export const commentDeletion =
           found
             ? Effect.void
             : Effect.fail(
-                new DocumentRejected({ reason: "only your own or the assistant's comments" }),
+                new DocumentRejected({ reason: localized(m.documents_error_comment_not_own) }),
               ),
         ),
       );

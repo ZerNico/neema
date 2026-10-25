@@ -50,6 +50,7 @@ import {
   DocumentNotAvailable,
   DocumentRejected,
   documentImagePath,
+  foreignReason,
   IMAGE_REFUSED,
   PushDocumentInput,
   type DocumentImageInput,
@@ -61,6 +62,8 @@ import {
   type EditableDocument,
   type PushDocumentResult,
 } from "../schema.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
 import { groupVersions, type DocumentVersion } from "./versions.ts";
 import { placeImported, type ImportedText } from "./word-import.ts";
@@ -160,7 +163,7 @@ interface Stored {
 }
 
 const decode =
-  <S extends Schema.Top>(schema: S, reason: string) =>
+  <S extends Schema.Top>(schema: S, reason: Localized) =>
   (input: S["Type"]) =>
     Schema.decodeUnknownEffect(schema)(input, { onExcessProperty: "error" }).pipe(
       Effect.mapError(() => new DocumentRejected({ reason })),
@@ -187,7 +190,7 @@ const applySteps = (
       if (checked && next.childCount) next.check();
       return { doc: next, steps };
     },
-    catch: () => new DocumentRejected({ reason: "invalid document step" }),
+    catch: () => new DocumentRejected({ reason: localized(m.documents_error_invalid_step) }),
   });
 /**
  * One model edit written while its arguments stream. It owns the blocks it
@@ -215,7 +218,7 @@ const detachRefusal = (threads: ReadonlyArray<string>) => ({
 });
 
 /** Why a streamed creation stopped: someone wrote in the document while it streamed. */
-export const EDITED_MEANWHILE = "someone edited the document while it was being written";
+export const EDITED_MEANWHILE = localized(m.documents_error_edited_meanwhile);
 
 /** The stored revision moved without this process: rebuild the entry from storage. */
 class StaleEntry extends Schema.TaggedError<StaleEntry>()("StaleEntry", {}) {}
@@ -258,7 +261,10 @@ const withinTreeCap = (doc: Node) => {
     malformed ||= !wellTyped(node);
     return !malformed;
   });
-  if (malformed) return Effect.fail(new DocumentRejected({ reason: "invalid document update" }));
+  if (malformed)
+    return Effect.fail(
+      new DocumentRejected({ reason: localized(m.documents_error_invalid_update) }),
+    );
   const over = overCap(doc);
   return over ? Effect.fail(new DocumentRejected({ reason: over })) : Effect.void;
 };
@@ -289,7 +295,7 @@ const ownedRange = (doc: Node, live: LiveEdit) => {
 const buildDocument = (content: string, outline: ReadonlyArray<string> = []) =>
   Effect.try({
     try: () => parseMarkdown(content),
-    catch: () => new DocumentRejected({ reason: "this Markdown could not be read as a document" }),
+    catch: () => new DocumentRejected({ reason: localized(m.documents_error_markdown_unreadable) }),
   }).pipe(Effect.map((parsed) => withOutline(parsed, outline)));
 
 const withOutline = (parsed: Node, outline: ReadonlyArray<string>) => {
@@ -317,7 +323,7 @@ const importedDocument = (json: TreeNode) =>
       doc.check();
       return ensureIds(squareTables(new Transform(doc))).doc;
     },
-    catch: () => new DocumentRejected({ reason: "this file could not be read as a document" }),
+    catch: () => new DocumentRejected({ reason: localized(m.documents_error_file_unreadable) }),
   });
 /**
  * Where the preview writes now: its own blocks once it has some, else the
@@ -654,7 +660,7 @@ export class DocumentService extends Context.Service<
             .admitFor(ownerId, userId, images)
             .pipe(
               Effect.catchTag("StorageFull", (full) =>
-                Effect.fail(new DocumentRejected({ reason: full.reason })),
+                Effect.fail(new DocumentRejected({ reason: foreignReason(full.reason) })),
               ),
             );
           for (const attachmentId of attachmentIds) {
@@ -706,7 +712,9 @@ export class DocumentService extends Context.Service<
             Effect.flatMap((allowed) =>
               allowed
                 ? Effect.void
-                : Effect.fail(new DocumentRejected({ reason: "documents are unavailable" })),
+                : Effect.fail(
+                    new DocumentRejected({ reason: localized(m.documents_error_unavailable) }),
+                  ),
             ),
           );
       /**
@@ -886,7 +894,10 @@ export class DocumentService extends Context.Service<
         from?: ImportedText,
       ) =>
         Effect.gen(function* () {
-          const parsed = yield* decode(CreateDocumentInput, "invalid document")(input);
+          const parsed = yield* decode(
+            CreateDocumentInput,
+            localized(m.documents_error_invalid_document),
+          )(input);
           const owner = parsed.projectId
             ? { projectId: parsed.projectId }
             : parsed.conversationId
@@ -894,7 +905,7 @@ export class DocumentService extends Context.Service<
               : null;
           if (!owner || (parsed.projectId && parsed.conversationId))
             return yield* new DocumentRejected({
-              reason: "a document belongs to a chat or a project",
+              reason: localized(m.documents_error_one_owner),
             });
           const images = from?.images ?? [];
           const plan = yield* planImages(
@@ -1075,14 +1086,19 @@ export class DocumentService extends Context.Service<
         userId: string,
         input: PushDocumentInput,
       ) {
-        const parsed = yield* decode(PushDocumentInput, "invalid document update")(input);
+        const parsed = yield* decode(
+          PushDocumentInput,
+          localized(m.documents_error_invalid_update),
+        )(input);
         return yield* exclusive(parsed.documentId)(
           Effect.gen(function* () {
             const { entry, document } = yield* load(userId, parsed.documentId);
             const clientId = personClient(userId, parsed.clientId);
             // Refused before the steps touch anything: a reader's cursor may move, their text may not.
             if (parsed.steps && !document.canEdit)
-              return yield* new DocumentRejected({ reason: "this document is read-only for you" });
+              return yield* new DocumentRejected({
+                reason: localized(m.documents_error_read_only),
+              });
             if (parsed.presence && entry.feeds.has(clientId)) {
               // Labelled by who is signed in, never by what the client says.
               const presence = {
@@ -1100,10 +1116,13 @@ export class DocumentService extends Context.Service<
               parsed.steps.reduce((total, step) => total + step.length, 0) >
               DOCUMENT_LIMITS.stepChars
             )
-              return yield* new DocumentRejected({ reason: "document update is too large" });
+              return yield* new DocumentRejected({
+                reason: localized(m.documents_error_update_too_large),
+              });
             const json = yield* Effect.try({
               try: () => parsed.steps!.map((step) => JSON.parse(step) as Record<string, unknown>),
-              catch: () => new DocumentRejected({ reason: "invalid document step" }),
+              catch: () =>
+                new DocumentRejected({ reason: localized(m.documents_error_invalid_step) }),
             });
             const { doc, steps } = yield* applySteps(entry.doc, json, { checked: true });
             const author: Author = { origin: "user", userId, clientId };
@@ -1118,7 +1137,9 @@ export class DocumentService extends Context.Service<
               Effect.catchTag("StaleEntry", () =>
                 drop(parsed.documentId).pipe(
                   Effect.andThen(
-                    Effect.fail(new DocumentRejected({ reason: "document changed; reload it" })),
+                    Effect.fail(
+                      new DocumentRejected({ reason: localized(m.documents_error_changed) }),
+                    ),
                   ),
                 ),
               ),
@@ -1262,7 +1283,10 @@ export class DocumentService extends Context.Service<
         userId: string,
         input: CommentInput,
       ) {
-        const parsed = yield* decode(CommentInput, "invalid comment")(input);
+        const parsed = yield* decode(
+          CommentInput,
+          localized(m.documents_error_invalid_comment),
+        )(input);
         yield* commentWrite(userId, parsed.documentId, (tx) =>
           personComment(documents, userId, parsed)(tx).pipe(Effect.asVoid),
         );
@@ -1272,7 +1296,10 @@ export class DocumentService extends Context.Service<
         userId: string,
         input: ResolveThreadInput,
       ) {
-        const parsed = yield* decode(ResolveThreadInput, "invalid thread")(input);
+        const parsed = yield* decode(
+          ResolveThreadInput,
+          localized(m.documents_error_invalid_thread),
+        )(input);
         yield* commentWrite(userId, parsed.documentId, threadResolution(documents, parsed));
       });
 
@@ -1280,7 +1307,10 @@ export class DocumentService extends Context.Service<
         userId: string,
         input: DeleteCommentInput,
       ) {
-        const parsed = yield* decode(DeleteCommentInput, "invalid comment")(input);
+        const parsed = yield* decode(
+          DeleteCommentInput,
+          localized(m.documents_error_invalid_comment),
+        )(input);
         yield* commentWrite(userId, parsed.documentId, commentDeletion(documents, userId, parsed));
       });
 
@@ -1316,7 +1346,9 @@ export class DocumentService extends Context.Service<
                   // Checked again under the lock: the thread may have been deleted since.
                   const current = yield* documents.comments(input.documentId, tx);
                   if (!current.some((each) => each.id === thread))
-                    return yield* new DocumentRejected({ reason: "that thread was deleted" });
+                    return yield* new DocumentRejected({
+                      reason: localized(m.documents_error_thread_deleted),
+                    });
                   yield* documents.addComment(tx, {
                     id: uuidv7(),
                     documentId: input.documentId,
@@ -1562,7 +1594,7 @@ export class DocumentService extends Context.Service<
                 const document = yield* documents.lock(tx, userId, documentId);
                 if (!document.projectId)
                   return yield* new DocumentRejected({
-                    reason: "a chat's document goes with the answer that made it",
+                    reason: localized(m.documents_error_chat_document_delete),
                   });
                 yield* documents.remove(tx, documentId);
                 return document;
