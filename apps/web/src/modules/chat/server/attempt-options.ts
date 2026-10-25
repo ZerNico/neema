@@ -18,12 +18,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { resolveImageModel } from "~/modules/images/server/resolve.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import {
-  resolveAgentSelection,
-  desktopGenerationConfig,
-  resolveEffectiveGeneration,
-  resolveAttemptSkills,
-} from "./effective-config.ts";
+import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
@@ -310,38 +305,12 @@ export const makeAttemptOptions = Effect.gen(function* () {
         // banner must name the machine the chat actually last worked on.
         const desktop = defaults.mode === "work" ? input.desktop : undefined;
         if (defaults.mode === "work" && !desktop) return yield* new WorkDesktopRequired();
-        // An edit that submits a selection is changing it, so it cannot take the
-        // replay shortcut below: new collections need a rebuilt manifest.
+        // Every attempt resolves its collections and skills as they are now: a
+        // submitted selection (an edit's) replaces the saved one, otherwise the
+        // saved one is kept.
         const editing = input.attempt === "edit";
         const editedCollections = editing ? input.collectionIds : undefined;
         const editedSkills = editing ? input.skillIds : undefined;
-        if (!defaults.agent && continuation && editedCollections === undefined) {
-          yield* knowledge.authorizeManifest(
-            input.userId,
-            continuation.collectionIds,
-            continuation.manifest,
-            tx,
-          );
-          return {
-            ...continuation,
-            // Plain knowledge retains its old manifest semantics; skills deliberately do not.
-            skills: yield* resolveAttemptSkills(
-              tx,
-              input.userId,
-              editedSkills ?? continuation.standaloneSkillIds ?? [],
-              [],
-            ),
-            searchEnabled,
-            researchEnabled,
-            reasoningEffort,
-            ...desktopGenerationConfig(desktop),
-            // Only a fresh send adds files; retry and edit replay the list.
-            workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
-            integrationGrants: integrationGrantsOf(input),
-            resolvedProject,
-            imageModel,
-          };
-        }
         const agent = defaults.agent
           ? defaults.agent.agentId
             ? yield* resolveAgentSelection({

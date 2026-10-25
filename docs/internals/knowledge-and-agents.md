@@ -108,8 +108,10 @@ whatever agent the conversation is associated with.
 ## Collections and documents
 
 - The composer sends the standalone collection list with every send and clears it on submit;
-  an agent's own collections persist across the conversation instead. The server stores what
-  each generation actually ran with, so retry/edit never depend on later composer state. A
+  an agent's own collections persist across the conversation instead. The server stores which
+  collections each generation chose, so retry/edit never depend on later composer state, and
+  every attempt, a retry or an edit included, in any chat, reads those collections' current
+  document versions; a removed document is gone and a lost collection refuses the attempt. A
   collection shows only on the question that added it, never as an activity row on the answer
   (`knowledge_context` still exists underneath for citations/replay).
 - Editing a message resends its own selection: the editor is seeded from that message and its

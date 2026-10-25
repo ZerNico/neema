@@ -104,7 +104,7 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
  * on the machine that granted them, so a conversation continued elsewhere
  * resolves its own folders. The machine stamp names where the chat last worked.
  */
-export const desktopGenerationConfig = (desktop: DesktopSubmission | undefined) => ({
+const desktopGenerationConfig = (desktop: DesktopSubmission | undefined) => ({
   desktopFolders:
     desktop && desktop.folders.length > 0 ? desktop.folders.map((folder) => folder.name) : null,
   desktopCommands: desktop?.commands ?? false,

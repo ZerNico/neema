@@ -1367,13 +1367,21 @@ describe("knowledge-backed generations", () => {
     ).toEqual({ total: 0 });
   });
 
-  it("retries with the saved manifest and fails when access to it is gone", async () => {
+  it("retries with the collection as it is now, and refuses once it is gone", async () => {
     const owner = await createUser();
     const { collectionId, documents } = await collectionWith(owner, [["Note", "Retry evidence."]]);
     script = () => Stream.make(text("first [^1]"), finish());
     const sent = await send({ userId: owner, collectionIds: [collectionId] });
     await settle(sent.assistantMessageId);
-    // A document added after the question must not appear on retry.
+    const retry = () =>
+      Effect.flatMap(ChatService, (chat) =>
+        chat.retryMessage({
+          userId: owner,
+          conversationId: sent.conversationId,
+          messageId: sent.assistantMessageId,
+        }),
+      );
+    // A note added after the question is part of the collection the retry reads.
     await run(
       Effect.flatMap(KnowledgeService, (service) =>
         service.addNote(owner, { collectionId, title: "Later", content: "Added later." }),
@@ -1381,55 +1389,28 @@ describe("knowledge-backed generations", () => {
     );
     await drainIndexer();
     script = () => Stream.make(text("second [^1]"), finish());
-    await run(
-      Effect.flatMap(ChatService, (chat) =>
-        chat.retryMessage({
-          userId: owner,
-          conversationId: sent.conversationId,
-          messageId: sent.assistantMessageId,
-        }),
-      ),
-    );
+    await run(retry());
     expect(await settle(sent.assistantMessageId)).toMatchObject({
       status: "complete",
       content: "second [^1]",
     });
-    const prompt = promptText(requests.at(-1)!.prompt);
-    expect(prompt).toContain("Retry evidence.");
-    expect(prompt).not.toContain("Added later.");
-    const calls = await toolCalls(sent.assistantMessageId);
-    expect(calls).toHaveLength(1);
-    expect(
-      (calls[0]!.result as { sources: Array<{ versionId: string }> }).sources.map(
-        (s) => s.versionId,
-      ),
-    ).toEqual([documents[0]!.versionId]);
-    // The new turn sees the current collection, including the later note.
-    const next = await send({
-      userId: owner,
-      conversationId: sent.conversationId,
-      content: "And now?",
-      collectionIds: [collectionId],
-    });
-    await settle(next.assistantMessageId);
+    expect(promptText(requests.at(-1)!.prompt)).toContain("Retry evidence.");
     expect(promptText(requests.at(-1)!.prompt)).toContain("Added later.");
 
+    // A document removed since is gone from the next retry too.
     await run(
       Effect.flatMap(KnowledgeService, (service) =>
         service.removeDocument(owner, documents[0]!.documentId),
       ),
     );
-    const failure = await run(
-      Effect.flip(
-        Effect.flatMap(ChatService, (chat) =>
-          chat.retryMessage({
-            userId: owner,
-            conversationId: sent.conversationId,
-            messageId: sent.assistantMessageId,
-          }),
-        ),
-      ),
-    );
+    await drainIndexer();
+    await run(retry());
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(promptText(requests.at(-1)!.prompt)).not.toContain("Retry evidence.");
+
+    // Without the collection there is nothing to answer from, so the answer stays.
+    await run(Effect.flatMap(KnowledgeService, (service) => service.remove(owner, collectionId)));
+    const failure = await run(Effect.flip(retry()));
     expect(failure).toMatchObject({ _tag: "KnowledgeNotAvailable" });
     expect(
       (await exec(`select status from messages where id = '${sent.assistantMessageId}'`)).rows[0],
