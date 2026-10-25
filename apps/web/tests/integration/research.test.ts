@@ -1597,6 +1597,7 @@ describe("ending a run", () => {
           textOffset: 0,
           providerCallId: "reaper-call",
           toolName: "deep_research",
+          family: "research",
           arguments: {},
         });
         const runId = yield* repo.research!.queue({
@@ -1640,6 +1641,7 @@ describe("ending a run", () => {
                 callIndex: 0,
                 providerCallId: "late",
                 toolName: "web_search",
+                family: "web",
                 arguments: {},
                 status: "running",
               })
@@ -1683,6 +1685,7 @@ describe("ending a run", () => {
           callIndex: 0,
           providerCallId: "old-generation-research",
           toolName: "deep_research",
+          family: "research",
           arguments: {},
         });
         const runId = yield* repo.research!.queue({
@@ -1733,6 +1736,7 @@ describe("ending a run", () => {
           callIndex: 0,
           providerCallId: "new-generation-research",
           toolName: "deep_research",
+          family: "research",
           arguments: {},
         });
         const nextId = yield* repo.research!.queue({

@@ -637,6 +637,7 @@ const stored = (testCase: Case, running = false) =>
   toActivity({
     id: "call-1",
     toolName: testCase.name,
+    family: testCase.family,
     arguments: testCase.arguments ?? {},
     result: running ? (testCase.running ?? null) : testCase.result,
     status: running ? "running" : testCase.status,

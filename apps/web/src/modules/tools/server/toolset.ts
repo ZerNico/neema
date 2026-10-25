@@ -1,4 +1,5 @@
 import type { WebExecutionPolicy } from "./execution-policy.ts";
+import type { ToolFamily } from "../families.ts";
 import { Effect, Result as EffectResult, Schema, type Scope } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import type { SourceIndexer } from "./source-indexer.ts";
@@ -8,12 +9,25 @@ import { webSearchTool, type WebSearchExecutor } from "./web-search.ts";
 
 /**
  * Tool families build their definitions and handlers independently, then the
- * stream engine combines whichever groups apply to one generation.
+ * stream engine combines whichever groups apply to one generation. A group
+ * declares the family of every tool it carries; a call's row stores it.
  */
 export interface ToolGroup {
+  readonly family: ToolFamily;
   readonly toolkit: Toolkit.Any;
   readonly handlers: Record<string, unknown>;
 }
+
+/**
+ * The family of each tool the groups offer, by name. A name missing here was
+ * never offered: the toolkit runs no handler for it, so it gets no row.
+ */
+export const toolFamilies = (groups: ReadonlyArray<ToolGroup>): ReadonlyMap<string, ToolFamily> =>
+  new Map(
+    groups.flatMap((group) =>
+      Object.keys(group.toolkit.tools).map((name) => [name, group.family] as const),
+    ),
+  );
 
 export interface PreparedWebTools {
   tools: { search: boolean; reader: boolean };
@@ -64,7 +78,7 @@ const unavailable = () => Effect.succeed(null);
  * cast here rather than spreading `any` through every executor and caller.
  */
 export const mergeToolGroups = Effect.fn("tools.mergeToolGroups")(function* (
-  groups: ReadonlyArray<ToolGroup>,
+  groups: ReadonlyArray<Omit<ToolGroup, "family">>,
 ) {
   if (groups.length === 0) return undefined;
 
@@ -114,6 +128,7 @@ export const prepareWebTools: (input: {
     return {
       tools,
       group: {
+        family: "web",
         toolkit: Toolkit.make(webSearchTool, urlReaderTool),
         handlers: { web_search: search, read_url: reader },
       },
@@ -123,6 +138,7 @@ export const prepareWebTools: (input: {
     return {
       tools,
       group: {
+        family: "web",
         toolkit: Toolkit.make(webSearchTool),
         handlers: { web_search: search },
       },
@@ -132,6 +148,7 @@ export const prepareWebTools: (input: {
     return {
       tools,
       group: {
+        family: "web",
         toolkit: Toolkit.make(urlReaderTool),
         handlers: { read_url: reader },
       },

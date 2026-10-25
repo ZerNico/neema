@@ -160,6 +160,7 @@ export function prepareWordTools(host: WordToolHost): { group: ToolGroup } {
   });
   return {
     group: {
+      family: "word",
       toolkit: Toolkit.make(inspectWordFileTool, editWordFileTool),
       handlers: { inspect_word_file: inspect, edit_word_file: edit },
     } satisfies ToolGroup,

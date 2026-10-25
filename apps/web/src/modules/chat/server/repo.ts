@@ -1,3 +1,4 @@
+import type { ToolFamily } from "~/modules/tools/families.ts";
 import type { UsageEventInput } from "~/modules/analytics/server/repo.ts";
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
@@ -854,6 +855,8 @@ export class ChatRepo extends Context.Service<
       textOffset?: number;
       providerCallId: string;
       toolName: string;
+      /** Declared by the group that offered the tool; never inferred from the name. */
+      family: ToolFamily;
       arguments: JsonValue;
       /** What a running call already knows, for a page that loads before it ends. */
       result?: JsonValue;

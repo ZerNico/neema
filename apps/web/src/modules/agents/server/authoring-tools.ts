@@ -355,6 +355,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
     return session.patched(result, decoded.value.changes);
   });
   const group: ToolGroup = {
+    family: "agent-draft",
     toolkit: Toolkit.make(draftTool, readTool, optionsTool, updateTool),
     handlers: {
       draft_agent: (raw: unknown) => session.bounded(open(raw)),

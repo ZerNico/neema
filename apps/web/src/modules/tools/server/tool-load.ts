@@ -86,6 +86,7 @@ export const prepareToolLoad = (input: {
   offered: ReadonlyArray<LoadableToolFamily>;
   unlocked: Set<LoadableToolFamily>;
 }): ToolGroup => ({
+  family: "tool-load",
   toolkit: Toolkit.make(loadToolsTool(input.offered)),
   handlers: {
     load_tools: (args: { families?: unknown }) =>

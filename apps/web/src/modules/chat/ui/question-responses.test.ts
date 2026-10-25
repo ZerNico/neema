@@ -3,7 +3,7 @@ import { associateQuestionResponses } from "./question-responses.ts";
 import type { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 
 const assistant = { id: "assistant", role: "assistant", status: "complete" };
-const call = { id: "ask", messageId: assistant.id, toolName: "ask_user" };
+const call = { id: "ask", messageId: assistant.id, toolName: "ask_user", family: "ask" };
 const answers: QuestionResponse = { kind: "answers", answers: [{ selected: [0], custom: "" }] };
 const user = (response: QuestionResponse = answers, callId = call.id) => ({
   id: "user",

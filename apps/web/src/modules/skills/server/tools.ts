@@ -336,6 +336,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   ];
   return {
     group: {
+      family: "skill" as const,
       toolkit: Toolkit.make(loadSkillTool, readSkillFileTool),
       handlers: {
         load_skill: (raw: unknown) => {

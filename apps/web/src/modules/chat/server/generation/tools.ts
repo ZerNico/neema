@@ -1,7 +1,6 @@
 import type { WordDocumentFile } from "~/modules/documents/server/document-tools.ts";
 import { readWordDocument } from "~/modules/documents/server/word-import.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
-import { ProjectFileToolName } from "~/modules/projects/file-tool-schema.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts";
 import {
@@ -10,14 +9,10 @@ import {
   type ToolCallRowRef,
 } from "../research/tool.ts";
 
-import { DocumentToolName } from "~/modules/documents/tool-schema.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
-import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";
-import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools, skillOffer } from "~/modules/skills/server/tools.ts";
-import { SkillToolName } from "~/modules/skills/tool-schema.ts";
 import { findBuiltinSkill } from "~/modules/skills/bundled/index.ts";
 import type { FontFace } from "~/modules/presentations/server/font-file.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
@@ -40,7 +35,6 @@ import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { makeImageResolver, type ImageResolver } from "~/modules/genui/server/image-resolver.ts";
 import { makeMapResolver, type MapResolver } from "~/modules/genui/server/map-resolver.ts";
 import { prepareMapRouteTool } from "~/modules/genui/server/map-tool.ts";
-import { MAP_ROUTE_TOOL } from "~/modules/genui/map-tool-schema.ts";
 import { fileForModel } from "../file-for-model.ts";
 import { ensureGenerationLive, lockGeneration } from "../generation-fence.ts";
 import { prepareConversationContext } from "../conversation-context.ts";
@@ -64,7 +58,6 @@ import {
   makeImageBudget,
   prepareImageTool,
 } from "~/modules/images/server/image-tool.ts";
-import { IMAGE_TOOL } from "~/modules/images/tool-schema.ts";
 import {
   ASSISTANT_FILE_LIMITS as ANSWER_FILE_LIMITS,
   isGeneratedImage,
@@ -72,18 +65,17 @@ import {
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
 import { prepareCustomTools } from "~/modules/custom-tools/server/tools.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
-import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
+import { mergeToolGroups, prepareWebTools, toolFamilies } from "~/modules/tools/server/toolset.ts";
+import type { ToolFamily } from "~/modules/tools/families.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
 import { findScheduleFire, prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
 
 import { isWebSource } from "~/modules/tools/sources.ts";
-import { DesktopToolName } from "~/modules/desktop/tool-schema.ts";
 import { computeBudget, skillRootChars, estimateToolSchemaTokens } from "../compaction.ts";
 import { type PromptDeps } from "../prompt.ts";
 import { prepareAttachmentReader } from "../attachment-reader.ts";
 import { prepareHistoryTools } from "../history-tools.ts";
-import { HistoryToolName } from "../../history-tool-schema.ts";
 import { currentAttachmentId } from "../file-aliases.ts";
 import { hasFileText } from "~/modules/attachments/server/file-text.ts";
 import {
@@ -951,55 +943,18 @@ export const prepareGenerationTools = (
         ? { oneOf: names }
         : ("auto" as const);
     };
-    // The family that owns a call the model made, or null for a name this
-    // answer was not offered.
-    const familyOf = (name: string) =>
-      name === "load_tools" && toolLoad
-        ? "tool-load"
-        : name === "read_attachment"
-          ? "attachment"
-          : historyTools && Schema.is(HistoryToolName)(name) && name in historyTools.handlers
-            ? "history"
-            : Schema.is(AgentDraftToolName)(name)
-              ? "agent-draft"
-              : Schema.is(ScheduleDraftToolName)(name)
-                ? "schedule-draft"
-                : Schema.is(DocumentToolName)(name)
-                  ? "document"
-                  : Schema.is(ProjectFileToolName)(name)
-                    ? "project-file"
-                    : Schema.is(DesktopToolName)(name)
-                      ? "desktop"
-                      : name === "save_memory"
-                        ? "memory"
-                        : name === "ask_user"
-                          ? "ask"
-                          : name === "update_plan"
-                            ? "plan"
-                            : name === "notify_user" && notifyTools
-                              ? "notify"
-                              : name === MAP_ROUTE_TOOL && mapRouteTools
-                                ? "map"
-                                : (name === "publish_file" && publishFileTool) ||
-                                    (name === "create_file" && createFileTool)
-                                  ? "tool-file"
-                                  : officeFamilyOf(name)
-                                    ? officeFamilyOf(name)!.family
-                                    : Schema.is(SkillToolName)(name)
-                                      ? "skill"
-                                      : Schema.is(KnowledgeToolName)(name)
-                                        ? "knowledge"
-                                        : name === "deep_research"
-                                          ? "research"
-                                          : name === "web_search" || name === "read_url"
-                                            ? "web"
-                                            : name === IMAGE_TOOL && imageTool
-                                              ? "image"
-                                              : customTools?.tools.has(name)
-                                                ? "custom"
-                                                : integrationTools?.names.has(name)
-                                                  ? "integration"
-                                                  : null;
+    // The family each offered tool's group declared. A name outside the
+    // offer gets no row: the toolkit runs no handler for it. Retrieval is
+    // decided before the first call, and a spent memory save is not offered.
+    const offeredFamilies = toolFamilies([
+      ...commonGroups,
+      ...(memoryTools && !memorySpent ? [memoryTools.group] : []),
+    ]);
+    const knowledgeFamilies = toolFamilies(knowledgeTools ? [knowledgeTools.group] : []);
+    const familyOf = (name: string): ToolFamily | null =>
+      offeredFamilies.get(name) ??
+      (offerState.retrievalEnabled ? knowledgeFamilies.get(name) : undefined) ??
+      null;
     // What retained history already worked with stays loaded: an explicit
     // load, a lazy tool it called, an authoring skill it loaded, a kept
     // draft or an attached Office file. Decided once, so a later hard

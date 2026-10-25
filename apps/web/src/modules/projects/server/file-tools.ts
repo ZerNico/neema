@@ -175,6 +175,7 @@ export const prepareProjectFileTools = (input: {
   return {
     group: input.project.canEdit
       ? ({
+          family: "project-file",
           toolkit: Toolkit.make(listTool, saveTool),
           handlers: {
             list_project_files: () => bounded(list),
@@ -182,6 +183,7 @@ export const prepareProjectFileTools = (input: {
           },
         } satisfies ToolGroup)
       : ({
+          family: "project-file",
           toolkit: Toolkit.make(listTool),
           handlers: {
             list_project_files: () => bounded(list),

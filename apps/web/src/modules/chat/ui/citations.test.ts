@@ -140,6 +140,7 @@ const storedIntegration = (id: string, read = true) =>
   toActivity({
     id,
     toolName: "int_outline__search_documents",
+    family: "integration",
     arguments: {},
     result: integrationProjection(read),
     status: "complete",

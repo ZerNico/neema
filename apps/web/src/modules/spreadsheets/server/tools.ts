@@ -168,6 +168,7 @@ export function prepareSpreadsheetTools(host: SpreadsheetToolHost): { group: Too
   });
   return {
     group: {
+      family: "spreadsheet",
       toolkit: Toolkit.make(inspectSpreadsheetTool, editSpreadsheetTool),
       handlers: { inspect_spreadsheet: inspect, edit_spreadsheet: edit },
     } satisfies ToolGroup,

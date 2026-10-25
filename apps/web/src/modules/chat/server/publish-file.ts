@@ -58,6 +58,7 @@ export function preparePublishFileTool(workspace: WorkingFiles): {
     // The file is a one-off draft of this answer's, published at once through
     // the same fenced path and budget as publish_file.
     createGroup: {
+      family: "tool-file",
       toolkit: Toolkit.make(createTool),
       handlers: {
         create_file: (
@@ -102,6 +103,7 @@ export function preparePublishFileTool(workspace: WorkingFiles): {
       },
     },
     group: {
+      family: "tool-file",
       toolkit: Toolkit.make(tool),
       handlers: {
         publish_file: (

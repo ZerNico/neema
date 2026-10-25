@@ -590,6 +590,7 @@ export function preparePresentationTools(host: PresentationToolHost): { group: T
   });
   return {
     group: {
+      family: "presentation",
       toolkit: Toolkit.make(inspectPresentationTool, editPresentationTool, renderPresentationTool),
       handlers: {
         inspect_presentation: inspect,

@@ -17,6 +17,7 @@ describe("toActivity", () => {
     const initial = toActivity({
       ...row,
       toolName: "deep_research",
+      family: "research" as const,
       status: "running",
       result: null,
     });
@@ -60,9 +61,15 @@ describe("toActivity", () => {
   it.each(["complete", "error"] as const)(
     "keeps %s research without progress terminal",
     (status) => {
-      expect(toActivity({ ...row, toolName: "deep_research", status, result: null }).status).toBe(
-        "error",
-      );
+      expect(
+        toActivity({
+          ...row,
+          toolName: "deep_research",
+          family: "research" as const,
+          status,
+          result: null,
+        }).status,
+      ).toBe("error");
     },
   );
 
@@ -71,6 +78,7 @@ describe("toActivity", () => {
       toActivity({
         ...row,
         toolName: "save_memory",
+        family: "memory" as const,
         arguments: { content: "private memory" },
         result: {
           outcome: "updated",
@@ -94,6 +102,7 @@ describe("toActivity", () => {
       toActivity({
         ...row,
         toolName: "save_memory",
+        family: "memory" as const,
         status: "error",
         result: { outcome: "rejected", reason: "sensitive", message: "private text" },
       }),
@@ -111,6 +120,7 @@ describe("toActivity", () => {
       toActivity({
         ...row,
         toolName: "save_memory",
+        family: "memory" as const,
         status: "error",
         result: { outcome: "rejected", reason: "not a real reason" },
       }),
@@ -122,6 +132,7 @@ describe("toActivity", () => {
       toActivity({
         ...row,
         toolName: "web_search",
+        family: "web" as const,
         arguments: { queries: ["effect"] },
         result: { resultCount: 2 },
       }),
@@ -149,6 +160,7 @@ const askRow = {
   id: "ask-1",
   messageId: "m-answer",
   toolName: "ask_user",
+  family: "ask" as const,
   arguments: { questions: askQuestions },
   result: { v: 1, outcome: "presented", questions: askQuestions },
   status: "complete" as const,
@@ -204,6 +216,7 @@ it("hydrates document source activities only from an explicit knowledge envelope
   const row = {
     id: "read",
     toolName: "read_knowledge_document",
+    family: "knowledge" as const,
     turnIndex: 0,
     callIndex: 0,
     textOffset: 4,

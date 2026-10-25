@@ -43,7 +43,7 @@ const WorkingFileActivity = Schema.Struct({
 export const CustomToolActivity = Schema.Struct({
   family: Schema.Literal("custom"),
   version: Schema.Literal(1),
-  /** Model-facing name (`custom_…`); the prefix is the durable discriminator. */
+  /** Model-facing name (`custom_…`); the row's stored family, not the prefix, says what it is. */
   name: bounded(CUSTOM_ACTIVITY_LIMITS.name),
   /** Human label resolved from the row at call time. */
   displayName: bounded(CUSTOM_ACTIVITY_LIMITS.name),

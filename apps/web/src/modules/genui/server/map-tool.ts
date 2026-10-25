@@ -166,6 +166,7 @@ export function prepareMapRouteTool(deps: MapRouteDeps): ToolGroup {
       };
     });
   return {
+    family: "map",
     toolkit: Toolkit.make(mapRouteTool),
     handlers: { [MAP_ROUTE_TOOL]: handler },
   };

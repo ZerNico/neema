@@ -77,5 +77,5 @@ export function prepareAskUserTool(): ToolGroup {
       presented = true;
       return { v: 1, outcome: "presented", questions };
     });
-  return { toolkit: Toolkit.make(askUserTool), handlers: { ask_user: handler } };
+  return { family: "ask", toolkit: Toolkit.make(askUserTool), handlers: { ask_user: handler } };
 }

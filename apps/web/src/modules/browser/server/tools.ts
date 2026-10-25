@@ -160,6 +160,7 @@ export const prepareBrowserTools = (deps: Pick<DesktopToolDeps, "rowIdFor">): To
   const handle = (name: DesktopToolName) =>
     awaitDesktopCall(deps.rowIdFor, name, desktopToolTimeout(name));
   return {
+    family: "desktop",
     toolkit: Toolkit.make(
       browserTabsTool,
       browserOpenTool,

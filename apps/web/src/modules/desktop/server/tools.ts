@@ -306,6 +306,7 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     deleteLocalFileTool,
   ] as const;
   return {
+    family: "desktop",
     toolkit: deps.commands
       ? Toolkit.make(
           ...files,

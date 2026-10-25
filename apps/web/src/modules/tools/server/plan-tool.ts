@@ -59,7 +59,11 @@ export function preparePlanTool(initial: PlanSnapshot | null = null): PreparedPl
       return { v: 1, outcome: "updated", steps: current.steps };
     });
   return {
-    group: { toolkit: Toolkit.make(updatePlanTool), handlers: { update_plan: handler } },
+    group: {
+      family: "plan",
+      toolkit: Toolkit.make(updatePlanTool),
+      handlers: { update_plan: handler },
+    },
     current: () => current,
   };
 }

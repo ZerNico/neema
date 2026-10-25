@@ -289,6 +289,7 @@ export function prepareMemoryTool(input: {
 
   return {
     group: {
+      family: "memory",
       toolkit: Toolkit.make(saveMemoryTool),
       handlers: { save_memory: handler },
     },

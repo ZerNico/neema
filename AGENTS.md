@@ -161,7 +161,9 @@ skipped one on purpose.
 - **Tool families**: web, knowledge, skill, memory, ask, plan, notify, map, research, agent-draft,
   schedule-draft, document, project-file, desktop, custom, image, integration, presentation,
   spreadsheet, word, tool-file, tool-load, attachment, history.
-  Each has its own envelope with a required `family`; there is no inference from shape.
+  Each has its own envelope with a required `family`; there is no inference from shape or
+  name. The tool group that offers a tool declares its family and the call's row stores it;
+  a call to a name outside the attempt's offer leaves no row.
 - **Model kinds**: native tool calling and the Hermes polyfill for models without
   it, over either wire format (Chat Completions, Responses). The toolkit loop never
   learns the difference.

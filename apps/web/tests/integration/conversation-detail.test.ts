@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { plainResolve } from "./plain-resolve.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -30,6 +30,19 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
+import { customToolName } from "~/modules/custom-tools/schema.ts";
+import { DESKTOP_TOOL_NAMES } from "~/modules/desktop/tool-schema.ts";
+import { DocumentToolName } from "~/modules/documents/tool-schema.ts";
+import { MAP_ROUTE_TOOL } from "~/modules/genui/map-tool-schema.ts";
+import { IMAGE_TOOL } from "~/modules/images/tool-schema.ts";
+import { KnowledgeToolName } from "~/modules/knowledge/tool-schema.ts";
+import { OFFICE_FAMILIES, OFFICE_FAMILY_NAMES } from "~/modules/office/families.ts";
+import { ProjectFileToolName } from "~/modules/projects/file-tool-schema.ts";
+import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
+import { SkillToolName } from "~/modules/skills/tool-schema.ts";
+import type { ToolFamily } from "~/modules/tools/families.ts";
+import { HistoryToolName } from "~/modules/chat/history-tool-schema.ts";
 import { purgeConversation } from "./purge.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -215,6 +228,7 @@ describe("attempt snapshot reads", () => {
             callIndex: 0,
             providerCallId: "new-call",
             toolName: "web_search",
+            family: "web",
             arguments: { queries: ["new"] },
           });
           yield* Deferred.succeed(release, undefined);
@@ -369,6 +383,7 @@ describe("loadConversationDetail", () => {
           callIndex: 0,
           providerCallId: "call-1",
           toolName: "web_search",
+          family: "web",
           arguments: { queries: ["effect 4"] },
         }),
       ),
@@ -694,6 +709,7 @@ describe("loadConversationDetail", () => {
           callIndex: 0,
           providerCallId: "ask",
           toolName: "ask_user",
+          family: "ask",
           arguments: { questions },
           status: "complete",
           result: { v: 1, outcome: "presented", questions },
@@ -747,6 +763,7 @@ describe("loadConversationDetail", () => {
           callIndex,
           providerCallId: `call-${outcome}`,
           toolName: "read_project_file",
+          family: "attachment" as const,
           arguments: { name: "plan.md" },
           status: outcome === "read" ? ("complete" as const) : ("error" as const),
           result: { outcome, fileName: "plan.md", ...(message ? { message } : {}) },
@@ -840,6 +857,96 @@ describe("loadConversationDetail", () => {
         expect(rows[1]!.delta).toBe(research);
         expect(rows[2]!.delta).toBe(prose);
         expect(JSON.parse(rows[3]!.delta)).toEqual({ ...marker, turnIndex: 1 });
+      }),
+    );
+  });
+
+  it("backfills a stored tool call's family from its name", async () => {
+    // Every name a group offers today, by the family that group declares.
+    const expected: ReadonlyArray<readonly [string, ToolFamily]> = [
+      ["publish_file", "tool-file"],
+      ["create_file", "tool-file"],
+      ["load_tools", "tool-load"],
+      ["read_attachment", "attachment"],
+      ...HistoryToolName.literals.map((name) => [name, "history"] as const),
+      ...OFFICE_FAMILY_NAMES.flatMap((family) =>
+        OFFICE_FAMILIES[family].names.literals.map((name) => [name, family] as const),
+      ),
+      ...AgentDraftToolName.literals.map((name) => [name, "agent-draft"] as const),
+      ...ScheduleDraftToolName.literals.map((name) => [name, "schedule-draft"] as const),
+      ...DocumentToolName.literals.map((name) => [name, "document"] as const),
+      ...ProjectFileToolName.literals.map((name) => [name, "project-file"] as const),
+      ...KnowledgeToolName.literals.map((name) => [name, "knowledge"] as const),
+      ...SkillToolName.literals.map((name) => [name, "skill"] as const),
+      ...DESKTOP_TOOL_NAMES.map((name) => [name, "desktop"] as const),
+      [IMAGE_TOOL, "image"],
+      ["deep_research", "research"],
+      ["ask_user", "ask"],
+      [MAP_ROUTE_TOOL, "map"],
+      ["notify_user", "notify"],
+      ["update_plan", "plan"],
+      ["save_memory", "memory"],
+      ["web_search", "web"],
+      ["read_url", "web"],
+      [customToolName("exporter", "csv"), "custom"],
+      ["int_jira__create_issue", "integration"],
+      // Names the client never knew were old web rows.
+      ["int___orphan", "web"],
+      ["legacy_lookup", "web"],
+    ];
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const thread = yield* seedThread(userId, "Old tool rows");
+        const db = yield* Db;
+        // As the rows stood between the column's migration and its backfill.
+        yield* db.execute(
+          `alter table message_tool_calls alter column family drop not null` as never,
+        );
+        yield* db.insert(messageToolCalls).values(
+          expected.map(([toolName], callIndex) => ({
+            id: uuidv7(),
+            messageId: thread.assistantId,
+            turnIndex: 0,
+            callIndex,
+            providerCallId: `p${callIndex}`,
+            toolName,
+            family: sql`null`,
+            arguments: {},
+            status: "complete" as const,
+          })),
+        );
+        // One statement per query, as the migrator runs them.
+        const migration = readFileSync(
+          new URL(
+            "../../drizzle/20261025185114_tool_call_family_backfill/migration.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        );
+        for (const statement of migration.split("--> statement-breakpoint"))
+          yield* db.execute(statement as never);
+        const rows = yield* db
+          .select({ toolName: messageToolCalls.toolName, family: messageToolCalls.family })
+          .from(messageToolCalls)
+          .where(eq(messageToolCalls.messageId, thread.assistantId))
+          .orderBy(messageToolCalls.callIndex);
+        expect(rows.map((row) => [row.toolName, row.family])).toEqual(expected);
+        // Required again once every row has one.
+        const failed = yield* Effect.result(
+          db.insert(messageToolCalls).values({
+            id: uuidv7(),
+            messageId: thread.assistantId,
+            turnIndex: 1,
+            callIndex: 0,
+            providerCallId: "unfamilied",
+            toolName: "web_search",
+            family: sql`null`,
+            arguments: {},
+            status: "complete",
+          }),
+        );
+        expect(failed._tag).toBe("Failure");
       }),
     );
   });
@@ -1090,6 +1197,7 @@ describe("loadConversationDetail windows", () => {
           callIndex: 0,
           providerCallId: "call",
           toolName: "web_search",
+          family: "web",
           arguments: {},
           status: "complete",
           result: { v: 1, family: "web", sources: [source(1), source(2)] },

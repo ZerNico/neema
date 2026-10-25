@@ -15,6 +15,7 @@ const stored = (toolName: string, result: unknown, status: "complete" | "error" 
   toActivity({
     id: "row",
     toolName,
+    family: "history",
     arguments: {},
     result,
     status,

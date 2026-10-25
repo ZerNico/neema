@@ -1,4 +1,5 @@
-import { familyOfTool, projectToolCall, readTextOffset } from "../client/tool-families.ts";
+import type { ToolFamily } from "~/modules/tools/families.ts";
+import { projectToolCall, readTextOffset } from "../client/tool-families.ts";
 import type { CompactionActivity, ToolActivity } from "../client/use-message-stream.ts";
 
 export const epoch = (value: Date | string | null | undefined) =>
@@ -25,12 +26,13 @@ export const timedActivity = (
 
 /**
  * Durable message_tool_calls row → the same family-discriminated shape used by
- * live chunks, through the same projection. The tool name is the durable
- * discriminator; old web rows never carried a family field of their own.
+ * live chunks, through the same projection. The row's stored family, written
+ * by the group that offered the call, is the discriminator.
  */
 export function toActivity(row: {
   id: string;
   toolName: string;
+  family: ToolFamily;
   arguments: unknown;
   result: unknown;
   status: "running" | "complete" | "error";
@@ -42,7 +44,7 @@ export function toActivity(row: {
   error: { code: string; message: string } | null;
 }): ToolActivity {
   return projectToolCall(
-    familyOfTool(row.toolName),
+    row.family,
     {
       name: row.toolName,
       status: row.status,

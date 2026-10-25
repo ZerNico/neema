@@ -267,6 +267,7 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       return session.patched(result, decoded.value.changes);
     });
     const group: ToolGroup = {
+      family: "schedule-draft",
       toolkit: Toolkit.make(draftTool, readTool, updateTool),
       handlers: {
         draft_schedule: (raw: unknown) => session.bounded(open(raw)),

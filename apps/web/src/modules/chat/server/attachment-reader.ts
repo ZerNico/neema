@@ -177,6 +177,7 @@ export const prepareAttachmentReader = (input: {
       };
     });
   const group: ToolGroup = {
+    family: "attachment",
     toolkit: Toolkit.make(readAttachmentTool),
     handlers: {
       read_attachment: (

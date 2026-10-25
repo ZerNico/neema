@@ -1,7 +1,8 @@
 import type { UiImages } from "../../assistant-output.ts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
-import { IMAGE_TOOL, ImageToolActivity } from "~/modules/images/tool-schema.ts";
+import { ImageToolActivity } from "~/modules/images/tool-schema.ts";
+import type { ToolFamily } from "~/modules/tools/families.ts";
 import { composeFileReferenceAliases } from "../../file-reference-aliases.ts";
 import { projectResearchProgress } from "../../research-schema.ts";
 import { researchRuns, researchTasks } from "~/db/schema/research.ts";
@@ -34,7 +35,7 @@ import type { ChatRepo } from "../repo.ts";
  * file card still groups under the call that produced it there.
  */
 const withClonedFileIds = (
-  toolName: string,
+  family: ToolFamily,
   result: JsonValue | null,
   cloned: ReadonlyMap<string, string>,
 ): JsonValue | null => {
@@ -44,7 +45,7 @@ const withClonedFileIds = (
     return cloneId ? [cloneId] : [];
   };
   // Both deliver a file under the same activity shape; a copy points at the branch's own.
-  if (toolName === "publish_file" || toolName === "create_file") {
+  if (family === "tool-file") {
     const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ToolFileActivity)(result));
     if (stored?.attachmentId) {
       const next = { ...result };
@@ -53,7 +54,7 @@ const withClonedFileIds = (
       return id ? { ...next, attachmentId: id } : next;
     }
   }
-  if (toolName === IMAGE_TOOL) {
+  if (family === "image") {
     const stored = Option.getOrUndefined(Schema.decodeUnknownOption(ImageToolActivity)(result));
     if (stored) return { ...result, attachmentIds: stored.attachmentIds.flatMap(copy) };
   }
@@ -346,7 +347,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                             progress: clonedProgress.get(rootRuns.get(call.id)!),
                           }),
                         ) as JsonValue)
-                      : withClonedFileIds(call.toolName, call.result, attachmentIds),
+                      : withClonedFileIds(call.family, call.result, attachmentIds),
                     messageId: clonedIds.get(call.messageId)!,
                   })),
                 )

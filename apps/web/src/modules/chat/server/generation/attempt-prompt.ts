@@ -895,6 +895,7 @@ export const prepareAttemptPrompt = (env: {
           ...position,
           providerCallId: `knowledge-context:${rowId}`,
           toolName: "knowledge_context",
+          family: "knowledge",
           arguments: {},
         });
         yield* sink.pushTool({
@@ -950,6 +951,7 @@ export const prepareAttemptPrompt = (env: {
         textOffset: sink.text().length,
         providerCallId: `skill-context:${rowId}`,
         toolName: "load_skill",
+        family: "skill",
         arguments: {},
       });
       yield* sink.pushTool({

@@ -19,6 +19,7 @@ describe("a scheduled run telling its owner", () => {
     const stored = toActivity({
       id: "row",
       toolName: "notify_user",
+      family: "notify",
       arguments: {},
       result: { v: 1, outcome: "queued", message: "It fell." },
       status: "complete",
@@ -36,6 +37,7 @@ describe("a scheduled run telling its owner", () => {
     const stored = toActivity({
       id: "row",
       toolName: "notify_user",
+      family: "notify",
       arguments: {},
       result: { v: 1, outcome: "rejected", message: "This answer already notified its owner." },
       status: "error",

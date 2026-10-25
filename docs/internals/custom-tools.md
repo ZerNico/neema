@@ -66,12 +66,11 @@ export default defineModule({
 A module and each function use lowercase slug segments. The model-facing name is
 `custom_<module-slug>__<function-slug>`. Both slug components are capped at 27
 characters, keeping the complete name within the common 64-character provider
-limit. The `custom_` prefix is the durable family discriminator in persistence
-and client projection. Inside a generation, though, the manifest that generation
-resolved decides what counts as a custom call: a model can invent a `custom_…`
-name, and the SDK still forwards that part to the consumer, so a prefix test
-there would turn a hallucination into a failed attempt. A name outside that
-manifest falls through like any other unknown tool.
+limit. The prefix decides nothing: like every family, a custom call's family is
+declared by the tool group that offered it and stored on its row, which reload
+and branch read. A model can invent a `custom_…` name, and the SDK still forwards
+that part to the consumer; a name outside the modules that generation resolved is
+outside its offer and leaves no row, like any other unknown tool.
 
 Build inspection converts each parameter schema with
 `Schema.toJsonSchemaDocument`, preserving `$defs`. A struct annotated with an

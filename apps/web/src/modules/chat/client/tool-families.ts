@@ -1,16 +1,13 @@
 import { Option, Schema } from "effect";
 import {
   AgentDraftToolEnvelope,
-  AgentDraftToolName,
   agentDraftResultOk,
   projectAgentDraftResult,
 } from "~/modules/agents/tool-schema.ts";
 import { CustomToolActivity, CustomToolEnvelope } from "~/modules/custom-tools/tool-schema.ts";
-import { isCustomToolName } from "~/modules/custom-tools/schema.ts";
 import { DesktopToolName, DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import {
   DocumentToolEnvelope,
-  DocumentToolName,
   documentResultOk,
   projectDocumentResult,
 } from "~/modules/documents/tool-schema.ts";
@@ -21,7 +18,6 @@ import {
   summarizeMapRoute,
 } from "~/modules/genui/map-tool-schema.ts";
 import {
-  IMAGE_TOOL,
   ImageToolActivity,
   ImageToolEnvelope,
   runningImageActivity,
@@ -31,30 +27,20 @@ import {
   IntegrationToolActivity as StoredIntegrationActivity,
   IntegrationToolEnvelope,
 } from "~/modules/integrations/tool-schema.ts";
-import {
-  KnowledgeActivityResult,
-  KnowledgeToolEnvelope,
-  KnowledgeToolName,
-} from "~/modules/knowledge/tool-schema.ts";
-import {
-  OFFICE_FAMILIES,
-  officeFamilyOfTool,
-  type OfficeFamily,
-} from "~/modules/office/families.ts";
+import { KnowledgeActivityResult, KnowledgeToolEnvelope } from "~/modules/knowledge/tool-schema.ts";
+import { OFFICE_FAMILIES, type OfficeFamily } from "~/modules/office/families.ts";
 import {
   ProjectFileToolEnvelope,
-  ProjectFileToolName,
   projectFileResultOk,
   projectProjectFileResult,
 } from "~/modules/projects/file-tool-schema.ts";
 import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
 import {
   ScheduleDraftToolEnvelope,
-  ScheduleDraftToolName,
   projectScheduleDraftResult,
   scheduleDraftResultOk,
 } from "~/modules/schedules/tool-schema.ts";
-import { SkillActivity, SkillToolEnvelope, SkillToolName } from "~/modules/skills/tool-schema.ts";
+import { SkillActivity, SkillToolEnvelope } from "~/modules/skills/tool-schema.ts";
 import { AskUserResult, readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
 import { PlanStep, PlanToolResult } from "~/modules/tools/plan-schema.ts";
 import { MemoryActivityReason, type MemoryActivityOutcome } from "~/modules/tools/schema.ts";
@@ -114,8 +100,6 @@ interface LiveCall {
 }
 
 interface FamilySpec<F extends Family> {
-  /** Whether a stored row's tool name, its only discriminator, is this family's. */
-  owns: (toolName: string) => boolean;
   project: (call: ToolCall) => FamilyFields<F>;
   /** Null when the envelope does not decode, which leaves the activity as it was. */
   live: (envelope: Envelope, previous: ActivityOf<F> | undefined) => LiveCall | null;
@@ -217,12 +201,10 @@ const started = (envelope: Envelope): LiveCall => ({
  * and the handler's reason for one that did not land kept as the row's error.
  */
 const outcomeFamily = <R>(
-  owns: (toolName: string) => boolean,
   envelope: Parameters<typeof Schema.decodeUnknownOption>[0],
   project: (value: unknown) => R,
   ok: (result: R) => boolean,
 ) => ({
-  owns,
   project: (call: ToolCall) => {
     if (call.status === "running") return { status: "running" as const };
     const result = project(call.result);
@@ -256,7 +238,6 @@ const officeFamily = <S extends { outcome: string; message: string }>(
   summary: (raw: unknown, failed: boolean) => S,
   envelope: Parameters<typeof Schema.decodeUnknownOption>[0],
 ) => ({
-  owns: (toolName: string) => officeFamilyOfTool(toolName) === family,
   project: (call: ToolCall) => {
     if (call.status === "running") return { status: "running" as const };
     const kept = summary(call.result, call.status === "error");
@@ -312,8 +293,6 @@ const KnowledgeTargets = Schema.Struct({ targets: Schema.Array(Schema.String) })
 const LoadedFamilies = Schema.Struct({ loaded: LoadToolsResult.fields.loaded });
 const RouteSummary = Schema.Struct({ route: MapRouteSummary });
 
-const WEB_TOOLS = new Set(["web_search", "read_url"]);
-
 /** What a web row keeps: the summary and sources, never page bodies. */
 interface WebResult {
   targets?: string[];
@@ -329,26 +308,14 @@ const lineageOf = (envelope: Envelope) => ({
 });
 
 export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
-  "agent-draft": outcomeFamily(
-    Schema.is(AgentDraftToolName),
-    AgentDraftToolEnvelope,
-    projectAgentDraftResult,
-    agentDraftResultOk,
-  ),
+  "agent-draft": outcomeFamily(AgentDraftToolEnvelope, projectAgentDraftResult, agentDraftResultOk),
   "schedule-draft": outcomeFamily(
-    Schema.is(ScheduleDraftToolName),
     ScheduleDraftToolEnvelope,
     projectScheduleDraftResult,
     scheduleDraftResultOk,
   ),
-  document: outcomeFamily(
-    Schema.is(DocumentToolName),
-    DocumentToolEnvelope,
-    projectDocumentResult,
-    documentResultOk,
-  ),
+  document: outcomeFamily(DocumentToolEnvelope, projectDocumentResult, documentResultOk),
   "project-file": outcomeFamily(
-    Schema.is(ProjectFileToolName),
     ProjectFileToolEnvelope,
     projectProjectFileResult,
     projectFileResultOk,
@@ -366,7 +333,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   word: officeFamily("word", OFFICE_FAMILIES.word.summary, OFFICE_FAMILIES.word.envelope),
 
   skill: {
-    owns: Schema.is(SkillToolName),
     project: (call) => {
       // A running row keeps nothing, so a reload names it only once it settles.
       const label = decode(SkillLabel, call.result);
@@ -400,7 +366,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   knowledge: {
-    owns: Schema.is(KnowledgeToolName),
     project: (call) => {
       if (call.status === "running") {
         // Only the stream knows the queries of a running search.
@@ -445,7 +410,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   "tool-file": {
-    owns: (toolName) => toolName === "publish_file" || toolName === "create_file",
     project: (call) => {
       const result = call.status === "running" ? null : decode(ToolFileActivity, call.result);
       return {
@@ -469,7 +433,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   image: {
-    owns: (toolName) => toolName === IMAGE_TOOL,
     project: (call) => {
       // Every row is written with a running snapshot, so the shape is always kept.
       const kept = decode(ImageToolActivity, call.result);
@@ -505,7 +468,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   custom: {
-    owns: isCustomToolName,
     project: (call) => {
       const kept = decode(CustomFields, call.result);
       return {
@@ -529,7 +491,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   integration: {
-    owns: (toolName) => parseIntegrationToolName(toolName) !== null,
     project: (call) => {
       const kept = decode(StoredIntegrationActivity, call.result);
       if (kept) return integrationFields(kept);
@@ -567,7 +528,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   desktop: {
-    owns: Schema.is(DesktopToolName),
     project: (call) => {
       // The row holds the summary only, never the file contents or command
       // output that reached the model, so a reload shows no body for it.
@@ -604,7 +564,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   research: {
-    owns: (toolName) => toolName === "deep_research",
     project: (call) => {
       const kept = (call.result ?? {}) as { progress?: unknown; sources?: ToolSource[] };
       const progress = readResearchProgress(kept.progress);
@@ -654,7 +613,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   ask: {
-    owns: (toolName) => toolName === "ask_user",
     project: (call) => {
       // Only a validated, successful presentation can supply questions.
       const questions = readPresentedQuestions(call.result);
@@ -687,7 +645,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   map: {
-    owns: (toolName) => toolName === MAP_ROUTE_TOOL,
     project: (call) => {
       // The row keeps the whole route; the stream sends only its summary.
       const kept = decode(MapRouteResult, call.result);
@@ -713,7 +670,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   notify: {
-    owns: (toolName) => toolName === "notify_user",
     project: (call) => {
       const kept = decode(NotifyToolResult, call.result);
       const message = kept?.outcome === "queued" ? kept.message : undefined;
@@ -739,7 +695,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   plan: {
-    owns: (toolName) => toolName === "update_plan",
     project: (call) => {
       const kept = decode(PlanToolResult, call.result);
       const steps = kept?.outcome === "updated" ? kept.steps : null;
@@ -766,7 +721,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   attachment: {
-    owns: (toolName) => toolName === "read_attachment",
     project: (call) => {
       const read = call.status === "running" ? null : decode(AttachmentReadActivity, call.result);
       return {
@@ -786,7 +740,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   history: {
-    owns: (toolName) => Schema.is(HistoryToolName)(toolName),
     project: (call) => {
       const read = call.status === "running" ? null : decode(HistoryActivity, call.result);
       return {
@@ -806,7 +759,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   "tool-load": {
-    owns: (toolName) => toolName === "load_tools",
     project: (call) => {
       const kept = call.status === "running" ? null : decode(LoadedFamilies, call.result);
       return {
@@ -830,7 +782,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   memory: {
-    owns: (toolName) => toolName === "save_memory",
     project: (call) => {
       // Summary only: memory content never reaches stream state or the row.
       const kept = (call.result ?? {}) as { outcome?: unknown; reason?: unknown; scope?: unknown };
@@ -860,7 +811,6 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 
   web: {
-    owns: (toolName) => WEB_TOOLS.has(toolName),
     project: (call) => {
       const args = (call.args ?? {}) as { queries?: string[]; urls?: string[] };
       const kept = (call.result ?? {}) as WebResult;
@@ -920,14 +870,8 @@ export const TOOL_FAMILIES: { [F in Family]: FamilySpec<F> } = {
   },
 };
 
-const FAMILIES = Object.keys(TOOL_FAMILIES) as Family[];
-
 export const isToolFamily = (value: unknown): value is Family =>
   typeof value === "string" && Object.hasOwn(TOOL_FAMILIES, value);
-
-/** A stored row's family, by its tool name; an unknown name is an old web row. */
-export const familyOfTool = (toolName: string): Family =>
-  FAMILIES.find((family) => TOOL_FAMILIES[family].owns(toolName)) ?? "web";
 
 /** A live envelope as its family reads it; `previous` is that family's activity for the call. */
 export const readLiveCall = (

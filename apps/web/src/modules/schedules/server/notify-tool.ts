@@ -81,6 +81,7 @@ export function prepareNotifyTool(
       return { v: 1, outcome: "queued", message };
     });
   const group: ToolGroup = {
+    family: "notify",
     toolkit: Toolkit.make(notifyUserTool),
     handlers: { notify_user: handler },
   };

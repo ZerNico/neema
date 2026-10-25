@@ -1164,6 +1164,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
       ),
     );
   const group = {
+    family: "document",
     toolkit: Toolkit.make(createTool, editTool, readTool, listTool, commentTool),
     handlers: {
       create_document: (raw: unknown) =>

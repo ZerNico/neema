@@ -1,4 +1,5 @@
 import { findBuiltinSkill } from "~/modules/skills/bundled/index.ts";
+import type { ToolFamily } from "~/modules/tools/families.ts";
 import { desktopToolTimeout, unusableDesktopResult } from "~/modules/desktop/tool-schema.ts";
 import {
   ProjectFileToolName,
@@ -80,7 +81,6 @@ import type { RoundEnv } from "./round.ts";
 import type { ChatStreamPart } from "~/modules/providers/server/gateway.ts";
 import type { DbTx } from "~/server/db.ts";
 
-type ToolFamily = ToolChunkEnvelope["family"];
 /**
  * What a call's row keeps of its arguments. Content in its own deletable row
  * (memory, drafts, documents) leaves nothing; tools that write content keep a
@@ -462,6 +462,7 @@ export const observePart = (
           textOffset,
           providerCallId: part.id,
           toolName: part.name,
+          family,
           // A page loading mid-draw shows the model and frame the live start names.
           ...(family === "image" && imageModel
             ? {

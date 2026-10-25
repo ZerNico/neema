@@ -365,6 +365,7 @@ export const prepareKnowledgeTools = Effect.fn("knowledge.prepareTools")(functio
 
   return {
     group: {
+      family: "knowledge" as const,
       toolkit: Toolkit.make(listDocumentsTool, searchKnowledgeTool, readDocumentTool),
       handlers: {
         list_knowledge_documents: list,

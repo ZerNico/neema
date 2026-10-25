@@ -28,7 +28,7 @@ import { KnowledgeToolName, projectKnowledgeToolResult } from "~/modules/knowled
 import type { GenerationConfig } from "../repo.ts";
 import { isWebSource, mergeSource, mergeSources } from "~/modules/tools/sources.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
-import { mergeToolGroups, prepareWebTools } from "~/modules/tools/server/toolset.ts";
+import { mergeToolGroups, prepareWebTools, toolFamilies } from "~/modules/tools/server/toolset.ts";
 import type { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import type { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import type { CompactionChunkEnvelope } from "../../schema.ts";
@@ -319,6 +319,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           textOffset: 0,
           providerCallId: `skill-context:${rowId}`,
           toolName: "load_skill",
+          family: "skill",
           arguments: {},
           result: json(activity),
           status: "complete",
@@ -341,11 +342,13 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
     });
     yield* deps.emit({ v: 1, phase: "result", callId: rowId, runId: fence.runId, ...activity });
   }
-  const workerToolkit = yield* mergeToolGroups([
+  const workerGroups = [
     ...(skillTools ? [skillTools.group] : []),
     web.group,
     ...(knowledgeTools ? [knowledgeTools.group] : []),
-  ]);
+  ];
+  const workerToolkit = yield* mergeToolGroups(workerGroups);
+  const workerFamilies = toolFamilies(workerGroups);
   let compactionPosition = 0;
 
   const invoke = Effect.fn("research.invoke")(function* (input: {
@@ -472,16 +475,14 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
           }
           if (!preliminary && part.type !== "error") parts.push(part);
           if (part.type === "text-delta") text += part.delta;
-          const isSkill =
-            (part.type === "tool-call" || part.type === "tool-result") &&
-            Schema.is(SkillToolName)(part.name);
-          const isKnowledge =
-            (part.type === "tool-call" || part.type === "tool-result") &&
-            Schema.is(KnowledgeToolName)(part.name);
-          if (
-            part.type === "tool-call" &&
-            (part.name === "web_search" || part.name === "read_url" || isKnowledge || isSkill)
-          ) {
+          // Only what the worker was offered gets a row.
+          const family =
+            part.type === "tool-call" || part.type === "tool-result"
+              ? workerFamilies.get(part.name)
+              : undefined;
+          const isSkill = family === "skill";
+          const isKnowledge = family === "knowledge";
+          if (part.type === "tool-call" && family) {
             const rowId = uuidv7();
             rows.set(part.id, rowId);
             const index = callIndex++;
@@ -499,6 +500,7 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
                   textOffset,
                   providerCallId: `${id}:${part.id}`,
                   toolName: part.name,
+                  family,
                   arguments: isSkill ? {} : json(part.params),
                   status: "running",
                 })

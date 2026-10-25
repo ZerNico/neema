@@ -646,7 +646,11 @@ export function prepareIntegrationTools(input: {
 
   if (definitions.length === 0) return undefined;
   return {
-    group: { toolkit: Toolkit.make(...definitions) as ToolGroup["toolkit"], handlers },
+    group: {
+      family: "integration",
+      toolkit: Toolkit.make(...definitions) as ToolGroup["toolkit"],
+      handlers,
+    },
     names,
     lazy,
     take: (providerCallId) => {

@@ -279,6 +279,7 @@ export const prepareHistoryTools = (input: {
 
   return otherChats
     ? {
+        family: "history",
         toolkit: Toolkit.make(readHistoryTool, searchChatsTool, readChatTool),
         handlers: {
           read_history: readHistory,
@@ -286,7 +287,11 @@ export const prepareHistoryTools = (input: {
           read_chat: readChat(otherChats),
         },
       }
-    : { toolkit: Toolkit.make(readHistoryTool), handlers: { read_history: readHistory } };
+    : {
+        family: "history",
+        toolkit: Toolkit.make(readHistoryTool),
+        handlers: { read_history: readHistory },
+      };
 };
 
 /** The durable activity: what was looked for and how much came back, without the text. */

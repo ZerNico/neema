@@ -395,7 +395,7 @@ export function prepareImageTool(input: {
     });
 
   return {
-    group: { toolkit: Toolkit.make(tool), handlers: { [IMAGE_TOOL]: handler } },
+    group: { family: "image", toolkit: Toolkit.make(tool), handlers: { [IMAGE_TOOL]: handler } },
     take: (callId) => {
       const value = staged.get(callId);
       staged.delete(callId);

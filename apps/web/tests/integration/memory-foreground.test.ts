@@ -543,6 +543,7 @@ describe("StreamEngine durable clarification handoff", () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]).toMatchObject({
       toolName: "ask_user",
+      family: "ask",
       status: "complete",
       arguments: questionParams,
       result: { v: 1, outcome: "presented", ...questionParams },
@@ -777,6 +778,7 @@ describe("StreamEngine foreground saved memory", () => {
     ]);
     expect(call).toMatchObject({
       toolName: "save_memory",
+      family: "memory",
       arguments: {},
       result: { outcome: "updated" },
       status: "complete",
@@ -819,6 +821,7 @@ describe("StreamEngine foreground saved memory", () => {
     });
     expect(call).toMatchObject({
       toolName: "save_memory",
+      family: "memory",
       arguments: {},
       result: { outcome: "created" },
       status: "complete",

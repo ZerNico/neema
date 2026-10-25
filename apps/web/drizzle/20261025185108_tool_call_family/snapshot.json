@@ -1,0 +1,51 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "07bea1d2-b3c6-44b8-9956-076d2e64bf0e",
+  "prevIds": [
+    "9f23a809-97db-447c-b8b4-5ccf45dbb7d4",
+    "7f3a1fc2-8a16-4d3a-ab97-a13bdbd0a871",
+    "b4922da2-5133-4169-a174-bca0d8c04bf7",
+    "90c7d330-3de2-4f79-9ca6-753db7539490",
+    "a93a93ba-1c66-43f6-a5be-d86ab748cfaf"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_tool_calls",
+        "family"
+      ],
+      "writes": [
+        "s|col|public.message_tool_calls.family",
+        "n|col|public.message_tool_calls.family",
+        "e|col|public.message_tool_calls.family"
+      ],
+      "reads": [
+        "n|tbl|public.message_tool_calls",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_tool_calls",
+        "name": "family",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

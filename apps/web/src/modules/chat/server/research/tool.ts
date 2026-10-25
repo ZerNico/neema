@@ -274,6 +274,7 @@ export const prepareResearchTool = (input: {
 
   return {
     group: {
+      family: "research",
       toolkit: Toolkit.make(researchTool),
       handlers: {
         deep_research: (raw: unknown, ctx: { toolCallId: string }) =>

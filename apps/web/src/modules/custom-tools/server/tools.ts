@@ -111,7 +111,11 @@ export function prepareCustomTools(
   }
 
   return {
-    group: { toolkit: Toolkit.make(...definitions) as ToolGroup["toolkit"], handlers },
+    group: {
+      family: "custom",
+      toolkit: Toolkit.make(...definitions) as ToolGroup["toolkit"],
+      handlers,
+    },
     tools: new Map(
       functions.map(({ module, fn }) => [
         fn.modelName,

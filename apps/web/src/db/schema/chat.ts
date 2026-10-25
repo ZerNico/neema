@@ -19,6 +19,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { TOOL_FAMILY_NAMES } from "~/modules/tools/families.ts";
 import { models } from "./providers.ts";
 import type { JsonValue } from "./providers.ts";
 import { user } from "./auth.ts";
@@ -341,6 +342,9 @@ export const messageToolCalls = pgTable(
     // id the provider assigned; must be echoed back in the tool-result message
     providerCallId: text("provider_call_id").notNull(),
     toolName: text("tool_name").notNull(),
+    // Declared by the tool group that offered the call, so reload and branch
+    // never guess it from the name.
+    family: text({ enum: TOOL_FAMILY_NAMES }).notNull(),
     arguments: jsonb().$type<JsonValue>().notNull(),
     // durable summary (query, counts, source urls/titles), not page content
     result: jsonb().$type<JsonValue>(),

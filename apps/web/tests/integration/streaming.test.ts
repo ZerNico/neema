@@ -547,6 +547,7 @@ const setupQuestion = Effect.gen(function* () {
     textOffset: 0,
     providerCallId: "ask-1",
     toolName: "ask_user",
+    family: "ask",
     arguments: questionParams,
   });
   yield* repo.completeToolCall({
@@ -5669,6 +5670,7 @@ describe("resumable streaming pipeline", () => {
           callIndex: 0,
           providerCallId: "running-preflight",
           toolName: "web_search",
+          family: "web",
           arguments: {},
         });
         yield* repo.insertToolCall({
@@ -5678,6 +5680,7 @@ describe("resumable streaming pipeline", () => {
           callIndex: 1,
           providerCallId: "completed-preflight",
           toolName: "web_search",
+          family: "web",
           arguments: {},
         });
         yield* repo.completeToolCall({ id: completedTool, status: "complete", result: {} });
@@ -5783,6 +5786,7 @@ describe("resumable streaming pipeline", () => {
           callIndex: 0,
           providerCallId: "current-attempt",
           toolName: "web_search",
+          family: "web",
           arguments: {},
         });
         const stale = yield* Effect.exit(
@@ -6157,6 +6161,7 @@ describe("resumable streaming pipeline", () => {
           callIndex: 0,
           providerCallId: "orphan",
           toolName: "web_search",
+          family: "web",
           arguments: {},
         });
         // Fresh lease: still considered alive, so nothing may settle it yet.
@@ -7218,6 +7223,7 @@ describe("reasoning effort attempts", () => {
                 textOffset: 0,
                 providerCallId: `ask-${callId}`,
                 toolName: "ask_user",
+                family: "ask",
                 arguments: questionParams,
               });
               yield* repo.completeToolCall({
@@ -8030,56 +8036,63 @@ describe("custom tool calls", () => {
       authoringFinish(),
     );
 
-  it("treats an invented custom_ name as an unknown tool rather than failing the attempt", async () => {
-    const seed = await runtime.runPromise(setupConversation);
-    const conversationId = (
-      await runtime.runPromise(
-        ChatRepo.use((repo) =>
-          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
-        ),
-      )
-    ).id;
-    let round = 0;
-    // Nothing is pinned to this attempt, so the name has no manifest entry.
-    // The SDK still forwards the part; the engine must not throw on it.
-    authoringScript = () =>
-      ++round === 1
-        ? (Stream.make(
-            AiResponse.makePart("tool-call", {
-              id: uuidv7(),
-              name: "custom_nope__lookup",
-              params: {},
-              providerExecuted: false,
+  // Only the offer decides a call's family. These names belong to families
+  // this attempt was not offered: no pinned module, no Work folder, no
+  // conditional schedule fire. The SDK still forwards each part.
+  it.each(["custom_nope__lookup", "run_command", "notify_user"])(
+    "treats %s, which this attempt was not offered, as an unknown tool and keeps no row",
+    async (name) => {
+      const seed = await runtime.runPromise(setupConversation);
+      const conversationId = (
+        await runtime.runPromise(
+          ChatRepo.use((repo) =>
+            repo.createConversation({ userId: seed.userId, modelId: textModelId }),
+          ),
+        )
+      ).id;
+      let round = 0;
+      authoringScript = () =>
+        ++round === 1
+          ? (Stream.make(
+              AiResponse.makePart("tool-call", {
+                id: uuidv7(),
+                name,
+                params: {},
+                providerExecuted: false,
+              }),
+              authoringFinish("tool-calls"),
+            ) as Stream.Stream<ChatStreamPart>)
+          : reply();
+      try {
+        const { assistantMessageId } = await runtime.runPromise(
+          ChatService.use((service) =>
+            service.sendMessage({
+              userId: seed.userId,
+              conversation: { kind: "existing", id: conversationId },
+              modelId: textModelId,
+              content: "Look it up.",
+              searchEnabled: false,
+              researchEnabled: false,
+              attachmentIds: [],
             }),
-            authoringFinish("tool-calls"),
-          ) as Stream.Stream<ChatStreamPart>)
-        : reply();
-    try {
-      const { assistantMessageId } = await runtime.runPromise(
-        ChatService.use((service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: conversationId },
-            modelId: textModelId,
-            content: "Look it up.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
-        ),
-      );
-      const detail = await runtime.runPromise(loadConversationDetail(seed.userId, conversationId));
-      expect(detail.messages.at(-1)).toMatchObject({ status: "complete" });
-      expect(detail.toolCalls).toEqual([]);
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
+          ),
+        );
+        await runtime.runPromise(
+          Effect.flatMap(StreamEngine, (engine) =>
+            Stream.runCollect(engine.subscribe(assistantMessageId, 0)),
+          ),
+        );
+        const detail = await runtime.runPromise(
+          loadConversationDetail(seed.userId, conversationId),
+        );
+        expect(detail.messages.at(-1)).toMatchObject({ status: "complete" });
+        expect(detail.toolCalls).toEqual([]);
+      } finally {
+        authoringScript = null;
+      }
+    },
+    60_000,
+  );
 
   it("stores a tool's files as attachments of the answer and shares only what it asked to", async () => {
     const seed = await runtime.runPromise(setupConversation);
@@ -10892,6 +10905,7 @@ describe("resuming an interrupted answer", () => {
           textOffset: content.length,
           providerCallId: "command-1",
           toolName: "run_command",
+          family: "desktop",
           arguments: { command: "ls" },
         });
         const researchRow = uuidv7();
@@ -10903,6 +10917,7 @@ describe("resuming an interrupted answer", () => {
           textOffset: content.length,
           providerCallId: "research-1",
           toolName: "deep_research",
+          family: "research",
           arguments: {},
         });
         // A steer the crashed attempt took in after its first round.
@@ -11162,6 +11177,7 @@ describe("resuming an interrupted answer", () => {
           textOffset: 8,
           providerCallId: "last-host-round",
           toolName: "read_url",
+          family: "web",
           arguments: {},
         });
         return {
@@ -11330,6 +11346,7 @@ describe("resuming an interrupted answer", () => {
           textOffset: 0,
           providerCallId: uuidv7(),
           toolName: "web_search",
+          family: "web" as const,
           arguments: {},
           status: "complete" as const,
           ...overrides,
@@ -11340,12 +11357,14 @@ describe("resuming an interrupted answer", () => {
           row({
             providerCallId: `knowledge-context:${uuidv7()}`,
             toolName: "knowledge_context",
+            family: "knowledge",
             result: { sources: [] },
           }),
           row({
             callIndex: -5,
             providerCallId: `skill-context:${uuidv7()}`,
             toolName: "load_skill",
+            family: "skill",
             result: { skillId: "s1" },
           }),
           row({

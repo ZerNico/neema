@@ -901,6 +901,7 @@ describe("question history compaction", () => {
             callIndex: 0,
             providerCallId: "ask",
             toolName: "ask_user",
+            family: "ask",
             arguments: params,
           });
           yield* repo.completeToolCall({
@@ -1159,6 +1160,7 @@ describe("compaction inside a generation", () => {
           callIndex: 0,
           providerCallId: "old-search",
           toolName: "web_search",
+          family: "web",
           arguments: { queries: ["old query"] },
         });
         yield* repo.completeToolCall({

@@ -377,6 +377,7 @@ describe("branching a conversation", () => {
           callIndex: 2,
           providerCallId: "call_abc",
           toolName: "web_search",
+          family: "web",
           arguments: { query: "effect 4" },
         });
         yield* repo.completeToolCall({
@@ -409,6 +410,7 @@ describe("branching a conversation", () => {
       callIndex: cloned.callIndex,
       providerCallId: cloned.providerCallId,
       toolName: cloned.toolName,
+      family: cloned.family,
       arguments: cloned.arguments,
       result: cloned.result,
       status: cloned.status,
@@ -417,6 +419,7 @@ describe("branching a conversation", () => {
       callIndex: 2,
       providerCallId: "call_abc",
       toolName: "web_search",
+      family: "web",
       arguments: { query: "effect 4" },
       result: { sources: [{ url: "https://example.com", title: "Example", status: "ok" }] },
       status: "complete",
@@ -485,6 +488,7 @@ describe("branching a conversation", () => {
               callIndex: callIndex++,
               providerCallId: id,
               toolName,
+              family: "tool-file",
               arguments: {},
             });
             yield* repo.completeToolCall({ id, status: "complete", result: toolResult });
@@ -566,6 +570,7 @@ describe("branching a conversation", () => {
           callIndex: 0,
           providerCallId: "call_fox",
           toolName: "generate_image",
+          family: "image",
           arguments: {},
         });
         yield* repo.completeToolCall({ id: callId, status: "complete", result: {} });
@@ -660,6 +665,7 @@ describe("branching a conversation", () => {
           callIndex: 0,
           providerCallId: "reference-call",
           toolName: "custom_files__read",
+          family: "custom",
           arguments: { attachmentId: early!.id },
         });
         yield* repo.completeToolCall({
@@ -1167,6 +1173,7 @@ describe("research snapshots in branches", () => {
             callIndex: 0,
             providerCallId: `root-${ordinal}`,
             toolName: "deep_research",
+            family: "research",
             arguments: {},
             status: "complete",
             result: { ok: true, progress },
@@ -1202,6 +1209,7 @@ describe("research snapshots in branches", () => {
             callIndex: 1,
             providerCallId: `child-${ordinal}`,
             toolName: "web_search",
+            family: "web",
             arguments: {},
             status: "complete",
             result: { sources: [] },
