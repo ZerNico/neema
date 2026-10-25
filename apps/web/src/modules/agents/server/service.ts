@@ -175,8 +175,6 @@ export class AgentService extends Context.Service<
         }),
         update: Effect.fn("AgentService.update")(function* (userId, input) {
           yield* available(userId, input.agentId, true);
-          if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1)
-            return yield* new AgentRejected({ reason: "invalid agent revision" });
           yield* repo.update(userId, {
             ...(yield* validate(userId, input)),
             agentId: input.agentId,
