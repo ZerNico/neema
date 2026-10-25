@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { connectAppsAllowed } from "~/modules/mcp-server/server/access.ts";
@@ -80,7 +81,7 @@ const sendAuthMail = (to: string, subject: string, content: MailContent) =>
   runtime.runPromise(
     Effect.flatMap(MailService, (mail) => mail.sendTo(to, subject, content)).pipe(
       Effect.catch((error) =>
-        Effect.logWarning("auth email could not be sent", { reason: error.reason }),
+        Effect.logWarning("auth email could not be sent", { reason: english(error.reason) }),
       ),
     ),
   );

@@ -1,6 +1,8 @@
 import { plainTextSelectors, render } from "@react-email/render";
 import { Link, Text } from "react-email";
 import type { ReactNode } from "react";
+import { m } from "~/paraglide/messages.js";
+import type { Locale } from "~/paraglide/runtime.js";
 import { Layout } from "./layout.tsx";
 import { APP_NAME, footerLink, muted, paragraph } from "./styles.ts";
 
@@ -25,48 +27,43 @@ const both = async (email: ReactNode): Promise<MailContent> => ({
   }),
 });
 
-export const verifyEmailMail = (url: string) =>
+export const verifyEmailMail = (url: string, locale: Locale) =>
   both(
     <Layout
-      preview="Confirm this address to finish signing up."
-      heading="Confirm your email"
-      action={{ label: "Confirm email", href: url }}
-      footer={
-        <Text style={muted}>If you didn’t create an account, you can ignore this email.</Text>
-      }
+      locale={locale}
+      preview={m.notifications_mail_verify_preview({}, { locale })}
+      heading={m.notifications_mail_verify_heading({}, { locale })}
+      action={{ label: m.notifications_mail_verify_action({}, { locale }), href: url }}
+      footer={<Text style={muted}>{m.notifications_mail_verify_footer({}, { locale })}</Text>}
     >
-      <Text style={paragraph}>Confirm this address to finish setting up your account.</Text>
+      <Text style={paragraph}>{m.notifications_mail_verify_body({}, { locale })}</Text>
     </Layout>,
   );
 
-export const resetPasswordMail = (url: string) =>
+export const resetPasswordMail = (url: string, locale: Locale) =>
   both(
     <Layout
-      preview="Reset the password for this address."
-      heading="Reset your password"
-      action={{ label: "Reset password", href: url }}
-      footer={
-        <Text style={muted}>
-          If this wasn’t you, ignore this email. Your password stays the same.
-        </Text>
-      }
+      locale={locale}
+      preview={m.notifications_mail_reset_preview({}, { locale })}
+      heading={m.notifications_mail_reset_heading({}, { locale })}
+      action={{ label: m.notifications_mail_reset_action({}, { locale }), href: url }}
+      footer={<Text style={muted}>{m.notifications_mail_reset_footer({}, { locale })}</Text>}
     >
-      <Text style={paragraph}>
-        Someone asked to reset the password for this address. The link works for one hour.
-      </Text>
+      <Text style={paragraph}>{m.notifications_mail_reset_body({}, { locale })}</Text>
     </Layout>,
   );
 
-export const testMail = () =>
+export const testMail = (locale: Locale) =>
   both(
     <Layout
-      preview="Email from neema works."
-      heading="Email works"
-      footer={<Text style={muted}>Sent from the email settings in {APP_NAME}.</Text>}
+      locale={locale}
+      preview={m.notifications_mail_test_preview({ app: APP_NAME }, { locale })}
+      heading={m.notifications_mail_test_heading({}, { locale })}
+      footer={
+        <Text style={muted}>{m.notifications_mail_test_footer({ app: APP_NAME }, { locale })}</Text>
+      }
     >
-      <Text style={paragraph}>
-        This is a test from {APP_NAME}. Schedules can now notify people by email.
-      </Text>
+      <Text style={paragraph}>{m.notifications_mail_test_body({ app: APP_NAME }, { locale })}</Text>
     </Layout>,
   );
 
@@ -81,20 +78,29 @@ export const notificationMail = (input: {
   openUrl?: string | undefined;
   manageUrl?: string | undefined;
   settingsUrl?: string | undefined;
+  locale: Locale;
 }) =>
   both(
     <Layout
+      locale={input.locale}
       preview={input.body}
       heading={input.title}
-      action={input.openUrl ? { label: "Open chat", href: input.openUrl } : undefined}
+      action={
+        input.openUrl
+          ? {
+              label: m.notifications_mail_open_chat({}, { locale: input.locale }),
+              href: input.openUrl,
+            }
+          : undefined
+      }
       footer={
         <Text style={muted}>
-          You get this because email notifications are on.
+          {m.notifications_mail_why({}, { locale: input.locale })}
           {input.manageUrl ? (
             <>
               {" "}
               <Link href={input.manageUrl} style={footerLink}>
-                Edit schedule
+                {m.notifications_mail_edit_schedule({}, { locale: input.locale })}
               </Link>
             </>
           ) : null}
@@ -102,7 +108,7 @@ export const notificationMail = (input: {
             <>
               {" · "}
               <Link href={input.settingsUrl} style={footerLink}>
-                Notification settings
+                {m.notifications_mail_settings({}, { locale: input.locale })}
               </Link>
             </>
           ) : null}
@@ -114,7 +120,9 @@ export const notificationMail = (input: {
           <div dangerouslySetInnerHTML={{ __html: input.answer.html }} />
           {input.answer.truncated ? (
             <Text style={{ ...paragraph, color: "#71717a" }}>
-              {input.openUrl ? "Continue reading in the chat." : "The rest is in the chat."}
+              {input.openUrl
+                ? m.notifications_mail_continue_reading({}, { locale: input.locale })
+                : m.notifications_mail_rest_in_chat({}, { locale: input.locale })}
             </Text>
           ) : null}
         </>

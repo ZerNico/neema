@@ -16,13 +16,15 @@ import {
 } from "~/ui/primitives/select";
 import { smtpSettingsQuery } from "../client/queries.ts";
 import { clearSmtpSettings, saveSmtpSettings, sendTestEmail } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 type Security = "tls" | "starttls" | "none";
-const SECURITY = [
-  { value: "starttls", label: "STARTTLS", port: 587 },
-  { value: "tls", label: "TLS", port: 465 },
-  { value: "none", label: "None (local relay)", port: 25 },
-] as const satisfies ReadonlyArray<{ value: Security; label: string; port: number }>;
+const securities = () =>
+  [
+    { value: "starttls", label: "STARTTLS", port: 587 },
+    { value: "tls", label: "TLS", port: 465 },
+    { value: "none", label: m.notifications_email_security_none(), port: 25 },
+  ] as const satisfies ReadonlyArray<{ value: Security; label: string; port: number }>;
 
 /** The server notification email goes out through. Without it, nobody gets email. */
 export function AdminEmailPage() {
@@ -30,6 +32,7 @@ export function AdminEmailPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { data: saved } = useSuspenseQuery(smtpSettingsQuery);
+  const SECURITY = securities();
   const [draft, setDraft] = useState({
     host: saved?.host ?? "",
     port: String(saved?.port ?? 587),
@@ -59,19 +62,19 @@ export function AdminEmailPage() {
       }),
     onSuccess: () => {
       patch({ password: "" });
-      toast.success("Email settings saved.");
+      toast.success(m.notifications_email_saved());
     },
-    onError: (error) => toastError("Could not save the email settings.", error),
+    onError: (error) => toastError(m.notifications_email_error_save(), error),
     onSettled: refresh,
   });
   const test = useMutation({
     mutationFn: () => sendTestEmail(),
-    onSuccess: () => toast.success("Test email sent to your address."),
-    onError: (error) => toastError("The test email was not sent.", error),
+    onSuccess: () => toast.success(m.notifications_email_test_sent()),
+    onError: (error) => toastError(m.notifications_email_error_test(), error),
   });
   const clear = useMutation({
     mutationFn: () => clearSmtpSettings(),
-    onError: (error) => toastError("Could not remove the email settings.", error),
+    onError: (error) => toastError(m.notifications_email_error_remove(), error),
     onSettled: refresh,
   });
   const port = Number(draft.port);
@@ -84,11 +87,8 @@ export function AdminEmailPage() {
   const busy = save.isPending || test.isPending || clear.isPending;
 
   return (
-    <Page
-      title="Email"
-      description="The server that sends notification email. People turn email on in their own settings."
-    >
-      <Section title="SMTP server">
+    <Page title={m.notifications_email_title()} description={m.notifications_email_description()}>
+      <Section title={m.notifications_email_smtp()}>
         <form
           className="flex flex-col gap-6"
           onSubmit={(event) => {
@@ -98,11 +98,12 @@ export function AdminEmailPage() {
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-host`}>Host</FieldLabel>
+              <FieldLabel htmlFor={`${id}-host`}>{m.notifications_email_host()}</FieldLabel>
               <Input
                 id={`${id}-host`}
                 value={draft.host}
                 onChange={(event) => patch({ host: event.target.value })}
+                // oxlint-disable-next-line i18n/no-literal-text -- an example host, not words
                 placeholder="smtp.example.com"
                 autoComplete="off"
                 disabled={busy}
@@ -110,7 +111,9 @@ export function AdminEmailPage() {
             </Field>
             <div className="grid gap-6 sm:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor={`${id}-security`}>Encryption</FieldLabel>
+                <FieldLabel htmlFor={`${id}-security`}>
+                  {m.notifications_email_encryption()}
+                </FieldLabel>
                 <Select
                   items={SECURITY}
                   value={draft.security}
@@ -133,7 +136,7 @@ export function AdminEmailPage() {
                 </Select>
               </Field>
               <Field>
-                <FieldLabel htmlFor={`${id}-port`}>Port</FieldLabel>
+                <FieldLabel htmlFor={`${id}-port`}>{m.notifications_email_port()}</FieldLabel>
                 <Input
                   id={`${id}-port`}
                   inputMode="numeric"
@@ -145,7 +148,9 @@ export function AdminEmailPage() {
             </div>
             <div className="grid gap-6 sm:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor={`${id}-username`}>Username</FieldLabel>
+                <FieldLabel htmlFor={`${id}-username`}>
+                  {m.notifications_email_username()}
+                </FieldLabel>
                 <Input
                   id={`${id}-username`}
                   value={draft.username}
@@ -153,30 +158,35 @@ export function AdminEmailPage() {
                   autoComplete="off"
                   disabled={busy}
                 />
-                <FieldDescription>Leave empty for a relay without sign-in.</FieldDescription>
+                <FieldDescription>{m.notifications_email_username_hint()}</FieldDescription>
               </Field>
               <Field>
-                <FieldLabel htmlFor={`${id}-password`}>Password</FieldLabel>
+                <FieldLabel htmlFor={`${id}-password`}>
+                  {m.notifications_email_password()}
+                </FieldLabel>
                 <Input
                   id={`${id}-password`}
                   type="password"
                   autoComplete="off"
-                  placeholder={saved?.passwordSet ? "Unchanged" : undefined}
+                  placeholder={
+                    saved?.passwordSet ? m.notifications_email_password_unchanged() : undefined
+                  }
                   value={draft.password}
                   onChange={(event) => patch({ password: event.target.value })}
                   disabled={busy || !draft.username.trim()}
                 />
                 {saved?.passwordSet ? (
-                  <FieldDescription>Leave empty to keep the stored password.</FieldDescription>
+                  <FieldDescription>{m.notifications_email_password_hint()}</FieldDescription>
                 ) : null}
               </Field>
             </div>
             <Field>
-              <FieldLabel htmlFor={`${id}-from`}>From address</FieldLabel>
+              <FieldLabel htmlFor={`${id}-from`}>{m.notifications_email_from()}</FieldLabel>
               <Input
                 id={`${id}-from`}
                 value={draft.fromAddress}
                 onChange={(event) => patch({ fromAddress: event.target.value })}
+                // oxlint-disable-next-line i18n/no-literal-text -- an example address, not words
                 placeholder="neema <neema@example.com>"
                 disabled={busy}
               />
@@ -184,7 +194,7 @@ export function AdminEmailPage() {
           </FieldGroup>
           <FormActions>
             <PendingButton type="submit" pending={save.isPending} disabled={!complete || busy}>
-              Save
+              {m.common_save()}
             </PendingButton>
             {saved ? (
               <>
@@ -195,7 +205,7 @@ export function AdminEmailPage() {
                   disabled={busy}
                   onClick={() => test.mutate()}
                 >
-                  Send test email
+                  {m.notifications_email_send_test()}
                 </PendingButton>
                 <PendingButton
                   type="button"
@@ -205,15 +215,15 @@ export function AdminEmailPage() {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: "Remove email settings?",
-                        description: "Nobody gets notification email until it is set up again.",
-                        confirmLabel: "Remove",
+                        title: m.notifications_email_confirm_remove_title(),
+                        description: m.notifications_email_confirm_remove_description(),
+                        confirmLabel: m.notifications_email_remove(),
                       })
                     )
                       clear.mutate();
                   }}
                 >
-                  Remove
+                  {m.notifications_email_remove()}
                 </PendingButton>
               </>
             ) : null}

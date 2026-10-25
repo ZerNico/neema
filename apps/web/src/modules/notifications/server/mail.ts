@@ -7,8 +7,13 @@ import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import type { AppNotification } from "../schema.ts";
 import { LOGO_CID, LOGO_PNG } from "./email/logo.ts";
+import { APP_NAME } from "./email/styles.ts";
 import { answerHtml } from "./email/markdown.ts";
 import { notificationMail, testMail, type MailContent } from "./email/templates.tsx";
+import { english, Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
+import { m } from "~/paraglide/messages.js";
+import type { Locale } from "~/paraglide/runtime.js";
 
 const SETTINGS_ID = "instance";
 
@@ -43,7 +48,7 @@ export interface NotificationEmail {
 }
 
 export class MailFailed extends Schema.TaggedError<MailFailed>()("MailFailed", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 /**
@@ -58,7 +63,7 @@ export class MailService extends Context.Service<
     save(input: SmtpSettingsInput): Effect.Effect<void>;
     clear: Effect.Effect<void>;
     /** Sends one message now and reports the server's refusal. */
-    test(to: string): Effect.Effect<void, MailFailed>;
+    test(to: string, locale: Locale): Effect.Effect<void, MailFailed>;
     /** Whether an admin set up a server, so anyone can get email. */
     readonly available: Effect.Effect<boolean>;
     send(
@@ -75,6 +80,7 @@ export class MailService extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db;
       const cipher = yield* KeyCipher;
+      const languages = yield* LanguageRepo;
 
       const row = Effect.map(
         db.select().from(smtpSettings).where(eq(smtpSettings.id, SETTINGS_ID)).pipe(Effect.orDie),
@@ -84,7 +90,10 @@ export class MailService extends Context.Service<
       const deliver = (to: string, subject: string, content: MailContent) =>
         Effect.gen(function* () {
           const config = yield* row;
-          if (!config) return yield* new MailFailed({ reason: "email is not set up" });
+          if (!config)
+            return yield* new MailFailed({
+              reason: localized(m.notifications_error_mail_not_set_up),
+            });
           const password = config.passwordCiphertext
             ? Redacted.value(yield* cipher.decrypt(config.passwordCiphertext))
             : undefined;
@@ -115,7 +124,11 @@ export class MailService extends Context.Service<
             // the admin testing it needs that, never the password.
             catch: (error) =>
               new MailFailed({
-                reason: error instanceof Error ? error.message.slice(0, 300) : "sending failed",
+                // The server's own words, which the admin needs as they are.
+                reason:
+                  error instanceof Error
+                    ? verbatim(error.message.slice(0, 300))
+                    : localized(m.notifications_error_mail_failed),
               }),
           }).pipe(Effect.ensuring(Effect.sync(() => transport.close())));
         });
@@ -158,9 +171,15 @@ export class MailService extends Context.Service<
           .delete(smtpSettings)
           .where(eq(smtpSettings.id, SETTINGS_ID))
           .pipe(Effect.orDie, Effect.asVoid),
-        test: (to) =>
-          Effect.promise(testMail).pipe(
-            Effect.flatMap((content) => deliver(to, "neema test email", content)),
+        test: (to, locale) =>
+          Effect.promise(() => testMail(locale)).pipe(
+            Effect.flatMap((content) =>
+              deliver(
+                to,
+                m.notifications_mail_test_subject({ app: APP_NAME }, { locale }),
+                content,
+              ),
+            ),
           ),
         available: Effect.map(row, (config) => config !== null),
         sendTo: deliver,
@@ -173,6 +192,8 @@ export class MailService extends Context.Service<
           if (!recipient) return;
           // Without a public address there is nowhere a link could point.
           const site = publicUrl();
+          // Sent with no request behind it, so in the language the person last chose or used.
+          const locale = yield* languages.localeOf(userId);
           const content = yield* Effect.promise(() =>
             notificationMail({
               title: notification.title,
@@ -181,11 +202,14 @@ export class MailService extends Context.Service<
               openUrl: site && `${site}${notification.path}`,
               manageUrl: site && email?.managePath && `${site}${email.managePath}`,
               settingsUrl: site && `${site}/settings/notifications`,
+              locale,
             }),
           );
           yield* deliver(recipient.address, notification.title, content).pipe(
             Effect.catch((error) =>
-              Effect.logWarning("notification email could not be sent", { reason: error.reason }),
+              Effect.logWarning("notification email could not be sent", {
+                reason: english(error.reason),
+              }),
             ),
           );
         }),

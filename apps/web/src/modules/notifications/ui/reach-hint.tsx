@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { notificationPreferencesQuery } from "../client/queries.ts";
 import { permissionMissing, useNotificationPermission } from "../client/use-permission.ts";
 import { Button } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Says so when a run's notification would reach nobody: every channel is off,
@@ -17,9 +18,9 @@ export function NotificationReachHint() {
   if (!preferences.push && !email)
     return (
       <p className="text-muted-foreground text-sm">
-        Your notifications are off.{" "}
+        {m.notifications_hint_off()}{" "}
         <Link to="/settings/notifications" className="underline underline-offset-2">
-          Turn them on
+          {m.notifications_hint_turn_them_on()}
         </Link>
       </p>
     );
@@ -28,11 +29,12 @@ export function NotificationReachHint() {
   return (
     <div className="flex items-center gap-2">
       <p className="text-muted-foreground text-sm">
-        {missing}.{permission === "denied" ? " Allow them in its site settings." : null}
+        {`${missing}.`}
+        {permission === "denied" ? ` ${m.notifications_hint_allow()}` : null}
       </p>
       {permission === "default" ? (
         <Button type="button" size="xs" variant="outline" onClick={() => void request()}>
-          Turn on
+          {m.notifications_hint_turn_on()}
         </Button>
       ) : null}
     </div>

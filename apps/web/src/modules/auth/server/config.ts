@@ -14,6 +14,8 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { and, count, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
 import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
@@ -304,8 +306,15 @@ export function createAppAuth({
       revokeSessionsOnPasswordReset: true,
       ...(mail
         ? {
-            sendResetPassword: async ({ user, url }) =>
-              mail.send(user.email, "Reset your password", await resetPasswordMail(url)),
+            // Still inside the request that asked, so its locale is the reader's.
+            sendResetPassword: async ({ user, url }) => {
+              const locale = getLocale();
+              await mail.send(
+                user.email,
+                m.notifications_mail_reset_subject({}, { locale }),
+                await resetPasswordMail(url, locale),
+              );
+            },
           }
         : {}),
     },
@@ -315,8 +324,14 @@ export function createAppAuth({
       autoSignInAfterVerification: true,
       ...(mail
         ? {
-            sendVerificationEmail: async ({ user, url }) =>
-              mail.send(user.email, "Confirm your email", await verifyEmailMail(url)),
+            sendVerificationEmail: async ({ user, url }) => {
+              const locale = getLocale();
+              await mail.send(
+                user.email,
+                m.notifications_mail_verify_subject({}, { locale }),
+                await verifyEmailMail(url, locale),
+              );
+            },
           }
         : {}),
     },

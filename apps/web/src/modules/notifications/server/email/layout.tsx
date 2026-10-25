@@ -15,12 +15,14 @@ import {
 import type { ReactNode } from "react";
 import { LOGO_CID } from "./logo.ts";
 import { APP_NAME, COLORS, FONT_STACK, muted } from "./styles.ts";
+import { m } from "~/paraglide/messages.js";
+import type { Locale } from "~/paraglide/runtime.js";
 
 /** The link spelled out under a button, for clients that block buttons. */
-function Fallback({ href }: { href: string }) {
+function Fallback({ href, locale }: { href: string; locale: Locale }) {
   return (
     <Text data-text="skip" style={{ ...muted, margin: "20px 0 0", wordBreak: "break-all" }}>
-      Or open this link:{" "}
+      {m.notifications_mail_fallback_link({}, { locale })}{" "}
       <Link href={href} style={{ color: COLORS.muted, textDecoration: "underline" }}>
         {href}
       </Link>
@@ -30,12 +32,14 @@ function Fallback({ href }: { href: string }) {
 
 /** The app's sign-in page as mail: the mark on the canvas, one sheet, a pill button. */
 export function Layout({
+  locale,
   preview,
   heading,
   action,
   footer,
   children,
 }: {
+  locale: Locale;
   preview: string;
   heading: string;
   action?: { label: string; href: string } | undefined;
@@ -43,7 +47,7 @@ export function Layout({
   children: ReactNode;
 }) {
   return (
-    <Html lang="en">
+    <Html lang={locale}>
       <Head>
         <Font
           fontFamily="Geist"
@@ -130,7 +134,7 @@ export function Layout({
                 >
                   {action.label}
                 </Button>
-                <Fallback href={action.href} />
+                <Fallback href={action.href} locale={locale} />
               </>
             ) : null}
           </Section>

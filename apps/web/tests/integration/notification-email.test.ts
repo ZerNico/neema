@@ -5,6 +5,7 @@ import { ConfigProvider, Effect, Layer, ManagedRuntime, Redacted, Stream } from 
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { smtpSettings, user } from "~/db/schema/index.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { MailService } from "~/modules/notifications/server/mail.ts";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -13,7 +14,10 @@ import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
-let runtime: ManagedRuntime.ManagedRuntime<NotificationService | MailService | Db, unknown>;
+let runtime: ManagedRuntime.ManagedRuntime<
+  NotificationService | MailService | LanguageRepo | Db,
+  unknown
+>;
 const published: SyncEvent[] = [];
 let smtp: Server;
 let smtpPort = 0;
@@ -83,6 +87,7 @@ beforeAll(async () => {
     NotificationService.layer.pipe(
       Layer.provideMerge(bus),
       Layer.provideMerge(cipher),
+      Layer.provideMerge(LanguageRepo.layer),
       Layer.provideMerge(infra),
     ),
   );
@@ -165,7 +170,7 @@ it("sends on the channels the person chose: push by default, email once turned o
   expect(received[0]!.data).toContain("Subject: Morning digest");
   expect(received[0]!.data).toContain("Rain after 3pm.");
 
-  await mail((m) => m.test("owner@t.io"));
+  await mail((m) => m.test("owner@t.io", "en"));
   expect(received).toHaveLength(2);
 
   // The answer travels as HTML beside the text, and its markup arrives as text.
@@ -182,6 +187,13 @@ it("sends on the channels the person chose: push by default, email once turned o
   expect(html).toContain("<strong>until</strong>");
   expect(html).toContain("&lt;script&gt;");
   expect(html).not.toContain("<script>");
+
+  // Sent with no request behind it, the mail reads in the language the person chose.
+  await runtime.runPromise(Effect.flatMap(LanguageRepo, (repo) => repo.choose("owner", "de")));
+  await notifications((n) => n.deliver("owner", notification));
+  const german = decodeQuotedPrintable(received[3]!.data);
+  expect(german).toContain('lang="de"');
+  expect(german).toContain("weil E-Mail-Benachrichtigungen aktiviert sind");
 });
 
 const decodeQuotedPrintable = (data: string) =>

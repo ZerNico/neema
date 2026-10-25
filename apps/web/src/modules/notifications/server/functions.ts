@@ -3,6 +3,9 @@ import { Effect, Schema } from "effect";
 import { invalidateAuth } from "~/modules/auth/server/auth.ts";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { SignupRepo } from "~/modules/auth/server/signup-repo.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { refuse } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MailService, SmtpSettingsInput } from "./mail.ts";
@@ -83,7 +86,7 @@ export const clearSmtpSettings = createServerFn({ method: "POST" })
         const settings = yield* Effect.flatMap(SignupRepo, (repo) => repo.settings());
         // Accounts could no longer prove their address, and nobody new could get in.
         if (settings.requireEmailVerification)
-          return yield* refuse(409, "Turn off email verification under Sign-in first");
+          return yield* refuse(409, localized(m.notifications_error_verification_on));
         yield* Effect.flatMap(MailService, (mail) => mail.clear);
       }),
     );
@@ -94,5 +97,7 @@ export const clearSmtpSettings = createServerFn({ method: "POST" })
 export const sendTestEmail = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .handler(({ context }) =>
-    runServerFn(Effect.flatMap(MailService, (mail) => mail.test(context.session.user.email))),
+    runServerFn(
+      Effect.flatMap(MailService, (mail) => mail.test(context.session.user.email, getLocale())),
+    ),
   );
