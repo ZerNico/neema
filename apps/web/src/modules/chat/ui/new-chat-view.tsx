@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -176,7 +177,7 @@ export function NewChatView({
     // up to where the user left it.
     onError: (error) => {
       setSending(false);
-      toastError("Could not send the message.", error);
+      toastError(m.chat_send_failed(), error);
       void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
     },
     onSuccess: async (result) => {
@@ -210,7 +211,7 @@ export function NewChatView({
                   size="icon"
                   variant="solid"
                   className="ml-auto"
-                  aria-label="Temporary chat"
+                  aria-label={m.chat_temporary_label()}
                   pressed={temporary}
                   onPressedChange={onTemporaryChange}
                 />
@@ -228,7 +229,7 @@ export function NewChatView({
               </motion.span>
             </TooltipTrigger>
             <TooltipContent>
-              {temporary ? "Turn off temporary chat" : "Start a temporary chat"}
+              {temporary ? m.chat_temporary_turn_off() : m.chat_temporary_start()}
             </TooltipContent>
           </Tooltip>
         </HeaderContent>
@@ -265,7 +266,7 @@ export function NewChatView({
             <h1 className="text-foreground text-2xl font-medium tracking-tight">
               <MotionSwap value={isTemporary ? "temporary" : "greeting"}>
                 {isTemporary
-                  ? "Temporary chat"
+                  ? m.chat_temporary_title()
                   : greetingFor(user.name, greetingMoment.now, greetingMoment.roll)}
               </MotionSwap>
             </h1>
@@ -277,7 +278,7 @@ export function NewChatView({
               className="text-muted-foreground hover:text-foreground mt-2 flex items-center gap-1.5 text-sm"
             >
               <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} className="size-4" aria-hidden />
-              In {project.data.name}
+              {m.chat_new_in_project({ project: project.data.name })}
             </Link>
           ) : null}
           <AnimatePresence initial={false}>
@@ -291,7 +292,7 @@ export function NewChatView({
                 transition={{ duration: reducedMotion ? 0 : 0.18, ease: motionEase }}
               >
                 <p className="text-muted-foreground max-w-md pt-2 text-sm">
-                  This chat won’t appear in your history or use your memories.
+                  {m.chat_temporary_description()}
                 </p>
               </motion.div>
             ) : null}
@@ -299,7 +300,7 @@ export function NewChatView({
         </div>
         {starters.length > 0 && !sending ? (
           <ul
-            aria-label="Conversation starters"
+            aria-label={m.chat_starters_label()}
             className="mx-auto mt-6 flex w-full max-w-3xl flex-wrap justify-center gap-2"
           >
             {starters.map((starter) => (

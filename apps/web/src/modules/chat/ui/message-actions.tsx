@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowReloadHorizontalIcon,
   BookOpen01Icon,
@@ -121,7 +122,7 @@ function RetryMenu({
         onChange={onRetryWith}
         disabled={disabled}
         side="bottom"
-        emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+        emptyLabel={models === undefined ? m.chat_models_loading() : m.chat_models_no_match()}
         // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
         header={({ close }) => (
           <SameModelHeader
@@ -181,7 +182,7 @@ export function ResumeMenu({
       onChange={onResumeWith}
       disabled={disabled}
       side="bottom"
-      emptyLabel={models === undefined ? "Loading models…" : "No models match"}
+      emptyLabel={models === undefined ? m.chat_models_loading() : m.chat_models_no_match()}
       // oxlint-disable-next-line react/no-unstable-nested-components -- a render prop, not a component
       header={({ close }) => (
         <SameModelHeader

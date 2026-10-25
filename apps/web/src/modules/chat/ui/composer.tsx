@@ -1,10 +1,11 @@
+import { m } from "~/paraglide/messages.js";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
@@ -169,9 +170,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const blockedReason = !working
     ? null
     : outdated
-      ? "This desktop app is out of date. Update it to continue this work chat."
+      ? m.chat_composer_desktop_outdated()
       : !desktop
-        ? "This is a work chat. Open it in the desktop app to continue."
+        ? m.chat_composer_work_needs_desktop()
         : null;
   const sendDisabled = disabled || (working && readOnly);
   const { data: capabilities } = useQuery(capabilitiesQuery);
@@ -283,9 +284,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // and a half-written message must never be discarded to open another one.
   const editBlocked =
     editingId !== null
-      ? "Finish the edit that is open first"
+      ? m.chat_queue_edit_blocked_open()
       : draft.trim() !== "" || attachments.items.length > 0
-        ? "Send or clear your draft to edit a queued message"
+        ? m.chat_queue_edit_blocked_draft()
         : null;
 
   const startEdit = (entryId: string) => {
@@ -402,7 +403,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <div className="flex flex-col">
       <AnimatePresence initial={false}>
         {queue && queue.entries.length > 0 ? (
-          <m.div key="queue" {...queueCollapse}>
+          <motion.div key="queue" {...queueCollapse}>
             <QueueStrip
               entries={queue.entries}
               generating={!!onStop}
@@ -417,7 +418,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               sendNowBlocked={queue.sendNowBlocked}
               onDispatch={queue.onDispatch}
             />
-          </m.div>
+          </motion.div>
         ) : null}
       </AnimatePresence>
       <ChatInput
@@ -441,8 +442,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         queueing={onQueue !== undefined || editingId !== null}
         {...(editingId
           ? {
-              queueLabel: "Save queued message",
-              submitLabel: "Save queued message",
+              queueLabel: m.chat_queue_save(),
+              submitLabel: m.chat_queue_save(),
               onCancel: cancelEdit,
             }
           : {})}

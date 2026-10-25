@@ -3,7 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { Suspense, useMemo, useState } from "react";
 import { AccountMenu } from "~/modules/auth/account-menu.tsx";
 import { conversationQuery, conversationsInfiniteQuery } from "../client/queries.ts";
@@ -205,7 +205,7 @@ function ConversationRow({
   grows,
   registry,
   actions,
-  motion,
+  motion: rowMotion,
 }: {
   conversation: SidebarConversation;
   active: boolean;
@@ -217,8 +217,8 @@ function ConversationRow({
 }) {
   return (
     <SidebarMenuItem>
-      <m.div
-        {...motion}
+      <motion.div
+        {...rowMotion}
         // Only a chat created since the list mounted grows in; one
         // arriving from a later page or another group just appears.
         {...(grows ? {} : { initial: false })}
@@ -250,7 +250,7 @@ function ConversationRow({
         >
           <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
         </ConversationMenu>
-      </m.div>
+      </motion.div>
     </SidebarMenuItem>
   );
 }

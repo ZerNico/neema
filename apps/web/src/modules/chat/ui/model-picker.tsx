@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
@@ -30,7 +31,7 @@ export function ModelPicker({
   disabled = false,
   align = "start",
   side = "top",
-  emptyLabel = "No models match",
+  emptyLabel = m.chat_models_no_match(),
   limited = false,
 }: {
   models: readonly PickableModel[];
@@ -104,7 +105,7 @@ export function ModelPicker({
       </ComboboxTrigger>
       <ComboboxContent side={side} align={align} className="w-80 min-w-80">
         {header?.({ close: () => setOpen(false) })}
-        <ComboboxInput placeholder="Search models…" showTrigger={false} />
+        <ComboboxInput placeholder={m.chat_models_search()} showTrigger={false} />
         <ComboboxEmpty>{emptyLabel}</ComboboxEmpty>
         <ComboboxList>
           {items.map((model) => (

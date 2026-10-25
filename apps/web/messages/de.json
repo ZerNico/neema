@@ -365,6 +365,165 @@
   "browser_settings_links_panel": "In der Seitenleiste",
   "browser_settings_title": "Browser",
   "browser_tab_new": "Neuer Tab",
+  "chat_agent_missing_collection_named": "Die Sammlung „{name}“ des Agenten ist nicht mehr verfügbar",
+  "chat_agent_missing_collection_unnamed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Eine der Sammlungen des Agenten ist nicht mehr verfügbar",
+        "countPlural=other": "{count} Sammlungen des Agenten sind nicht mehr verfügbar"
+      }
+    }
+  ],
+  "chat_agent_missing_integration_named": "Die Integration „{name}“ des Agenten ist nicht mehr verfügbar",
+  "chat_agent_missing_integration_unnamed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Eine der Integrationen des Agenten ist nicht mehr verfügbar",
+        "countPlural=other": "{count} Integrationen des Agenten sind nicht mehr verfügbar"
+      }
+    }
+  ],
+  "chat_agent_missing_skill_named": "Der Skill „{name}“ des Agenten ist nicht mehr verfügbar",
+  "chat_agent_missing_skill_unnamed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Einer der Skills des Agenten ist nicht mehr verfügbar",
+        "countPlural=other": "{count} Skills des Agenten sind nicht mehr verfügbar"
+      }
+    }
+  ],
+  "chat_agent_missing_tool_named": "Das Tool „{name}“ des Agenten ist nicht mehr verfügbar",
+  "chat_agent_missing_tool_unnamed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Eines der Tools des Agenten ist nicht mehr verfügbar",
+        "countPlural=other": "{count} Tools des Agenten sind nicht mehr verfügbar"
+      }
+    }
+  ],
+  "chat_answers_save_failed": "Deine Antworten konnten nicht gespeichert werden.",
+  "chat_answers_send_failed": "Deine Antworten konnten nicht gesendet werden.",
+  "chat_branch_without_files": "Die Abzweigung wurde ohne ihre lokalen Dateien geöffnet.",
+  "chat_collection_documents": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Dokument",
+        "countPlural=other": "{count} Dokumente"
+      }
+    }
+  ],
+  "chat_collection_failed": "{count} fehlgeschlagen",
+  "chat_collection_preparing": "{count} in Vorbereitung",
+  "chat_composer_add_attachment": "Anhang hinzufügen",
+  "chat_composer_add_files_or_tools": "Dateien oder Tools hinzufügen",
+  "chat_composer_add_integration": "Integration hinzufügen…",
+  "chat_composer_add_to_queue": "Zur Warteschlange hinzufügen",
+  "chat_composer_add_workspace_files": "Dateien zum Arbeitsordner hinzufügen",
+  "chat_composer_attach_files": "Dateien anhängen",
+  "chat_composer_deep_research": "Recherche",
+  "chat_composer_desktop_outdated": "Diese Desktop-App ist veraltet. Aktualisiere sie, um diesen Arbeitschat fortzusetzen.",
+  "chat_composer_drop_attach": "Leg Dateien zum Anhängen hier ab",
+  "chat_composer_drop_workspace": "Leg Dateien hier ab, um sie zum Arbeitsordner hinzuzufügen",
+  "chat_composer_integrations": "Integrationen",
+  "chat_composer_mode": "Chatmodus",
+  "chat_composer_mode_chat": "Chat",
+  "chat_composer_mode_work": "Arbeiten",
+  "chat_composer_mode_work_label": "Mit einem Ordner arbeiten",
+  "chat_composer_model_cannot_read_images": "{model} kann keine Bilder lesen. Wähle ein anderes Modell oder entferne diese Datei.",
+  "chat_composer_model_cannot_read_pdfs": "{model} kann keine PDFs lesen und das Auslesen von Dokumenten ist ausgeschaltet. Bitte einen Admin, es einzuschalten, oder wähle ein anderes Modell.",
+  "chat_composer_no_models": "Keine Modelle eingerichtet, frag einen Admin",
+  "chat_composer_placeholder": "Nachricht…",
+  "chat_composer_research_checking": "Recherche wird geprüft…",
+  "chat_composer_research_needs_tools": "Websuche und das Lesen von Webseiten müssen beide eingeschaltet sein.",
+  "chat_composer_research_unavailable": "Recherche ist für dein Konto nicht verfügbar.",
+  "chat_composer_search": "Websuche",
+  "chat_composer_search_label": "Im Web suchen",
+  "chat_composer_select_model": "Modell wählen",
+  "chat_composer_send": "Senden",
+  "chat_composer_sending_after_uploads": "Wird gesendet, sobald die Uploads fertig sind",
+  "chat_composer_sending_after_workspace": "Wird gesendet, sobald die Dateien im Arbeitsordner liegen",
+  "chat_composer_skills": "Skills",
+  "chat_composer_stop": "Antwort stoppen",
+  "chat_composer_too_many_collections": "Zu viele Sammlungen für eine Nachricht. Entferne {count}.",
+  "chat_composer_unavailable_collection": "Nicht verfügbare Sammlung",
+  "chat_composer_work_needs_desktop": "Das ist ein Arbeitschat. Öffne ihn in der Desktop-App, um weiterzumachen.",
+  "chat_context_add": "Hinzufügen",
+  "chat_context_agent": "Agent",
+  "chat_context_agent_unavailable": "Agent nicht verfügbar",
+  "chat_context_agents_failed": "Die Agenten konnten nicht geladen werden.",
+  "chat_context_collection": "Sammlung",
+  "chat_context_collection_failed": "Die Sammlung konnte nicht geladen werden",
+  "chat_context_collection_unavailable": "Sammlung nicht verfügbar",
+  "chat_context_collections_failed": "Die Sammlungen konnten nicht geladen werden.",
+  "chat_context_deleted_agent": "Gelöschter Agent",
+  "chat_context_knowledge": "Wissen",
+  "chat_context_limit_beside_agent": "Bis zu {max} zusätzlich zu denen des Agenten",
+  "chat_context_limit_per_message": "Bis zu {max} pro Nachricht",
+  "chat_context_loading": "Wird geladen…",
+  "chat_context_loading_agents": "Agenten werden geladen…",
+  "chat_context_loading_collections": "Sammlungen werden geladen…",
+  "chat_context_no_agents": "Noch keine Agenten",
+  "chat_context_no_agents_match": "Keine passenden Agenten",
+  "chat_context_no_collections": "Noch keine Sammlungen",
+  "chat_context_no_collections_match": "Keine passenden Sammlungen",
+  "chat_context_no_longer_available": "Für dich nicht mehr verfügbar",
+  "chat_context_remove": "{name} entfernen",
+  "chat_context_schedule": "Zeitplan",
+  "chat_context_schedule_unavailable": "Zeitplan nicht verfügbar",
+  "chat_context_search_agents": "Agenten suchen…",
+  "chat_context_search_collections": "Sammlungen suchen…",
+  "chat_context_selected": "{count} ausgewählt",
+  "chat_context_selection_failed": "Die Auswahl konnte nicht geladen werden",
+  "chat_context_skill_unavailable": "Skill nicht verfügbar",
+  "chat_context_unavailable": "Nicht verfügbar",
+  "chat_edit_confirm": "Speichern und neu erstellen",
+  "chat_edit_confirm_later": "Alle Nachrichten nach ihrer Antwort werden entfernt.",
+  "chat_edit_confirm_title": "Diese Nachricht bearbeiten?",
+  "chat_edit_send_failed": "Die Änderung konnte nicht gesendet werden.",
+  "chat_effort_default": "Standard",
+  "chat_effort_high": "Hoch",
+  "chat_effort_label": "Denkaufwand: {effort}",
+  "chat_effort_low": "Niedrig",
+  "chat_effort_max": "Maximal",
+  "chat_effort_medium": "Mittel",
+  "chat_effort_minimal": "Minimal",
+  "chat_effort_off": "Aus",
+  "chat_effort_xhigh": "Sehr hoch",
   "chat_error_agent_fixed_after_creation": "der Agent lässt sich nach dem Erstellen des Chats nicht mehr ändern",
   "chat_error_agent_fixed_at_start": "der Agent wird beim Start eines Chats gewählt und lässt sich danach nicht mehr ändern",
   "chat_error_answer_every_question": "Beantworte jede Frage mit einer gültigen Auswahl oder eigenem Text.",
@@ -481,11 +640,179 @@
   "chat_failure_retry_moment": "Versuch es gleich noch einmal.",
   "chat_failure_technical_details": "Technische Details",
   "chat_failure_try_again_description": "Versuch es noch einmal oder wähle ein anderes Modell.",
+  "chat_greeting_afternoon": "Guten Tag{who}",
+  "chat_greeting_evening": "Guten Abend{who}",
+  "chat_greeting_first_today": "Was steht heute als Erstes an{who}?",
+  "chat_greeting_friday": "Schönen Freitag{who}",
+  "chat_greeting_help": "Wobei kann ich dir helfen{who}?",
+  "chat_greeting_morning": "Guten Morgen{who}",
+  "chat_greeting_new_week": "Neue Woche{who}. Womit fangen wir an?",
+  "chat_greeting_new_year": "Frohes neues Jahr{who}",
+  "chat_greeting_night_owl": "Nachteule unterwegs{who}?",
+  "chat_greeting_on_your_mind": "Was beschäftigt dich{who}?",
+  "chat_greeting_still_up": "Noch wach{who}?",
+  "chat_greeting_up_late": "Noch so spät wach{who}?",
+  "chat_greeting_weekend": "Ein Wochenendprojekt{who}?",
+  "chat_greeting_who": ", {name}",
+  "chat_greeting_working_on": "Woran arbeiten wir{who}?",
+  "chat_loss_agent_draft_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Agentenentwurf",
+        "countPlural=other": "{count} Agentenentwürfe"
+      }
+    }
+  ],
+  "chat_loss_agent_draft_named": "Der Agentenentwurf „{name}“ wird ebenfalls gelöscht.",
+  "chat_loss_agent_draft_untitled": "Ein unbenannter Agentenentwurf wird ebenfalls gelöscht.",
+  "chat_loss_document_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Dokument",
+        "countPlural=other": "{count} Dokumente"
+      }
+    }
+  ],
+  "chat_loss_document_named": "Das Dokument „{name}“ wird ebenfalls gelöscht.",
+  "chat_loss_document_untitled": "Ein unbenanntes Dokument wird ebenfalls gelöscht.",
+  "chat_loss_schedule_draft_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Zeitplanentwurf",
+        "countPlural=other": "{count} Zeitplanentwürfe"
+      }
+    }
+  ],
+  "chat_loss_schedule_draft_named": "Der Zeitplanentwurf „{name}“ wird ebenfalls gelöscht.",
+  "chat_loss_schedule_draft_untitled": "Ein unbenannter Zeitplanentwurf wird ebenfalls gelöscht.",
+  "chat_loss_several": "{list} werden ebenfalls gelöscht.",
+  "chat_loss_working_file_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} unveröffentlichte Datei",
+        "countPlural=other": "{count} unveröffentlichte Dateien"
+      }
+    }
+  ],
+  "chat_loss_working_file_named": "Die unveröffentlichte Datei „{name}“ wird ebenfalls gelöscht.",
+  "chat_loss_working_file_untitled": "Eine unbenannte unveröffentlichte Datei wird ebenfalls gelöscht.",
+  "chat_mention_collections": "Wissenssammlungen",
+  "chat_mention_integrations": "Integrationen",
+  "chat_mention_skills": "Lokale Skills",
+  "chat_models_loading": "Modelle werden geladen…",
+  "chat_models_no_match": "Keine passenden Modelle",
+  "chat_models_search": "Modelle suchen…",
+  "chat_new_in_project": "In {project}",
+  "chat_preferred_model_label": "Bevorzugtes Modell",
+  "chat_preferred_model_none": "Keine Vorgabe",
+  "chat_preferred_model_unavailable": "Nicht verfügbares Modell",
+  "chat_queue_add_failed": "Deine Nachricht konnte nicht in die Warteschlange gestellt werden.",
+  "chat_queue_answer_first": "Beantworte zuerst die Fragen oben",
+  "chat_queue_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Nachricht in der Warteschlange",
+        "countPlural=other": "{count} Nachrichten in der Warteschlange"
+      }
+    }
+  ],
+  "chat_queue_edit": "Bearbeiten",
+  "chat_queue_edit_blocked_draft": "Sende oder leere deinen Entwurf, um eine Nachricht in der Warteschlange zu bearbeiten",
+  "chat_queue_edit_blocked_open": "Schließ zuerst die offene Bearbeitung ab",
+  "chat_queue_editing": "Wird bearbeitet",
   "chat_queue_failure_account": "Mit diesem Konto lassen sich keine Nachrichten starten. Versuch es mit „Jetzt senden“, sobald der Zugang wieder freigegeben ist.",
   "chat_queue_failure_files": "Das Modell dieser Nachricht kann eine ihrer Dateien nicht mehr lesen. Bearbeite oder entferne sie.",
   "chat_queue_failure_limit": "Du hast ein Nutzungslimit erreicht.",
   "chat_queue_failure_model": "Das Modell dieser Nachricht ist nicht mehr verfügbar. Bearbeite sie, um ein anderes zu wählen.",
   "chat_queue_failure_other": "Diese Nachricht konnte nicht gestartet werden. Vielleicht sind ihr Modell oder ihre Sammlungen nicht mehr verfügbar.",
+  "chat_queue_more": "{count} weitere",
+  "chat_queue_more_label": "Weitere Aktionen: {message}",
+  "chat_queue_paused": "Warteschlange pausiert",
+  "chat_queue_paused_desktop": "Öffne Chat Desktop, um diese Arbeit fortzusetzen",
+  "chat_queue_paused_question": "Beantworte die Fragen oben, um weiterzumachen",
+  "chat_queue_remove": "Aus der Warteschlange entfernen",
+  "chat_queue_remove_failed": "Die Nachricht konnte nicht aus der Warteschlange entfernt werden.",
+  "chat_queue_remove_label": "Entfernen: {message}",
+  "chat_queue_remove_with_files": "Aus der Warteschlange entfernen und ihre Dateien löschen",
+  "chat_queue_save": "Nachricht in der Warteschlange speichern",
+  "chat_queue_save_failed": "Die Nachricht in der Warteschlange konnte nicht gespeichert werden.",
+  "chat_queue_send_failed": "Die Nachricht aus der Warteschlange konnte nicht gesendet werden.",
+  "chat_queue_send_needs_desktop": "Öffne Chat Desktop, um Arbeit aus der Warteschlange zu senden",
+  "chat_queue_send_next": "Nächste senden",
+  "chat_queue_send_now": "Jetzt senden",
+  "chat_queue_start_failed": "Die Nachricht aus der Warteschlange konnte nicht gestartet werden.",
+  "chat_queue_starting": "Die nächste Nachricht wird gestartet…",
+  "chat_queue_steer": "Lenken",
+  "chat_queue_steer_failed": "Die Nachricht konnte nicht in die Antwort gesendet werden.",
+  "chat_queue_steer_hint": "Beim nächsten Schritt in diese Antwort senden",
+  "chat_queue_steer_label": "Lenken: {message}",
+  "chat_queue_steering": "Geht beim nächsten Schritt mit",
+  "chat_queue_steering_hint": "Ist die Antwort vorher fertig, wird sie direkt danach gesendet.",
+  "chat_queue_stop_and_send": "Stoppen und jetzt senden",
+  "chat_refresh_failed": "Der Chat konnte nicht aktualisiert werden.",
+  "chat_resume_failed": "Die Antwort konnte nicht fortgesetzt werden.",
+  "chat_retry_confirm": "Erneut versuchen",
+  "chat_retry_confirm_later": "Alle Nachrichten danach werden entfernt.",
+  "chat_retry_confirm_title": "Diese Antwort erneut versuchen?",
+  "chat_retry_failed": "Die Antwort konnte nicht erneut versucht werden.",
+  "chat_send_failed": "Die Nachricht konnte nicht gesendet werden.",
+  "chat_starters_label": "Gesprächseinstiege",
+  "chat_steer_loss": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Die Nachricht, die du in diese Antwort gelenkt hast, wird ebenfalls entfernt.",
+        "countPlural=other": "Die {count} Nachrichten, die du in diese Antwort gelenkt hast, werden ebenfalls entfernt."
+      }
+    }
+  ],
+  "chat_stop_failed": "Die Antwort konnte nicht gestoppt werden.",
+  "chat_temporary_description": "Dieser Chat erscheint nicht in deinem Verlauf und nutzt deine Erinnerungen nicht.",
+  "chat_temporary_label": "Temporärer Chat",
+  "chat_temporary_start": "Temporären Chat starten",
+  "chat_temporary_title": "Temporärer Chat",
+  "chat_temporary_turn_off": "Temporären Chat ausschalten",
   "chat_title_new_chat": "Neuer Chat",
   "common_add": "Hinzufügen",
   "common_back": "Zurück",

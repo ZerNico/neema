@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 // Landing-page greeting. Better Auth's `name` is free-form text (a full name,
 // a single handle, sometimes an email), so the greeting only uses it when the
 // leading word actually reads like something to call a person.
@@ -13,19 +14,25 @@ export function firstNameOf(name: string | null | undefined): string | null {
 // `who` is ", Ada" or empty, so every line reads with and without a name.
 type Line = (who: string) => string;
 
-const ask: Line = (who) => `What can I help with${who}?`;
+const ask: Line = (who) => m.chat_greeting_help({ who });
 
 const NIGHT: Line[] = [
-  (who) => `Up late${who}?`,
-  (who) => `Night owl mode${who}?`,
-  (who) => `Still up${who}?`,
+  (who) => m.chat_greeting_up_late({ who }),
+  (who) => m.chat_greeting_night_owl({ who }),
+  (who) => m.chat_greeting_still_up({ who }),
 ];
-const MORNING: Line[] = [(who) => `Good morning${who}`, (who) => `What’s first today${who}?`];
+const MORNING: Line[] = [
+  (who) => m.chat_greeting_morning({ who }),
+  (who) => m.chat_greeting_first_today({ who }),
+];
 const AFTERNOON: Line[] = [
-  (who) => `Good afternoon${who}`,
-  (who) => `What are we working on${who}?`,
+  (who) => m.chat_greeting_afternoon({ who }),
+  (who) => m.chat_greeting_working_on({ who }),
 ];
-const EVENING: Line[] = [(who) => `Good evening${who}`, (who) => `What’s on your mind${who}?`];
+const EVENING: Line[] = [
+  (who) => m.chat_greeting_evening({ who }),
+  (who) => m.chat_greeting_on_your_mind({ who }),
+];
 
 function byHour(hour: number): Line[] {
   if (hour < 5 || hour >= 22) return NIGHT;
@@ -37,10 +44,11 @@ function byHour(hour: number): Line[] {
 function occasions(now: Date): Line[] {
   const day = now.getDay();
   const hour = now.getHours();
-  if (now.getMonth() === 0 && now.getDate() === 1) return [(who) => `Happy New Year${who}`];
-  if (day === 1 && hour >= 5 && hour < 12) return [(who) => `New week${who}. Where do we start?`];
-  if (day === 5 && hour >= 12) return [(who) => `Happy Friday${who}`];
-  if ((day === 0 || day === 6) && hour >= 5) return [(who) => `Weekend project${who}?`];
+  if (now.getMonth() === 0 && now.getDate() === 1)
+    return [(who) => m.chat_greeting_new_year({ who })];
+  if (day === 1 && hour >= 5 && hour < 12) return [(who) => m.chat_greeting_new_week({ who })];
+  if (day === 5 && hour >= 12) return [(who) => m.chat_greeting_friday({ who })];
+  if ((day === 0 || day === 6) && hour >= 5) return [(who) => m.chat_greeting_weekend({ who })];
   return [];
 }
 
@@ -50,7 +58,7 @@ function occasions(now: Date): Line[] {
  */
 export function greetingFor(name: string | null | undefined, now: Date, roll: number): string {
   const first = firstNameOf(name);
-  const who = first === null ? "" : `, ${first}`;
+  const who = first === null ? "" : m.chat_greeting_who({ name: first });
   const lines = [ask, ...byHour(now.getHours()), ...occasions(now)];
   const line = lines[Math.min(lines.length - 1, Math.floor(roll * lines.length))] ?? ask;
   return line(who);

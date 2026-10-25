@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import { useTagSync } from "./use-tag-sync.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
@@ -62,7 +63,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import { useFileDrop } from "~/ui/use-file-drop.ts";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { CollapseItem, MotionSwap } from "~/ui/motion.tsx";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
@@ -78,14 +79,14 @@ import type { ConversationMode } from "../schema.ts";
 import type { MessageReference } from "../references.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
-const effortLabels: Record<ReasoningEffort, string> = {
-  none: "Off",
-  minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Maximum",
+const effortLabels: Record<ReasoningEffort, () => string> = {
+  none: m.chat_effort_off,
+  minimal: m.chat_effort_minimal,
+  low: m.chat_effort_low,
+  medium: m.chat_effort_medium,
+  high: m.chat_effort_high,
+  xhigh: m.chat_effort_xhigh,
+  max: m.chat_effort_max,
 };
 
 // Stored chips preview from the authenticated route; an image still in
@@ -209,7 +210,7 @@ export const ChatInput = forwardRef<
     onStop,
     disabled,
     queueing = false,
-    queueLabel = "Add to queue",
+    queueLabel = m.chat_composer_add_to_queue(),
     textareaDisabled = disabled,
     controlsDisabled = disabled,
     modelId,
@@ -229,10 +230,10 @@ export const ChatInput = forwardRef<
     skills,
     integrations,
     references,
-    placeholder = "Message…",
+    placeholder = m.chat_composer_placeholder(),
     textareaLabel,
     autoFocus = false,
-    submitLabel = "Send",
+    submitLabel = m.chat_composer_send(),
     className,
   },
   forwardedRef,
@@ -286,11 +287,11 @@ export const ChatInput = forwardRef<
   const stopping = !!onStop && !queueDraft;
   const action = stopping ? "stop" : target?.queued ? "upload" : "send";
   const actionLabel = stopping
-    ? "Stop generating"
+    ? m.chat_composer_stop()
     : workspaceImports?.queued
-      ? "Sending after the files land in the workspace"
+      ? m.chat_composer_sending_after_workspace()
       : attachments?.queued
-        ? "Sending after uploads finish"
+        ? m.chat_composer_sending_after_uploads()
         : queueDraft
           ? queueLabel
           : submitLabel;
@@ -308,7 +309,9 @@ export const ChatInput = forwardRef<
     (canResearch && (!!onResearchEnabledChange || researchEnabled)) ||
     // Only when there is something to connect or already connected.
     !!(integrations && (integrations.items.length || integrations.canAdd));
-  const menuLabel = hasTools ? "Add files or tools" : "Add attachment";
+  const menuLabel = hasTools
+    ? m.chat_composer_add_files_or_tools()
+    : m.chat_composer_add_attachment();
   // "#" offers the same collections the Knowledge popup does: not the agent's
   // own, which come with it. Selecting one commits immediately.
   const knowledge = useQuery({
@@ -360,7 +363,7 @@ export const ChatInput = forwardRef<
             selected: context.selection.collectionIds,
             nameOf: (id: string) =>
               knowledge.data?.find((collection) => collection.id === id)?.name ??
-              (knowledge.isSuccess ? "Unavailable collection" : undefined),
+              (knowledge.isSuccess ? m.chat_composer_unavailable_collection() : undefined),
             canSelect: (id: string) =>
               !!knowledge.data?.some((collection) => collection.id === id) &&
               !context.agentCollectionIds.has(id),
@@ -408,9 +411,9 @@ export const ChatInput = forwardRef<
     selectedModel !== undefined;
 
   const researchUnavailableReason = !researchAvailability
-    ? "Checking research availability…"
+    ? m.chat_composer_research_checking()
     : !researchAvailability.configured || !researchAvailability.enabled
-      ? "Web search and page reading must both be enabled."
+      ? m.chat_composer_research_needs_tools()
       : null;
 
   // Parsing lets a PDF through on a model without native file input; while the
@@ -422,7 +425,7 @@ export const ChatInput = forwardRef<
   const warningFor = (item: AttachmentUpload): string | null => {
     if (item.status === "error") return null;
     if (item.kind === "image" && selectedModel && !selectedModel.capabilities.vision) {
-      return `${selectedModel.displayName} cannot read images, so pick another model or remove this file.`;
+      return m.chat_composer_model_cannot_read_images({ model: selectedModel.displayName });
     }
     if (
       item.kind === "pdf" &&
@@ -430,7 +433,7 @@ export const ChatInput = forwardRef<
       !selectedModel.capabilities.files &&
       !parsingUsable
     ) {
-      return `${selectedModel.displayName} cannot read PDFs and document parsing is disabled. Ask an admin to enable it or pick another model.`;
+      return m.chat_composer_model_cannot_read_pdfs({ model: selectedModel.displayName });
     }
     return null;
   };
@@ -446,9 +449,7 @@ export const ChatInput = forwardRef<
     ? context.selection.collectionIds.length - context.maxCollections
     : 0;
   const collectionsReason =
-    extraCollections > 0
-      ? `Too many collections for one message: remove ${extraCollections}.`
-      : null;
+    extraCollections > 0 ? m.chat_composer_too_many_collections({ count: extraCollections }) : null;
   const usable = items.filter((item) => item.status !== "error").length;
   const usableImports = importItems.filter((item) => item.status !== "error").length;
   const canSubmit =
@@ -484,7 +485,7 @@ export const ChatInput = forwardRef<
         (attachments && items.length > 0) ||
         (workspaceImports && importItems.length > 0) ||
         (context?.selection.agent && !context.agentLocked) ? (
-          <m.div key="chips" {...rowMotion}>
+          <motion.div key="chips" {...rowMotion}>
             <AttachmentChipRow className="px-3 pt-3">
               <AnimatePresence initial={false}>
                 {/* What the message is about comes first. */}
@@ -537,7 +538,7 @@ export const ChatInput = forwardRef<
                   : null}
               </AnimatePresence>
             </AttachmentChipRow>
-          </m.div>
+          </motion.div>
         ) : null}
       </AnimatePresence>
       {target?.notice ? (
@@ -599,7 +600,7 @@ export const ChatInput = forwardRef<
         onValueChange={onValueChange}
         onSubmit={submit}
         onCancel={onCancel}
-        placeholder={noModels ? "No models configured, ask an admin" : placeholder}
+        placeholder={noModels ? m.chat_composer_no_models() : placeholder}
         {...(textareaLabel ? { ariaLabel: textareaLabel } : {})}
         autoFocus={autoFocus}
         disabled={noModels || textareaDisabled}
@@ -615,7 +616,7 @@ export const ChatInput = forwardRef<
             // Any type lands in a workspace; the server upload path keeps its
             // allowlist, since the model only reads what the server accepts.
             className="sr-only"
-            aria-label="Attach files"
+            aria-label={m.chat_composer_attach_files()}
             // Selecting the same file twice in a row must re-fire `change`.
             onChange={(event) => {
               target.addFiles(event.target.files ?? []);
@@ -655,7 +656,9 @@ export const ChatInput = forwardRef<
             {target ? (
               <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
                 <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-                {workspaceImports ? "Add files to the workspace" : "Attach files"}
+                {workspaceImports
+                  ? m.chat_composer_add_workspace_files()
+                  : m.chat_composer_attach_files()}
               </DropdownMenuItem>
             ) : null}
             {context && (canChooseAgent || canChooseKnowledge) ? (
@@ -670,7 +673,7 @@ export const ChatInput = forwardRef<
             {skills && canChooseSkills ? (
               <DropdownMenuItem disabled={controlsDisabled} onClick={() => choosePicker("skills")}>
                 <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
-                Skills
+                {m.chat_composer_skills()}
                 {skills.selectedIds.length > 0 ? (
                   <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">
                     {skills.selectedIds.length}
@@ -693,7 +696,7 @@ export const ChatInput = forwardRef<
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger disabled={controlsDisabled}>
                     <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={2} />
-                    Integrations
+                    {m.chat_composer_integrations()}
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="w-64">
                     {integrations.items.map((item) => (
@@ -714,7 +717,7 @@ export const ChatInput = forwardRef<
                     {integrations.items.length ? <DropdownMenuSeparator /> : null}
                     <DropdownMenuItem onClick={() => setAddingIntegration(true)}>
                       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-                      Add integration…
+                      {m.chat_composer_add_integration()}
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
@@ -732,7 +735,7 @@ export const ChatInput = forwardRef<
                   {...(researchUnavailableReason ? { "aria-describedby": researchHintId } : {})}
                 >
                   <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
-                  Deep research
+                  {m.chat_composer_deep_research()}
                 </DropdownMenuSwitchItem>
                 {researchUnavailableReason ? (
                   <p id={researchHintId} className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs">
@@ -790,15 +793,15 @@ export const ChatInput = forwardRef<
             size="sm"
             spacing={0}
             disabled={modeDisabled}
-            aria-label="Chat mode"
+            aria-label={m.chat_composer_mode()}
             className="shrink-0"
           >
-            <ToggleGroupItem value="chat" aria-label="Chat">
-              Chat
+            <ToggleGroupItem value="chat" aria-label={m.chat_composer_mode_chat()}>
+              {m.chat_composer_mode_chat()}
             </ToggleGroupItem>
-            <ToggleGroupItem value="work" aria-label="Work with a folder">
+            <ToggleGroupItem value="work" aria-label={m.chat_composer_mode_work_label()}>
               <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} data-icon="inline-start" />
-              Work
+              {m.chat_composer_mode_work()}
             </ToggleGroupItem>
           </ToggleGroup>
         ) : null}
@@ -806,14 +809,14 @@ export const ChatInput = forwardRef<
           <Button
             size="sm-collapsible"
             variant={searchEnabled ? "default" : "ghost"}
-            aria-label="Search the web"
+            aria-label={m.chat_composer_search_label()}
             aria-pressed={searchEnabled}
             onClick={() => onSearchEnabledChange(!searchEnabled)}
             disabled={controlsDisabled}
             className={cn("shrink-0", !searchEnabled && "text-muted-foreground")}
           >
             <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span>Search</span>
+            <span>{m.chat_composer_search()}</span>
           </Button>
         ) : null}
         {/* One unit, so a narrow composer wraps model, reasoning and send onto
@@ -830,7 +833,9 @@ export const ChatInput = forwardRef<
             disabled={noModels || controlsDisabled}
             trigger={<Button variant="chip" size="sm" className="min-w-0 max-w-64" />}
           >
-            <span className="truncate text-sm">{selectedModel?.displayName ?? "Select model"}</span>
+            <span className="truncate text-sm">
+              {selectedModel?.displayName ?? m.chat_composer_select_model()}
+            </span>
           </ModelPicker>
           {onReasoningEffortChange && (selectedModel?.reasoningEfforts?.length ?? 0) > 0 ? (
             <DropdownMenu open={reasoningMenuOpen} onOpenChange={setReasoningMenuOpen}>
@@ -840,12 +845,18 @@ export const ChatInput = forwardRef<
                     variant="chip"
                     size="sm-collapsible"
                     disabled={controlsDisabled}
-                    aria-label={`Reasoning: ${reasoningEffort ? effortLabels[reasoningEffort] : "Default"}`}
+                    aria-label={m.chat_effort_label({
+                      effort: reasoningEffort
+                        ? effortLabels[reasoningEffort]()
+                        : m.chat_effort_default(),
+                    })}
                   />
                 }
               >
                 <HugeiconsIcon icon={AiBrain01Icon} strokeWidth={2} data-icon="inline-start" />
-                <span>{reasoningEffort ? effortLabels[reasoningEffort] : "Default"}</span>
+                <span>
+                  {reasoningEffort ? effortLabels[reasoningEffort]() : m.chat_effort_default()}
+                </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
                 <DropdownMenuRadioGroup
@@ -861,10 +872,12 @@ export const ChatInput = forwardRef<
                     setReasoningMenuOpen(false);
                   }}
                 >
-                  <DropdownMenuRadioItem value="default">Default</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="default">
+                    {m.chat_effort_default()}
+                  </DropdownMenuRadioItem>
                   {selectedModel?.reasoningEfforts?.map((effort) => (
                     <DropdownMenuRadioItem key={effort} value={effort}>
-                      {effortLabels[effort]}
+                      {effortLabels[effort]()}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -880,18 +893,18 @@ export const ChatInput = forwardRef<
                       size="icon-sm"
                       variant="ghost"
                       onClick={onStop}
-                      aria-label="Stop generating"
+                      aria-label={m.chat_composer_stop()}
                     />
                   }
                 >
                   <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
                 </TooltipTrigger>
-                <TooltipContent>Stop generating</TooltipContent>
+                <TooltipContent>{m.chat_composer_stop()}</TooltipContent>
               </Tooltip>
             ) : null}
             {onCancel ? (
               <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>
-                Cancel
+                {m.common_cancel()}
               </Button>
             ) : null}
             <Tooltip>
@@ -941,14 +954,12 @@ export const ChatInput = forwardRef<
           <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
             {blockedReason ??
               collectionsReason ??
-              (!canResearch
-                ? "Deep research isn’t available for your account."
-                : researchUnavailableReason)}
+              (!canResearch ? m.chat_composer_research_unavailable() : researchUnavailableReason)}
           </p>
         </DisclosureContent>
       </Disclosure>
       {/* Never intercept dragleave/drop; only opacity changes, not hit testing. */}
-      <m.div
+      <motion.div
         aria-hidden={!dragging}
         inert
         initial={false}
@@ -958,9 +969,9 @@ export const ChatInput = forwardRef<
       >
         <span className="text-foreground flex items-center gap-2 text-sm font-medium">
           <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
-          {workspaceImports ? "Drop files to add them to the workspace" : "Drop files to attach"}
+          {workspaceImports ? m.chat_composer_drop_workspace() : m.chat_composer_drop_attach()}
         </span>
-      </m.div>
+      </motion.div>
     </div>
   );
 });

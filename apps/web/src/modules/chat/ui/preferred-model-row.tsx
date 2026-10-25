@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useQuery } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { chatModelsQuery } from "~/modules/chat/client/queries.ts";
@@ -47,7 +48,7 @@ export function PreferredModelRow({
                   onChange(null);
                 }}
               >
-                No preference
+                {m.chat_preferred_model_none()}
               </button>
             </div>
           )}
@@ -56,13 +57,14 @@ export function PreferredModelRow({
               size="sm"
               variant="outline"
               className="w-full min-w-0 justify-between"
-              aria-label="Preferred model"
+              aria-label={m.chat_preferred_model_label()}
               aria-invalid={invalid}
             />
           }
         >
           <span className="truncate">
-            {selected?.displayName ?? (value ? "Unavailable model" : "No preference")}
+            {selected?.displayName ??
+              (value ? m.chat_preferred_model_unavailable() : m.chat_preferred_model_none())}
           </span>
         </ModelPicker>
         <FieldError errors={errors} />

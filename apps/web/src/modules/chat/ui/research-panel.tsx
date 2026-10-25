@@ -5,7 +5,7 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { m } from "motion/react";
+import { m as motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import type {
   KnowledgeToolActivity,
@@ -200,14 +200,14 @@ function Milestone({
         {title}
       </span>
       {finding ? (
-        <m.span
+        <motion.span
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3, ease: "easeOut" }}
           className="text-muted-foreground text-[13px] leading-snug [overflow-wrap:anywhere]"
         >
           {finding}
-        </m.span>
+        </motion.span>
       ) : null}
       {detail ? (
         <span className="text-muted-foreground flex min-w-0 text-xs">
@@ -219,7 +219,7 @@ function Milestone({
     </span>
   );
   return (
-    <m.li
+    <motion.li
       layout="position"
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
@@ -264,7 +264,7 @@ function Milestone({
       ) : (
         face
       )}
-    </m.li>
+    </motion.li>
   );
 }
 

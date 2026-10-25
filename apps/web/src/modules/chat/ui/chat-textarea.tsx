@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Extension } from "@tiptap/core";
 import { Book02Icon, FolderLibraryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -61,10 +62,10 @@ export interface ComposerFieldHandle {
 
 type Trigger = "/" | "#" | "@";
 const TRIGGERS: readonly Trigger[] = ["/", "#", "@"];
-const TRIGGER_LABEL: Record<Trigger, string> = {
-  "/": "Local skills",
-  "#": "Knowledge collections",
-  "@": "Integrations",
+const TRIGGER_LABEL: Record<Trigger, () => string> = {
+  "/": m.chat_mention_skills,
+  "#": m.chat_mention_collections,
+  "@": m.chat_mention_integrations,
 };
 const suggestionKeys: Record<Trigger, PluginKey> = {
   "/": new PluginKey("composer-mention-/"),
@@ -505,7 +506,7 @@ export const ChatTextarea = forwardRef<
       {list ? (
         <MentionList
           id={listId}
-          label={TRIGGER_LABEL[list.trigger]}
+          label={TRIGGER_LABEL[list.trigger]()}
           items={list.items}
           selectedIndex={selectedIndex}
           caretRect={list.caretRect}

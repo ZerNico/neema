@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -115,7 +116,7 @@ export function useAttemptMutations({
   };
   const sendMutation = useMutation({
     onMutate: beforeGeneration,
-    onError: (error) => refused("Could not send the message.", error),
+    onError: (error) => refused(m.chat_send_failed(), error),
     mutationFn: async (input: {
       content: string;
       attachmentIds: ReadonlyArray<string>;
@@ -180,7 +181,7 @@ export function useAttemptMutations({
         { throwOnError: true },
       ),
     onSuccess: () => setQuestionNeedsRefresh(false),
-    onError: (error) => toastError("Could not refresh the chat.", error),
+    onError: (error) => toastError(m.chat_refresh_failed(), error),
   });
   const refreshQuestionState = async () => {
     try {
@@ -191,7 +192,7 @@ export function useAttemptMutations({
       );
     } catch {
       setQuestionNeedsRefresh(true);
-      toast.error("Could not refresh the chat.");
+      toast.error(m.chat_refresh_failed());
     }
   };
   const answerMutation = useMutation({
@@ -211,7 +212,7 @@ export function useAttemptMutations({
       }),
     onError: (error) => {
       cancelAnchor();
-      toastError("Could not send your answers.", error);
+      toastError(m.chat_answers_send_failed(), error);
       void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
     },
     onSettled: refreshQuestionState,
@@ -221,7 +222,7 @@ export function useAttemptMutations({
 
   const retryMutation = useMutation({
     onMutate: beforeGeneration,
-    onError: (error) => refused("Could not retry the answer.", error),
+    onError: (error) => refused(m.chat_retry_failed(), error),
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
@@ -254,7 +255,7 @@ export function useAttemptMutations({
       releaseAnchor();
     },
     onError: (error) => {
-      toastError("Could not resume the answer.", error);
+      toastError(m.chat_resume_failed(), error);
       void queryClient.invalidateQueries({ queryKey: chatModelsQuery.queryKey });
     },
     mutationFn: async (input: { messageId: string; modelId?: string }) =>
@@ -290,7 +291,7 @@ export function useAttemptMutations({
         try {
           await copyWorkspaceToBranch(conversationId, result.conversationId);
         } catch {
-          toast.error("The branch opened without its local files.");
+          toast.error(m.chat_branch_without_files());
         }
       }
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -307,7 +308,7 @@ export function useAttemptMutations({
     // No invalidation here: the generation finalizes itself and the `done`
     // event already carries the terminal status back through the stream hook.
     // A refused stop sends none, so it says so.
-    onError: (error) => toastError("Could not stop the response.", error),
+    onError: (error) => toastError(m.chat_stop_failed(), error),
   });
 
   const editMutation = useMutation({
@@ -374,9 +375,9 @@ export function useAttemptMutations({
       setEditingMessageId(null);
     },
     onError: async (error, input) => {
-      if (!input.questionResponse) return refused("Could not send the edit.", error);
+      if (!input.questionResponse) return refused(m.chat_edit_send_failed(), error);
       cancelAnchor();
-      toastError("Could not save your answers.", error);
+      toastError(m.chat_answers_save_failed(), error);
       await refreshQuestionState();
     },
     onSettled: (_result, _error, input) => input.releaseUploads?.(),
@@ -448,15 +449,21 @@ export function useAttemptMutations({
         (items ?? []).filter((item) => item.messageId && removed.has(item.messageId));
       return lossSentence([
         ...lost(data.documents).map((document) => ({
-          noun: "document",
+          kind: "document" as const,
           name: document.title,
         })),
-        ...lost(data.agentDrafts).map((draft) => ({ noun: "agent draft", name: draft.name })),
-        ...lost(data.scheduleDrafts).map((draft) => ({
-          noun: "schedule draft",
+        ...lost(data.agentDrafts).map((draft) => ({
+          kind: "agentDraft" as const,
           name: draft.name,
         })),
-        ...lost(data.workingFiles).map((file) => ({ noun: "unpublished file", name: file.name })),
+        ...lost(data.scheduleDrafts).map((draft) => ({
+          kind: "scheduleDraft" as const,
+          name: draft.name,
+        })),
+        ...lost(data.workingFiles).map((file) => ({
+          kind: "workingFile" as const,
+          name: file.name,
+        })),
       ]);
     },
     [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts, data.workingFiles],
@@ -470,9 +477,7 @@ export function useAttemptMutations({
         (message) => answerId && message.steeredIntoMessageId === answerId,
       ).length;
       if (count === 0) return "";
-      return count === 1
-        ? " The message you steered into it will be removed too."
-        : ` The ${count} messages you steered into it will be removed too.`;
+      return ` ${m.chat_steer_loss({ count })}`;
     },
     [data.messages],
   );
@@ -484,9 +489,9 @@ export function useAttemptMutations({
       if (
         (later || losing) &&
         !(await confirm({
-          title: "Retry this response?",
-          description: `${later ? "All messages after it will be removed." : ""}${losing}`.trim(),
-          confirmLabel: "Retry",
+          title: m.chat_retry_confirm_title(),
+          description: `${later ? m.chat_retry_confirm_later() : ""}${losing}`.trim(),
+          confirmLabel: m.chat_retry_confirm(),
         }))
       ) {
         return;
@@ -511,10 +516,9 @@ export function useAttemptMutations({
       return (
         (!removesLaterTurns && !losing) ||
         (await confirm({
-          title: "Edit this message?",
-          description:
-            `${removesLaterTurns ? "All messages after its response will be removed." : ""}${losing}`.trim(),
-          confirmLabel: "Save and regenerate",
+          title: m.chat_edit_confirm_title(),
+          description: `${removesLaterTurns ? m.chat_edit_confirm_later() : ""}${losing}`.trim(),
+          confirmLabel: m.chat_edit_confirm(),
         }))
       );
     },

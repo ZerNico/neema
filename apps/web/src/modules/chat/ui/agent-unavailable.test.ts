@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { describe, expect, it } from "vitest";
 import { agentUnavailableLines } from "./agent-unavailable.ts";
 
@@ -17,6 +18,15 @@ describe("agentUnavailableLines", () => {
       "One of the agent’s tools is no longer available",
       "The agent’s integration “Jira” is no longer available",
     ]);
+  });
+
+  it("counts the rest in German with the noun's own grammar", () => {
+    expect(m.chat_agent_missing_skill_unnamed({ count: 1 }, { locale: "de" })).toBe(
+      "Einer der Skills des Agenten ist nicht mehr verfügbar",
+    );
+    expect(m.chat_agent_missing_skill_unnamed({ count: 3 }, { locale: "de" })).toBe(
+      "3 Skills des Agenten sind nicht mehr verfügbar",
+    );
   });
 
   it("says nothing when the agent ran whole", () => {

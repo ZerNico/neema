@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { matchesWords } from "~/modules/search/match.ts";
 import { AnimatePresence } from "motion/react";
 import { CollapseItem } from "~/ui/motion.tsx";
@@ -86,10 +87,10 @@ export function ContextMenuItems({
       {agentLocked ? null : (
         <DropdownMenuItem disabled={disabled} onClick={() => onPick("agent")}>
           <HugeiconsIcon icon={Robot01Icon} strokeWidth={2} />
-          Agent
+          {m.chat_context_agent()}
           {selection.agent ? (
             <span className="text-muted-foreground ml-auto truncate pl-2 text-xs">
-              {selection.agent.name ?? "Unavailable"}
+              {selection.agent.name ?? m.chat_context_unavailable()}
             </span>
           ) : null}
         </DropdownMenuItem>
@@ -97,7 +98,7 @@ export function ContextMenuItems({
       {knowledgeEnabled ? (
         <DropdownMenuItem disabled={disabled} onClick={() => onPick("collections")}>
           <HugeiconsIcon icon={FolderLibraryIcon} strokeWidth={2} />
-          Knowledge
+          {m.chat_context_knowledge()}
           {count > 0 ? (
             <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">{count}</span>
           ) : null}
@@ -148,15 +149,19 @@ export function AgentPicker({
       autoHighlight
     >
       <ComboboxContent side={side} anchor={anchor} className="w-72 min-w-72">
-        <ComboboxInput placeholder="Search agents…" showTrigger={false} aria-label="Agent" />
+        <ComboboxInput
+          placeholder={m.chat_context_search_agents()}
+          showTrigger={false}
+          aria-label={m.chat_context_agent()}
+        />
         <ComboboxEmpty>
           {agents.isPending
-            ? "Loading agents…"
+            ? m.chat_context_loading_agents()
             : agents.isError
-              ? "Could not load agents."
+              ? m.chat_context_agents_failed()
               : items.length === 0
-                ? "No agents yet"
-                : "No agents match"}
+                ? m.chat_context_no_agents()
+                : m.chat_context_no_agents_match()}
         </ComboboxEmpty>
         <ComboboxList>
           {(agent: AgentSummary) => (
@@ -232,18 +237,18 @@ export function CollectionPicker({
     >
       <ComboboxContent side={side} anchor={anchor} className="w-72 min-w-72">
         <ComboboxInput
-          placeholder="Search collections…"
+          placeholder={m.chat_context_search_collections()}
           showTrigger={false}
-          aria-label="Knowledge"
+          aria-label={m.chat_context_knowledge()}
         />
         <ComboboxEmpty>
           {collections.isPending
-            ? "Loading collections…"
+            ? m.chat_context_loading_collections()
             : collections.isError
-              ? "Could not load collections."
+              ? m.chat_context_collections_failed()
               : items.length === 0
-                ? "No collections yet"
-                : "No collections match"}
+                ? m.chat_context_no_collections()
+                : m.chat_context_no_collections_match()}
         </ComboboxEmpty>
         <ComboboxList>
           {(collection: CollectionSummary) => (
@@ -263,10 +268,10 @@ export function CollectionPicker({
           <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
             {full
               ? maxCollections < MAX_SELECTED_COLLECTIONS
-                ? `Up to ${maxCollections} beside the agent’s`
-                : `Up to ${MAX_SELECTED_COLLECTIONS} per message`
+                ? m.chat_context_limit_beside_agent({ max: maxCollections })
+                : m.chat_context_limit_per_message({ max: MAX_SELECTED_COLLECTIONS })
               : draftIds.length > 0
-                ? `${draftIds.length} selected`
+                ? m.chat_context_selected({ count: draftIds.length })
                 : ""}
           </span>
           <Button
@@ -277,7 +282,7 @@ export function CollectionPicker({
               close();
             }}
           >
-            Add
+            {m.chat_context_add()}
           </Button>
         </div>
       </ComboboxContent>
@@ -332,11 +337,11 @@ export function AgentChip({
               name:
                 name === null && !agents.isSuccess
                   ? agents.isError
-                    ? "Could not load selection"
-                    : "Loading…"
+                    ? m.chat_context_selection_failed()
+                    : m.chat_context_loading()
                   : name,
               icon: listed?.icon ?? "robot",
-              note: agent.id === null ? "Deleted agent" : "Agent",
+              note: agent.id === null ? m.chat_context_deleted_agent() : m.chat_context_agent(),
             }}
             onRemove={disabled ? undefined : () => onAgentChange(null)}
           />
@@ -359,12 +364,12 @@ export function ContextChip({
   const label =
     item.name ??
     (item.kind === "agent"
-      ? "Agent unavailable"
+      ? m.chat_context_agent_unavailable()
       : item.kind === "skill"
-        ? "Skill unavailable"
+        ? m.chat_context_skill_unavailable()
         : item.kind === "schedule"
-          ? "Schedule unavailable"
-          : "Collection unavailable");
+          ? m.chat_context_schedule_unavailable()
+          : m.chat_context_collection_unavailable());
   return (
     <span
       title={label}
@@ -397,14 +402,14 @@ export function ContextChip({
             unavailable ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {unavailable ? "No longer available to you" : item.note}
+          {unavailable ? m.chat_context_no_longer_available() : item.note}
         </span>
       </span>
       {onRemove ? (
         <Button
           size="icon-xs"
           variant="ghost"
-          aria-label={`Remove ${label}`}
+          aria-label={m.chat_context_remove({ name: label })}
           onClick={onRemove}
           className="-mr-1 size-6 shrink-0"
         >
@@ -441,7 +446,7 @@ export function ReferenceChip({
         id: reference.id,
         name,
         icon: agent?.icon,
-        note: reference.kind === "agent" ? "Agent" : "Schedule",
+        note: reference.kind === "agent" ? m.chat_context_agent() : m.chat_context_schedule(),
       }}
       onRemove={onRemove}
     />
@@ -460,9 +465,9 @@ export function CollectionChip({ collectionId }: { collectionId: string }) {
         name: collections.isSuccess
           ? name
           : collections.isError
-            ? "Could not load collection"
-            : "Loading…",
-        note: "Collection",
+            ? m.chat_context_collection_failed()
+            : m.chat_context_loading(),
+        note: m.chat_context_collection(),
       }}
     />
   );

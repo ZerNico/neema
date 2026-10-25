@@ -1,4 +1,4 @@
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { useState } from "react";
 import type { ComponentProps } from "react";
 import { Calendar03Icon, GitBranchIcon, Globe02Icon } from "@hugeicons/core-free-icons";
@@ -36,7 +36,7 @@ export function ConversationStatusTitle({
   return (
     <>
       <ConversationTitle {...title} resizing={moving} />
-      <m.span
+      <motion.span
         data-status-slot
         data-filled={width > 0 || undefined}
         className="flex shrink-0 items-center justify-end overflow-hidden"
@@ -95,7 +95,7 @@ export function ConversationStatusTitle({
             />
           ) : null}
         </MotionSwap>
-      </m.span>
+      </motion.span>
     </>
   );
 }

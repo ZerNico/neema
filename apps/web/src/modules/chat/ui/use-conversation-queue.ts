@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { toast } from "sonner";
@@ -58,9 +59,9 @@ interface Draft {
 }
 
 /** Shows the server's reason for a refused queue action, or a fallback. */
-const failed = (fallback: string) => (error: unknown) => {
+const failed = (fallback: () => string) => (error: unknown) => {
   if (error instanceof AlreadyTold) return;
-  toast.error(error instanceof Error && error.message ? error.message : fallback);
+  toast.error(error instanceof Error && error.message ? error.message : fallback());
 };
 
 /**
@@ -128,25 +129,25 @@ export function useConversationQueue(input: {
       settings.settleCollections();
       refresh();
     },
-    onError: failed("Could not queue your message."),
+    onError: failed(m.chat_queue_add_failed),
   });
   const replace = useMutation({
     onMutate: () => input.checkWork(),
     mutationFn: async (draft: Draft & { entryId: string }) =>
       replaceQueuedMessage({ data: { ...(await fields(draft)), entryId: draft.entryId } }),
     onSuccess: refresh,
-    onError: failed("Could not save the queued message."),
+    onError: failed(m.chat_queue_save_failed),
   });
   const remove = useMutation({
     mutationFn: (entryId: string) => removeQueuedMessage({ data: { conversationId, entryId } }),
     onSuccess: refresh,
-    onError: failed("Could not remove the queued message."),
+    onError: failed(m.chat_queue_remove_failed),
   });
   const steer = useMutation({
     mutationFn: (target: { entryId: string; messageId: string; generationId: string }) =>
       steerQueuedMessage({ data: { conversationId, ...target } }),
     onSuccess: refresh,
-    onError: failed("Could not send that into the response."),
+    onError: failed(m.chat_queue_steer_failed),
   });
   const sendNow = useMutation({
     onMutate: () => input.prepare(),
@@ -155,7 +156,7 @@ export function useConversationQueue(input: {
     mutationFn: async (entryId: string) =>
       sendQueuedNow({ data: { conversationId, entryId, ...(await input.attemptFields()) } }),
     onSuccess: refresh,
-    onError: failed("Could not send the queued message."),
+    onError: failed(m.chat_queue_send_failed),
   });
   const dispatch = useMutation({
     onMutate: () => input.prepare(),
@@ -166,7 +167,7 @@ export function useConversationQueue(input: {
         data: { conversationId, force: true, ...(await input.attemptFields()) },
       }),
     onSuccess: refresh,
-    onError: failed("Could not start the queued message."),
+    onError: failed(m.chat_queue_start_failed),
   });
 
   // The one reason only this page knows: whether it is the desktop app a Work
@@ -205,9 +206,9 @@ export function useConversationQueue(input: {
       // Send now stops the answer first; where nothing could start afterwards
       // it must not stop anything, so it is refused before the click.
       sendNowBlocked: needsDesktop
-        ? "Open Chat Desktop to send queued work"
+        ? m.chat_queue_send_needs_desktop()
         : input.state === "question"
-          ? "Answer the questions above first"
+          ? m.chat_queue_answer_first()
           : null,
       onSteer: (entryId) => {
         if (!input.running) return;
@@ -255,15 +256,15 @@ const pausedReason = (state: QueueState, needsDesktop: boolean): ComposerQueue["
     case "running":
       return null;
     case "question":
-      return { reason: "Answer the questions above to continue", canDispatch: false };
+      return { reason: m.chat_queue_paused_question(), canDispatch: false };
     case "ready":
       return needsDesktop
-        ? { reason: "Open Chat Desktop to continue this work", canDispatch: false }
-        : { reason: "Starting the next message…", canDispatch: false };
+        ? { reason: m.chat_queue_paused_desktop(), canDispatch: false }
+        : { reason: m.chat_queue_starting(), canDispatch: false };
     case "stopped":
     case "failed":
       return needsDesktop
-        ? { reason: "Open Chat Desktop to continue this work", canDispatch: false }
-        : { reason: "Queue paused", canDispatch: true };
+        ? { reason: m.chat_queue_paused_desktop(), canDispatch: false }
+        : { reason: m.chat_queue_paused(), canDispatch: true };
   }
 };

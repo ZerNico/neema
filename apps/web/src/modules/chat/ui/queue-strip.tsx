@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowTurnForwardIcon,
   ArrowUp02Icon,
@@ -8,7 +9,7 @@ import {
 import { tagWords } from "../tags.ts";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { useState } from "react";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploads.ts";
@@ -85,7 +86,7 @@ export function QueueStrip({
   // The rows already say what is queued, so a heading only earns its line
   // when there is news: the queue is waiting on something.
   const waiting = !generating && paused ? paused : null;
-  const count = `${entries.length} message${entries.length === 1 ? "" : "s"} queued`;
+  const count = m.chat_queue_count({ count: entries.length });
   return (
     <div className="mx-3 -mb-3 flex">
       <div className="bg-muted/60 text-muted-foreground flex min-w-0 flex-1 flex-col rounded-t-composer border border-b-0 px-3 pt-1 pb-3.5 text-xs">
@@ -94,7 +95,7 @@ export function QueueStrip({
             <span role="status">{waiting.reason}</span>
             {waiting.canDispatch ? (
               <Button size="xs" variant="ghost" onClick={onDispatch} disabled={editingId !== null}>
-                Send next
+                {m.chat_queue_send_next()}
               </Button>
             ) : null}
           </div>
@@ -109,7 +110,7 @@ export function QueueStrip({
               const label = queuedLabel(entry);
               const editing = entry.id === editingId;
               return (
-                <m.li key={entry.id} {...collapse} className="min-w-0">
+                <motion.li key={entry.id} {...collapse} className="min-w-0">
                   <div className="flex min-w-0 flex-col gap-1 py-1">
                     <div className="flex min-w-0 items-center gap-2">
                       {/* Order only means something once there are two. */}
@@ -122,7 +123,9 @@ export function QueueStrip({
                       >
                         {label}
                       </span>
-                      {editing ? <span className="text-foreground shrink-0">Editing</span> : null}
+                      {editing ? (
+                        <span className="text-foreground shrink-0">{m.chat_queue_editing()}</span>
+                      ) : null}
                       {entry.lastError ? (
                         <span className="text-destructive min-w-0 truncate" title={entry.lastError}>
                           {entry.lastError}
@@ -133,11 +136,9 @@ export function QueueStrip({
                           <TooltipTrigger
                             render={<span className="text-foreground shrink-0 px-1" tabIndex={0} />}
                           >
-                            Sends at the next step
+                            {m.chat_queue_steering()}
                           </TooltipTrigger>
-                          <TooltipContent>
-                            If this answer finishes first, it’s sent right after.
-                          </TooltipContent>
+                          <TooltipContent>{m.chat_queue_steering_hint()}</TooltipContent>
                         </Tooltip>
                       ) : null}
                       {generating && !editing && !steeringIds.has(entry.id) ? (
@@ -147,7 +148,7 @@ export function QueueStrip({
                               <Button
                                 size="xs"
                                 variant="ghost"
-                                aria-label={`Steer: ${label}`}
+                                aria-label={m.chat_queue_steer_label({ message: label })}
                                 onClick={() => onSteer(entry.id)}
                               />
                             }
@@ -157,9 +158,9 @@ export function QueueStrip({
                               strokeWidth={2}
                               className="size-3.5"
                             />
-                            Steer
+                            {m.chat_queue_steer()}
                           </TooltipTrigger>
-                          <TooltipContent>Send into this response at its next step</TooltipContent>
+                          <TooltipContent>{m.chat_queue_steer_hint()}</TooltipContent>
                         </Tooltip>
                       ) : null}
                       {editing ? null : (
@@ -169,7 +170,7 @@ export function QueueStrip({
                               <Button
                                 size="icon-xs"
                                 variant="ghost"
-                                aria-label={`Remove: ${label}`}
+                                aria-label={m.chat_queue_remove_label({ message: label })}
                                 onClick={() => onRemove(entry.id)}
                               />
                             }
@@ -182,8 +183,8 @@ export function QueueStrip({
                           </TooltipTrigger>
                           <TooltipContent>
                             {entry.attachments.length > 0
-                              ? "Remove from queue and delete its files"
-                              : "Remove from queue"}
+                              ? m.chat_queue_remove_with_files()
+                              : m.chat_queue_remove()}
                           </TooltipContent>
                         </Tooltip>
                       )}
@@ -194,7 +195,7 @@ export function QueueStrip({
                               <Button
                                 size="icon-xs"
                                 variant="ghost"
-                                aria-label={`More actions: ${label}`}
+                                aria-label={m.chat_queue_more_label({ message: label })}
                               />
                             }
                           >
@@ -211,14 +212,14 @@ export function QueueStrip({
                             >
                               <HugeiconsIcon icon={ArrowUp02Icon} strokeWidth={2} />
                               {/* The one way to cut an answer short for a queued message. */}
-                              {generating ? "Stop and send now" : "Send now"}
+                              {generating ? m.chat_queue_stop_and_send() : m.chat_queue_send_now()}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               disabled={editBlocked !== null}
                               onClick={() => onEdit(entry.id)}
                             >
                               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                              Edit
+                              {m.chat_queue_edit()}
                             </DropdownMenuItem>
                             {[sendNowBlocked, editBlocked].filter(Boolean).map((reason) => (
                               <p
@@ -250,7 +251,7 @@ export function QueueStrip({
                       </AttachmentChipRow>
                     ) : null}
                   </div>
-                </m.li>
+                </motion.li>
               );
             })}
           </AnimatePresence>
@@ -263,7 +264,7 @@ export function QueueStrip({
             onClick={() => setExpanded(true)}
           >
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} className="size-3.5" />
-            {entries.length - shown.length} more
+            {m.chat_queue_more({ count: entries.length - shown.length })}
           </Button>
         ) : null}
       </div>

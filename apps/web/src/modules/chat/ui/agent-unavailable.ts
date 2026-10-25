@@ -1,12 +1,27 @@
+import { m } from "~/paraglide/messages.js";
 import type { UnavailableAgentDependency } from "~/db/schema/agents.ts";
 
 export type AgentUnavailable = Omit<UnavailableAgentDependency, "id">;
 
-const NOUNS: Record<AgentUnavailable["kind"], readonly [string, string]> = {
-  collection: ["collection", "collections"],
-  skill: ["skill", "skills"],
-  customTool: ["tool", "tools"],
-  integration: ["integration", "integrations"],
+type Lines = {
+  named: (inputs: { name: string }) => string;
+  unnamed: (inputs: { count: number }) => string;
+};
+
+const LINES: Record<AgentUnavailable["kind"], Lines> = {
+  collection: {
+    named: m.chat_agent_missing_collection_named,
+    unnamed: m.chat_agent_missing_collection_unnamed,
+  },
+  skill: { named: m.chat_agent_missing_skill_named, unnamed: m.chat_agent_missing_skill_unnamed },
+  customTool: {
+    named: m.chat_agent_missing_tool_named,
+    unnamed: m.chat_agent_missing_tool_unnamed,
+  },
+  integration: {
+    named: m.chat_agent_missing_integration_named,
+    unnamed: m.chat_agent_missing_integration_unnamed,
+  },
 };
 
 /**
@@ -16,14 +31,12 @@ const NOUNS: Record<AgentUnavailable["kind"], readonly [string, string]> = {
  */
 export function agentUnavailableLines(items: ReadonlyArray<AgentUnavailable>): string[] {
   const lines: string[] = [];
-  for (const kind of Object.keys(NOUNS) as Array<AgentUnavailable["kind"]>) {
-    const [one, many] = NOUNS[kind];
+  for (const kind of Object.keys(LINES) as Array<AgentUnavailable["kind"]>) {
+    const { named, unnamed } = LINES[kind];
     const ofKind = items.filter((item) => item.kind === kind);
-    for (const item of ofKind)
-      if (item.name) lines.push(`The agent’s ${one} “${item.name}” is no longer available`);
-    const unnamed = ofKind.filter((item) => !item.name).length;
-    if (unnamed === 1) lines.push(`One of the agent’s ${many} is no longer available`);
-    else if (unnamed > 1) lines.push(`${unnamed} of the agent’s ${many} are no longer available`);
+    for (const item of ofKind) if (item.name) lines.push(named({ name: item.name }));
+    const count = ofKind.filter((item) => !item.name).length;
+    if (count > 0) lines.push(unnamed({ count }));
   }
   return lines;
 }
