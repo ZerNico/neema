@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Schema } from "effect";
 import { defineIntegrationTool } from "../manifest.ts";
 
@@ -33,6 +34,10 @@ const searchIssuesTool = defineIntegrationTool({
   name: "search_issues",
   title: "Search issues",
   label: "Searched Jira",
+  display: {
+    title: m.integrations_jira_tool_search_title,
+    label: m.integrations_jira_tool_search_label,
+  },
   description:
     "Find issues by JQL or by words. Returns key, summary, status, type, assignee and last update, most recently updated first; read an issue for its description and comments. Without `jql` or `text`, lists the user's own open issues.",
   access: "read",
@@ -50,6 +55,10 @@ const readIssueTool = defineIntegrationTool({
   name: "read_issue",
   title: "Read issues",
   label: "Read a Jira issue",
+  display: {
+    title: m.integrations_jira_tool_read_title,
+    label: m.integrations_jira_tool_read_label,
+  },
   description:
     "Read one issue: its fields, description and comments as Markdown, links, subtasks and the transitions it can take next. Long descriptions and comment threads come back in parts; pass the offsets from the previous answer to continue.",
   access: "read",
@@ -65,6 +74,10 @@ const listProjectsTool = defineIntegrationTool({
   name: "list_projects",
   title: "List projects",
   label: "Listed Jira projects",
+  display: {
+    title: m.integrations_jira_tool_projects_title,
+    label: m.integrations_jira_tool_projects_label,
+  },
   description:
     "List the projects the user can see, with their keys and issue types, to know where an issue can be created.",
   access: "read",
@@ -79,6 +92,10 @@ const createIssueTool = defineIntegrationTool({
   name: "create_issue",
   title: "Create issues",
   label: "Created a Jira issue",
+  display: {
+    title: m.integrations_jira_tool_create_title,
+    label: m.integrations_jira_tool_create_label,
+  },
   description:
     "Create an issue. Needs `project` (key), `type` (an issue type name of that project, such as Task or Bug) and `summary`. `description` is Markdown. Pass `parent` to create a subtask or a child of an epic. If the project requires other fields, the answer names them.",
   access: "write",
@@ -99,6 +116,10 @@ const updateIssueTool = defineIntegrationTool({
   name: "update_issue",
   title: "Edit issues",
   label: "Edited a Jira issue",
+  display: {
+    title: m.integrations_jira_tool_edit_title,
+    label: m.integrations_jira_tool_edit_label,
+  },
   description:
     "Change an issue's summary, description (Markdown, replaces the old one), labels (replace the old ones) or priority. Pass only what changes. Status and assignee have their own tools.",
   access: "write",
@@ -116,6 +137,10 @@ const linkIssuesTool = defineIntegrationTool({
   name: "link_issues",
   title: "Link issues",
   label: "Linked Jira issues",
+  display: {
+    title: m.integrations_jira_tool_link_title,
+    label: m.integrations_jira_tool_link_label,
+  },
   description:
     "Link two issues so that `from` <type> `to`, where `type` is a link name or its wording as Jira shows it: “blocks”, “is blocked by”, “relates to”, “duplicates”.",
   access: "write",
@@ -134,6 +159,10 @@ const addCommentTool = defineIntegrationTool({
   name: "add_comment",
   title: "Comment on issues",
   label: "Commented in Jira",
+  display: {
+    title: m.integrations_jira_tool_comment_title,
+    label: m.integrations_jira_tool_comment_label,
+  },
   description: "Add a comment to an issue, as the user. `body` is Markdown.",
   access: "write",
   parameters: Schema.Struct({
@@ -147,6 +176,10 @@ const assignIssueTool = defineIntegrationTool({
   name: "assign_issue",
   title: "Assign issues",
   label: "Assigned a Jira issue",
+  display: {
+    title: m.integrations_jira_tool_assign_title,
+    label: m.integrations_jira_tool_assign_label,
+  },
   description:
     "Assign an issue to someone who can be assigned in its project, by name or email; “me” for the user, “none” to unassign. When several people match, the answer lists them.",
   access: "write",
@@ -162,6 +195,10 @@ const transitionIssueTool = defineIntegrationTool({
   name: "transition_issue",
   title: "Move issues through the workflow",
   label: "Moved a Jira issue",
+  display: {
+    title: m.integrations_jira_tool_transition_title,
+    label: m.integrations_jira_tool_transition_label,
+  },
   description:
     "Move an issue to another status through its workflow, by the status or transition name (read_issue lists the ones available). Optionally add a comment with it.",
   access: "write",

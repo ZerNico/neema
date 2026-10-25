@@ -1,4 +1,6 @@
+import { m } from "~/paraglide/messages.js";
 import { Effect } from "effect";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationRejected } from "../../errors.ts";
 import { parseMailbox } from "../../mailbox.ts";
 import { INTEGRATION_LIMITS } from "../../schema.ts";
@@ -20,7 +22,9 @@ import {
 import { queryPath } from "../../server/rest-call.ts";
 
 const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
-const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
+// Arguments the model got wrong: only it reads this, in English.
+const reject = (reason: string) =>
+  Effect.fail(new IntegrationRejected({ reason: verbatim(reason) }));
 
 const MESSAGE_LIST_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,webLink,isDraft";
 const EVENT_FIELDS =
@@ -509,8 +513,7 @@ export const outlookAdapter: IntegrationAdapter = {
   kind: "outlook",
   normalizeConfig: (config) => {
     const tenant = (config.tenant ?? "").trim().toLowerCase() || "organizations";
-    if (!TENANT.test(tenant))
-      return { error: "Enter a directory (tenant) ID or domain, or leave it empty." };
+    if (!TENANT.test(tenant)) return { error: localized(m.integrations_error_outlook_tenant) };
     return { config: { tenant }, fingerprint: tenant };
   },
   oauth: {

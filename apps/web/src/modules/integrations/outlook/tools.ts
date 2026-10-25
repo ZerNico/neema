@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Schema } from "effect";
 import { defineIntegrationTool } from "../manifest.ts";
 
@@ -35,6 +36,10 @@ const searchMailTool = defineIntegrationTool({
   name: "search_mail",
   title: "Search mail",
   label: "Searched Outlook mail",
+  display: {
+    title: m.integrations_outlook_tool_search_title,
+    label: m.integrations_outlook_tool_search_label,
+  },
   description:
     "Search the user's mailbox. Returns sender, subject, date, a preview and an id per message, newest first; read a message for its full text. Without `query`, lists the newest messages in the inbox.",
   access: "read",
@@ -50,6 +55,10 @@ const readMessageTool = defineIntegrationTool({
   name: "read_message",
   title: "Read messages",
   label: "Read an Outlook message",
+  display: {
+    title: m.integrations_outlook_tool_read_title,
+    label: m.integrations_outlook_tool_read_label,
+  },
   description:
     "Read one message as plain text by id, with its recipients. Long messages come back in parts; pass `offset` from the previous answer to continue. With `thread`, lists the other messages of its conversation too.",
   access: "read",
@@ -67,6 +76,10 @@ const listEventsTool = defineIntegrationTool({
   name: "list_events",
   title: "List calendar events",
   label: "Checked the Outlook calendar",
+  display: {
+    title: m.integrations_outlook_tool_events_title,
+    label: m.integrations_outlook_tool_events_label,
+  },
   description:
     "List the user's calendar events between two times, expanded so recurring events appear once per occurrence.",
   access: "read",
@@ -85,6 +98,10 @@ const checkAvailabilityTool = defineIntegrationTool({
   name: "check_availability",
   title: "Check availability",
   label: "Checked availability in Outlook",
+  display: {
+    title: m.integrations_outlook_tool_availability_title,
+    label: m.integrations_outlook_tool_availability_label,
+  },
   description:
     "Busy times of the user and of colleagues in the same organization between two times, to find a slot for a meeting. Returns busy blocks per person; free time is what lies between them.",
   access: "read",
@@ -101,6 +118,10 @@ const createDraftTool = defineIntegrationTool({
   name: "create_draft",
   title: "Create drafts",
   label: "Drafted an Outlook message",
+  display: {
+    title: m.integrations_outlook_tool_draft_title,
+    label: m.integrations_outlook_tool_draft_label,
+  },
   description:
     "Save a message to the user's Drafts without sending it. A new message needs `to` and `subject`. Pass `replyTo` with a message id to draft a reply to its sender (`replyAll` for everyone on it); Outlook fills in recipients and subject. `body` is plain text.",
   access: "write",
@@ -119,6 +140,10 @@ const createEventTool = defineIntegrationTool({
   name: "create_event",
   title: "Create events",
   label: "Created an Outlook event",
+  display: {
+    title: m.integrations_outlook_tool_event_title,
+    label: m.integrations_outlook_tool_event_label,
+  },
   description:
     "Add an event to the user's calendar. With `attendees`, Outlook sends each of them an invitation as soon as it is created.",
   access: "write",
@@ -139,6 +164,10 @@ const sendMailTool = defineIntegrationTool({
   name: "send_mail",
   title: "Send mail",
   label: "Sent an Outlook message",
+  display: {
+    title: m.integrations_outlook_tool_send_title,
+    label: m.integrations_outlook_tool_send_label,
+  },
   description:
     "Send mail as the user. Pass `draftId` to send a saved draft exactly as its recipients stand, or `to`, `subject` and `body` to compose and send at once. Bcc is never sent. Only when the user asked for the message to go out.",
   access: "write",

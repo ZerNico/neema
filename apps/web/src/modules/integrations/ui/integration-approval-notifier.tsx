@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
@@ -32,11 +33,15 @@ export function IntegrationApprovalNotifier() {
         continue;
       }
       if (shown !== undefined) continue;
-      const waitingFor = call.kind === "elicitation" ? "an answer" : "your approval";
-      const id = toast(`${name(call.integrationId)} is waiting for ${waitingFor}.`, {
+      const service = name(call.integrationId);
+      const message =
+        call.kind === "elicitation"
+          ? m.integrations_notify_answer({ name: service })
+          : m.integrations_notify_approval({ name: service });
+      const id = toast(message, {
         duration: Infinity,
         action: {
-          label: "Review",
+          label: m.integrations_notify_review(),
           onClick: () =>
             void navigate({
               to: "/chat/$conversationId",

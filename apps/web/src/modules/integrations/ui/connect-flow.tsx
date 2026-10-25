@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -75,6 +77,7 @@ export function ConnectFlow({
   const entry = integrationEntry(integration);
   // A server from a catalog is known by its own name, not its type's.
   const service = manifest?.toolSource === "listed" ? integration.name : manifest?.name;
+  const keyNoun = manifest?.apiKey?.noun?.(getLocale()) ?? m.integrations_api_key_noun();
 
   const waitingFor = step.kind === "waiting" ? step.attempt : null;
   useEffect(() => {
@@ -111,18 +114,18 @@ export function ConnectFlow({
           <span className="bg-primary text-primary-foreground flex size-9 items-center justify-center rounded-full">
             <HugeiconsIcon icon={Tick02Icon} strokeWidth={2} className="size-4" />
           </span>
-          <p className="font-medium">{integration.name} is ready</p>
+          <p className="font-medium">{m.integrations_connect_ready({ name: integration.name })}</p>
           <p className="text-muted-foreground text-sm">
             {tools === 0
-              ? "It lists no tools to your account yet."
-              : `${tools === 1 ? "1 tool" : `${tools} tools`}. Reads run, changes ask first.`}
+              ? m.integrations_connect_ready_no_tools()
+              : m.integrations_connect_ready_tools({ count: tools })}
           </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onOpenPage}>
-            Tool permissions
+            {m.integrations_connect_permissions()}
           </Button>
-          <Button onClick={onDone}>Done</Button>
+          <Button onClick={onDone}>{m.common_done()}</Button>
         </DialogFooter>
       </>
     );
@@ -136,8 +139,8 @@ export function ConnectFlow({
           <Spinner />
           <p className="text-sm font-medium">
             {desktop
-              ? `Finish signing in to ${service} in your browser`
-              : `Finish signing in to ${service} in the new window`}
+              ? m.integrations_connect_finish_browser({ service: service ?? "" })
+              : m.integrations_connect_finish_window({ service: service ?? "" })}
           </p>
           {step.blocked ? (
             <Button
@@ -145,7 +148,7 @@ export function ConnectFlow({
               variant="outline"
               render={<a href={step.url} target="_blank" rel="noopener" />}
             >
-              Open sign-in window
+              {m.integrations_connect_open_window()}
             </Button>
           ) : null}
         </div>
@@ -154,13 +157,13 @@ export function ConnectFlow({
       ) : (
         <p className="text-muted-foreground text-sm">
           {integration.methods.open
-            ? "It needs no account. Chats can use it once it’s on."
-            : `Connect your ${service} account. Chats then read for you and ask before they change anything.`}
+            ? m.integrations_connect_open_hint()
+            : m.integrations_connect_account_hint({ service: service ?? "" })}
         </p>
       )}
       <DialogFooter>
         <Button variant="outline" onClick={step.kind === "start" ? onBack : restart}>
-          {step.kind === "waiting" ? "Cancel" : "Back"}
+          {step.kind === "waiting" ? m.common_cancel() : m.common_back()}
         </Button>
         {step.kind === "waiting" ? null : (
           <>
@@ -172,14 +175,14 @@ export function ConnectFlow({
                 onClick={() => setKeyOpen(true)}
               >
                 {step.kind === "failed" && integration.methods.oauth
-                  ? `Use ${manifest?.apiKey?.noun ?? "an API key"} instead`
-                  : `Use ${manifest?.apiKey?.noun ?? "an API key"}`}
+                  ? m.integrations_connect_use_key_instead({ noun: keyNoun })
+                  : m.integrations_connect_use_key({ noun: keyNoun })}
               </Button>
             ) : null}
             {integration.methods.open ? <TurnOnButton integration={integration} /> : null}
             {integration.methods.oauth ? (
               <Button disabled={!me} onClick={() => me && signIn(me.id)}>
-                {step.kind === "failed" ? "Try again" : "Sign in"}
+                {step.kind === "failed" ? m.common_retry() : m.integrations_connect_sign_in()}
               </Button>
             ) : null}
           </>

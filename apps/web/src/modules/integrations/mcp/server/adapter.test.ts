@@ -14,7 +14,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CallContext, Credential, IntegrationSession } from "../../server/adapter.ts";
 import type { ElicitationAnswer, ElicitationPrompt } from "../../schema.ts";
 import type { McpToolEntry } from "../catalog.ts";
+import { english } from "~/i18n/localized.ts";
+import { IntegrationRejected } from "../../errors.ts";
 import { mapResult, mcpAdapter } from "./adapter.ts";
+
+/** What a refusal says, in the English the tests are written in. */
+const reasonOf = (exit: Exit.Exit<unknown, unknown>) => {
+  const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : null;
+  return error instanceof IntegrationRejected ? english(error.reason) : JSON.stringify(exit);
+};
 
 /** A one-pixel PNG, as a server would return a chart. */
 const PIXEL =
@@ -361,10 +369,7 @@ describe("an MCP server through the adapter", () => {
     const { entries } = await list(sessionAt("/mcp"));
     seen.length = 0;
     const exit = await run(sessionAt("/mcp"), byName(entries, "search"), { q: 5 });
-    expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
-      _tag: "IntegrationRejected",
-      reason: "The arguments do not fit Search docs: data/q must be string",
-    });
+    expect(reasonOf(exit)).toBe("The arguments do not fit Search docs: data/q must be string");
     expect(seen.filter((line) => line.endsWith("tools/call"))).toEqual([]);
   });
 
@@ -377,7 +382,7 @@ describe("an MCP server through the adapter", () => {
     };
     const exit = await run(sessionAt("/mcp"), broken, { q: "x" });
     expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(true);
-    expect(JSON.stringify(exit)).toMatch(/not valid JSON Schema/);
+    expect(reasonOf(exit)).toMatch(/not valid JSON Schema/);
   });
 
   it("reports a tool's own error as a failure in its words", async () => {

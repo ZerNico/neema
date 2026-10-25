@@ -1,6 +1,8 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState } from "react";
+import { localized } from "~/i18n/localized.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -42,17 +44,29 @@ const MCP_FIELDS: ReadonlyArray<IntegrationField> = mcpManifest.adminFields;
 const FIELDS = MCP_FIELDS.flatMap((field): IntegrationField[] => {
   if (!PERSONAL_SERVER_FIELDS.some((key) => key === field.key)) return [];
   if (field.key === "url")
-    return [{ ...field, description: "Its public HTTPS address. Older SSE servers work too." }];
+    return [{ ...field, description: localized(m.integrations_server_url_description) }];
   if (field.key === "ways")
     return [
       {
         ...field,
         kind: "choice",
-        label: "Account",
+        label: localized(m.integrations_server_account_label),
         options: [
-          { value: "anonymous", label: "No account", description: "The server needs nothing." },
-          { value: "oauth", label: "Sign in", description: "With your account on the server." },
-          { value: "token", label: "Token", description: "Pasted from your account there." },
+          {
+            value: "anonymous",
+            label: localized(m.integrations_server_account_none),
+            description: localized(m.integrations_server_account_none_description),
+          },
+          {
+            value: "oauth",
+            label: localized(m.integrations_server_account_oauth),
+            description: localized(m.integrations_server_account_oauth_description),
+          },
+          {
+            value: "token",
+            label: localized(m.integrations_server_account_token),
+            description: localized(m.integrations_server_account_token_description),
+          },
         ],
       },
     ];
@@ -83,11 +97,7 @@ const KNOWN_KEYS = new Set(["url", "ways"]);
 /** Most servers let this app register itself; the few that do not take an app of one's own. */
 const OWN_APP_SETUP = {
   console: null,
-  steps: [
-    {
-      text: "Only for a server that lets in just the apps registered with it: register one there with this redirect URI, then paste its client ID and secret.",
-    },
-  ],
+  steps: [{ text: localized(m.integrations_server_own_app_step) }],
 };
 
 /**
@@ -155,7 +165,7 @@ export function PersonalServerDialog({
       await refresh();
       onOpenChange(false);
     },
-    onError: () => setError("Could not save the server."),
+    onError: () => setError(m.integrations_server_save_error()),
   });
   const busy = save.isPending;
   const entries = shared
@@ -179,7 +189,9 @@ export function PersonalServerDialog({
       {connecting ? (
         <DirectoryDialogContent>
           <DialogHeader>
-            <DialogTitle>Connect {connecting.name}</DialogTitle>
+            <DialogTitle>
+              {m.integrations_server_connect_title({ name: connecting.name })}
+            </DialogTitle>
           </DialogHeader>
           <ConnectFlow
             integration={connecting}
@@ -191,14 +203,14 @@ export function PersonalServerDialog({
       ) : !byAddress ? (
         <DirectoryDialogContent browsing={entries}>
           <DialogHeader>
-            <DialogTitle>Add integration</DialogTitle>
+            <DialogTitle>{m.integrations_settings_add()}</DialogTitle>
           </DialogHeader>
           <IntegrationDirectory
             entries={entries}
             custom={
               choices.canAdd
                 ? {
-                    label: "MCP server by address",
+                    label: m.integrations_server_by_address(),
                     onPick: () => setByAddress(true),
                   }
                 : null
@@ -214,7 +226,7 @@ export function PersonalServerDialog({
         // A new server keeps the directory’s width, so its steps read as the same dialog.
         <DirectoryDialogContent>
           <DialogHeader>
-            <DialogTitle>Add an MCP server</DialogTitle>
+            <DialogTitle>{m.integrations_server_add_title()}</DialogTitle>
           </DialogHeader>
           <AddByAddress
             onBack={() => setByAddress(false)}
@@ -226,9 +238,11 @@ export function PersonalServerDialog({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {known && !known.ownApp ? `Rename ${server.name}` : `Set up ${server.name}`}
+              {known && !known.ownApp
+                ? m.integrations_server_rename_title({ name: server.name })
+                : m.integrations_server_setup_title({ name: server.name })}
             </DialogTitle>
-            <DialogDescription>Only you use it. Chats get the tools it lists.</DialogDescription>
+            <DialogDescription>{m.integrations_server_dialog_description()}</DialogDescription>
           </DialogHeader>
           <form
             className="flex flex-col gap-6"
@@ -240,7 +254,7 @@ export function PersonalServerDialog({
           >
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-name`}>{m.common_name()}</FieldLabel>
                 <Input
                   id={`${fieldId}-name`}
                   value={name}
@@ -284,10 +298,10 @@ export function PersonalServerDialog({
             {error ? <FieldError>{error}</FieldError> : null}
             <DialogFooter>
               <DialogClose render={<Button variant="outline" disabled={busy} />}>
-                Cancel
+                {m.common_cancel()}
               </DialogClose>
               <PendingButton type="submit" pending={save.isPending} disabled={!name.trim()}>
-                Save
+                {m.common_save()}
               </PendingButton>
             </DialogFooter>
           </form>

@@ -8,6 +8,7 @@ import type { ConnectedSession } from "../../server/credentials.ts";
 import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
 import { outlookManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";
+import { english } from "~/i18n/localized.ts";
 import { outlookAdapter } from "./adapter.ts";
 
 interface Draft {
@@ -121,7 +122,9 @@ const handlers = outlookAdapter.handlers;
 const refusal = (prepare: Effect.Effect<unknown, AdapterFailure>) =>
   Effect.runPromise(
     Effect.flip(prepare).pipe(
-      Effect.map((error) => (error._tag === "IntegrationRejected" ? error.reason : error._tag)),
+      Effect.map((error) =>
+        error._tag === "IntegrationRejected" ? english(error.reason) : error._tag,
+      ),
     ),
   );
 const draft = (id: string, fields: Partial<Draft> = {}) =>

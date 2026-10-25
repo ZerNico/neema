@@ -1260,6 +1260,842 @@
   "images_test_declined": "Declined: {message}",
   "images_test_family_unhosted": "This provider does not host that family.",
   "images_test_provider_missing": "Provider not found.",
+  "integrations_access_destructive": "Deletes or sends",
+  "integrations_access_read": "Reads only",
+  "integrations_access_write": "Changes things",
+  "integrations_account_actions": "Actions for {name}",
+  "integrations_account_changed": "{name} changed. Turn it on again to keep using it.",
+  "integrations_account_grant_more": "Grant more access",
+  "integrations_account_in_chats": "In chats",
+  "integrations_account_name_hint": "Name it to tell your accounts apart.",
+  "integrations_account_none_needed": "{name} needs no account.",
+  "integrations_account_none_used": "Used without an account.",
+  "integrations_account_offer_by_default": "Turn on in new chats",
+  "integrations_account_reconnect": "Reconnect",
+  "integrations_account_replace_key": "Replace key",
+  "integrations_account_shared": "Everyone here uses one key, so chats only read.",
+  "integrations_account_sign_in_again": "Sign in to {name} again to keep using it.",
+  "integrations_account_turn_on_again": "Turn on again",
+  "integrations_account_used_as": "Chats use {name} as this account.",
+  "integrations_activity_approved_in": "Approved in {app}",
+  "integrations_activity_declined_in": "Declined in {app}",
+  "integrations_activity_failed": "{label}: didn’t work",
+  "integrations_activity_refused": "{label}: not done",
+  "integrations_activity_results": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} result",
+        "countPlural=other": "{count} results"
+      }
+    }
+  ],
+  "integrations_activity_waiting_answer": "Waiting for your answer: {label}",
+  "integrations_activity_waiting_approval": "Waiting for your approval: {label}",
+  "integrations_add_account_another": "Add another account",
+  "integrations_add_account_another_description": "Work and personal, say. Chats ask which to use.",
+  "integrations_add_account_own": "Use your own account",
+  "integrations_add_account_own_description": "Instead of using it without an account.",
+  "integrations_address_app_save_error": "Could not save the app.",
+  "integrations_address_description": "Its public HTTPS address. Only you use it.",
+  "integrations_address_label": "Server address",
+  "integrations_address_own_app_step": "This server only lets in apps registered with it. Register one there with this redirect URI, then paste its client ID and secret.",
+  "integrations_address_unreachable": "Could not reach the server.",
+  "integrations_admin_actions": "Integration actions",
+  "integrations_admin_add_error": "Could not add the integration.",
+  "integrations_admin_add_ready": "Everyone can connect their own account once it’s added.",
+  "integrations_admin_add_title": "Add {name}",
+  "integrations_admin_adding": "Adding…",
+  "integrations_admin_audience_change": "Change",
+  "integrations_admin_audience_chosen": "People you choose",
+  "integrations_admin_audience_everyone": "Everyone",
+  "integrations_admin_audience_title": "Who can use it",
+  "integrations_admin_check_now": "Check now",
+  "integrations_admin_checked": "Checked {time}",
+  "integrations_admin_custom_server": "MCP server",
+  "integrations_admin_delete_description": "Chats, agents and schedules stop using it. Past answers keep what it found.",
+  "integrations_admin_delete_description_people": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} person loses their connection, and chats, agents and schedules stop using it. Past answers keep what it found.",
+        "countPlural=other": "{count} people lose their connections, and chats, agents and schedules stop using it. Past answers keep what it found."
+      }
+    }
+  ],
+  "integrations_admin_delete_error": "Could not delete the integration.",
+  "integrations_admin_delete_title": "Delete {name}?",
+  "integrations_admin_deleted_hint": "It may have been deleted.",
+  "integrations_admin_description": "Services people can connect their own accounts to, for chat tools and knowledge sync.",
+  "integrations_admin_edit_settings": "Edit settings",
+  "integrations_admin_empty_description": "Add one to let people connect their own accounts.",
+  "integrations_admin_empty_title": "No integrations yet",
+  "integrations_admin_enabled_label": "{name} on",
+  "integrations_admin_failing": [
+    {
+      "declarations": [
+        "input count",
+        "input error",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} account could not list its tools: {error}",
+        "countPlural=other": "{count} accounts could not list its tools: {error}"
+      }
+    }
+  ],
+  "integrations_admin_no_tools_hint": "They show once someone connects.",
+  "integrations_admin_off": "Off",
+  "integrations_admin_offer_tool": "Offer {tool}",
+  "integrations_admin_on": "On",
+  "integrations_admin_people_connected": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} person connected",
+        "countPlural=other": "{count} people connected"
+      }
+    }
+  ],
+  "integrations_admin_secrets_description": "Secrets are encrypted at rest and never shown again. People connect their own accounts from Settings.",
+  "integrations_admin_setup_title": "Set up {name}",
+  "integrations_admin_title": "Integrations",
+  "integrations_admin_toggle_error": "Could not change it.",
+  "integrations_admin_tool_limit": "Chats get at most {count} tools. Turn others off to make room.",
+  "integrations_admin_tools_listed": "What its server offers. Turn off any that nobody should use.",
+  "integrations_admin_tools_static": "Turn off any that nobody should use.",
+  "integrations_admin_tools_title": "Tools",
+  "integrations_admin_turn_off_error": "Could not turn it off.",
+  "integrations_admin_turn_on": "Turn on",
+  "integrations_admin_turn_on_error": "Could not turn it on.",
+  "integrations_admin_turned_off": "An admin turned this integration off.",
+  "integrations_answer_send_error": "Could not send your answer.",
+  "integrations_api_key_noun": "an API key",
+  "integrations_approval_allow": "Allow",
+  "integrations_approval_always": "Always allow in this chat",
+  "integrations_approval_change": "This will change with your {service} account.",
+  "integrations_approval_change_account": "This will change with your {service} account “{account}”.",
+  "integrations_approval_contact": [
+    {
+      "declarations": [
+        "input service",
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "This will contact this person from your {service} account.",
+        "countPlural=other": "This will contact these {count} people from your {service} account."
+      }
+    }
+  ],
+  "integrations_approval_contact_account": [
+    {
+      "declarations": [
+        "input service",
+        "input account",
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "This will contact this person from your {service} account “{account}”.",
+        "countPlural=other": "This will contact these {count} people from your {service} account “{account}”."
+      }
+    }
+  ],
+  "integrations_approval_decision": "Decision",
+  "integrations_approval_delete": "This will delete with your {service} account.",
+  "integrations_approval_delete_account": "This will delete with your {service} account “{account}”.",
+  "integrations_approval_deny": "Deny",
+  "integrations_approval_empty": "empty",
+  "integrations_approval_everything": "Everything this sends",
+  "integrations_approval_everything_lead": "Everything this sends:",
+  "integrations_approval_question": "{label} in {name}?",
+  "integrations_approval_read": "This will read with your {service} account.",
+  "integrations_approval_read_account": "This will read with your {service} account “{account}”.",
+  "integrations_approval_recipients": "Recipients",
+  "integrations_approval_recipients_lead": "Recipients: {targets}",
+  "integrations_approval_service_asks": "{service} asks: {message}",
+  "integrations_approval_service_fallback": "A service",
+  "integrations_category_developer": "Developer",
+  "integrations_category_docs": "Docs",
+  "integrations_category_productivity": "Productivity",
+  "integrations_category_projects": "Projects",
+  "integrations_chat_description": "Choose what this chat can use.",
+  "integrations_chat_loading": "Loading…",
+  "integrations_chat_manage": "Manage integrations",
+  "integrations_chat_none": "No integrations are set up on this instance yet. An admin can add them under Admin → Integrations.",
+  "integrations_chat_title": "Integrations",
+  "integrations_chat_toggle_error": "Could not change that integration for this chat.",
+  "integrations_chat_use": "Use {name} in this chat",
+  "integrations_check_tools": "Check again",
+  "integrations_check_tools_error": "Could not check its tools.",
+  "integrations_config_allow_keys": "Allow personal API keys",
+  "integrations_config_allow_keys_description": "People can paste a key from their own {name} account instead of signing in.",
+  "integrations_config_description_description": "What people see when they choose what to connect.",
+  "integrations_config_name_description": "Shown in chats and @mentions.",
+  "integrations_config_registered_app": "Registered app",
+  "integrations_config_registered_app_description": "For a sign-in that only accepts apps registered with it.",
+  "integrations_config_save_error": "Could not save the integration.",
+  "integrations_config_shared_key_description": "Everyone uses it, so chats only ever read with it.",
+  "integrations_config_title": "Edit {name}",
+  "integrations_config_way_keys": "Personal API keys",
+  "integrations_config_way_keys_description": "People paste a key from their own {name} account.",
+  "integrations_config_way_oauth": "Sign in",
+  "integrations_config_way_oauth_description": "Through an OAuth app you register with {name}.",
+  "integrations_config_ways_label": "How people connect",
+  "integrations_config_ways_pick": "Pick at least one.",
+  "integrations_connect_account_hint": "Connect your {service} account. Chats then read for you and ask before they change anything.",
+  "integrations_connect_finish_browser": "Finish signing in to {service} in your browser",
+  "integrations_connect_finish_window": "Finish signing in to {service} in the new window",
+  "integrations_connect_open_hint": "It needs no account. Chats can use it once it’s on.",
+  "integrations_connect_open_window": "Open sign-in window",
+  "integrations_connect_permissions": "Tool permissions",
+  "integrations_connect_ready": "{name} is ready",
+  "integrations_connect_ready_no_tools": "It lists no tools to your account yet.",
+  "integrations_connect_ready_tools": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} tool. Reads run, changes ask first.",
+        "countPlural=other": "{count} tools. Reads run, changes ask first."
+      }
+    }
+  ],
+  "integrations_connect_sign_in": "Sign in",
+  "integrations_connect_sign_in_with": "Sign in with {service}",
+  "integrations_connect_to_use": "Connect your {name} account to use it in chats.",
+  "integrations_connect_turn_on": "Turn on",
+  "integrations_connect_unreachable": "Could not reach {name}.",
+  "integrations_connect_use_key": "Use {noun}",
+  "integrations_connect_use_key_instead": "Use {noun} instead",
+  "integrations_count_schedules": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} schedule",
+        "countPlural=other": "{count} schedules"
+      }
+    }
+  ],
+  "integrations_count_sources": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} knowledge source",
+        "countPlural=other": "{count} knowledge sources"
+      }
+    }
+  ],
+  "integrations_detail_account": "Account",
+  "integrations_detail_accounts": "Accounts",
+  "integrations_detail_fallback_title": "Integration",
+  "integrations_detail_no_tools": "No tools yet",
+  "integrations_detail_no_tools_account": "The server lists none to this account yet.",
+  "integrations_detail_no_tools_connect": "Its tools show once you connect.",
+  "integrations_detail_no_tools_server": "The server lists none yet. Check again once it does.",
+  "integrations_detail_not_found_description": "It may have been turned off, or it is not available to you.",
+  "integrations_detail_not_found_title": "Integration not found",
+  "integrations_detail_own_server_description": "Your MCP server. Only you can use it.",
+  "integrations_detail_tools_title": "What chats can do",
+  "integrations_directory_all": "All",
+  "integrations_directory_category": "Category",
+  "integrations_directory_custom_description": "Any remote MCP server, by its address.",
+  "integrations_directory_no_match": "Nothing matches.",
+  "integrations_directory_search": "Search services",
+  "integrations_disconnect": "Disconnect",
+  "integrations_disconnect_affected": [
+    {
+      "declarations": [
+        "input count",
+        "input things",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay.",
+        "countPlural=other": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay."
+      }
+    }
+  ],
+  "integrations_disconnect_error": "Could not disconnect.",
+  "integrations_disconnect_everyone": "Chats go back to using it without an account.",
+  "integrations_disconnect_plain": "Chats lose it until you connect it again.",
+  "integrations_disconnect_title": "Disconnect “{name}”?",
+  "integrations_elicit_asking": "{name} is asking",
+  "integrations_elicit_choose": "Choose one",
+  "integrations_elicit_decline": "Decline",
+  "integrations_elicit_done": "I’m done",
+  "integrations_elicit_goes_to": "Goes to {name}. Don’t enter passwords or keys here.",
+  "integrations_elicit_open": "Open {host}",
+  "integrations_elicit_opens": "Opens {host}",
+  "integrations_elicit_send": "Send",
+  "integrations_error_account_connected": "That account is already connected as “{name}”.",
+  "integrations_error_account_removed": "This account was removed.",
+  "integrations_error_cannot_sync": "This integration cannot sync.",
+  "integrations_error_check_needs_account": "Its tools show once someone connects. Connect your own account in Settings to check now.",
+  "integrations_error_check_raced": "Another check ran at the same time. Check again.",
+  "integrations_error_client_id_first": "Enter the client ID of the app registered with {name} first.",
+  "integrations_error_connect_first": "Connect it first.",
+  "integrations_error_connect_in_settings": "Connect this integration in Settings first.",
+  "integrations_error_connect_integration_first": "Connect this integration first.",
+  "integrations_error_credential_refused": "The service did not accept that credential.",
+  "integrations_error_description_long": "Keep the description under {count} characters.",
+  "integrations_error_jira_site": "Enter your Jira Cloud site, such as acme.atlassian.net.",
+  "integrations_error_keys_off": "API keys are turned off for this integration.",
+  "integrations_error_lists_per_account": "It lists its tools to each account that connects.",
+  "integrations_error_mcp_anonymous": "Choose how people connect without an account.",
+  "integrations_error_mcp_anonymous_own": "Choose how you connect without an account.",
+  "integrations_error_mcp_header": "The header name has characters a header cannot have.",
+  "integrations_error_mcp_issuer_mismatch": "The sign-in came back from another server than it went to, so it was not used.",
+  "integrations_error_mcp_issuer_moved": "The server now signs in through {issuer}, not {pinned} where your admin’s client ID was set up. Ask your admin to check it.",
+  "integrations_error_mcp_issuer_moved_server": "The server now signs in through {issuer}, not the server where your admin’s client ID was set up. Ask your admin to check it.",
+  "integrations_error_mcp_no_https": "The server’s sign-in does not use HTTPS.",
+  "integrations_error_mcp_no_pkce": "The server’s sign-in does not support PKCE, so it is not safe to use.",
+  "integrations_error_mcp_no_sign_in": "Could not find the server’s sign-in: {error}",
+  "integrations_error_mcp_no_sign_in_needed": "This server does not ask anyone to sign in. Choose “No sign-in” for it.",
+  "integrations_error_mcp_other_resource": "The server’s sign-in names another server as itself, so it was not used.",
+  "integrations_error_mcp_registered_only_admin": "The server’s sign-in only accepts registered apps. Ask your admin to add a client ID for it.",
+  "integrations_error_mcp_registered_only_token": "The server’s sign-in only accepts registered apps. Use a token instead.",
+  "integrations_error_mcp_registration_refused": "The server’s sign-in refused to register this app: {error}",
+  "integrations_error_mcp_scopes": "The scopes are too long.",
+  "integrations_error_mcp_sign_in_nowhere": "The server asks for sign-in but does not say where. Ask its operator for an OAuth setup, or use a token.",
+  "integrations_error_mcp_sign_in_refused": "The server refused the sign-in. Try again.",
+  "integrations_error_mcp_start_failed": "Could not start the sign-in: {error}",
+  "integrations_error_mcp_unreachable": "The MCP server could not be reached.",
+  "integrations_error_mcp_url_credentials": "Leave credentials out of the address. Choose a sign-in instead.",
+  "integrations_error_mcp_url_https": "The server address must start with https://.",
+  "integrations_error_mcp_url_missing": "Enter the MCP server’s address.",
+  "integrations_error_mcp_url_scheme": "The server address must start with https:// or http://.",
+  "integrations_error_mcp_ways_none": "Choose at least one way people connect.",
+  "integrations_error_mcp_ways_unknown": "Choose how people connect.",
+  "integrations_error_name_missing": "Give it a name.",
+  "integrations_error_name_taken": "“{name}” is already in use.",
+  "integrations_error_no_limits": "This integration has no limits.",
+  "integrations_error_no_personal_servers": "Your admin has not let you add MCP servers.",
+  "integrations_error_no_sign_in": "This integration does not use sign-in.",
+  "integrations_error_not_available": "That integration is not available to you right now.",
+  "integrations_error_not_listed": "This integration does not list its own tools.",
+  "integrations_error_oauth_missing": "OAuth is not set up for this integration.",
+  "integrations_error_other_account": "That is another account than “{name}”. Add it as another account instead.",
+  "integrations_error_outline_url_missing": "Enter the Outline address, like https://app.getoutline.com.",
+  "integrations_error_outline_url_scheme": "The Outline address must start with https:// or http://.",
+  "integrations_error_outlook_tenant": "Enter a directory (tenant) ID or domain, or leave it empty.",
+  "integrations_error_own_account": "Connect this integration with your own account.",
+  "integrations_error_owner_cannot_use": "Its owner can no longer use this integration.",
+  "integrations_error_owner_only": "Only the collection’s owner can sync into it.",
+  "integrations_error_public_address": "Use a public address. An admin can add servers on a private network.",
+  "integrations_error_scope_limit": "Pick at most {count}.",
+  "integrations_error_secret_missing": "Enter the OAuth client secret too.",
+  "integrations_error_server_limit": "You can add at most {count} servers.",
+  "integrations_error_server_unreachable": "Could not reach the server.",
+  "integrations_error_setup_changed_connecting": "This integration’s setup changed while connecting. Try again.",
+  "integrations_error_setup_changed_sign_in": "This integration’s setup changed during the sign-in. Start again from Settings.",
+  "integrations_error_shared_key_first": "Enter the shared key before turning this on.",
+  "integrations_error_shared_key_missing": "The shared key is not set up.",
+  "integrations_error_sign_in_expired": "This sign-in link expired or was opened in another browser. Start again from Settings.",
+  "integrations_error_sign_in_refused": "The service refused the sign-in. Try again.",
+  "integrations_error_sign_in_stale": "The saved sign-in no longer works.",
+  "integrations_error_source_changed": "This source changed or the collection can no longer accept its pages.",
+  "integrations_error_source_gone": "That source no longer exists.",
+  "integrations_error_source_stale": "This source is no longer current.",
+  "integrations_error_sources_mirror": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} knowledge source mirrors it. Remove it first.",
+        "countPlural=other": "{count} knowledge sources mirror it. Remove them first."
+      }
+    }
+  ],
+  "integrations_error_sync_account_gone": "Its account was disconnected. Choose which account it syncs as.",
+  "integrations_error_turned_off": "{name} is turned off.",
+  "integrations_error_unknown": "Unknown integration.",
+  "integrations_error_unknown_server": "Unknown MCP server.",
+  "integrations_error_unknown_tool": "Unknown tool.",
+  "integrations_error_unknown_type": "Unknown integration type.",
+  "integrations_error_way_in_first": "Set up OAuth or allow personal API keys before turning this on.",
+  "integrations_field_choose_from": "Choose from the {field} options.",
+  "integrations_field_choose_one": "Choose one of the {field} options.",
+  "integrations_field_not_email": "The {field} is not an email address.",
+  "integrations_field_not_url": "The {field} is not a web address.",
+  "integrations_field_required": "Enter the {field}.",
+  "integrations_field_too_long": "The {field} is too long.",
+  "integrations_jira_console": "Atlassian developer console",
+  "integrations_jira_description": "Search and read Jira issues, create and edit them, comment, assign and move them along.",
+  "integrations_jira_email_label": "Atlassian account email",
+  "integrations_jira_scope_label": "Projects",
+  "integrations_jira_scope_noun": "project",
+  "integrations_jira_scope_plural": "projects",
+  "integrations_jira_site_description": "Your Jira Cloud site.",
+  "integrations_jira_site_label": "Jira site",
+  "integrations_jira_step_authorization": "Under Authorization, add the redirect URI above as its callback URL.",
+  "integrations_jira_step_create": "Create an OAuth 2.0 integration with Resource-level access.",
+  "integrations_jira_step_distribution": "Under Distribution, turn on sharing so others in your organization can connect.",
+  "integrations_jira_step_paste": "Paste the client ID and secret from Settings below.",
+  "integrations_jira_step_permissions": "Under Permissions, add the Jira API with these scopes:",
+  "integrations_jira_token_description": "A token without scopes; Jira takes it together with your account's email.",
+  "integrations_jira_token_label": "API token",
+  "integrations_jira_tool_assign_label": "Assigned a Jira issue",
+  "integrations_jira_tool_assign_title": "Assign issues",
+  "integrations_jira_tool_comment_label": "Commented in Jira",
+  "integrations_jira_tool_comment_title": "Comment on issues",
+  "integrations_jira_tool_create_label": "Created a Jira issue",
+  "integrations_jira_tool_create_title": "Create issues",
+  "integrations_jira_tool_edit_label": "Edited a Jira issue",
+  "integrations_jira_tool_edit_title": "Edit issues",
+  "integrations_jira_tool_link_label": "Linked Jira issues",
+  "integrations_jira_tool_link_title": "Link issues",
+  "integrations_jira_tool_projects_label": "Listed Jira projects",
+  "integrations_jira_tool_projects_title": "List projects",
+  "integrations_jira_tool_read_label": "Read a Jira issue",
+  "integrations_jira_tool_read_title": "Read issues",
+  "integrations_jira_tool_search_label": "Searched Jira",
+  "integrations_jira_tool_search_title": "Search issues",
+  "integrations_jira_tool_transition_label": "Moved a Jira issue",
+  "integrations_jira_tool_transition_title": "Move issues through the workflow",
+  "integrations_key_check_error": "Could not check that.",
+  "integrations_key_connect": "Connect",
+  "integrations_key_create_in": "Create one in {settings}.",
+  "integrations_key_description": "It’s checked with {name}, encrypted, and never shown again. Chats act with everything it can reach.",
+  "integrations_key_settings_link": "{name} settings",
+  "integrations_key_title": "Connect {name} with {noun}",
+  "integrations_known_airtable_description": "Bases, tables and records in Airtable.",
+  "integrations_known_asana_description": "Tasks, projects and goals in Asana.",
+  "integrations_known_asana_setup": "Asana only lets in apps registered with it: create one in its developer console with this integration’s redirect URI, then enter its client ID and secret. An Asana admin may also have to allow the app for your workspace.",
+  "integrations_known_atlassian_description": "Jira issues and Confluence pages, from Atlassian’s Rovo server.",
+  "integrations_known_atlassian_setup": "An Atlassian organization admin must first allow {origin}/** under Rovo MCP server, Allowed domains.",
+  "integrations_known_canva_description": "Find, create and export Canva designs.",
+  "integrations_known_cloudflare_description": "Workers, storage, DNS and the rest of the Cloudflare API.",
+  "integrations_known_linear_description": "Issues, projects and comments in Linear.",
+  "integrations_known_notion_description": "Search, read and write Notion pages and databases.",
+  "integrations_known_sentry_description": "Errors, issues and releases in Sentry.",
+  "integrations_known_stripe_description": "Customers, payments, invoices and products in Stripe.",
+  "integrations_known_supabase_description": "Projects, databases and SQL on Supabase.",
+  "integrations_known_trello_description": "Boards, lists, cards and checklists, from Atlassian’s Trello server.",
+  "integrations_known_vercel_description": "Projects, deployments and logs on Vercel.",
+  "integrations_known_zapier_description": "Actions in the apps you’ve connected to Zapier.",
+  "integrations_mcp_anonymous_label": "Without an account",
+  "integrations_mcp_anonymous_open": "No key",
+  "integrations_mcp_anonymous_open_description": "The server needs nothing.",
+  "integrations_mcp_anonymous_shared": "One shared key",
+  "integrations_mcp_anonymous_shared_description": "Everyone uses your key, so chats only read.",
+  "integrations_mcp_api_key_noun": "a token",
+  "integrations_mcp_description": "Tools from a remote Model Context Protocol server.",
+  "integrations_mcp_everyone_all": "Everyone at once",
+  "integrations_mcp_everyone_all_description": "On for everyone who can use it, and in their new chats.",
+  "integrations_mcp_everyone_label": "Turned on by",
+  "integrations_mcp_everyone_person": "Each person",
+  "integrations_mcp_everyone_person_description": "In their Settings.",
+  "integrations_mcp_header_description": "Where the token goes. Authorization sends it as a bearer token.",
+  "integrations_mcp_header_label": "Header",
+  "integrations_mcp_scopes_label": "Scopes",
+  "integrations_mcp_scopes_placeholder": "Leave empty to ask for what the server needs",
+  "integrations_mcp_shared_key_label": "Shared key",
+  "integrations_mcp_step_register": "Register the app with this redirect URI, then paste its client ID and secret.",
+  "integrations_mcp_token_label": "Token",
+  "integrations_mcp_url_description": "Its Streamable HTTP endpoint. Older SSE servers work too.",
+  "integrations_mcp_url_label": "Server address",
+  "integrations_mcp_way_anonymous": "Without an account",
+  "integrations_mcp_way_anonymous_description": "For servers anyone can use.",
+  "integrations_mcp_way_oauth": "Sign in",
+  "integrations_mcp_way_oauth_description": "With their own account on the server.",
+  "integrations_mcp_way_token": "Personal token",
+  "integrations_mcp_way_token_description": "Pasted from their own account.",
+  "integrations_mcp_ways_label": "How people connect",
+  "integrations_not_connected": "Not connected",
+  "integrations_notify_answer": "{name} is waiting for an answer.",
+  "integrations_notify_approval": "{name} is waiting for your approval.",
+  "integrations_notify_review": "Review",
+  "integrations_oauth_client_id": "OAuth client ID",
+  "integrations_oauth_client_secret": "OAuth client secret",
+  "integrations_oauth_copy_redirect_uri": "Copy redirect URI",
+  "integrations_oauth_how_to": "How to set up OAuth",
+  "integrations_oauth_open_console": "Open the {console}.",
+  "integrations_oauth_redirect_uri": "Redirect URI",
+  "integrations_oauth_secret_keep": "Leave empty to keep the stored secret.",
+  "integrations_oauth_secret_unchanged": "Unchanged",
+  "integrations_outline_api_key": "API key",
+  "integrations_outline_base_url_description": "The address people open Outline at. Use your own domain when self-hosted.",
+  "integrations_outline_base_url_label": "Outline address",
+  "integrations_outline_console": "Outline’s application settings",
+  "integrations_outline_description": "Search, read and write documents in an Outline knowledge base.",
+  "integrations_outline_step_create": "Create an application with the redirect URI above as its callback URL.",
+  "integrations_outline_step_paste": "Paste its client ID and secret below.",
+  "integrations_outline_tool_browse_label": "Browsed Outline",
+  "integrations_outline_tool_browse_title": "Browse collections and pages",
+  "integrations_outline_tool_create_label": "Create an Outline document",
+  "integrations_outline_tool_create_title": "Create documents",
+  "integrations_outline_tool_delete_label": "Delete an Outline document",
+  "integrations_outline_tool_delete_title": "Delete documents",
+  "integrations_outline_tool_read_label": "Read an Outline document",
+  "integrations_outline_tool_read_title": "Read a document",
+  "integrations_outline_tool_search_label": "Searched Outline",
+  "integrations_outline_tool_search_title": "Search documents",
+  "integrations_outline_tool_update_label": "Update an Outline document",
+  "integrations_outline_tool_update_title": "Update documents",
+  "integrations_outlook_allowance_invite": "Invite people",
+  "integrations_outlook_allowance_invite_description": "Create events that invite these addresses",
+  "integrations_outlook_allowance_send": "Send mail",
+  "integrations_outlook_allowance_send_description": "Send mail and drafts to these addresses",
+  "integrations_outlook_console": "Microsoft Entra admin center",
+  "integrations_outlook_description": "Search and read Outlook mail, check calendars, draft and send mail, and create events.",
+  "integrations_outlook_step_paste": "Paste the application (client) ID and the secret’s value below.",
+  "integrations_outlook_step_permissions": "Under API permissions, add these delegated Microsoft Graph permissions:",
+  "integrations_outlook_step_register": "Under App registrations, register an application with the redirect URI above as a Web redirect URI.",
+  "integrations_outlook_step_secret": "Under Certificates & secrets, create a client secret.",
+  "integrations_outlook_tenant_description": "Your directory (tenant) ID or domain, to admit only your organization. Leave empty for any work or school account.",
+  "integrations_outlook_tenant_label": "Tenant",
+  "integrations_outlook_tool_availability_label": "Checked availability in Outlook",
+  "integrations_outlook_tool_availability_title": "Check availability",
+  "integrations_outlook_tool_draft_label": "Drafted an Outlook message",
+  "integrations_outlook_tool_draft_title": "Create drafts",
+  "integrations_outlook_tool_event_label": "Created an Outlook event",
+  "integrations_outlook_tool_event_title": "Create events",
+  "integrations_outlook_tool_events_label": "Checked the Outlook calendar",
+  "integrations_outlook_tool_events_title": "List calendar events",
+  "integrations_outlook_tool_read_label": "Read an Outlook message",
+  "integrations_outlook_tool_read_title": "Read messages",
+  "integrations_outlook_tool_search_label": "Searched Outlook mail",
+  "integrations_outlook_tool_search_title": "Search mail",
+  "integrations_outlook_tool_send_label": "Sent an Outlook message",
+  "integrations_outlook_tool_send_title": "Send mail",
+  "integrations_permission_allow": "Always allow",
+  "integrations_permission_ask": "Needs approval",
+  "integrations_permission_block": "Blocked",
+  "integrations_permission_custom": "Custom",
+  "integrations_permission_group_reach": "Tools that contact people",
+  "integrations_permission_group_read": "Read-only tools",
+  "integrations_permission_group_write": "Write and delete tools",
+  "integrations_permission_label": "{name} permission",
+  "integrations_permissions_description": "Choose when chats may use each tool. Blocked tools are never offered.",
+  "integrations_permissions_shared_description": "Chats only read with a key everyone shares. Choose when they may.",
+  "integrations_permissions_title": "Tool permissions",
+  "integrations_permissions_title_named": "Tool permissions · {name}",
+  "integrations_preference_save_error": "Could not save that preference.",
+  "integrations_rename_description": "Shown in chats and approvals. Leave it empty for {label}.",
+  "integrations_rename_title": "Rename account",
+  "integrations_scope_all": "All {items}",
+  "integrations_scope_all_description": "Everything this account can see in {name}.",
+  "integrations_scope_filter": "Filter {items}",
+  "integrations_scope_loading": "Loading {items}…",
+  "integrations_scope_no_match": "No {items} match.",
+  "integrations_scope_none_selected": "None selected",
+  "integrations_scope_selected": "{count} selected",
+  "integrations_scope_some": "Only selected {items}",
+  "integrations_scope_some_description": "Nothing outside them is searched, read or changed.",
+  "integrations_scope_which": "Which {items} chats reach",
+  "integrations_server_account_label": "Account",
+  "integrations_server_account_none": "No account",
+  "integrations_server_account_none_description": "The server needs nothing.",
+  "integrations_server_account_oauth": "Sign in",
+  "integrations_server_account_oauth_description": "With your account on the server.",
+  "integrations_server_account_token": "Token",
+  "integrations_server_account_token_description": "Pasted from your account there.",
+  "integrations_server_actions": "Server actions",
+  "integrations_server_add_title": "Add an MCP server",
+  "integrations_server_by_address": "MCP server by address",
+  "integrations_server_connect_title": "Connect {name}",
+  "integrations_server_dialog_description": "Only you use it. Chats get the tools it lists.",
+  "integrations_server_edit": "Edit server",
+  "integrations_server_own_app_step": "Only for a server that lets in just the apps registered with it: register one there with this redirect URI, then paste its client ID and secret.",
+  "integrations_server_remove_description": "Chats, agents and schedules stop using it. Past answers keep what it found.",
+  "integrations_server_remove_error": "Could not remove it.",
+  "integrations_server_remove_title": "Remove {name}?",
+  "integrations_server_rename_title": "Rename {name}",
+  "integrations_server_save_error": "Could not save the server.",
+  "integrations_server_section": "Server",
+  "integrations_server_setup_title": "Set up {name}",
+  "integrations_server_tool_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} tool",
+        "countPlural=other": "{count} tools"
+      }
+    }
+  ],
+  "integrations_server_url_description": "Its public HTTPS address. Older SSE servers work too.",
+  "integrations_settings_add": "Add integration",
+  "integrations_settings_description": "Connect your own accounts so chats can search, read and, with your approval, change things there.",
+  "integrations_settings_empty_description": "Add an integration to use its tools in your chats.",
+  "integrations_settings_empty_title": "Nothing connected yet",
+  "integrations_settings_none_description": "An admin turns integrations on for this instance. Once they do, you can connect your account here.",
+  "integrations_settings_none_title": "No integrations yet",
+  "integrations_settings_own_server": "Your own server",
+  "integrations_settings_title": "Integrations",
+  "integrations_sign_in_cancelled": "The connection was cancelled.",
+  "integrations_sign_in_here_first": "Sign in here first, then connect again.",
+  "integrations_sign_in_not_available": "That integration is not available to you.",
+  "integrations_sign_in_restart": "Start connecting again from the app.",
+  "integrations_sign_in_someone_else": "This browser is signed in here as someone else. Sign in as yourself, then try again.",
+  "integrations_sign_in_unfinished": "The service did not finish the sign-in.",
+  "integrations_sources_attention": "Needs attention",
+  "integrations_sources_basic_search": "{count} on basic search only",
+  "integrations_sources_change": "Change source",
+  "integrations_sources_collapse": "Collapse {title}",
+  "integrations_sources_connect_first": "Connect your {name} account in Settings to choose what to sync.",
+  "integrations_sources_dialog_title": "Sync from {name}",
+  "integrations_sources_edit_label": "Edit what is synced from {title}",
+  "integrations_sources_elsewhere": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} page already synced by another source",
+        "countPlural=other": "{count} pages already synced by another source"
+      }
+    }
+  ],
+  "integrations_sources_everything": "Everything",
+  "integrations_sources_everything_except": "Everything except {pages}",
+  "integrations_sources_expand": "Expand {title}",
+  "integrations_sources_failed": "{count} couldn’t be prepared",
+  "integrations_sources_leaf": "Nothing is under this page yet, so only the page itself is synced.",
+  "integrations_sources_level_empty": "Nothing here.",
+  "integrations_sources_level_error": "Could not load this level.",
+  "integrations_sources_loading": "Loading…",
+  "integrations_sources_mode_all": "Everything",
+  "integrations_sources_mode_all_hint": "Uncheck pages to leave them and everything under them out.",
+  "integrations_sources_mode_selected": "Only what I pick",
+  "integrations_sources_mode_selected_hint": "Check pages to sync them and everything under them.",
+  "integrations_sources_next": "Next",
+  "integrations_sources_not_synced": "not synced yet",
+  "integrations_sources_over_limit": "{count} over the collection limit",
+  "integrations_sources_pages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} page",
+        "countPlural=other": "{count} pages"
+      }
+    }
+  ],
+  "integrations_sources_paused_own": "Paused: {name} isn’t connected. Pages already synced stay searchable.",
+  "integrations_sources_paused_owner": "Paused: the owner’s {name} account is disconnected. Pages already synced stay searchable.",
+  "integrations_sources_picked": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} page picked",
+        "countPlural=other": "{count} pages picked"
+      }
+    }
+  ],
+  "integrations_sources_picked_excluded": [
+    {
+      "declarations": [
+        "input count",
+        "input excluded",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} page picked, {excluded} left out",
+        "countPlural=other": "{count} pages picked, {excluded} left out"
+      }
+    }
+  ],
+  "integrations_sources_preparing": "{count} preparing",
+  "integrations_sources_preparing_search": "{count} preparing search",
+  "integrations_sources_reconnect": "Reconnect {name}",
+  "integrations_sources_remove_error": "Could not remove the source.",
+  "integrations_sources_retry_error": "Could not prepare search again.",
+  "integrations_sources_retry_failed": "Retry failed",
+  "integrations_sources_retry_nothing": "Nothing needed preparing again.",
+  "integrations_sources_retry_started": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Preparing search again for {count} page.",
+        "countPlural=other": "Preparing search again for {count} pages."
+      }
+    }
+  ],
+  "integrations_sources_save_error": "Could not save the selection.",
+  "integrations_sources_save_sync": "Save and sync",
+  "integrations_sources_start": "Start syncing",
+  "integrations_sources_stop": "Stop syncing",
+  "integrations_sources_stop_description": "Every page it brought in from {name} is removed from this collection. Chats that cited them will show those sources as unavailable.",
+  "integrations_sources_stop_label": "Stop syncing {title}",
+  "integrations_sources_stop_title": "Stop syncing “{title}”?",
+  "integrations_sources_sync_as": "Sync as",
+  "integrations_sources_sync_as_label": "Account it syncs as",
+  "integrations_sources_sync_error": "Could not start the sync.",
+  "integrations_sources_sync_now_label": "Sync {title} now",
+  "integrations_sources_synced_at": "synced {date}",
+  "integrations_sources_syncing": "Syncing",
+  "integrations_sources_title": "Synced from",
+  "integrations_sources_too_large": "{count} too large",
+  "integrations_sources_what_description": "New pages arrive and deleted ones leave by themselves.",
+  "integrations_sources_what_label": "What to sync from {title}",
+  "integrations_sources_where_description": "Choose a collection or a page. You can add more sources to this collection later.",
+  "integrations_sources_where_label": "Where to sync from",
+  "integrations_status_accounts": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} account",
+        "countPlural=other": "{count} accounts"
+      }
+    }
+  ],
+  "integrations_status_connected": "Connected",
+  "integrations_status_paused": "Paused",
+  "integrations_status_signed_out": "Signed out",
+  "integrations_status_signed_out_count": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} signed out",
+        "countPlural=other": "{count} signed out"
+      }
+    }
+  ],
+  "integrations_status_turned_off": "Turned off",
+  "integrations_sync_error_account": "The owner’s account is missing or needs reconnecting.",
+  "integrations_sync_error_owner": "The collection’s owner can no longer sync it.",
+  "integrations_sync_gone": [
+    {
+      "declarations": [
+        "input count",
+        "input titles",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "“{titles}” can no longer be found or opened, so its pages were removed. Edit the selection to drop it.",
+        "countPlural=other": "“{titles}” can no longer be found or opened, so their pages were removed. Edit the selection to drop them."
+      }
+    }
+  ],
+  "integrations_synced_basic_search": "Basic search",
+  "integrations_synced_empty": "Nothing synced yet.",
+  "integrations_synced_failed": "Couldn’t prepare",
+  "integrations_synced_filter": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Filter {count} page…",
+        "countPlural=other": "Filter {count} pages…"
+      }
+    }
+  ],
+  "integrations_synced_filter_label": "Filter synced pages",
+  "integrations_synced_loading": "Loading…",
+  "integrations_synced_no_match": "No page matches.",
+  "integrations_synced_open_in": "Open {title} in {name}",
+  "integrations_synced_preparing": "Preparing",
+  "integrations_synced_preparing_search": "Preparing search",
+  "integrations_tool_access_label": "What {tool} does",
+  "integrations_tool_change_error": "Could not change the tool.",
+  "integrations_tool_claim_destructive": "The server says it can delete or send.",
+  "integrations_tool_claim_read": "The server says it only reads.",
+  "integrations_tool_claim_write": "The server says it changes things.",
+  "integrations_turn_on_to_use": "Turn {name} on to use it in chats.",
   "knowledge_access": "Access",
   "knowledge_add_menu": "Add",
   "knowledge_admin_all_prepared": "Everything is already prepared.",

@@ -1,5 +1,10 @@
 import { Schema } from "effect";
 import type { ComponentProps, ComponentType } from "react";
+import type { Localized } from "~/i18n/localized.ts";
+import type { Locale } from "~/paraglide/runtime.js";
+
+/** A message for the page, or given a locale, for words the server sends a person. */
+type DisplayText = (inputs?: Record<string, never>, options?: { locale?: Locale }) => string;
 
 /**
  * How much a tool can change. Consent keys on this, never on a tool's name:
@@ -56,6 +61,11 @@ export interface IntegrationToolDefinition<
   readonly parameters: Schema.Struct<Fields>;
   /** One line for the tool row and approval card, from the model's arguments. */
   summarize(args: Schema.Struct.Type<Fields>): string | null;
+  /**
+   * `title` and `label` in the reader's language, for the page only: the
+   * English ones above are also what the model and the stored row read.
+   */
+  readonly display?: { readonly title: DisplayText; readonly label: DisplayText };
 }
 
 export const defineIntegrationTool = <const Name extends string, Fields extends ToolFields>(
@@ -80,10 +90,10 @@ export const summarizeCall = (tool: IntegrationToolDefinition, args: unknown) =>
  */
 export interface IntegrationAllowance {
   readonly id: string;
-  /** The schedule editor's switch: "Send mail". */
-  readonly label: string;
+  /** The schedule editor's switch: "Send mail". The model reads it in English. */
+  readonly label: Localized;
   /** What the switch lets runs do, for the schedule editor. */
-  readonly description: string;
+  readonly description: Localized;
   /** The tools whose calls may reach targets under it. */
   readonly tools: ReadonlyArray<string>;
   /** Only email addresses exist so far; each kind brings its own exact parser. */
@@ -103,7 +113,7 @@ export interface FieldCondition {
 
 export interface IntegrationField {
   readonly key: string;
-  readonly label: string;
+  readonly label: Localized;
   /**
    * `secret` is never shown again once saved. `choice` holds one of `options`,
    * `choices` any of them, space-separated.
@@ -111,16 +121,16 @@ export interface IntegrationField {
   readonly kind: "url" | "text" | "email" | "secret" | "choice" | "choices";
   readonly options?: ReadonlyArray<{
     readonly value: string;
-    readonly label: string;
-    readonly description?: string;
+    readonly label: Localized;
+    readonly description?: Localized;
   }>;
   /**
    * Shown only while another field holds one of these values; a list means any
    * of them. A field whose condition names a hidden field is hidden too.
    */
   readonly when?: FieldCondition | ReadonlyArray<FieldCondition>;
-  readonly placeholder?: string;
-  readonly description?: string;
+  readonly placeholder?: Localized;
+  readonly description?: Localized;
   readonly required: boolean;
 }
 
@@ -130,10 +140,12 @@ export interface IntegrationField {
  * items it touches so the tool layer can refuse one outside the limit.
  */
 export interface IntegrationScope {
-  /** The settings section: "Projects". */
-  readonly label: string;
+  /** The settings section: "Projects". The model reads it in English. */
+  readonly label: Localized;
   /** One of them, in a sentence: "project". */
-  readonly noun: string;
+  readonly noun: Localized;
+  /** Several of them, in a sentence: "projects", in German "Projekte". */
+  readonly plural: Localized;
 }
 
 /**
@@ -143,10 +155,13 @@ export interface IntegrationScope {
 export interface OAuthSetup {
   /** Where the app is registered, when there is one place; the first step links to it. */
   readonly console: {
-    readonly label: string;
+    readonly label: Localized;
     readonly url: (config: Readonly<Record<string, string>>) => string | null;
   } | null;
-  readonly steps: ReadonlyArray<{ readonly text: string; readonly values?: ReadonlyArray<string> }>;
+  readonly steps: ReadonlyArray<{
+    readonly text: Localized;
+    readonly values?: ReadonlyArray<string>;
+  }>;
 }
 
 /**
@@ -161,7 +176,7 @@ export interface IntegrationManifest {
   /** The type: what instances name as their `kind`, and the adapter with the same key. */
   readonly kind: string;
   readonly name: string;
-  readonly description: string;
+  readonly description: Localized;
   readonly logo: ComponentType<ComponentProps<"svg">>;
   /** Null for a type that is no one service: the add dialog offers MCP as its own way in. */
   readonly category: IntegrationCategory | null;
@@ -183,7 +198,7 @@ export interface IntegrationManifest {
    */
   readonly apiKey: {
     /** What a person pastes, in a sentence: "an API key" unless said otherwise. */
-    readonly noun?: string;
+    readonly noun?: Localized;
     readonly fields: ReadonlyArray<IntegrationField>;
     /** Where in the service a person creates one, from the admin config. */
     readonly helpUrl: (config: Readonly<Record<string, string>>) => string | null;

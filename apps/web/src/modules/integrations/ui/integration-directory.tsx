@@ -1,6 +1,8 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { useCallback, useState, type ReactNode } from "react";
 import { cardSurfaceClassName } from "~/ui/card-surface.ts";
 import { DialogContent } from "~/ui/primitives/dialog";
@@ -12,11 +14,11 @@ import type { IntegrationCategory } from "../manifest.ts";
 import { findKnownMcpServer } from "../mcp/known-servers.ts";
 import { searchable, type DirectoryEntry } from "./directory-entries.ts";
 
-const CATEGORIES: ReadonlyArray<{ value: IntegrationCategory; label: string }> = [
-  { value: "projects", label: "Projects" },
-  { value: "docs", label: "Docs" },
-  { value: "developer", label: "Developer" },
-  { value: "productivity", label: "Productivity" },
+const CATEGORIES: ReadonlyArray<{ value: IntegrationCategory; label: () => string }> = [
+  { value: "projects", label: m.integrations_category_projects },
+  { value: "docs", label: m.integrations_category_docs },
+  { value: "developer", label: m.integrations_category_developer },
+  { value: "productivity", label: m.integrations_category_productivity },
 ];
 
 const tileClassName = cn(
@@ -74,7 +76,7 @@ export function IntegrationDirectory({
   const shown = entries.filter(
     (entry) =>
       (category === "all" || entry.category === category) &&
-      `${entry.name} ${entry.description}`.toLowerCase().includes(needle),
+      `${entry.name} ${entry.description(getLocale())}`.toLowerCase().includes(needle),
   );
   const categories = CATEGORIES.filter((option) =>
     entries.some((entry) => entry.category === option.value),
@@ -85,14 +87,14 @@ export function IntegrationDirectory({
       {searchable(entries) ? (
         <>
           <SearchInput
-            aria-label="Search services"
-            placeholder="Search"
+            aria-label={m.integrations_directory_search()}
+            placeholder={m.common_search()}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             autoFocus
           />
           <SegmentedControl
-            aria-label="Category"
+            aria-label={m.integrations_directory_category()}
             value={[category]}
             multiple={false}
             onValueChange={(value) => {
@@ -100,10 +102,12 @@ export function IntegrationDirectory({
                 setCategory(CATEGORIES.find((option) => option.value === value[0])?.value ?? "all");
             }}
           >
-            <SegmentedControlItem value="all">All</SegmentedControlItem>
+            <SegmentedControlItem value="all">
+              {m.integrations_directory_all()}
+            </SegmentedControlItem>
             {categories.map((option) => (
               <SegmentedControlItem key={option.value} value={option.value}>
-                {option.label}
+                {option.label()}
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
@@ -116,7 +120,7 @@ export function IntegrationDirectory({
               key={entry.key}
               logo={<entry.logo className="size-4" />}
               name={entry.name}
-              description={entry.description}
+              description={entry.description(getLocale())}
               onClick={() => onPick(entry)}
             />
           ))}
@@ -124,14 +128,16 @@ export function IntegrationDirectory({
             <Tile
               logo={<HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />}
               name={custom.label}
-              description="Any remote MCP server, by its address."
+              description={m.integrations_directory_custom_description()}
               dashed
               onClick={custom.onPick}
             />
           ) : null}
         </div>
         {shown.length === 0 ? (
-          <p className="text-muted-foreground px-1 pt-3 text-sm">Nothing matches.</p>
+          <p className="text-muted-foreground px-1 pt-3 text-sm">
+            {m.integrations_directory_no_match()}
+          </p>
         ) : null}
       </div>
     </div>
@@ -140,7 +146,7 @@ export function IntegrationDirectory({
 
 /** The picked service above its setup: logo, name, what it does, and what it needs first. */
 export function DirectoryEntryHeader({ entry }: { entry: DirectoryEntry }) {
-  const setup = findKnownMcpServer(entry.server)?.setup?.(window.location.origin);
+  const setup = findKnownMcpServer(entry.server)?.setup?.(window.location.origin)(getLocale());
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
@@ -149,7 +155,7 @@ export function DirectoryEntryHeader({ entry }: { entry: DirectoryEntry }) {
         </span>
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="font-medium">{entry.name}</span>
-          <span className="text-muted-foreground text-xs">{entry.description}</span>
+          <span className="text-muted-foreground text-xs">{entry.description(getLocale())}</span>
         </span>
       </div>
       {setup ? <p className="text-muted-foreground text-xs">{setup}</p> : null}
@@ -184,7 +190,7 @@ export function DirectoryDialogContent({
   return (
     <DialogContent scrollable={false} className="sm:max-w-2xl">
       {/* Pulled out by the ring width, so focus rings at the edge are not clipped. */}
-      <m.div
+      <motion.div
         initial={false}
         animate={{ height }}
         transition={{ duration: 0.2, ease: motionEase }}
@@ -204,7 +210,7 @@ export function DirectoryDialogContent({
         >
           {children}
         </div>
-      </m.div>
+      </motion.div>
     </DialogContent>
   );
 }

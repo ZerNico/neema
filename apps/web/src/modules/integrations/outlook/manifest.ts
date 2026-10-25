@@ -1,3 +1,5 @@
+import { localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import type { IntegrationManifest } from "../manifest.ts";
 import { OutlookLogo } from "./logo.tsx";
 import { OUTLOOK_TOOLS } from "./tools.ts";
@@ -5,34 +7,30 @@ import { OUTLOOK_TOOLS } from "./tools.ts";
 export const outlookManifest = {
   kind: "outlook",
   name: "Outlook",
-  description:
-    "Search and read Outlook mail, check calendars, draft and send mail, and create events.",
+  description: localized(m.integrations_outlook_description),
   logo: OutlookLogo,
   category: "productivity",
   adminFields: [
     {
       key: "tenant",
-      label: "Tenant",
+      label: localized(m.integrations_outlook_tenant_label),
       kind: "text",
-      placeholder: "organizations",
-      description:
-        "Your directory (tenant) ID or domain, to admit only your organization. Leave empty for any work or school account.",
+      placeholder: verbatim("organizations"),
+      description: localized(m.integrations_outlook_tenant_description),
       required: false,
     },
   ],
   oauth: {
     setup: {
       console: {
-        label: "Microsoft Entra admin center",
+        label: localized(m.integrations_outlook_console),
         url: () =>
           "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
       },
       steps: [
+        { text: localized(m.integrations_outlook_step_register) },
         {
-          text: "Under App registrations, register an application with the redirect URI above as a Web redirect URI.",
-        },
-        {
-          text: "Under API permissions, add these delegated Microsoft Graph permissions:",
+          text: localized(m.integrations_outlook_step_permissions),
           values: [
             "offline_access",
             "User.Read",
@@ -41,8 +39,8 @@ export const outlookManifest = {
             "Calendars.ReadWrite",
           ],
         },
-        { text: "Under Certificates & secrets, create a client secret." },
-        { text: "Paste the application (client) ID and the secret’s value below." },
+        { text: localized(m.integrations_outlook_step_secret) },
+        { text: localized(m.integrations_outlook_step_paste) },
       ],
     },
   },
@@ -53,16 +51,16 @@ export const outlookManifest = {
   allowances: [
     {
       id: "send",
-      label: "Send mail",
-      description: "Send mail and drafts to these addresses",
+      label: localized(m.integrations_outlook_allowance_send),
+      description: localized(m.integrations_outlook_allowance_send_description),
       tools: ["send_mail"],
       targets: "email",
       cap: 3,
     },
     {
       id: "invite",
-      label: "Invite people",
-      description: "Create events that invite these addresses",
+      label: localized(m.integrations_outlook_allowance_invite),
+      description: localized(m.integrations_outlook_allowance_invite_description),
       tools: ["create_event"],
       targets: "email",
       cap: 3,

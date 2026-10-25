@@ -1,3 +1,4 @@
+import { getLocale } from "~/paraglide/runtime.js";
 import { Cancel01Icon, Delete02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
@@ -225,7 +226,7 @@ export const AgentSettingsFields = withForm({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{integration.name}</p>
                         <p className="text-muted-foreground truncate text-xs">
-                          {integrationLook(integration)?.description}
+                          {integrationLook(integration)?.description(getLocale())}
                         </p>
                       </div>
                       <Switch

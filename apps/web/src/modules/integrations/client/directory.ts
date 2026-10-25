@@ -1,4 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
+import { verbatim } from "~/i18n/localized.ts";
 import { findIntegrationType } from "../catalog.ts";
 import type { IntegrationManifest } from "../manifest.ts";
 import { findKnownMcpServer } from "../mcp/known-servers.ts";
@@ -30,7 +31,8 @@ export const integrationLook = (entry: {
   const look = known
     ? { ...manifest, logo: known.logo, description: known.description, category: known.category }
     : manifest;
-  return entry.description ? { ...look, description: entry.description } : look;
+  // The admin wrote it in their own words, the same in every language.
+  return entry.description ? { ...look, description: verbatim(entry.description) } : look;
 };
 
 /**

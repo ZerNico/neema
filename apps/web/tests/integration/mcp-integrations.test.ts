@@ -34,6 +34,26 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
+
+/** A refusal as English reads it, so assertions match its words. */
+const worded = (error: unknown) =>
+  error !== null &&
+  typeof error === "object" &&
+  "reason" in error &&
+  typeof error.reason === "function"
+    ? {
+        ...error,
+        _tag: (error as { _tag?: string })._tag,
+        reason: english(error.reason as Localized),
+      }
+    : error;
+
+/** A value as JSON, with any words for a person in English. */
+const said = (value: unknown) =>
+  JSON.stringify(value, (_key, field: unknown) =>
+    typeof field === "function" ? english(field as Localized) : field,
+  );
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 5).toString("base64");
 
@@ -488,7 +508,7 @@ describe("an MCP server set up by an admin", () => {
         handlerOf(unattended, `int_${id}__archive`)!({}, { toolCallId: "added" }),
       );
       expect(result).toMatchObject({ ok: false });
-      expect(JSON.stringify(result)).not.toContain("Done.");
+      expect(said(result)).not.toContain("Done.");
     } finally {
       searchDescription = "Search the docs.";
       addedTool = null;
@@ -730,7 +750,9 @@ describe("an MCP server set up by an admin", () => {
       await checkTools(admin, id);
       expect(await descriptionOf()).toBe("Search the docs, and send them to me.");
       release();
-      expect(await slow).toMatchObject({ reason: expect.stringMatching(/Another check ran/) });
+      expect(worded(await slow)).toMatchObject({
+        reason: expect.stringMatching(/Another check ran/),
+      });
       // The old listing did not bring the old description back.
       expect(await descriptionOf()).toBe("Search the docs, and send them to me.");
     } finally {
@@ -767,7 +789,9 @@ describe("an MCP server set up by an admin", () => {
       ),
     );
     release();
-    expect(await stale).toMatchObject({ reason: expect.stringMatching(/Another check ran/) });
+    expect(worded(await stale)).toMatchObject({
+      reason: expect.stringMatching(/Another check ran/),
+    });
     expect(moved.tools).toEqual([]);
     expect(await listingsOf(id)).toEqual([]);
 
@@ -1192,7 +1216,7 @@ describe("an MCP server set up by an admin", () => {
         }),
       );
       expect(outcome).toMatchObject({ ok: false, refused: true });
-      expect(JSON.stringify(outcome)).toMatch(/changed since this answer started/);
+      expect(said(outcome)).toMatch(/changed since this answer started/);
       expect(deleted).toEqual([]);
     };
 
@@ -1258,7 +1282,7 @@ describe("an MCP server set up by an admin", () => {
         return yield* Fiber.join(second);
       }),
     );
-    expect(JSON.stringify(outcome)).toMatch(/changed since this answer started/);
+    expect(said(outcome)).toMatch(/changed since this answer started/);
     expect(deleted).toEqual([]);
   });
 
@@ -1305,7 +1329,7 @@ describe("an MCP server set up by an admin", () => {
 
     const unattended = await toolsFor(admin, conversationId, true);
     const result = await run(handlerOf(unattended, `int_${id}__release`)!({}, { toolCallId: "d" }));
-    expect(JSON.stringify(result)).not.toContain("Released");
+    expect(said(result)).not.toContain("Released");
     expect(await run(Effect.flatMap(IntegrationApprovals, (a) => a.pending(admin)))).toEqual([]);
   });
 
@@ -1372,7 +1396,7 @@ describe("an MCP server set up by an admin", () => {
     const config = { url: `${base}/scoped`, ways: "oauth" };
     const id = await setUp("Docs scoped", config);
     const normalized = mcpAdapter.normalizeConfig(config);
-    if ("error" in normalized) throw new Error(normalized.error);
+    if ("error" in normalized) throw new Error(english(normalized.error));
     await run(
       Effect.flatMap(IntegrationRepo, (repo) =>
         saveAtCurrent(repo, {
@@ -1393,7 +1417,7 @@ describe("an MCP server set up by an admin", () => {
     const refused = await run(
       handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "s" }),
     );
-    expect(JSON.stringify(refused)).toMatch(/Grant more access/);
+    expect(said(refused)).toMatch(/Grant more access/);
     const listed = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(admin)));
     expect(listed.find((row) => row.id === id)?.connections[0]).toMatchObject({
       status: "active",
@@ -1441,7 +1465,7 @@ describe("an MCP server set up by an admin", () => {
     const config = { url: `${base}/scoped`, ways: "oauth" };
     const id = await setUp("Docs rescoped", config);
     const normalized = mcpAdapter.normalizeConfig(config);
-    if ("error" in normalized) throw new Error(normalized.error);
+    if ("error" in normalized) throw new Error(english(normalized.error));
     // MCP names no account, so signing in again is a reconnect of the one it names.
     const connect = (accessToken: string, connectionId?: string) =>
       run(
@@ -1570,7 +1594,9 @@ describe("an MCP server set up by an admin", () => {
         Effect.flip(s.connectApiKey(person, id, { token: "admin-key" })),
       ),
     );
-    expect(refused).toMatchObject({ reason: "API keys are turned off for this integration." });
+    expect(worded(refused)).toMatchObject({
+      reason: "API keys are turned off for this integration.",
+    });
     const after = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(after.find((row) => row.id === id)?.connections[0]?.authKind).toBe("shared");
 
@@ -1596,7 +1622,7 @@ describe("an MCP server set up by an admin", () => {
     const failed = await run(
       handlerOf(prepared, `int_${id}__search`)!({ q: "x" }, { toolCallId: "f" }),
     );
-    expect(JSON.stringify(failed)).toMatch(/refused the shared key/);
+    expect(said(failed)).toMatch(/refused the shared key/);
     const still = await run(Effect.flatMap(IntegrationService, (s) => s.listForUser(person)));
     expect(still.find((row) => row.id === id)?.connections[0]?.status).toBe("active");
   });
@@ -1642,7 +1668,7 @@ describe("an MCP server a person adds for themselves", () => {
       _tag: "Success",
       success: { ways: "token" },
     });
-    expect(JSON.stringify(await probe("http://mcp.probe.test/mcp"))).toMatch(/https:/);
+    expect(said(await probe("http://mcp.probe.test/mcp"))).toMatch(/https:/);
   });
 
   it("keeps a server needing an account out of every list until it is connected", async () => {
@@ -1747,7 +1773,7 @@ describe("an MCP server a person adds for themselves", () => {
       run(Effect.flatMap(IntegrationRepo, (repo) => repo.getConfig(id)));
     const added = await saveAs({ oauthClientId: " app-1 ", oauthClientSecret: "secret-1" }, null);
     expect(added).toMatchObject({ oauthClientId: "app-1", oauthSecretConfigured: true });
-    expect(JSON.stringify(added)).not.toContain("secret-1");
+    expect(said(added)).not.toContain("secret-1");
     expect((await stored(added.id))?.oauthClientSecretCiphertext).not.toContain("secret-1");
     // Saving without the fields keeps them; another way in than signing in drops both.
     expect(await saveAs({}, added.id)).toMatchObject({
@@ -1773,13 +1799,11 @@ describe("an MCP server a person adds for themselves", () => {
     );
 
     await allowServers(false);
-    expect(JSON.stringify(await save(owner, "Mine", "https://mcp.example.test/mcp"))).toMatch(
+    expect(said(await save(owner, "Mine", "https://mcp.example.test/mcp"))).toMatch(
       /has not let you/,
     );
     await allowServers(true);
-    expect(JSON.stringify(await save(owner, "Mine", "http://mcp.example.test/mcp"))).toMatch(
-      /https:/,
-    );
+    expect(said(await save(owner, "Mine", "http://mcp.example.test/mcp"))).toMatch(/https:/);
     const saved = await save(owner, "Mine", "https://mcp.example.test/mcp");
     if (saved._tag !== "Success") throw new Error(JSON.stringify(saved));
     const id = saved.success.id;
@@ -1872,7 +1896,7 @@ describe("an MCP server a person adds for themselves", () => {
     await service((s) => s.setOwnToolAccess(owner, id, changing.name, claimed));
     expect((await tools()).find((tool) => tool.name === changing.name)!.access).toBe(claimed);
     expect(
-      JSON.stringify(
+      said(
         await service((s) =>
           s.setOwnToolAccess(owner, id, "no_such_tool", "read").pipe(Effect.result),
         ),
@@ -1897,7 +1921,7 @@ describe("an MCP server a person adds for themselves", () => {
     const refused = await run(
       Effect.flatMap(IntegrationService, (s) => Effect.flip(s.checkOwnTools(owner, saved.id))),
     );
-    expect(refused).toMatchObject({ reason: "Connect it first." });
+    expect(worded(refused)).toMatchObject({ reason: "Connect it first." });
     expect(names.get("token.example.test")!.requests).toBe(0);
   });
 
@@ -1929,12 +1953,10 @@ describe("an MCP server a person adds for themselves", () => {
     await allowServers(true);
     const owner = await activeUser();
     names.set("inside.example.test", { address: "10.0.0.5", requests: 0 });
-    expect(JSON.stringify(await save(owner, "Inside", "https://inside.example.test/mcp"))).toMatch(
+    expect(said(await save(owner, "Inside", "https://inside.example.test/mcp"))).toMatch(
       /public address/,
     );
-    expect(JSON.stringify(await save(owner, "Local", `https://127.0.0.1/mcp`))).toMatch(
-      /public address/,
-    );
+    expect(said(await save(owner, "Local", `https://127.0.0.1/mcp`))).toMatch(/public address/);
 
     names.set("moves.example.test", { address: "93.184.216.34", forwardTo: base, requests: 0 });
     const saved = await save(owner, "Moves", "https://moves.example.test/mcp");
@@ -1972,7 +1994,7 @@ describe("a known server whose sign-in lets in only registered apps", () => {
           })
           .pipe(Effect.result),
       );
-    expect(JSON.stringify(await turnOn({ oauthClientId: "" }))).toMatch(
+    expect(said(await turnOn({ oauthClientId: "" }))).toMatch(
       /client ID of the app registered with Asana/,
     );
     expect(await turnOn({ oauthClientId: "app-1", oauthClientSecret: "secret-1" })).toMatchObject({

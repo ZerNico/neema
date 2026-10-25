@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowDown01Icon,
   CheckmarkCircle02Icon,
@@ -20,23 +21,28 @@ import { cn } from "~/ui/utils";
 import { findIntegrationType } from "../catalog.ts";
 import { permissionFor, type ToolPermission } from "../consent.ts";
 import type { IntegrationToolInfo, ToolAccess } from "../manifest.ts";
+import { toolText } from "../tool-text.ts";
 
-const CHOICES: ReadonlyArray<{ value: ToolPermission; label: string; icon: typeof HandIcon }> = [
-  { value: "allow", label: "Always allow", icon: CheckmarkCircle02Icon },
-  { value: "ask", label: "Needs approval", icon: HandIcon },
-  { value: "block", label: "Blocked", icon: UnavailableIcon },
+const CHOICES: ReadonlyArray<{
+  value: ToolPermission;
+  label: () => string;
+  icon: typeof HandIcon;
+}> = [
+  { value: "allow", label: m.integrations_permission_allow, icon: CheckmarkCircle02Icon },
+  { value: "ask", label: m.integrations_permission_ask, icon: HandIcon },
+  { value: "block", label: m.integrations_permission_block, icon: UnavailableIcon },
 ];
 
 /** What a tool does, for whoever may correct a server that says too little. */
-export const ACCESS_CHOICES: ReadonlyArray<{ value: ToolAccess; label: string }> = [
-  { value: "read", label: "Reads only" },
-  { value: "write", label: "Changes things" },
-  { value: "destructive", label: "Deletes or sends" },
+export const accessChoices = (): ReadonlyArray<{ value: ToolAccess; label: string }> => [
+  { value: "read", label: m.integrations_access_read() },
+  { value: "write", label: m.integrations_access_write() },
+  { value: "destructive", label: m.integrations_access_destructive() },
 ];
 
-const GROUP_ITEMS = [
-  ...CHOICES.map((choice) => ({ value: choice.value, label: choice.label })),
-  { value: "custom", label: "Custom" },
+const groupItems = () => [
+  ...CHOICES.map((choice) => ({ value: choice.value, label: choice.label() })),
+  { value: "custom", label: m.integrations_permission_custom() },
 ];
 
 /**
@@ -63,23 +69,26 @@ export function ToolPermissions({
   onAccessChange?: ((tool: string, access: ToolAccess) => void) | undefined;
 }) {
   const manifest = findIntegrationType(kind);
-  const tools = given ?? manifest?.tools ?? [];
+  const tools = (given ?? manifest?.tools ?? []).map((tool) => ({
+    ...tool,
+    title: toolText(kind, tool).title,
+  }));
   // Their own group, so allowing every change at once never also lets mail go out unasked.
   const reaching = new Set(manifest?.allowances.flatMap((allowance) => allowance.tools) ?? []);
   const groups = [
     {
       key: "read",
-      title: "Read-only tools",
+      title: m.integrations_permission_group_read(),
       tools: tools.filter((t) => t.access === "read"),
     },
     {
       key: "write",
-      title: "Write and delete tools",
+      title: m.integrations_permission_group_write(),
       tools: tools.filter((t) => t.access !== "read" && !reaching.has(t.name)),
     },
     {
       key: "reach",
-      title: "Tools that contact people",
+      title: m.integrations_permission_group_reach(),
       tools: tools.filter((t) => reaching.has(t.name)),
     },
   ].filter((group) => group.tools.length > 0);
@@ -141,7 +150,7 @@ function ToolGroup({
         </button>
         <Select
           value={shared}
-          items={GROUP_ITEMS}
+          items={groupItems()}
           disabled={disabled}
           onValueChange={(value) => {
             const choice = CHOICES.find((entry) => entry.value === value);
@@ -149,7 +158,11 @@ function ToolGroup({
               onChange(Object.fromEntries(tools.map((tool) => [tool.name, choice.value])));
           }}
         >
-          <SelectTrigger size="sm" aria-label={`${title} permission`} className="w-44">
+          <SelectTrigger
+            size="sm"
+            aria-label={m.integrations_permission_label({ name: title })}
+            className="w-44"
+          >
             <HugeiconsIcon
               icon={current?.icon ?? MoreHorizontalCircle01Icon}
               strokeWidth={2}
@@ -160,13 +173,13 @@ function ToolGroup({
           <SelectContent>
             {CHOICES.map((choice) => (
               <SelectItem key={choice.value} value={choice.value}>
-                {choice.label}
+                {choice.label()}
               </SelectItem>
             ))}
             {/* Shown only as the mixed state; picking it would mean nothing. */}
             {shared === "custom" ? (
               <SelectItem value="custom" disabled>
-                Custom
+                {m.integrations_permission_custom()}
               </SelectItem>
             ) : null}
           </SelectContent>
@@ -184,22 +197,22 @@ function ToolGroup({
                 {onAccessChange ? (
                   <Select
                     value={tool.access}
-                    items={ACCESS_CHOICES}
+                    items={accessChoices()}
                     disabled={disabled}
                     onValueChange={(access) => {
-                      const choice = ACCESS_CHOICES.find((entry) => entry.value === access);
+                      const choice = accessChoices().find((entry) => entry.value === access);
                       if (choice) onAccessChange(tool.name, choice.value);
                     }}
                   >
                     <SelectTrigger
                       size="sm"
-                      aria-label={`What ${tool.title} does`}
+                      aria-label={m.integrations_tool_access_label({ tool: tool.title })}
                       className="w-40"
                     >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ACCESS_CHOICES.map((choice) => (
+                      {accessChoices().map((choice) => (
                         <SelectItem key={choice.value} value={choice.value}>
                           {choice.label}
                         </SelectItem>
@@ -218,16 +231,18 @@ function ToolGroup({
                   size="sm"
                   spacing={0}
                   disabled={disabled}
-                  aria-label={`${tool.title} permission`}
+                  aria-label={m.integrations_permission_label({ name: tool.title })}
                 >
                   {CHOICES.map((choice) => (
                     <Tooltip key={choice.value}>
                       <TooltipTrigger
-                        render={<ToggleGroupItem value={choice.value} aria-label={choice.label} />}
+                        render={
+                          <ToggleGroupItem value={choice.value} aria-label={choice.label()} />
+                        }
                       >
                         <HugeiconsIcon icon={choice.icon} strokeWidth={2} />
                       </TooltipTrigger>
-                      <TooltipContent>{choice.label}</TooltipContent>
+                      <TooltipContent>{choice.label()}</TooltipContent>
                     </Tooltip>
                   ))}
                 </ToggleGroup>

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { createHash } from "node:crypto";
 import { Context, Effect, Layer } from "effect";
 import { conversations } from "~/db/schema/index.ts";
@@ -5,6 +6,7 @@ import { ownedConversationById } from "~/modules/chat/server/owned-conversation.
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationAuthFailed, IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import type { ToolPermission, UnattendedGrant } from "../consent.ts";
 import type { IntegrationGrant } from "../grant.ts";
@@ -59,7 +61,7 @@ import { listingOwner, makeToolListings, toListingView } from "./tool-listings.t
 
 const connectOutdated = () =>
   new IntegrationRejected({
-    reason: "This integration’s setup changed while connecting. Try again.",
+    reason: localized(m.integrations_error_setup_changed_connecting),
   });
 
 /** One account as a chat sees it: whether it is on here, and how much it asks. */
@@ -132,7 +134,8 @@ const MAX_SCOPE_ITEMS = 200;
 /** At most this many MCP servers of one's own. */
 const MAX_PERSONAL_SERVERS = 20;
 
-const unknownIntegration = () => new IntegrationRejected({ reason: "Unknown integration." });
+const unknownIntegration = () =>
+  new IntegrationRejected({ reason: localized(m.integrations_error_unknown) });
 
 export class IntegrationService extends Context.Service<
   IntegrationService,
@@ -788,7 +791,7 @@ export class IntegrationService extends Context.Service<
           function* (userId, input) {
             if (!(yield* repo.mayAddServers(userId)))
               return yield* new IntegrationRejected({
-                reason: "Your admin has not let you add MCP servers.",
+                reason: localized(m.integrations_error_no_personal_servers),
               });
             const adapter = findAdapterType("mcp");
             if (!adapter) return yield* unknownIntegration();
@@ -797,13 +800,19 @@ export class IntegrationService extends Context.Service<
               return yield* unknownIntegration();
             if (!stored && (yield* repo.listConfigs(userId)).length >= MAX_PERSONAL_SERVERS)
               return yield* new IntegrationRejected({
-                reason: `You can add at most ${MAX_PERSONAL_SERVERS} servers.`,
+                reason: localized(m.integrations_error_server_limit, {
+                  count: MAX_PERSONAL_SERVERS,
+                }),
               });
             const name = input.name.trim();
             if (!name || name.length > NAME_MAX)
-              return yield* new IntegrationRejected({ reason: "Give it a name." });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_name_missing),
+              });
             if (yield* repo.nameTaken(name, stored?.id ?? null, userId))
-              return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_name_taken, { name }),
+              });
             // Only what a person may choose; without an account means open, never a shared key.
             const config: Record<string, string> = Object.fromEntries(
               PERSONAL_SERVER_FIELDS.flatMap((key) =>
@@ -820,7 +829,7 @@ export class IntegrationService extends Context.Service<
               Effect.mapError(
                 () =>
                   new IntegrationRejected({
-                    reason: "Use a public address. An admin can add servers on a private network.",
+                    reason: localized(m.integrations_error_public_address),
                   }),
               ),
             );
@@ -838,7 +847,9 @@ export class IntegrationService extends Context.Service<
                 draft: !opens,
               }));
             if (!id)
-              return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_name_taken, { name }),
+              });
             // Their own app, for a server whose sign-in registers none: only while it is signed into.
             const signsIn = mcpWaysOf(normalized.config).oauth;
             const clientId = signsIn
@@ -900,7 +911,7 @@ export class IntegrationService extends Context.Service<
         probeServer: Effect.fn("IntegrationService.probeServer")(function* (userId, url) {
           if (!(yield* repo.mayAddServers(userId)))
             return yield* new IntegrationRejected({
-              reason: "Your admin has not let you add MCP servers.",
+              reason: localized(m.integrations_error_no_personal_servers),
             });
           const adapter = findAdapterType("mcp");
           if (!adapter) return yield* unknownIntegration();
@@ -916,7 +927,7 @@ export class IntegrationService extends Context.Service<
             Effect.mapError(
               () =>
                 new IntegrationRejected({
-                  reason: "Use a public address. An admin can add servers on a private network.",
+                  reason: localized(m.integrations_error_public_address),
                 }),
             ),
           );
@@ -934,8 +945,9 @@ export class IntegrationService extends Context.Service<
             return yield* new IntegrationRejected({
               reason:
                 "message" in asNobody.failure && typeof asNobody.failure.message === "string"
-                  ? asNobody.failure.message
-                  : "Could not reach the server.",
+                  ? // The server's own words, or the request's.
+                    verbatim(asNobody.failure.message)
+                  : localized(m.integrations_error_server_unreachable),
             });
           const signIn = yield* offersSignIn(normalized.config);
           if (!signIn.signIn) return { ways: "token" as const, name, needsClient: false };
@@ -962,7 +974,9 @@ export class IntegrationService extends Context.Service<
             );
             if (entry?.config.ownerUserId !== userId) return yield* unknownIntegration();
             if (entry.connections.length === 0)
-              return yield* new IntegrationRejected({ reason: "Connect it first." });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_connect_first),
+              });
             yield* repo.publishDraft(userId, integrationId);
             yield* changed(userId);
           },
@@ -980,7 +994,9 @@ export class IntegrationService extends Context.Service<
             if (!entry?.usable) return yield* unknownIntegration();
             const accounts = entry.connections.filter((account) => account.status === "active");
             if (accounts.length === 0)
-              return yield* new IntegrationRejected({ reason: "Connect it first." });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_connect_first),
+              });
             yield* listEach(integrationId, new Set(accounts.map(listingOwner)));
             yield* changed(userId);
           },
@@ -998,7 +1014,10 @@ export class IntegrationService extends Context.Service<
             const listed = (yield* repo.toolListing(integrationId, owner))?.tools?.find(
               (item) => item.key === tool,
             );
-            if (!listed) return yield* new IntegrationRejected({ reason: "Unknown tool." });
+            if (!listed)
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_unknown_tool),
+              });
             const off = row.toolSettings[listed.mcpName]?.off;
             const value = {
               ...(off ? { off: true as const } : {}),
@@ -1016,15 +1035,23 @@ export class IntegrationService extends Context.Service<
         createIntegration: Effect.fn("IntegrationService.createIntegration")(function* (input) {
           const adapter = findAdapterType(input.kind);
           if (!findIntegrationType(input.kind) || !adapter)
-            return yield* new IntegrationRejected({ reason: "Unknown integration type." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_unknown_type),
+            });
           const known = input.server === undefined ? null : findKnownMcpServer(input.server);
           if (input.server !== undefined && (!known || input.kind !== "mcp"))
-            return yield* new IntegrationRejected({ reason: "Unknown MCP server." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_unknown_server),
+            });
           const name = input.name.trim();
           if (!name || name.length > NAME_MAX)
-            return yield* new IntegrationRejected({ reason: "Give it a name." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_name_missing),
+            });
           if (yield* repo.nameTaken(name, null, null))
-            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_name_taken, { name }),
+            });
           // A known server is named by its preset, any other server by what the admin called it.
           const id = yield* repo.createConfig({
             kind: input.kind,
@@ -1036,7 +1063,9 @@ export class IntegrationService extends Context.Service<
                 : {}),
           });
           if (!id)
-            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_name_taken, { name }),
+            });
           // A known server needs nothing more: on at once, at its address, people signing in.
           // One that lets in only registered apps waits off for the admin's.
           if (known) {
@@ -1064,7 +1093,7 @@ export class IntegrationService extends Context.Service<
           const outcome = yield* repo.deleteConfig(id);
           if (!outcome.deleted)
             return yield* new IntegrationRejected({
-              reason: `${outcome.sources} knowledge ${outcome.sources === 1 ? "source mirrors" : "sources mirror"} it. Remove ${outcome.sources === 1 ? "it" : "them"} first.`,
+              reason: localized(m.integrations_error_sources_mirror, { count: outcome.sources }),
             });
           yield* bus
             .publishGlobal({ type: "integrations.changed" })
@@ -1080,13 +1109,17 @@ export class IntegrationService extends Context.Service<
             return yield* unknownIntegration();
           const name = input.name.trim();
           if (!name || name.length > NAME_MAX)
-            return yield* new IntegrationRejected({ reason: "Give it a name." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_name_missing),
+            });
           if (yield* repo.nameTaken(name, input.id, null))
-            return yield* new IntegrationRejected({ reason: `“${name}” is already in use.` });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_name_taken, { name }),
+            });
           const description = input.description?.trim().replace(/\s+/g, " ");
           if (description && description.length > DESCRIPTION_MAX)
             return yield* new IntegrationRejected({
-              reason: `Keep the description under ${DESCRIPTION_MAX} characters.`,
+              reason: localized(m.integrations_error_description_long, { count: DESCRIPTION_MAX }),
             });
           const known = new Set(manifest.adminFields.map((field) => field.key));
           const config = Object.fromEntries(
@@ -1102,7 +1135,9 @@ export class IntegrationService extends Context.Service<
               : input.oauthClientSecret !== "";
           // A discovered sign-in may use a public client the admin registered, with no secret.
           if (clientId && !willHaveSecret && manifest.oauth && !adapter.discoveredOAuth)
-            return yield* new IntegrationRejected({ reason: "Enter the OAuth client secret too." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_secret_missing),
+            });
           let sharedCredential = input.sharedCredential;
           if (sharedCredential && manifest.sharedCredential) {
             const read = readFields(manifest.sharedCredential.fields, sharedCredential);
@@ -1128,13 +1163,13 @@ export class IntegrationService extends Context.Service<
           const preset = stored.kind === "mcp" ? knownMcpServerAt(normalized.config.url) : null;
           if (input.enabled && preset?.ownApp && mcpWaysOf(normalized.config).oauth && !clientId)
             return yield* new IntegrationRejected({
-              reason: `Enter the client ID of the app registered with ${preset.name} first.`,
+              reason: localized(m.integrations_error_client_id_first, { name: preset.name }),
             });
           if (input.enabled && !methods.oauth && !methods.apiKey && methods.open === null)
             return yield* new IntegrationRejected({
               reason: adapter.connectMethods
-                ? "Enter the shared key before turning this on."
-                : "Set up OAuth or allow personal API keys before turning this on.",
+                ? localized(m.integrations_error_shared_key_first)
+                : localized(m.integrations_error_way_in_first),
             });
           // Another server drops what the last one listed.
           const row = yield* repo.saveConfig({
@@ -1147,7 +1182,7 @@ export class IntegrationService extends Context.Service<
             sharedCredential,
             listsTools: manifest.toolSource === "listed",
           });
-          if (!row) return yield* new IntegrationRejected({ reason: "Unknown integration." });
+          if (!row) return yield* unknownIntegration();
           // Reachable without an account: what it lists shows at once, not after the first person.
           // Closed to that, the listing for nobody could only fail from then on.
           if (manifest.toolSource === "listed" && methods.open === null)
@@ -1180,7 +1215,7 @@ export class IntegrationService extends Context.Service<
             );
             if (!methods.apiKey || !form)
               return yield* new IntegrationRejected({
-                reason: "API keys are turned off for this integration.",
+                reason: localized(m.integrations_error_keys_off),
               });
             const read = readFields(form.fields, input);
             if ("error" in read) return yield* new IntegrationRejected({ reason: read.error });
@@ -1214,7 +1249,7 @@ export class IntegrationService extends Context.Service<
           const adapter = row ? findAdapterType(row.kind) : null;
           if (!row || !manifest || !adapter || manifest.toolSource !== "listed")
             return yield* new IntegrationRejected({
-              reason: "This integration does not list its own tools.",
+              reason: localized(m.integrations_error_not_listed),
             });
           const normalized = adapter.normalizeConfig(row.config);
           const methods = methodsFor(
@@ -1233,8 +1268,7 @@ export class IntegrationService extends Context.Service<
           if (methods.open !== null) owners.add(null);
           if (owners.size === 0)
             return yield* new IntegrationRejected({
-              reason:
-                "Its tools show once someone connects. Connect your own account in Settings to check now.",
+              reason: localized(m.integrations_error_check_needs_account),
             });
           yield* listEach(integrationId, owners);
         }),
@@ -1269,11 +1303,13 @@ export class IntegrationService extends Context.Service<
           const open = methodsFor(manifest, adapter, row, config, sharedStored).open;
           if (!open)
             return yield* new IntegrationRejected({
-              reason: "Connect this integration with your own account.",
+              reason: localized(m.integrations_error_own_account),
             });
           const shared = open === "shared" ? yield* repo.sharedCredential(row) : null;
           if (open === "shared" && !shared)
-            return yield* new IntegrationRejected({ reason: "The shared key is not set up." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_shared_key_missing),
+            });
           const verifiedOpen = yield* verified(
             adapter,
             config,
@@ -1307,13 +1343,13 @@ export class IntegrationService extends Context.Service<
               const row = yield* repo.getConfig(account.integrationId);
               if (!(row && findIntegrationType(row.kind)?.scope))
                 return yield* new IntegrationRejected({
-                  reason: "This integration has no limits.",
+                  reason: localized(m.integrations_error_no_limits),
                 });
               // Empty is a choice too: the connection then reaches nothing.
               scope = [...new Set(scope.map((item) => item.trim()).filter(Boolean))];
               if (scope.length > MAX_SCOPE_ITEMS)
                 return yield* new IntegrationRejected({
-                  reason: `Pick at most ${MAX_SCOPE_ITEMS}.`,
+                  reason: localized(m.integrations_error_scope_limit, { count: MAX_SCOPE_ITEMS }),
                 });
             }
             // A blank name goes back to what the service reports.
@@ -1337,15 +1373,20 @@ export class IntegrationService extends Context.Service<
           function* (userId, connectionId) {
             const session = yield* sessionFor(userId, connectionId);
             if (!session.adapter.scopeOptions)
-              return yield* new IntegrationRejected({ reason: "This integration has no limits." });
+              return yield* new IntegrationRejected({
+                reason: localized(m.integrations_error_no_limits),
+              });
             return yield* session.adapter.scopeOptions(session).pipe(
               Effect.catchTags({
                 IntegrationAuthFailed: () =>
                   Effect.fail(
-                    new IntegrationRejected({ reason: "The saved sign-in no longer works." }),
+                    new IntegrationRejected({
+                      reason: localized(m.integrations_error_sign_in_stale),
+                    }),
                   ),
                 IntegrationRequestFailed: (error) =>
-                  Effect.fail(new IntegrationRejected({ reason: error.message })),
+                  // The service's own words, or the request's.
+                  Effect.fail(new IntegrationRejected({ reason: verbatim(error.message) })),
               }),
             );
           },

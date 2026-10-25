@@ -1,4 +1,7 @@
+import { m } from "~/paraglide/messages.js";
 import type { ComponentProps, ComponentType } from "react";
+import { localized } from "~/i18n/localized.ts";
+import type { Localized } from "~/i18n/localized.ts";
 import type { IntegrationCategory } from "../manifest.ts";
 import {
   AirtableLogo,
@@ -24,7 +27,7 @@ import {
 export interface KnownMcpServer {
   readonly id: string;
   readonly name: string;
-  readonly description: string;
+  readonly description: Localized;
   readonly url: string;
   readonly category: IntegrationCategory;
   readonly logo: ComponentType<ComponentProps<"svg">>;
@@ -32,7 +35,7 @@ export interface KnownMcpServer {
    * What someone at the service must do before anyone here can sign in,
    * given this app's address. Shown before the sign-in, which would only fail.
    */
-  readonly setup?: (origin: string) => string;
+  readonly setup?: (origin: string) => Localized;
   /**
    * Its sign-in lets in only apps registered there, so an admin brings one: it is
    * added off, opens on the client ID and secret, and stays off without them.
@@ -49,7 +52,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "trello",
     name: "Trello",
-    description: "Boards, lists, cards and checklists, from Atlassian’s Trello server.",
+    description: localized(m.integrations_known_trello_description),
     url: "https://mcp.trello.com/v1",
     category: "projects",
     logo: TrelloLogo,
@@ -57,30 +60,28 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "atlassian",
     name: "Atlassian",
-    description: "Jira issues and Confluence pages, from Atlassian’s Rovo server.",
+    description: localized(m.integrations_known_atlassian_description),
     url: "https://mcp.atlassian.com/v1/mcp",
     category: "projects",
     logo: AtlassianLogo,
     // Atlassian lets in only domains its organization admin allowed, beside its own partners.
-    setup: (origin) =>
-      `An Atlassian organization admin must first allow ${origin}/** under Rovo MCP server, Allowed domains.`,
+    setup: (origin) => localized(m.integrations_known_atlassian_setup, { origin }),
   },
   {
     id: "asana",
     name: "Asana",
-    description: "Tasks, projects and goals in Asana.",
+    description: localized(m.integrations_known_asana_description),
     url: "https://mcp.asana.com/v2/mcp",
     category: "projects",
     logo: AsanaLogo,
     // Its V2 server registers no apps itself; V1, which did, is shut down.
     ownApp: true,
-    setup: () =>
-      "Asana only lets in apps registered with it: create one in its developer console with this integration’s redirect URI, then enter its client ID and secret. An Asana admin may also have to allow the app for your workspace.",
+    setup: () => localized(m.integrations_known_asana_setup),
   },
   {
     id: "linear",
     name: "Linear",
-    description: "Issues, projects and comments in Linear.",
+    description: localized(m.integrations_known_linear_description),
     url: "https://mcp.linear.app/mcp",
     category: "projects",
     logo: LinearLogo,
@@ -88,7 +89,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "notion",
     name: "Notion",
-    description: "Search, read and write Notion pages and databases.",
+    description: localized(m.integrations_known_notion_description),
     url: "https://mcp.notion.com/mcp",
     category: "docs",
     logo: NotionLogo,
@@ -96,7 +97,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "sentry",
     name: "Sentry",
-    description: "Errors, issues and releases in Sentry.",
+    description: localized(m.integrations_known_sentry_description),
     url: "https://mcp.sentry.dev/mcp",
     category: "developer",
     logo: SentryLogo,
@@ -104,7 +105,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "canva",
     name: "Canva",
-    description: "Find, create and export Canva designs.",
+    description: localized(m.integrations_known_canva_description),
     url: "https://mcp.canva.com/mcp",
     category: "productivity",
     logo: CanvaLogo,
@@ -112,7 +113,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "stripe",
     name: "Stripe",
-    description: "Customers, payments, invoices and products in Stripe.",
+    description: localized(m.integrations_known_stripe_description),
     url: "https://mcp.stripe.com/",
     category: "developer",
     logo: StripeLogo,
@@ -120,7 +121,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "vercel",
     name: "Vercel",
-    description: "Projects, deployments and logs on Vercel.",
+    description: localized(m.integrations_known_vercel_description),
     url: "https://mcp.vercel.com/",
     category: "developer",
     logo: VercelLogo,
@@ -128,7 +129,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "supabase",
     name: "Supabase",
-    description: "Projects, databases and SQL on Supabase.",
+    description: localized(m.integrations_known_supabase_description),
     url: "https://mcp.supabase.com/mcp",
     category: "developer",
     logo: SupabaseLogo,
@@ -136,7 +137,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "airtable",
     name: "Airtable",
-    description: "Bases, tables and records in Airtable.",
+    description: localized(m.integrations_known_airtable_description),
     url: "https://mcp.airtable.com/mcp",
     category: "productivity",
     logo: AirtableLogo,
@@ -144,7 +145,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "cloudflare",
     name: "Cloudflare",
-    description: "Workers, storage, DNS and the rest of the Cloudflare API.",
+    description: localized(m.integrations_known_cloudflare_description),
     url: "https://mcp.cloudflare.com/mcp",
     category: "developer",
     logo: CloudflareLogo,
@@ -152,7 +153,7 @@ export const KNOWN_MCP_SERVERS: ReadonlyArray<KnownMcpServer> = [
   {
     id: "zapier",
     name: "Zapier",
-    description: "Actions in the apps you’ve connected to Zapier.",
+    description: localized(m.integrations_known_zapier_description),
     url: "https://mcp.zapier.com/api/mcp/mcp",
     category: "productivity",
     logo: ZapierLogo,

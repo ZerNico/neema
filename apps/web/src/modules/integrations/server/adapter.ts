@@ -1,4 +1,5 @@
 import type { Effect, Schema } from "effect";
+import type { Localized } from "~/i18n/localized.ts";
 import type { Reach } from "../consent.ts";
 import type { IntegrationToolDefinition, IntegrationToolInfo } from "../manifest.ts";
 import type {
@@ -293,7 +294,7 @@ export interface IntegrationAdapter {
    */
   normalizeConfig(
     config: Readonly<Record<string, string>>,
-  ): { config: Record<string, string>; fingerprint: string } | { error: string };
+  ): { config: Record<string, string>; fingerprint: string } | { error: Localized };
   readonly oauth: {
     authorizeUrl(config: Readonly<Record<string, string>>): string;
     tokenUrl(config: Readonly<Record<string, string>>): string;

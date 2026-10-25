@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSessionUser } from "~/modules/auth/client.ts";
 import { useId, useState, type ReactNode } from "react";
@@ -40,6 +42,7 @@ export function ConnectActions({
   // A server from a catalog is known by its own name, not its type's.
   const service = manifest.toolSource === "listed" ? integration.name : manifest.name;
   const open = !another && integration.methods.open;
+  const keyNoun = manifest.apiKey?.noun?.(getLocale()) ?? m.integrations_api_key_noun();
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
       {/* One primary: no account first, then a sign-in, a token last. */}
@@ -50,7 +53,7 @@ export function ConnectActions({
           variant={integration.methods.oauth || open || another ? "outline" : "default"}
           onClick={() => setKeyOpen(true)}
         >
-          Use {manifest.apiKey?.noun ?? "an API key"}
+          {m.integrations_connect_use_key({ noun: keyNoun })}
         </Button>
       ) : null}
       {integration.methods.oauth ? (
@@ -59,7 +62,9 @@ export function ConnectActions({
           returnTo={returnTo}
           variant={open || another ? "outline" : "default"}
         >
-          {another ? "Sign in" : `Sign in with ${service}`}
+          {another
+            ? m.integrations_connect_sign_in()
+            : m.integrations_connect_sign_in_with({ service })}
         </SignInButton>
       ) : null}
       {keyOpen ? <ApiKeyDialog integration={integration} open onOpenChange={setKeyOpen} /> : null}
@@ -70,7 +75,7 @@ export function ConnectActions({
 /** For a server that needs no account of one's own: open, or the admin's shared key. */
 export function TurnOnButton({
   integration,
-  children = "Turn on",
+  children = m.integrations_connect_turn_on(),
 }: {
   integration: UserIntegration;
   children?: ReactNode;
@@ -87,7 +92,7 @@ export function TurnOnButton({
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["integrations"] });
     },
-    onError: () => setError(`Could not reach ${integration.name}.`),
+    onError: () => setError(m.integrations_connect_unreachable({ name: integration.name })),
   });
   return (
     <div className="flex flex-col items-end gap-1">
@@ -160,6 +165,8 @@ export function ApiKeyDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const complete = fields.every((field) => !field.required || values[field.key]?.trim());
+  // The sentence around the settings link, split where the link goes.
+  const createIn = m.integrations_key_create_in({ settings: "\u0001" }).split("\u0001");
   const save = useMutation({
     mutationFn: () =>
       connectIntegrationApiKey({
@@ -173,7 +180,7 @@ export function ApiKeyDialog({
       await queryClient.invalidateQueries({ queryKey: ["integrations"] });
       onOpenChange(false);
     },
-    onError: () => setError("Could not check that."),
+    onError: () => setError(m.integrations_key_check_error()),
   });
 
   return (
@@ -187,11 +194,13 @@ export function ApiKeyDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Connect {integration.name} with {manifest.apiKey?.noun ?? "an API key"}
+            {m.integrations_key_title({
+              name: integration.name,
+              noun: manifest.apiKey?.noun?.(getLocale()) ?? m.integrations_api_key_noun(),
+            })}
           </DialogTitle>
           <DialogDescription>
-            It’s checked with {integration.name}, encrypted, and never shown again. Chats act with
-            everything it can reach.
+            {m.integrations_key_description({ name: integration.name })}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -214,16 +223,16 @@ export function ApiKeyDialog({
               >
                 {field.kind === "secret" && integration.apiKeyHelpUrl ? (
                   <FieldDescription>
-                    Create one in{" "}
+                    {createIn[0]}
                     <a
                       href={integration.apiKeyHelpUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="underline underline-offset-4"
                     >
-                      {manifest.name} settings
+                      {m.integrations_key_settings_link({ name: manifest.name })}
                     </a>
-                    .
+                    {createIn[1]}
                   </FieldDescription>
                 ) : null}
               </IntegrationFieldControl>
@@ -232,10 +241,10 @@ export function ApiKeyDialog({
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!complete}>
-              Connect
+              {m.integrations_key_connect()}
             </PendingButton>
           </DialogFooter>
         </form>

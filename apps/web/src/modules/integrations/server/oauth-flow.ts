@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { isIP } from "node:net";
 import { and, eq, gt } from "drizzle-orm";
 import { Effect } from "effect";
@@ -5,6 +6,7 @@ import { uuidv7 } from "uuidv7";
 import { verification } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import { publicUrl } from "~/server/public-url.ts";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import {
   authorizeUrl,
@@ -19,7 +21,7 @@ import { methodsFor, verified, type makeCredentials } from "./credentials.ts";
 
 const signInOutdated = () =>
   new IntegrationRejected({
-    reason: "This integration’s setup changed during the sign-in. Start again from Settings.",
+    reason: localized(m.integrations_error_setup_changed_sign_in),
   });
 
 /**
@@ -108,7 +110,7 @@ export const makeOAuthFlow = (deps: {
       if (discovered) {
         if (!methodsFor(manifest, adapter, row, config, false).oauth)
           return yield* new IntegrationRejected({
-            reason: "This integration does not use sign-in.",
+            reason: localized(m.integrations_error_no_sign_in),
           });
         // A step-up keeps what was granted and asks for what a call lacked.
         const connection = reconnecting;
@@ -148,7 +150,7 @@ export const makeOAuthFlow = (deps: {
       }
       if (!adapter.oauth || !row.oauthClientId || !row.oauthClientSecretCiphertext)
         return yield* new IntegrationRejected({
-          reason: "OAuth is not set up for this integration.",
+          reason: localized(m.integrations_error_oauth_missing),
         });
       const verifier = randomToken();
       const value: OAuthStateValue = {
@@ -180,8 +182,7 @@ export const makeOAuthFlow = (deps: {
       input: { code: string; state: string; cookieState: string | null; iss: string | null },
     ) {
       const expired = new IntegrationRejected({
-        reason:
-          "This sign-in link expired or was opened in another browser. Start again from Settings.",
+        reason: localized(m.integrations_error_sign_in_expired),
       });
       // The cookie ties the callback to the browser that started it: a
       // stranger's authorization link cannot land their account in ours.
@@ -248,12 +249,13 @@ export const makeOAuthFlow = (deps: {
         },
       }).pipe(
         Effect.catchTag("IntegrationRequestFailed", (error) =>
-          Effect.fail(new IntegrationRejected({ reason: error.message })),
+          // The service's own words, or the request's.
+          Effect.fail(new IntegrationRejected({ reason: verbatim(error.message) })),
         ),
       );
       if (!outcome.ok)
         return yield* new IntegrationRejected({
-          reason: "The service refused the sign-in. Try again.",
+          reason: localized(m.integrations_error_sign_in_refused),
         });
       const { accountLabel, accountKey } = yield* verified(adapter, config, {
         kind: "oauth",

@@ -1,7 +1,9 @@
+import { m } from "~/paraglide/messages.js";
 import { and, eq } from "drizzle-orm";
 import { Effect, Semaphore } from "effect";
 import { uuidv7 } from "uuidv7";
 import { integrationConfigs, integrationConnections } from "~/db/schema/index.ts";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
 import { accountName } from "../schema.ts";
@@ -204,10 +206,13 @@ export const verified = (
     Effect.catchTags({
       IntegrationAuthFailed: () =>
         Effect.fail(
-          new IntegrationRejected({ reason: "The service did not accept that credential." }),
+          new IntegrationRejected({
+            reason: localized(m.integrations_error_credential_refused),
+          }),
         ),
+      // The service's own words, or the request's.
       IntegrationRequestFailed: (error) =>
-        Effect.fail(new IntegrationRejected({ reason: error.message })),
+        Effect.fail(new IntegrationRejected({ reason: verbatim(error.message) })),
     }),
   );
 
@@ -607,7 +612,7 @@ export const makeCredentials = (deps: {
         return yield* new IntegrationNotAvailable({ integrationId, connectionId });
       if (current.accountKey && accountKey && current.accountKey !== accountKey)
         return yield* new IntegrationRejected({
-          reason: `That is another account than “${accountName(current)}”. Add it as another account instead.`,
+          reason: localized(m.integrations_error_other_account, { name: accountName(current) }),
         });
       // A row from before it knew its account cannot take on one connected beside it.
       const listed = yield* repo.listForUser(userId, integrationId);
@@ -616,7 +621,7 @@ export const makeCredentials = (deps: {
         ?.connections.find((entry) => entry.id !== connectionId && entry.accountKey === accountKey);
       if (accountKey && other)
         return yield* new IntegrationRejected({
-          reason: `That account is already connected as “${accountName(other)}”.`,
+          reason: localized(m.integrations_error_account_connected, { name: accountName(other) }),
         });
     });
 

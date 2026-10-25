@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import {
   Delete02Icon,
   MoreHorizontalIcon,
@@ -46,13 +48,14 @@ import {
   setIntegrationTool,
 } from "../server/functions.ts";
 import { IntegrationConfigDialog } from "./integration-config-dialog.tsx";
-import { ACCESS_CHOICES } from "./tool-permissions.tsx";
+import { accessChoices } from "./tool-permissions.tsx";
+import { toolText } from "../tool-text.ts";
 
 /** What a tool says of itself, beside the admin's correction. */
-const CLAIMS: Record<ToolAccess, string> = {
-  read: "only reads",
-  write: "changes things",
-  destructive: "can delete or send",
+const CLAIMS: Record<ToolAccess, () => string> = {
+  read: m.integrations_tool_claim_read,
+  write: m.integrations_tool_claim_write,
+  destructive: m.integrations_tool_claim_destructive,
 };
 
 /**
@@ -68,58 +71,64 @@ export function AdminIntegrationPage({ integrationId }: { integrationId: string 
   const look = row ? integrationLook(row) : null;
   if (!row || !look)
     return (
-      <Page title="Integration" backTo="/admin/integrations" backLabel="Integrations">
+      <Page
+        title={m.integrations_detail_fallback_title()}
+        backTo="/admin/integrations"
+        backLabel={m.integrations_admin_title()}
+      >
         <EmptyState
           icon={PlugSocketIcon}
-          title="Integration not found"
-          description="It may have been deleted."
+          title={m.integrations_detail_not_found_title()}
+          description={m.integrations_admin_deleted_hint()}
         />
       </Page>
     );
   // The address set for this instance; without one, the address it was opened at.
   const origin = data.origin ?? (typeof window === "undefined" ? null : window.location.origin);
-  const note = origin ? findKnownMcpServer(row.server)?.setup?.(origin) : undefined;
+  const note = origin ? findKnownMcpServer(row.server)?.setup?.(origin)(getLocale()) : undefined;
 
   return (
     <Page
       title={row.name}
-      description={look.description}
+      description={look.description(getLocale())}
       backTo="/admin/integrations"
-      backLabel="Integrations"
+      backLabel={m.integrations_admin_title()}
       actions={<IntegrationActions row={row} onEdit={() => setEditing(true)} />}
     >
       {note ? <p className="text-muted-foreground text-sm">{note}</p> : null}
-      <Section title="Settings">
+      <Section title={m.common_settings()}>
         <ListCard>
           <ListRow>
             <EnabledSwitch row={row} />
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium">{row.enabled ? "On" : "Off"}</span>
+              <span className="text-sm font-medium">
+                {row.enabled ? m.integrations_admin_on() : m.integrations_admin_off()}
+              </span>
               <span className="text-muted-foreground truncate text-xs">
                 {row.config.url ?? row.config.baseUrl ?? row.config.site ?? look.name}
               </span>
             </div>
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              Edit
+              {m.common_edit()}
             </Button>
           </ListRow>
         </ListCard>
       </Section>
-      <Section title="Who can use it">
+      <Section title={m.integrations_admin_audience_title()}>
         <ListCard>
           <ListRow>
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="text-sm font-medium">
-                {row.audience === "instance" ? "Everyone" : "People you choose"}
+                {row.audience === "instance"
+                  ? m.integrations_admin_audience_everyone()
+                  : m.integrations_admin_audience_chosen()}
               </span>
               <span className="text-muted-foreground truncate text-xs">
-                {row.connectionCount === 1
-                  ? "1 person connected"
-                  : `${row.connectionCount} people connected`}
+                {m.integrations_admin_people_connected({ count: row.connectionCount })}
               </span>
             </div>
             <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
-              Change
+              {m.integrations_admin_audience_change()}
             </Button>
           </ListRow>
         </ListCard>
@@ -160,19 +169,19 @@ function EnabledSwitch({ row }: { row: AdminIntegration }) {
     onSuccess: async (result, enabled) => {
       if (!result.ok)
         toastError(
-          enabled ? "Could not turn it on." : "Could not turn it off.",
+          enabled ? m.integrations_admin_turn_on_error() : m.integrations_admin_turn_off_error(),
           new Error(result.error),
         );
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
     },
-    onError: (error) => toastError("Could not change it.", error),
+    onError: (error) => toastError(m.integrations_admin_toggle_error(), error),
   });
   return (
     <Switch
       checked={toggle.isPending ? toggle.variables : row.enabled}
       disabled={toggle.isPending}
       onCheckedChange={(enabled) => toggle.mutate(enabled)}
-      aria-label={`${row.name} on`}
+      aria-label={m.integrations_admin_enabled_label({ name: row.name })}
     />
   );
 }
@@ -185,21 +194,23 @@ function IntegrationActions({ row, onEdit }: { row: AdminIntegration; onEdit: ()
     mutationFn: () => deleteIntegration({ data: { integrationId: row.id } }),
     onSuccess: async (result) => {
       if (!result.ok) {
-        toastError("Could not delete the integration.", new Error(result.error));
+        toastError(m.integrations_admin_delete_error(), new Error(result.error));
         return;
       }
       await navigate({ to: "/admin/integrations" });
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
     },
-    onError: (error) => toastError("Could not delete the integration.", error),
+    onError: (error) => toastError(m.integrations_admin_delete_error(), error),
   });
   const request = async () => {
     const people = row.connectionCount;
     if (
       await confirm({
-        title: `Delete ${row.name}?`,
-        description: `${people ? `${people === 1 ? "1 person loses their connection" : `${people} people lose their connections`}, and ` : ""}chats, agents and schedules stop using it. Past answers keep what it found.`,
-        confirmLabel: "Delete",
+        title: m.integrations_admin_delete_title({ name: row.name }),
+        description: people
+          ? m.integrations_admin_delete_description_people({ count: people })
+          : m.integrations_admin_delete_description(),
+        confirmLabel: m.common_delete(),
       })
     )
       remove.mutate();
@@ -207,14 +218,16 @@ function IntegrationActions({ row, onEdit }: { row: AdminIntegration; onEdit: ()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button size="icon-sm" variant="ghost" aria-label="Integration actions" />}
+        render={
+          <Button size="icon-sm" variant="ghost" aria-label={m.integrations_admin_actions()} />
+        }
       >
         <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onEdit}>
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-          Edit settings
+          {m.integrations_admin_edit_settings()}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* A menu item cannot hold a spinner; disabled is its pending state. */}
@@ -224,7 +237,7 @@ function IntegrationActions({ row, onEdit }: { row: AdminIntegration; onEdit: ()
           onClick={() => void request()}
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-          Delete
+          {m.common_delete()}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -239,10 +252,10 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
   const check = useMutation({
     mutationFn: () => checkIntegrationTools({ data: { integrationId: row.id } }),
     onSuccess: async (result) => {
-      if (!result.ok) toastError("Could not check its tools.", new Error(result.error));
+      if (!result.ok) toastError(m.integrations_check_tools_error(), new Error(result.error));
       await refresh();
     },
-    onError: (error) => toastError("Could not check its tools.", error),
+    onError: (error) => toastError(m.integrations_check_tools_error(), error),
   });
   const set = useMutation({
     mutationFn: (input: { tool: AdminTool; off: boolean; access: ToolAccess }) =>
@@ -256,27 +269,25 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
         },
       }),
     onSuccess: async (result) => {
-      if (!result.ok) toastError("Could not change the tool.", new Error(result.error));
+      if (!result.ok) toastError(m.integrations_tool_change_error(), new Error(result.error));
       await refresh();
     },
-    onError: (error) => toastError("Could not change the tool.", error),
+    onError: (error) => toastError(m.integrations_tool_change_error(), error),
   });
   const { listings } = row;
   const checked = listings?.checkedAt
-    ? `Checked ${absoluteLabel(new Date(listings.checkedAt))}`
+    ? m.integrations_admin_checked({ time: absoluteLabel(new Date(listings.checkedAt)) })
     : null;
   // Shown with tools too: one account failing says nothing about the others.
   const failing = listings?.failing
-    ? `${listings.failing === 1 ? "1 account" : `${listings.failing} accounts`} could not list its tools: ${listings.error}`
+    ? m.integrations_admin_failing({ count: listings.failing, error: listings.error ?? "" })
     : null;
 
   return (
     <Section
-      title="Tools"
+      title={m.integrations_admin_tools_title()}
       description={
-        listings
-          ? "What its server offers. Turn off any that nobody should use."
-          : "Turn off any that nobody should use."
+        listings ? m.integrations_admin_tools_listed() : m.integrations_admin_tools_static()
       }
       actions={
         listings ? (
@@ -287,7 +298,7 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
             onClick={() => check.mutate()}
           >
             <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-            Check now
+            {m.integrations_admin_check_now()}
           </PendingButton>
         ) : null
       }
@@ -295,8 +306,8 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
       {row.tools.length === 0 ? (
         <EmptyState
           icon={PlugSocketIcon}
-          title="No tools yet"
-          description={failing ?? "They show once someone connects."}
+          title={m.integrations_detail_no_tools()}
+          description={failing ?? m.integrations_admin_no_tools_hint()}
         />
       ) : (
         <ListCard>
@@ -305,38 +316,46 @@ function ToolsSection({ row }: { row: AdminIntegration }) {
               <Switch
                 checked={!tool.off && !tool.unsupported}
                 disabled={Boolean(tool.unsupported) || set.isPending}
-                aria-label={`Offer ${tool.title}`}
+                aria-label={m.integrations_admin_offer_tool({
+                  tool: toolText(row.kind, tool).title,
+                })}
                 onCheckedChange={(on) => set.mutate({ tool, off: !on, access: tool.access })}
               />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate text-sm font-medium">{tool.title}</span>
+                <span className="truncate text-sm font-medium">
+                  {toolText(row.kind, tool).title}
+                </span>
                 {tool.unsupported || tool.pastLimit ? (
                   <span className="text-muted-foreground text-xs">
                     {tool.unsupported ??
-                      `Chats get at most ${MCP_LIMITS.enabledTools} tools. Turn others off to make room.`}
+                      m.integrations_admin_tool_limit({ count: MCP_LIMITS.enabledTools })}
                   </span>
                 ) : tool.description ? (
                   <ToolDescription text={tool.description} />
                 ) : null}
                 {tool.access === tool.claimed ? null : (
-                  <span className="text-muted-foreground text-xs">
-                    The server says it {CLAIMS[tool.claimed]}.
-                  </span>
+                  <span className="text-muted-foreground text-xs">{CLAIMS[tool.claimed]()}</span>
                 )}
               </div>
               <Select
                 value={tool.access}
-                items={ACCESS_CHOICES}
+                items={accessChoices()}
                 disabled={Boolean(tool.unsupported) || set.isPending}
                 onValueChange={(access) =>
                   set.mutate({ tool, off: tool.off, access: access as ToolAccess })
                 }
               >
-                <SelectTrigger size="sm" aria-label={`What ${tool.title} does`} className="w-40">
+                <SelectTrigger
+                  size="sm"
+                  aria-label={m.integrations_tool_access_label({
+                    tool: toolText(row.kind, tool).title,
+                  })}
+                  className="w-40"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ACCESS_CHOICES.map((choice) => (
+                  {accessChoices().map((choice) => (
                     <SelectItem key={choice.value} value={choice.value}>
                       {choice.label}
                     </SelectItem>

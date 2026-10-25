@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Schema } from "effect";
 import { defineIntegrationTool } from "../manifest.ts";
 
@@ -14,6 +15,10 @@ const searchTool = defineIntegrationTool({
   name: "search",
   title: "Search documents",
   label: "Searched Outline",
+  display: {
+    title: m.integrations_outline_tool_search_title,
+    label: m.integrations_outline_tool_search_label,
+  },
   description:
     "Full-text search across the Outline documents the user can access. Returns titles, links, ids and a short matching snippet; read a document for its full text.",
   access: "read",
@@ -28,6 +33,10 @@ const readDocumentTool = defineIntegrationTool({
   name: "read_document",
   title: "Read a document",
   label: "Read an Outline document",
+  display: {
+    title: m.integrations_outline_tool_read_title,
+    label: m.integrations_outline_tool_read_label,
+  },
   description:
     "Read one Outline document as Markdown by id. Long documents come back in parts; pass `offset` from the previous answer to continue.",
   access: "read",
@@ -44,6 +53,10 @@ const listTool = defineIntegrationTool({
   name: "list",
   title: "Browse collections and pages",
   label: "Browsed Outline",
+  display: {
+    title: m.integrations_outline_tool_browse_title,
+    label: m.integrations_outline_tool_browse_label,
+  },
   description:
     "Browse Outline. With no arguments, lists collections. With `collectionId`, lists that collection's top-level documents; with `documentId`, that document's children.",
   access: "read",
@@ -58,6 +71,10 @@ const createDocumentTool = defineIntegrationTool({
   name: "create_document",
   title: "Create documents",
   label: "Create an Outline document",
+  display: {
+    title: m.integrations_outline_tool_create_title,
+    label: m.integrations_outline_tool_create_label,
+  },
   description:
     "Create a published Outline document from Markdown, in a collection or under a parent document.",
   access: "write",
@@ -74,6 +91,10 @@ const updateDocumentTool = defineIntegrationTool({
   name: "update_document",
   title: "Update documents",
   label: "Update an Outline document",
+  display: {
+    title: m.integrations_outline_tool_update_title,
+    label: m.integrations_outline_tool_update_label,
+  },
   description:
     "Change an Outline document. `mode` is append, prepend, replace (the whole body) or patch (replace `findText` with `text`). Pass `title` to rename.",
   access: "write",
@@ -91,6 +112,10 @@ const deleteDocumentTool = defineIntegrationTool({
   name: "delete_document",
   title: "Delete documents",
   label: "Delete an Outline document",
+  display: {
+    title: m.integrations_outline_tool_delete_title,
+    label: m.integrations_outline_tool_delete_label,
+  },
   description:
     "Move an Outline document to the trash, with every document nested under it. The user can restore it from Outline's trash. Only when the user asked for it.",
   access: "destructive",

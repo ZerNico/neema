@@ -1,3 +1,4 @@
+import { getLocale } from "~/paraglide/runtime.js";
 import type { ReactNode } from "react";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { Checkbox } from "~/ui/primitives/checkbox";
@@ -48,17 +49,19 @@ export function IntegrationFieldControl({
   return (
     <Field>
       <FieldLabel htmlFor={id}>
-        {field.label} {field.required ? null : <OptionalMark />}
+        {field.label(getLocale())} {field.required ? null : <OptionalMark />}
       </FieldLabel>
       <Input
         id={id}
         {...INPUT[field.kind]}
         value={value}
-        placeholder={field.placeholder}
+        placeholder={field.placeholder?.(getLocale())}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
       />
-      {field.description ? <FieldDescription>{field.description}</FieldDescription> : null}
+      {field.description ? (
+        <FieldDescription>{field.description(getLocale())}</FieldDescription>
+      ) : null}
       {children}
     </Field>
   );
@@ -87,11 +90,11 @@ function ChoiceField({
       {control}
       <FieldContent>
         <FieldLabel id={`${id}-${entry.value}-label`} htmlFor={`${id}-${entry.value}`}>
-          {entry.label}
+          {entry.label(getLocale())}
         </FieldLabel>
         {entry.description ? (
           <FieldDescription id={`${id}-${entry.value}-description`}>
-            {entry.description}
+            {entry.description(getLocale())}
           </FieldDescription>
         ) : null}
       </FieldContent>
@@ -106,7 +109,7 @@ function ChoiceField({
   return (
     <FieldSet disabled={disabled}>
       <FieldLegend variant="label">
-        {field.label} {field.required ? null : <OptionalMark />}
+        {field.label(getLocale())} {field.required ? null : <OptionalMark />}
       </FieldLegend>
       {field.kind === "choice" ? (
         <RadioGroup
@@ -142,7 +145,9 @@ function ChoiceField({
           )}
         </FieldGroup>
       )}
-      {field.description ? <FieldDescription>{field.description}</FieldDescription> : null}
+      {field.description ? (
+        <FieldDescription>{field.description(getLocale())}</FieldDescription>
+      ) : null}
       {children}
     </FieldSet>
   );

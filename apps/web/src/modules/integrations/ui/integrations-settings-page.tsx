@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import {
   Add01Icon,
   ArrowRight01Icon,
@@ -37,6 +39,7 @@ import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { integrationLook } from "../client/directory.ts";
+import { toolText } from "../tool-text.ts";
 import { myIntegrationsQuery, personalServersQuery } from "../client/queries.ts";
 import { knownMcpServerWithUrl } from "../mcp/known-servers.ts";
 import {
@@ -66,13 +69,18 @@ type Account = IntegrationConnectionView;
 function StatusBadge({ integration }: { integration: UserIntegration }) {
   const { connections } = integration;
   if (connections.length === 0) return null;
-  if (!integration.available) return <Badge variant="outline">Turned off</Badge>;
+  if (!integration.available)
+    return <Badge variant="outline">{m.integrations_status_turned_off()}</Badge>;
   if (connections.length > 1) {
     const lapsed = connections.filter((account) => account.status === "needs_reauth").length;
     return lapsed ? (
-      <Badge variant="destructive">{lapsed === 1 ? "1 signed out" : `${lapsed} signed out`}</Badge>
+      <Badge variant="destructive">
+        {m.integrations_status_signed_out_count({ count: lapsed })}
+      </Badge>
     ) : (
-      <Badge variant="secondary">{connections.length} accounts</Badge>
+      <Badge variant="secondary">
+        {m.integrations_status_accounts({ count: connections.length })}
+      </Badge>
     );
   }
   return <AccountBadge account={connections[0]!} />;
@@ -83,11 +91,14 @@ function AccountBadge({ account }: { account: Account }) {
   if (account.status === "needs_reauth")
     return (
       <Badge variant="destructive">
-        {usesNoAccount(account.authKind) ? "Paused" : "Signed out"}
+        {usesNoAccount(account.authKind)
+          ? m.integrations_status_paused()
+          : m.integrations_status_signed_out()}
       </Badge>
     );
-  if (account.status === "unavailable") return <Badge variant="outline">Turned off</Badge>;
-  return <Badge variant="secondary">Connected</Badge>;
+  if (account.status === "unavailable")
+    return <Badge variant="outline">{m.integrations_status_turned_off()}</Badge>;
+  return <Badge variant="secondary">{m.integrations_status_connected()}</Badge>;
 }
 
 export function IntegrationsSettingsPage() {
@@ -107,15 +118,15 @@ export function IntegrationsSettingsPage() {
   const addButton = (
     <Button size="sm" onClick={() => setAdding(true)}>
       <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-      Add integration
+      {m.integrations_settings_add()}
     </Button>
   );
   return (
     <Page
-      title="Integrations"
-      description="Connect your own accounts so chats can search, read and, with your approval, change things there."
+      title={m.integrations_settings_title()}
+      description={m.integrations_settings_description()}
       rootPath="/settings"
-      rootLabel="Settings"
+      rootLabel={m.common_settings()}
       actions={mayAdd && yours.length ? addButton : null}
     >
       {adding ? (
@@ -132,15 +143,15 @@ export function IntegrationsSettingsPage() {
       ) : mayAdd ? (
         <EmptyState
           icon={PlugSocketIcon}
-          title="Nothing connected yet"
-          description="Add an integration to use its tools in your chats."
+          title={m.integrations_settings_empty_title()}
+          description={m.integrations_settings_empty_description()}
           action={addButton}
         />
       ) : (
         <EmptyState
           icon={PlugSocketIcon}
-          title="No integrations yet"
-          description="An admin turns integrations on for this instance. Once they do, you can connect your account here."
+          title={m.integrations_settings_none_title()}
+          description={m.integrations_settings_none_description()}
         />
       )}
     </Page>
@@ -167,7 +178,9 @@ function IntegrationList({ integrations }: { integrations: ReadonlyArray<UserInt
                   <StatusBadge integration={integration} />
                 </p>
                 <p className="text-muted-foreground truncate text-xs">
-                  {integration.personal ? "Your own server" : manifest.description}
+                  {integration.personal
+                    ? m.integrations_settings_own_server()
+                    : manifest.description(getLocale())}
                 </p>
               </div>
               <HugeiconsIcon
@@ -192,20 +205,26 @@ export function IntegrationSettingsPage({ integrationId }: { integrationId: stri
   const manifest = integration ? integrationLook(integration) : null;
   if (!integration || !manifest)
     return (
-      <Page title="Integration" backTo="/settings/integrations" backLabel="Integrations">
+      <Page
+        title={m.integrations_detail_fallback_title()}
+        backTo="/settings/integrations"
+        backLabel={m.integrations_settings_title()}
+      >
         <EmptyState
           icon={PlugSocketIcon}
-          title="Integration not found"
-          description="It may have been turned off, or it is not available to you."
+          title={m.integrations_detail_not_found_title()}
+          description={m.integrations_detail_not_found_description()}
         />
       </Page>
     );
   return (
     <Page
       title={integration.name}
-      description={server ? "Your MCP server. Only you can use it." : manifest.description}
+      description={
+        server ? m.integrations_detail_own_server_description() : manifest.description(getLocale())
+      }
       backTo="/settings/integrations"
-      backLabel="Integrations"
+      backLabel={m.integrations_settings_title()}
       actions={server ? <ServerActions server={server} onEdit={() => setEditing(true)} /> : null}
     >
       {server && editing ? (
@@ -230,7 +249,11 @@ function IntegrationDetails({
     : [];
   return (
     <>
-      <Section title={accounts.length > 1 ? "Accounts" : "Account"}>
+      <Section
+        title={
+          accounts.length > 1 ? m.integrations_detail_accounts() : m.integrations_detail_account()
+        }
+      >
         <ListCard>
           {accounts.length === 0 ? (
             <NotConnectedRow integration={integration} />
@@ -260,23 +283,23 @@ function IntegrationDetails({
           />
         ))
       ) : integration.tools.length === 0 ? (
-        <Section title="What chats can do">
+        <Section title={m.integrations_detail_tools_title()}>
           <EmptyState
             icon={PlugSocketIcon}
-            title="No tools yet"
+            title={m.integrations_detail_no_tools()}
             description={
               server
-                ? "The server lists none yet. Check again once it does."
-                : "Its tools show once you connect."
+                ? m.integrations_detail_no_tools_server()
+                : m.integrations_detail_no_tools_connect()
             }
           />
         </Section>
       ) : (
-        <Section title="What chats can do">
+        <Section title={m.integrations_detail_tools_title()}>
           <ListCard>
             {integration.tools.map((tool) => (
               <ListRow key={tool.name}>
-                <span className="text-sm">{tool.title}</span>
+                <span className="text-sm">{toolText(integration.kind, tool).title}</span>
               </ListRow>
             ))}
           </ListCard>
@@ -309,17 +332,17 @@ function AccountSettings({
     mutationFn: (input: { tool: string; access: ToolAccess }) =>
       setOwnToolAccess({ data: { integrationId: integration.id, ...input } }),
     onSuccess: (result) => {
-      if (!result.ok) toastError("Could not change the tool.", new Error(result.error));
+      if (!result.ok) toastError(m.integrations_tool_change_error(), new Error(result.error));
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["integrations"] }),
-    onError: (error) => toastError("Could not change the tool.", error),
+    onError: (error) => toastError(m.integrations_tool_change_error(), error),
   });
   return (
     <>
-      <Section title={titled ? name : "In chats"}>
+      <Section title={titled ? name : m.integrations_account_in_chats()}>
         <ListCard>
           <ListRow className="justify-between">
-            <FieldLabel htmlFor={fieldId}>Turn on in new chats</FieldLabel>
+            <FieldLabel htmlFor={fieldId}>{m.integrations_account_offer_by_default()}</FieldLabel>
             <Switch
               id={fieldId}
               checked={account.offerByDefault}
@@ -336,11 +359,15 @@ function AccountSettings({
         />
       ) : null}
       <Section
-        title={titled ? `Tool permissions · ${name}` : "Tool permissions"}
+        title={
+          titled
+            ? m.integrations_permissions_title_named({ name })
+            : m.integrations_permissions_title()
+        }
         description={
           account.authKind === "shared"
-            ? "Chats only read with a key everyone shares. Choose when they may."
-            : "Choose when chats may use each tool. Blocked tools are never offered."
+            ? m.integrations_permissions_shared_description()
+            : m.integrations_permissions_description()
         }
         actions={account.listing ? <CheckToolsButton integrationId={integration.id} /> : null}
       >
@@ -359,8 +386,8 @@ function AccountSettings({
         ) : (
           <EmptyState
             icon={PlugSocketIcon}
-            title="No tools yet"
-            description="The server lists none to this account yet."
+            title={m.integrations_detail_no_tools()}
+            description={m.integrations_detail_no_tools_account()}
           />
         )}
       </Section>
@@ -374,13 +401,13 @@ function CheckToolsButton({ integrationId }: { integrationId: string }) {
   const check = useMutation({
     mutationFn: () => checkOwnTools({ data: { integrationId } }),
     onSuccess: async (result) => {
-      if (!result.ok) toastError("Could not check its tools.", new Error(result.error));
+      if (!result.ok) toastError(m.integrations_check_tools_error(), new Error(result.error));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: personalServersQuery.queryKey }),
         queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
       ]);
     },
-    onError: (error) => toastError("Could not check its tools.", error),
+    onError: (error) => toastError(m.integrations_check_tools_error(), error),
   });
   return (
     <PendingButton
@@ -389,7 +416,7 @@ function CheckToolsButton({ integrationId }: { integrationId: string }) {
       pending={check.isPending}
       onClick={() => check.mutate()}
     >
-      Check again
+      {m.integrations_check_tools()}
     </PendingButton>
   );
 }
@@ -402,14 +429,16 @@ function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button size="icon-sm" variant="ghost" aria-label="Server actions" />}
+        render={
+          <Button size="icon-sm" variant="ghost" aria-label={m.integrations_server_actions()} />
+        }
       >
         <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onEdit}>
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-          {known && !known.ownApp ? "Rename" : "Edit server"}
+          {known && !known.ownApp ? m.common_rename() : m.integrations_server_edit()}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* A menu item cannot hold a spinner; disabled is its pending state. */}
@@ -419,7 +448,7 @@ function ServerActions({ server, onEdit }: { server: PersonalServer; onEdit: () 
           onClick={() => void remove.request(server)}
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-          Remove
+          {m.common_remove()}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -431,13 +460,13 @@ function ServerSection({ server }: { server: PersonalServer }) {
   const { listing } = server;
   const tools = listing?.count ?? 0;
   return (
-    <Section title="Server">
+    <Section title={m.integrations_server_section()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-sm font-medium">{server.config.url}</span>
             <span className="text-muted-foreground truncate text-xs">
-              {listing?.checkError ?? (tools === 1 ? "1 tool" : `${tools} tools`)}
+              {listing?.checkError ?? m.integrations_server_tool_count({ count: tools })}
             </span>
           </div>
           <CheckToolsButton integrationId={server.id} />
@@ -489,7 +518,7 @@ const useConnectionUpdate = (connectionId: string) => {
     },
     onError: (error, _input, context) => {
       if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
-      toastError("Could not save that preference.", error);
+      toastError(m.integrations_preference_save_error(), error);
     },
     onSettled: () =>
       queryClient.isMutating({ mutationKey }) === 1
@@ -498,22 +527,19 @@ const useConnectionUpdate = (connectionId: string) => {
   });
 };
 
-const plural = (count: number, noun: string) =>
-  count === 0 ? null : `${count} ${noun}${count === 1 ? "" : "s"}`;
-
 /** No account yet: the ways in, as the admin allowed them. */
 function NotConnectedRow({ integration }: { integration: UserIntegration }) {
   return (
     <ListRow>
       <IntegrationLogo integrationId={integration.id} variant="tile" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-medium">Not connected</span>
+        <span className="text-sm font-medium">{m.integrations_not_connected()}</span>
         <span className="text-muted-foreground truncate text-xs">
           {!integration.available
-            ? "An admin turned this integration off."
+            ? m.integrations_admin_turned_off()
             : integration.methods.open
-              ? `Turn ${integration.name} on to use it in chats.`
-              : `Connect your ${integration.name} account to use it in chats.`}
+              ? m.integrations_turn_on_to_use({ name: integration.name })
+              : m.integrations_connect_to_use({ name: integration.name })}
         </span>
       </div>
       {integration.available ? <ConnectActions integration={integration} /> : null}
@@ -528,12 +554,12 @@ function AddAccountRow({ integration }: { integration: UserIntegration }) {
     <ListRow>
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-sm font-medium">
-          {replaces ? "Use your own account" : "Add another account"}
+          {replaces ? m.integrations_add_account_own() : m.integrations_add_account_another()}
         </span>
         <span className="text-muted-foreground truncate text-xs">
           {replaces
-            ? "Instead of using it without an account."
-            : "Work and personal, say. Chats ask which to use."}
+            ? m.integrations_add_account_own_description()
+            : m.integrations_add_account_another_description()}
         </span>
       </div>
       <ConnectActions integration={integration} another />
@@ -555,28 +581,36 @@ function AccountRow({
   const disconnect = useMutation({
     mutationFn: () => disconnectIntegration({ data: { connectionId: account.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
-    onError: (error) => toastError("Could not disconnect.", error),
+    onError: (error) => toastError(m.integrations_disconnect_error(), error),
   });
   const { dependents } = account;
   const name = accountName(account);
   const needsReauth = account.status === "needs_reauth";
   const noAccount = usesNoAccount(account.authKind);
   const affected = [
-    plural(dependents.sources, "knowledge source"),
-    plural(dependents.schedules, "schedule"),
-  ].filter(Boolean);
+    dependents.sources ? m.integrations_count_sources({ count: dependents.sources }) : null,
+    dependents.schedules ? m.integrations_count_schedules({ count: dependents.schedules }) : null,
+  ].filter((thing) => thing !== null);
+  // The verb agrees with one count, or with a pair, which is always plural.
+  const affectedCount =
+    affected.length > 1 ? affected.length : dependents.sources || dependents.schedules;
 
   const confirmDisconnect = async () => {
     if (
       await confirm({
-        title: `Disconnect “${name}”?`,
+        title: m.integrations_disconnect_title({ name }),
         description:
           integration.methods.everyone && integration.connections.length === 1
-            ? "Chats go back to using it without an account."
+            ? m.integrations_disconnect_everyone()
             : affected.length
-              ? `Chats lose it, and ${affected.join(" and ")} stop working until you connect it again. Documents already synced stay.`
-              : "Chats lose it until you connect it again.",
-        confirmLabel: "Disconnect",
+              ? m.integrations_disconnect_affected({
+                  count: affectedCount,
+                  things: new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(
+                    affected,
+                  ),
+                })
+              : m.integrations_disconnect_plain(),
+        confirmLabel: m.integrations_disconnect(),
       })
     )
       disconnect.mutate();
@@ -605,27 +639,27 @@ function AccountRow({
           {integration.available ? (
             <AccountBadge account={account} />
           ) : (
-            <Badge variant="outline">Turned off</Badge>
+            <Badge variant="outline">{m.integrations_status_turned_off()}</Badge>
           )}
         </span>
         <span className="text-muted-foreground truncate text-xs">
           {!integration.available
-            ? "An admin turned this integration off."
+            ? m.integrations_admin_turned_off()
             : needsReauth && noAccount
-              ? `${integration.name} changed. Turn it on again to keep using it.`
+              ? m.integrations_account_changed({ name: integration.name })
               : needsReauth
-                ? `Sign in to ${integration.name} again to keep using it.`
+                ? m.integrations_account_sign_in_again({ name: integration.name })
                 : account.authKind === "shared"
-                  ? "Everyone here uses one key, so chats only read."
+                  ? m.integrations_account_shared()
                   : account.authKind === "none"
                     ? addsAccounts(integration)
-                      ? "Used without an account."
-                      : `${integration.name} needs no account.`
+                      ? m.integrations_account_none_used()
+                      : m.integrations_account_none_needed({ name: integration.name })
                     : account.name
                       ? account.accountLabel
                       : several
-                        ? "Name it to tell your accounts apart."
-                        : `Chats use ${integration.name} as this account.`}
+                        ? m.integrations_account_name_hint()
+                        : m.integrations_account_used_as({ name: integration.name })}
         </span>
       </div>
       {canConnect &&
@@ -635,18 +669,20 @@ function AccountRow({
       integration.methods.oauth ? (
         // A call needed more than this sign-in granted; signing in again asks for both.
         <SignInButton integration={integration} connectionId={account.id}>
-          Grant more access
+          {m.integrations_account_grant_more()}
         </SignInButton>
       ) : null}
       {reconnectWithOAuth ? (
         <SignInButton integration={integration} connectionId={account.id}>
-          Reconnect
+          {m.integrations_account_reconnect()}
         </SignInButton>
       ) : needsReauth && canConnect && noAccount && integration.methods.open ? (
-        <TurnOnButton integration={integration}>Turn on again</TurnOnButton>
+        <TurnOnButton integration={integration}>
+          {m.integrations_account_turn_on_again()}
+        </TurnOnButton>
       ) : reconnectWithKey ? (
         <Button size="sm" onClick={() => setKeyOpen(true)}>
-          Reconnect
+          {m.integrations_account_reconnect()}
         </Button>
       ) : null}
       {menu ? (
@@ -656,7 +692,7 @@ function AccountRow({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Actions for ${name}`}
+                aria-label={m.integrations_account_actions({ name })}
                 className="text-muted-foreground"
               />
             }
@@ -665,10 +701,14 @@ function AccountRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
             {noAccount ? null : (
-              <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setRenaming(true)}>
+                {m.common_rename()}
+              </DropdownMenuItem>
             )}
             {canReplaceKey ? (
-              <DropdownMenuItem onClick={() => setKeyOpen(true)}>Replace key</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setKeyOpen(true)}>
+                {m.integrations_account_replace_key()}
+              </DropdownMenuItem>
             ) : null}
             {canDisconnect ? (
               <DropdownMenuItem
@@ -677,7 +717,7 @@ function AccountRow({
                 disabled={disconnect.isPending}
                 onClick={() => void confirmDisconnect()}
               >
-                Disconnect
+                {m.integrations_disconnect()}
               </DropdownMenuItem>
             ) : null}
           </DropdownMenuContent>
@@ -710,9 +750,9 @@ function RenameDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rename account</DialogTitle>
+          <DialogTitle>{m.integrations_rename_title()}</DialogTitle>
           <DialogDescription>
-            Shown in chats and approvals. Leave it empty for {account.accountLabel}.
+            {m.integrations_rename_description({ label: account.accountLabel })}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -724,7 +764,7 @@ function RenameDialog({
           }}
         >
           <Field>
-            <FieldLabel htmlFor={fieldId}>Name</FieldLabel>
+            <FieldLabel htmlFor={fieldId}>{m.common_name()}</FieldLabel>
             <Input
               id={fieldId}
               value={name}
@@ -734,8 +774,8 @@ function RenameDialog({
             />
           </Field>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit">Save</Button>
+            <DialogClose render={<Button variant="outline" />}>{m.common_cancel()}</DialogClose>
+            <Button type="submit">{m.common_save()}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

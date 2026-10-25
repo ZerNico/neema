@@ -3,7 +3,15 @@ import type { AddressInfo } from "node:net";
 import { Cause, Duration, Effect, Exit } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveredServer, StoredOAuthClient } from "../../server/repo.ts";
+import { english } from "~/i18n/localized.ts";
+import { IntegrationRejected } from "../../errors.ts";
 import { mcpOAuth, offersSignIn } from "./auth.ts";
+
+/** What a refusal says, in the English the tests are written in. */
+const reasonOf = (exit: Exit.Exit<unknown, unknown>) => {
+  const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : null;
+  return error instanceof IntegrationRejected ? english(error.reason) : JSON.stringify(exit);
+};
 
 /** What the authorization server saw, to check what this app sent it. */
 const log = {
@@ -218,10 +226,7 @@ describe("signing in to an MCP server", () => {
         pinned: "https://idp.example.com",
       },
     });
-    expect(Exit.isFailure(moved.exit) && Cause.squash(moved.exit.cause)).toMatchObject({
-      _tag: "IntegrationRejected",
-      reason: expect.stringContaining("now signs in through"),
-    });
+    expect(reasonOf(moved.exit)).toContain("now signs in through");
     const same = await started({
       preregistered: { clientId: "admin-client", clientSecret: "x", pinned: base },
     });
@@ -257,14 +262,14 @@ describe("signing in to an MCP server", () => {
     for (const key of ["authorization_endpoint", "token_endpoint"]) {
       metadataExtras = { [key]: "http://login.example.com/oauth" };
       const { exit } = await begin({});
-      expect(JSON.stringify(exit), key).toContain("does not use HTTPS");
+      expect(reasonOf(exit), key).toContain("does not use HTTPS");
     }
   });
 
   it("refuses a sign-in without PKCE", async () => {
     metadataExtras = { code_challenge_methods_supported: ["plain"] };
     const { exit } = await begin({});
-    expect(JSON.stringify(exit)).toContain("PKCE");
+    expect(reasonOf(exit)).toContain("PKCE");
   });
 
   describe("finishing", () => {
@@ -312,10 +317,9 @@ describe("signing in to an MCP server", () => {
       const mixedUp = await finish(found, verifier, "https://evil.example.com");
       const silent = await finish(found, verifier, null);
       for (const exit of [mixedUp, silent])
-        expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toMatchObject({
-          _tag: "IntegrationRejected",
-          reason: "The sign-in came back from another server than it went to, so it was not used.",
-        });
+        expect(reasonOf(exit)).toBe(
+          "The sign-in came back from another server than it went to, so it was not used.",
+        );
       expect(log.tokens.filter((entry) => entry.grant_type === "authorization_code")).toEqual([]);
     });
   });

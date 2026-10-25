@@ -10,6 +10,7 @@ import type { DocumentService } from "~/modules/documents/server/document-servic
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import type { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts";
 import type { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
+import type { LanguageRepo } from "~/modules/language/server/repo.ts";
 import type { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import type { MemoryService } from "~/modules/memory/server/service.ts";
 import type { SkillReader } from "~/modules/skills/server/reader.ts";
@@ -77,6 +78,7 @@ export type McpServices =
   | IntegrationRepo
   | KnowledgeSearch
   | KnowledgeService
+  | LanguageRepo
   | MemoryService
   | ProjectService
   | ProviderRepo

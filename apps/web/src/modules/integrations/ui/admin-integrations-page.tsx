@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Add01Icon, ArrowRight01Icon, PlugSocketIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -41,21 +42,21 @@ export function AdminIntegrationsPage() {
   const add = (
     <Button size="sm" onClick={() => setAdding(true)}>
       <HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
-      Add integration
+      {m.integrations_settings_add()}
     </Button>
   );
 
   return (
     <Page
-      title="Integrations"
-      description="Services people can connect their own accounts to, for chat tools and knowledge sync."
+      title={m.integrations_admin_title()}
+      description={m.integrations_admin_description()}
       actions={data.integrations.length ? add : null}
     >
       {data.integrations.length === 0 ? (
         <EmptyState
           icon={PlugSocketIcon}
-          title="No integrations yet"
-          description="Add one to let people connect their own accounts."
+          title={m.integrations_admin_empty_title()}
+          description={m.integrations_admin_empty_description()}
           action={add}
         />
       ) : (
@@ -63,10 +64,7 @@ export function AdminIntegrationsPage() {
           {data.integrations.map((row) => {
             const look = integrationLook(row);
             if (!look) return null;
-            const people =
-              row.connectionCount === 1
-                ? "1 person connected"
-                : `${row.connectionCount} people connected`;
+            const people = m.integrations_admin_people_connected({ count: row.connectionCount });
             return (
               <Link
                 key={row.id}
@@ -79,7 +77,9 @@ export function AdminIntegrationsPage() {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       {row.name}
-                      {row.enabled ? null : <Badge variant="outline">Off</Badge>}
+                      {row.enabled ? null : (
+                        <Badge variant="outline">{m.integrations_admin_off()}</Badge>
+                      )}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
                       {/* The type only when the name does not already say it. */}
@@ -109,16 +109,16 @@ export function AdminIntegrationsPage() {
 }
 
 /** Any MCP server by its address, the directory's last tile. */
-const CUSTOM_SERVER: DirectoryEntry = {
+const customServer = (): DirectoryEntry => ({
   key: "mcp",
   kind: "mcp",
   server: null,
   integrationId: null,
-  name: "MCP server",
+  name: m.integrations_admin_custom_server(),
   description: mcpManifest.description,
   category: null,
   logo: mcpManifest.logo,
-};
+});
 
 /**
  * One directory of everything an admin can offer. A known server is added as
@@ -169,7 +169,7 @@ function AddIntegrationDialog({
       if (readyAsAdded(entry)) open(result.id);
       else setSettingUp(result.id);
     },
-    onError: () => setError("Could not add the integration."),
+    onError: () => setError(m.integrations_admin_add_error()),
   });
   // Never turned on: nothing of it stays behind.
   const discard = () => {
@@ -205,29 +205,26 @@ function AddIntegrationDialog({
       {row ? (
         <DirectoryDialogContent>
           <DialogHeader>
-            <DialogTitle>Set up {row.name}</DialogTitle>
-            <DialogDescription>
-              Secrets are encrypted at rest and never shown again. People connect their own accounts
-              from Settings.
-            </DialogDescription>
+            <DialogTitle>{m.integrations_admin_setup_title({ name: row.name })}</DialogTitle>
+            <DialogDescription>{m.integrations_admin_secrets_description()}</DialogDescription>
           </DialogHeader>
           <IntegrationSettingsForm
             row={row}
             enable
-            submitLabel="Turn on"
+            submitLabel={m.integrations_admin_turn_on()}
             onPendingChange={setBusy}
             onSaved={() => {
               setSettingUp(null);
               open(row.id);
             }}
-            cancelLabel="Back"
+            cancelLabel={m.common_back()}
             onCancel={discard}
           />
         </DirectoryDialogContent>
       ) : confirming ? (
         <DirectoryDialogContent>
           <DialogHeader>
-            <DialogTitle>Add {confirming.name}</DialogTitle>
+            <DialogTitle>{m.integrations_admin_add_title({ name: confirming.name })}</DialogTitle>
           </DialogHeader>
           <form
             className="flex flex-col gap-6"
@@ -240,9 +237,7 @@ function AddIntegrationDialog({
             <FieldGroup>
               <Field>
                 <DirectoryEntryHeader entry={confirming} />
-                <FieldDescription>
-                  Everyone can connect their own account once it’s added.
-                </FieldDescription>
+                <FieldDescription>{m.integrations_admin_add_ready()}</FieldDescription>
               </Field>
             </FieldGroup>
             {error ? <FieldError>{error}</FieldError> : null}
@@ -253,10 +248,10 @@ function AddIntegrationDialog({
                 disabled={create.isPending}
                 onClick={() => setConfirming(null)}
               >
-                Back
+                {m.common_back()}
               </Button>
               <PendingButton type="submit" pending={create.isPending}>
-                Add
+                {m.common_add()}
               </PendingButton>
             </DialogFooter>
           </form>
@@ -264,16 +259,19 @@ function AddIntegrationDialog({
       ) : (
         <DirectoryDialogContent browsing={entries}>
           <DialogHeader>
-            <DialogTitle>Add integration</DialogTitle>
+            <DialogTitle>{m.integrations_settings_add()}</DialogTitle>
             {create.isPending ? (
-              <DialogDescription>Adding…</DialogDescription>
+              <DialogDescription>{m.integrations_admin_adding()}</DialogDescription>
             ) : error ? (
               <DialogDescription className="text-destructive">{error}</DialogDescription>
             ) : null}
           </DialogHeader>
           <IntegrationDirectory
             entries={entries}
-            custom={{ label: "MCP server", onPick: () => pick(CUSTOM_SERVER) }}
+            custom={{
+              label: m.integrations_admin_custom_server(),
+              onPick: () => pick(customServer()),
+            }}
             onPick={(entry) => {
               if (!create.isPending) pick(entry);
             }}

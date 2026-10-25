@@ -18,6 +18,7 @@ import {
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
@@ -141,6 +142,8 @@ beforeAll(async () => {
             MemoryService.layer,
             // The real registry, over the stub: delegated answers park on it.
             IntegrationApprovals.layer,
+            // Approvals put to the app's person are worded in their language.
+            LanguageRepo.layer,
           ),
           // The real library: these tools read it as the app's own pages do.
           knowledge: Layer.mergeAll(

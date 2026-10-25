@@ -36,12 +36,27 @@ import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { IntegrationModelResult } from "~/modules/integrations/tool-schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import { KnowledgeSourceService } from "~/modules/integrations/server/sync.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { seedEligibleSession } from "../fixtures/eligible-session.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
+import { english, type Localized } from "~/i18n/localized.ts";
+
+/** A refusal as English reads it, so assertions match its words. */
+const worded = (error: unknown) =>
+  error !== null &&
+  typeof error === "object" &&
+  "reason" in error &&
+  typeof error.reason === "function"
+    ? {
+        ...error,
+        _tag: (error as { _tag?: string })._tag,
+        reason: english(error.reason as Localized),
+      }
+    : error;
 
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 5).toString("base64");
 
@@ -325,9 +340,12 @@ beforeAll(async () => {
   const Infra = Layer.mergeAll(Db.layer, KeyCipher.layer).pipe(
     Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })),
   );
-  const Base = Layer.mergeAll(IntegrationRepo.layer, KnowledgeRepo.layer, SyncBus.layer).pipe(
-    Layer.provideMerge(Infra),
-  );
+  const Base = Layer.mergeAll(
+    IntegrationRepo.layer,
+    KnowledgeRepo.layer,
+    LanguageRepo.layer,
+    SyncBus.layer,
+  ).pipe(Layer.provideMerge(Infra));
   const Services = Layer.mergeAll(IntegrationService.layer, IntegrationApprovals.layer).pipe(
     Layer.provideMerge(Base),
   );
@@ -357,7 +375,7 @@ describe("connections", () => {
         ),
       ),
     );
-    expect(refused).toMatchObject({ reason: "This integration has no limits." });
+    expect(worded(refused)).toMatchObject({ reason: "This integration has no limits." });
 
     await run(
       Effect.flatMap(IntegrationService, (s) =>
@@ -421,7 +439,7 @@ describe("connections", () => {
         s.connectApiKey(userId, "outline", { key: "ol_api_bad" }),
       ),
     );
-    expect(failureOf(refused)).toMatchObject({
+    expect(worded(failureOf(refused))).toMatchObject({
       _tag: "IntegrationRejected",
       reason: "The service did not accept that credential.",
     });
@@ -432,7 +450,7 @@ describe("connections", () => {
         Effect.flip(s.connectApiKey(userId, "outline", { other: "x" })),
       ),
     );
-    expect(empty).toMatchObject({ reason: "Enter the API key." });
+    expect(worded(empty)).toMatchObject({ reason: "Enter the API key." });
     expect(apiCalls.length).toBe(calls);
 
     await connectKey(userId);
@@ -501,7 +519,7 @@ describe("connections", () => {
         ),
       );
 
-    expect(failureOf(await complete("another-browser"))).toMatchObject({
+    expect(worded(failureOf(await complete("another-browser")))).toMatchObject({
       _tag: "IntegrationRejected",
       reason:
         "This sign-in link expired or was opened in another browser. Start again from Settings.",
@@ -510,7 +528,7 @@ describe("connections", () => {
     const mine = await outlineFor(userId);
     expect(mine?.connections[0]).toMatchObject({ authKind: "oauth", status: "active" });
     // The state is spent once used.
-    expect(failureOf(await complete(started.state))).toMatchObject({
+    expect(worded(failureOf(await complete(started.state)))).toMatchObject({
       _tag: "IntegrationRejected",
       reason:
         "This sign-in link expired or was opened in another browser. Start again from Settings.",
@@ -550,7 +568,7 @@ describe("connections", () => {
           ),
         ),
       );
-      expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
+      expect(worded(refused)).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
       expect(tokenCalls.length).toBe(before);
       expect((await outlineFor(userId))?.connections[0]).toBeUndefined();
     } finally {
@@ -596,7 +614,7 @@ describe("connections", () => {
         ),
       );
       expect(duringCodeExchange).toBeNull();
-      expect(refused).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
+      expect(worded(refused)).toMatchObject({ reason: expect.stringMatching(/setup changed/) });
       expect((await outlineFor(userId))?.connections[0]).toBeUndefined();
     } finally {
       duringCodeExchange = null;
@@ -1123,14 +1141,14 @@ describe("agents naming integrations", () => {
     try {
       await setOutline({ audience: "private" });
       const refused = await agentRepo((repo) => Effect.flip(repo.create(author, settings)));
-      expect(refused).toMatchObject({ reason: "a selected integration is unavailable" });
+      expect(worded(refused)).toMatchObject({ reason: "a selected integration is unavailable" });
       // Unshared, it is unavailable to a reader of the saved agent, and unnamed.
       expect(await agentRepo((repo) => repo.integrationsFor(author, ["outline"]))).toEqual([
         { id: "outline", name: null, available: false },
       ]);
       await setOutline({ audience: "instance", enabled: false });
       const off = await agentRepo((repo) => Effect.flip(repo.create(author, settings)));
-      expect(off).toMatchObject({ reason: "a selected integration is unavailable" });
+      expect(worded(off)).toMatchObject({ reason: "a selected integration is unavailable" });
     } finally {
       await setOutline({ audience: "instance", enabled: true });
     }
@@ -2475,7 +2493,9 @@ describe("several accounts of one integration", () => {
         Effect.flip(s.connectApiKey(userId, "outline", { key: "ol_api_good" }, bo)),
       ),
     );
-    expect(swapped).toMatchObject({ reason: expect.stringMatching(/another account than “Home”/) });
+    expect(worded(swapped)).toMatchObject({
+      reason: expect.stringMatching(/another account than “Home”/),
+    });
 
     await service((s) => s.disconnect(userId, ada));
     expect(await accountsOf(userId)).toEqual([{ id: bo, name: "Home", status: "active" }]);
@@ -2608,7 +2628,7 @@ describe("several accounts of one integration", () => {
         Effect.flip(s.connectApiKey(userId, "outline", { key: "bo-key" }, ada)),
       ),
     );
-    expect(taken).toMatchObject({ reason: "That account is already connected as “Home”." });
+    expect(worded(taken)).toMatchObject({ reason: "That account is already connected as “Home”." });
     expect((await accountsOf(userId)).map((account) => account.id)).toEqual([ada, bo]);
   });
 
@@ -2660,7 +2680,7 @@ describe("several integrations of one type", () => {
   ) => run(Effect.flatMap(IntegrationService, f));
   const refusal = <A>(
     f: (s: IntegrationService["Service"]) => Effect.Effect<A, IntegrationRejected>,
-  ) => service((s) => Effect.flip(f(s))).then((error) => error.reason);
+  ) => service((s) => Effect.flip(f(s))).then((error) => english(error.reason));
 
   it("keeps two Outlines apart, from their names to where each call goes", async () => {
     await configure();

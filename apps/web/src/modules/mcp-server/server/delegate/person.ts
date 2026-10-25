@@ -9,7 +9,11 @@ import {
   type ElicitationAnswer,
   type PendingIntegrationCall,
 } from "~/modules/integrations/schema.ts";
+import { toolText } from "~/modules/integrations/tool-text.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { m } from "~/paraglide/messages.js";
+import type { Locale } from "~/paraglide/runtime.js";
 import type { PersonAsk } from "../request-state.ts";
 
 const decodeAnswer = Schema.decodeUnknownOption(AnswerElicitationInput);
@@ -72,32 +76,51 @@ export const askable = (call: PendingIntegrationCall, support: { form: boolean; 
       ? support.form
       : call.prompt?.mode === "url" && support.url;
 
-const DECISION = {
+/** The approval form, in the person's language: their client shows these titles. */
+const decisionSchema = (locale: Locale) => ({
   type: "object" as const,
   properties: {
     decision: {
       type: "string" as const,
-      title: "Decision",
+      title: m.integrations_approval_decision({}, { locale }),
       oneOf: [
-        { const: "allow", title: "Allow" },
-        { const: "deny", title: "Deny" },
+        { const: "allow", title: m.integrations_approval_allow({}, { locale }) },
+        { const: "deny", title: m.integrations_approval_deny({}, { locale }) },
       ],
     },
   },
   required: ["decision"],
-};
+});
 
 /** What the in-app card shows, as one message: a person approves what they can see. */
-const approvalMessage = (call: PendingIntegrationCall, service: string) =>
+const approvalMessage = (
+  call: PendingIntegrationCall,
+  service: string,
+  kind: string | undefined,
+  locale: Locale,
+) =>
   [
-    `${call.label} in ${service}?`,
+    m.integrations_approval_question(
+      {
+        label: toolText(kind, { name: call.tool, label: call.label }, locale).label,
+        name: service,
+      },
+      { locale },
+    ),
     call.inFull
-      ? `Everything this sends:\n${call.inFull}`
+      ? `${m.integrations_approval_everything_lead({}, { locale })}\n${call.inFull}`
       : call.details?.length
-        ? call.details.map((detail) => `${detail.key}: ${detail.value || "empty"}`).join("\n")
+        ? call.details
+            .map(
+              (detail) =>
+                `${detail.key}: ${detail.value || m.integrations_approval_empty({}, { locale })}`,
+            )
+            .join("\n")
         : call.summary,
-    call.targets.length ? `Recipients: ${call.targets.join(", ")}` : null,
-    approvalConsequence(call, service),
+    call.targets.length
+      ? m.integrations_approval_recipients_lead({ targets: call.targets.join(", ") }, { locale })
+      : null,
+    approvalConsequence(call, service, locale),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -108,20 +131,24 @@ const approvalMessage = (call: PendingIntegrationCall, service: string) =>
  * the request state says which call each one answers.
  */
 export const askPerson = Effect.fn("mcp.askPerson")(function* (
+  userId: string,
   calls: ReadonlyArray<PendingIntegrationCall>,
   support: { form: boolean; url: boolean },
 ) {
   const integrations = yield* IntegrationRepo;
+  // Their client shows it to them, with no page of ours to know their language.
+  const locale = yield* (yield* LanguageRepo).localeOf(userId);
   const requests: Record<string, InputRequest> = {};
   const asks: PersonAsk[] = [];
   for (const [index, call] of calls.entries()) {
     const key = `ask-${index}`;
-    const service = (yield* integrations.getConfig(call.integrationId))?.name ?? "A service";
+    const config = yield* integrations.getConfig(call.integrationId);
+    const service = config?.name ?? m.integrations_approval_service_fallback({}, { locale });
     const prompt = call.prompt;
     if (call.kind === "approval" && support.form) {
       requests[key] = inputRequired.elicit({
-        message: approvalMessage(call, service),
-        requestedSchema: DECISION,
+        message: approvalMessage(call, service, config?.kind, locale),
+        requestedSchema: decisionSchema(locale),
       });
       asks.push({
         key,
@@ -132,7 +159,10 @@ export const askPerson = Effect.fn("mcp.askPerson")(function* (
       });
     } else if (prompt?.mode === "form" && support.form) {
       requests[key] = inputRequired.elicit({
-        message: `${service} asks: ${prompt.message}`,
+        message: m.integrations_approval_service_asks(
+          { service, message: prompt.message },
+          { locale },
+        ),
         requestedSchema: schemaOf(prompt.fields),
       });
       asks.push({
@@ -144,7 +174,10 @@ export const askPerson = Effect.fn("mcp.askPerson")(function* (
       });
     } else if (prompt?.mode === "url" && support.url) {
       requests[key] = inputRequired.elicitUrl({
-        message: `${service} asks: ${prompt.message}`,
+        message: m.integrations_approval_service_asks(
+          { service, message: prompt.message },
+          { locale },
+        ),
         url: prompt.url,
       });
       asks.push({

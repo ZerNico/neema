@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -104,7 +105,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
       }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: pendingIntegrationCallsQuery.queryKey }),
-    onError: (error) => toastError("Could not send your answer.", error),
+    onError: (error) => toastError(m.integrations_answer_send_error(), error),
   });
 
   return (
@@ -112,7 +113,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
       <CardContent className="flex min-w-0 flex-col gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <IntegrationLogo integrationId={call.integrationId} />
-          <span className="min-w-0 truncate">{name} is asking</span>
+          <span className="min-w-0 truncate">{m.integrations_elicit_asking({ name })}</span>
         </div>
         {prompt.message ? (
           <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap">{prompt.message}</p>
@@ -150,7 +151,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
               ))}
             </FieldGroup>
             <p className="text-muted-foreground text-xs">
-              Goes to {name}. Don’t enter passwords or keys here.
+              {m.integrations_elicit_goes_to({ name })}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -158,7 +159,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
                 type="submit"
                 disabled={answer.isPending || missing(prompt, values)}
               >
-                Send
+                {m.integrations_elicit_send()}
               </Button>
               <Button
                 size="sm"
@@ -167,7 +168,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
                 disabled={answer.isPending}
                 onClick={() => answer.mutate("decline")}
               >
-                Decline
+                {m.integrations_elicit_decline()}
               </Button>
               <Button
                 size="sm"
@@ -176,7 +177,7 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
                 disabled={answer.isPending}
                 onClick={() => answer.mutate("cancel")}
               >
-                Cancel
+                {m.common_cancel()}
               </Button>
             </div>
           </form>
@@ -198,10 +199,14 @@ function UrlPrompt({
 }) {
   const host = new URL(url).host;
   const [opened, setOpened] = useState(false);
+  // The sentence around the host, which is set apart, split where it goes.
+  const opensIn = m.integrations_elicit_opens({ host: "\u0001" }).split("\u0001");
   return (
     <>
       <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">
-        Opens <span className="font-medium">{host}</span>
+        {opensIn[0]}
+        <span className="font-medium">{host}</span>
+        {opensIn[1]}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -210,14 +215,14 @@ function UrlPrompt({
           render={<a href={url} target="_blank" rel="noopener noreferrer" />}
           onClick={() => setOpened(true)}
         >
-          Open {host}
+          {m.integrations_elicit_open({ host })}
           <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} />
         </Button>
         <Button size="sm" disabled={pending || !opened} onClick={() => onAnswer("accept")}>
-          I’m done
+          {m.integrations_elicit_done()}
         </Button>
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => onAnswer("cancel")}>
-          Cancel
+          {m.common_cancel()}
         </Button>
       </div>
     </>
@@ -272,7 +277,7 @@ function ElicitationInput({
           onValueChange={(next) => onChange(next === null ? undefined : String(next))}
         >
           <SelectTrigger id={id}>
-            <SelectValue placeholder="Choose one" />
+            <SelectValue placeholder={m.integrations_elicit_choose()} />
           </SelectTrigger>
           <SelectContent>
             {(field.options ?? []).map((option) => (

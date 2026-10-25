@@ -4,10 +4,10 @@ import { safeRedirect } from "~/modules/auth/redirect.ts";
 import { sessionFromHeaders } from "~/modules/auth/server/auth.ts";
 import { oauthCookies } from "~/modules/integrations/server/oauth.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
-import { runtime } from "~/server/runtime.ts";
-import { reportFailure, settingsPath, signInCookie, withSearch } from "./-sign-in.ts";
 import { m } from "~/paraglide/messages.js";
 import { getLocale } from "~/paraglide/runtime.js";
+import { runtime } from "~/server/runtime.ts";
+import { reportFailure, settingsPath, signInCookie, withSearch } from "./-sign-in.ts";
 
 const readCookie = (header: string | null, name: string) => {
   for (const part of header?.split(";") ?? []) {
@@ -62,20 +62,19 @@ export const Route = createFileRoute("/api/integrations/$integrationId/callback"
             headers.append("set-cookie", signInCookie(params.integrationId, name, "", secure));
           return new Response(null, { status: 302, headers });
         };
-        const current = await sessionFromHeaders(request.headers);
-        // Read here, inside the request: the effects below run on fibers that do not carry it.
+        // Read here, in the request: the effect below runs on fibers that do not carry it.
         const locale = getLocale();
+        const current = await sessionFromHeaders(request.headers);
         const failed = async (error: string) => {
           if (current) await reportFailure(current.session.user.id, returnTo, error);
           return finish(withSearch(returnTo ?? settingsPath(params.integrationId), { error }));
         };
-        if (!current?.approved)
-          return failed(m.app_integration_error_sign_in_first({}, { locale }));
+        if (!current?.approved) return failed(m.integrations_sign_in_here_first());
         if (!code || !state)
           return failed(
             url.searchParams.get("error") === "access_denied"
-              ? m.app_integration_error_cancelled({}, { locale })
-              : m.app_integration_error_unfinished({}, { locale }),
+              ? m.integrations_sign_in_cancelled()
+              : m.integrations_sign_in_unfinished(),
           );
         const result = await runtime.runPromise(
           Effect.flatMap(IntegrationService, (service) =>
@@ -93,8 +92,8 @@ export const Route = createFileRoute("/api/integrations/$integrationId/callback"
                 ok: false as const,
                 error:
                   "reason" in error
-                    ? error.reason
-                    : m.app_integration_error_unavailable({}, { locale }),
+                    ? error.reason(locale)
+                    : m.integrations_sign_in_not_available({}, { locale }),
               }),
             ),
           ),

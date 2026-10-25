@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { ArrowLeft01Icon, LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
@@ -41,7 +42,7 @@ export function SyncedPagesPanel({
   if (detail.isPending)
     return (
       <div className="text-muted-foreground flex items-center gap-2 text-sm">
-        <Spinner /> Loading…
+        <Spinner /> {m.integrations_synced_loading()}
       </div>
     );
   const pages = (detail.data?.documents ?? []).filter(
@@ -89,12 +90,12 @@ export function SyncedPagesPanel({
       <Input
         value={filter}
         onChange={(event) => setFilter(event.target.value)}
-        placeholder={`Filter ${pages.length} ${pages.length === 1 ? "page" : "pages"}…`}
-        aria-label="Filter synced pages"
+        placeholder={m.integrations_synced_filter({ count: pages.length })}
+        aria-label={m.integrations_synced_filter_label()}
       />
       {shown.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          {pages.length ? "No page matches." : "Nothing synced yet."}
+          {pages.length ? m.integrations_synced_no_match() : m.integrations_synced_empty()}
         </p>
       ) : (
         <ul className="flex flex-col">
@@ -119,13 +120,21 @@ export function SyncedPagesPanel({
                   <span className="min-w-0 flex-1 truncate text-sm">{document.title}</span>
                 )}
                 {document.status === "failed" ? (
-                  <span className="text-destructive shrink-0 text-xs">Couldn’t prepare</span>
+                  <span className="text-destructive shrink-0 text-xs">
+                    {m.integrations_synced_failed()}
+                  </span>
                 ) : isPreparing(document) ? (
-                  <span className="text-muted-foreground shrink-0 text-xs">Preparing</span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {m.integrations_synced_preparing()}
+                  </span>
                 ) : searchState(document) === "basic" ? (
-                  <span className="text-muted-foreground shrink-0 text-xs">Basic search</span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {m.integrations_synced_basic_search()}
+                  </span>
                 ) : searchState(document) === "preparing" ? (
-                  <span className="text-muted-foreground shrink-0 text-xs">Preparing search</span>
+                  <span className="text-muted-foreground shrink-0 text-xs">
+                    {m.integrations_synced_preparing_search()}
+                  </span>
                 ) : null}
                 {document.source?.url ? (
                   <a
@@ -133,7 +142,7 @@ export function SyncedPagesPanel({
                     target="_blank"
                     rel="noreferrer"
                     className="text-muted-foreground hover:text-foreground shrink-0"
-                    aria-label={`Open ${document.title} in ${name}`}
+                    aria-label={m.integrations_synced_open_in({ title: document.title, name })}
                   >
                     <HugeiconsIcon icon={LinkSquare02Icon} strokeWidth={2} className="size-3.5" />
                   </a>

@@ -1,5 +1,6 @@
 import { Effect, Schema, Semaphore } from "effect";
 import { Tool, Toolkit } from "effect/ai";
+import { english } from "~/i18n/localized.ts";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
 import type { SourceIndexer } from "~/modules/tools/server/source-indexer.ts";
 import type { ToolGroup } from "~/modules/tools/server/toolset.ts";
@@ -162,8 +163,10 @@ const failure = (error: string, refused = false): IntegrationModelResult =>
 
 const instead = "Say what you would have done instead.";
 
-const allowanceLabel = (manifest: IntegrationManifest, id: string) =>
-  manifest.allowances.find((entry) => entry.id === id)?.label.toLowerCase() ?? id;
+const allowanceLabel = (manifest: IntegrationManifest, id: string) => {
+  const allowance = manifest.allowances.find((entry) => entry.id === id);
+  return allowance ? english(allowance.label).toLowerCase() : id;
+};
 
 /**
  * Whether a failed call certainly sent nothing, so its allowance use can go
@@ -283,7 +286,7 @@ export function prepareIntegrationTools(input: {
           : [],
       );
       const limited = limits.length
-        ? ` The user limited ${integrationName} to these ${manifest.scope!.label.toLowerCase()}: ${limits.join("; ")}.`
+        ? ` The user limited ${integrationName} to these ${english(manifest.scope!.label).toLowerCase()}: ${limits.join("; ")}.`
         : "";
       const choose = several
         ? ` The user has several ${integrationName} accounts; pass \`account\` as one of ${usable.map(({ label }) => `“${label}”`).join(", ")}. When the request does not make clear which, ask the user instead of guessing.`
@@ -429,7 +432,7 @@ export function prepareIntegrationTools(input: {
           return tool.access === "read"
             ? null
             : failure(
-                `${name} could not tell which ${scope.noun} this changes, so it did not run.`,
+                `${name} could not tell which ${english(scope.noun)} this changes, so it did not run.`,
                 true,
               );
         const limit = yield* offer.session.scope;
@@ -437,7 +440,7 @@ export function prepareIntegrationTools(input: {
         const outside = call.scope.filter((item) => !limit.includes(item));
         if (outside.length === 0) return null;
         return failure(
-          `Not permitted: the user limited ${name} to ${limit.length ? `the ${scope.label.toLowerCase()} ${limit.join(", ")}` : `no ${scope.label.toLowerCase()}`}, and this touches ${outside.join(", ")}. ${instead}`,
+          `Not permitted: the user limited ${name} to ${limit.length ? `the ${english(scope.label).toLowerCase()} ${limit.join(", ")}` : `no ${english(scope.label).toLowerCase()}`}, and this touches ${outside.join(", ")}. ${instead}`,
           true,
         );
       });
@@ -466,7 +469,8 @@ export function prepareIntegrationTools(input: {
               ),
             ),
           );
-      if (error._tag === "IntegrationRejected") return Effect.succeed(failure(error.reason));
+      if (error._tag === "IntegrationRejected")
+        return Effect.succeed(failure(english(error.reason)));
       if (error.missingScopes?.length && session.authKind === "oauth")
         return input
           .reportMissingScopes(session, error.missingScopes)
@@ -599,7 +603,7 @@ export function prepareIntegrationTools(input: {
         const counted = offer.unattended !== null && allowance !== undefined;
         if (counted && !(yield* input.allowanceUses.reserve(offer.session.connectionId, allowance)))
           return failure(
-            `Not permitted: a scheduled run may ${allowance.label.toLowerCase()} at most ${allowance.cap} times, and this one has. ${instead}`,
+            `Not permitted: a scheduled run may ${english(allowance.label).toLowerCase()} at most ${allowance.cap} times, and this one has. ${instead}`,
             true,
           );
         const execute = call.execute.pipe(

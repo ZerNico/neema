@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { Add01Icon, PlugSocketIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
@@ -51,18 +53,17 @@ export function AddIntegrationDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Integrations</DialogTitle>
-          <DialogDescription>Choose what this chat can use.</DialogDescription>
+          <DialogTitle>{m.integrations_chat_title()}</DialogTitle>
+          <DialogDescription>{m.integrations_chat_description()}</DialogDescription>
         </DialogHeader>
         {mine.isPending ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <Spinner /> Loading…
+            <Spinner /> {m.integrations_chat_loading()}
           </div>
         ) : connected.length === 0 && !mayAdd ? (
           <div className="text-muted-foreground flex flex-col items-center gap-2 py-6 text-center text-sm">
             <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={2} className="size-5" />
-            No integrations are set up on this instance yet. An admin can add them under Admin →
-            Integrations.
+            {m.integrations_chat_none()}
           </div>
         ) : (
           <ul className="flex min-w-0 flex-col gap-2">
@@ -79,7 +80,7 @@ export function AddIntegrationDialog({
                   <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-2xl">
                     <HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" />
                   </span>
-                  Add integration
+                  {m.integrations_settings_add()}
                 </button>
               </li>
             ) : null}
@@ -91,10 +92,10 @@ export function AddIntegrationDialog({
             className="sm:mr-auto"
             render={<Link to="/settings/integrations" />}
           >
-            Manage integrations
+            {m.integrations_chat_manage()}
           </Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Done
+            {m.common_done()}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -130,11 +131,11 @@ function ChatIntegrationRow({
   const several = here.length > 1;
 
   const action = !integration.available ? (
-    <Badge variant="outline">Turned off</Badge>
+    <Badge variant="outline">{m.integrations_status_turned_off()}</Badge>
   ) : lapsed && here.length === 0 ? (
     integration.methods.oauth ? (
       <SignInButton integration={integration} connectionId={lapsed.id} returnTo={returnTo}>
-        Reconnect
+        {m.integrations_account_reconnect()}
       </SignInButton>
     ) : (
       <Button
@@ -146,13 +147,13 @@ function ChatIntegrationRow({
           />
         }
       >
-        Reconnect
+        {m.integrations_account_reconnect()}
       </Button>
     )
   ) : here.length === 1 ? (
     <Switch
       checked={here[0]!.enabled}
-      aria-label={`Use ${integration.name} in this chat`}
+      aria-label={m.integrations_chat_use({ name: integration.name })}
       onCheckedChange={(enabled) => chat.setEnabled(here[0]!.connectionId, enabled)}
     />
   ) : null;
@@ -164,10 +165,14 @@ function ChatIntegrationRow({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-center gap-2 text-sm font-medium">
             {integration.name}
-            {lapsed && here.length > 0 ? <Badge variant="destructive">Reconnect</Badge> : null}
+            {lapsed && here.length > 0 ? (
+              <Badge variant="destructive">{m.integrations_account_reconnect()}</Badge>
+            ) : null}
           </span>
           {/* Accounts tell themselves apart below; one is just the service. */}
-          <span className="text-muted-foreground truncate text-xs">{manifest.description}</span>
+          <span className="text-muted-foreground truncate text-xs">
+            {manifest.description(getLocale())}
+          </span>
         </div>
         {action}
       </div>
@@ -178,7 +183,7 @@ function ChatIntegrationRow({
               <span className="truncate text-sm">{item.account ?? integration.name}</span>
               <Switch
                 checked={item.enabled}
-                aria-label={`Use ${item.account ?? integration.name} in this chat`}
+                aria-label={m.integrations_chat_use({ name: item.account ?? integration.name })}
                 onCheckedChange={(enabled) => chat.setEnabled(item.connectionId, enabled)}
               />
             </li>

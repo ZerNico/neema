@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { leaseFor } from "~/server/sql.ts";
 import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { alias } from "drizzle-orm/pg-core";
@@ -23,6 +24,8 @@ import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType } from "../catalog.ts";
+import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { IntegrationNotAvailable, IntegrationRejected } from "../errors.ts";
 import {
   accountName,
@@ -52,12 +55,13 @@ const FULL_SYNC_EVERY_MS = 24 * 60 * 60 * 1000;
 
 type SourceRow = typeof knowledgeSources.$inferSelect;
 
-const failureText = (error: AdapterFailure | IntegrationNotAvailable) =>
+const failureText = (error: AdapterFailure | IntegrationNotAvailable): Localized =>
   error._tag === "IntegrationAuthFailed" || error._tag === "IntegrationNotAvailable"
-    ? "The owner’s account is missing or needs reconnecting."
+    ? localized(m.integrations_sync_error_account)
     : error._tag === "IntegrationRejected"
       ? error.reason
-      : error.message;
+      : // The service's own words, or the request's.
+        verbatim(error.message);
 
 export class KnowledgeSourceService extends Context.Service<
   KnowledgeSourceService,
@@ -119,6 +123,8 @@ function make(background: boolean) {
     const knowledge = yield* KnowledgeRepo;
     const integrations = yield* IntegrationService;
     const bus = yield* SyncBus;
+    // A sync runs with nobody watching; its outcome is kept in the owner's language.
+    const languages = yield* LanguageRepo;
 
     const changed = bus
       .publishGlobal({ type: "knowledge.index.changed" })
@@ -245,20 +251,25 @@ function make(background: boolean) {
       if (!mayCreate || !(yield* accountEligible(owner).pipe(Effect.provideService(Db, db))))
         return yield* finish({
           status: "error",
-          lastError: "The collection’s owner can no longer sync it.",
+          lastError: m.integrations_sync_error_owner(
+            {},
+            { locale: yield* languages.localeOf(owner) },
+          ),
         });
       // Always the owner's own chosen account; never anyone else's, nor another of theirs.
       const outcome = yield* Effect.gen(function* () {
         if (!source.connectionId)
           return yield* new IntegrationRejected({
-            reason: "Its account was disconnected. Choose which account it syncs as.",
+            reason: localized(m.integrations_error_sync_account_gone),
           });
         const session = yield* integrations.session(owner, source.connectionId);
         if (session.integration.id !== source.integrationId)
           return yield* new IntegrationNotAvailable({ integrationId: source.integrationId });
         const adapter = session.adapter.knowledge;
         if (!adapter)
-          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+          return yield* new IntegrationRejected({
+            reason: localized(m.integrations_error_cannot_sync),
+          });
         // Incremental only with a cursor and a full listing within the day; a
         // selection edit clears the cursor, since newly picked pages need text.
         const since =
@@ -378,7 +389,7 @@ function make(background: boolean) {
           });
           if (!saved)
             return yield* new IntegrationRejected({
-              reason: "This source changed or the collection can no longer accept its pages.",
+              reason: localized(m.integrations_error_source_changed),
             });
           if (!current) room--;
           stats.synced++;
@@ -394,9 +405,9 @@ function make(background: boolean) {
               }))
             )
               return yield* new IntegrationRejected({
-                reason: "This source is no longer current.",
+                reason: localized(m.integrations_error_source_stale),
               });
-        const gone = listed.missing.includes(source.root.nodeId) ? [`“${source.root.title}”`] : [];
+        const gone = listed.missing.includes(source.root.nodeId) ? [source.root.title] : [];
         return { stats, gone, cursor, oversized, full: since === null };
       }).pipe(
         Effect.map((result) => ({ ok: true as const, ...result })),
@@ -410,7 +421,10 @@ function make(background: boolean) {
           ...(outcome.gone.length
             ? {
                 status: "error",
-                lastError: `${outcome.gone.join(", ")} can no longer be found or opened, so ${outcome.gone.length === 1 ? "its pages were" : "their pages were"} removed. Edit the selection to drop ${outcome.gone.length === 1 ? "it" : "them"}.`,
+                lastError: m.integrations_sync_gone(
+                  { count: outcome.gone.length, titles: outcome.gone.join(", ") },
+                  { locale: yield* languages.localeOf(owner) },
+                ),
                 stats: outcome.stats,
               }
             : { status: "idle" as const, lastError: null, stats: outcome.stats }),
@@ -418,7 +432,10 @@ function make(background: boolean) {
       else {
         if (outcome.error._tag === "IntegrationAuthFailed")
           yield* integrations.reportAuthFailure({ userId: owner, failure: outcome.error });
-        yield* finish({ status: "error", lastError: failureText(outcome.error) });
+        yield* finish({
+          status: "error",
+          lastError: failureText(outcome.error)(yield* languages.localeOf(owner)),
+        });
       }
       yield* changed;
     });
@@ -574,12 +591,14 @@ function make(background: boolean) {
       save: Effect.fn("KnowledgeSourceService.save")(function* (userId, input) {
         if (!(yield* ownedCollection(userId, input.collectionId)))
           return yield* new IntegrationRejected({
-            reason: "Only the collection’s owner can sync into it.",
+            reason: localized(m.integrations_error_owner_only),
           });
         // Saving needs a working account of theirs now; later syncs look it up again.
         const session = yield* integrations.session(userId, input.connectionId);
         if (!findIntegrationType(session.integration.kind)?.knowledgeSource)
-          return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+          return yield* new IntegrationRejected({
+            reason: localized(m.integrations_error_cannot_sync),
+          });
         const integrationId = session.integration.id;
         const root = { ...input.root, rules: [...input.root.rules] };
         const row = yield* db
@@ -639,7 +658,9 @@ function make(background: boolean) {
           )
           .pipe(Effect.orDie);
         if (!row)
-          return yield* new IntegrationRejected({ reason: "That source no longer exists." });
+          return yield* new IntegrationRejected({
+            reason: localized(m.integrations_error_source_gone),
+          });
         yield* kick;
         return toView(row, true, true, session.account);
       }),
@@ -667,7 +688,9 @@ function make(background: boolean) {
           const session = yield* integrations.session(userId, connectionId);
           const adapter = session.adapter.knowledge;
           if (!adapter)
-            return yield* new IntegrationRejected({ reason: "This integration cannot sync." });
+            return yield* new IntegrationRejected({
+              reason: localized(m.integrations_error_cannot_sync),
+            });
           return yield* adapter
             .browse(session, parentId)
             .pipe(

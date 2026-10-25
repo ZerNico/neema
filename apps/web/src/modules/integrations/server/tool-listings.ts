@@ -1,8 +1,10 @@
+import { m } from "~/paraglide/messages.js";
 import { Duration, Effect } from "effect";
 import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { findIntegrationType, INTEGRATION_TYPES } from "../catalog.ts";
+import { english, type Localized, localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationRejected } from "../errors.ts";
 import { usesNoAccount, type IntegrationConnectionView, type ToolListingView } from "../schema.ts";
 import type { Credential } from "./adapter.ts";
@@ -20,8 +22,8 @@ const SWEEP_BATCHES = 20;
 const failureReason = (error: { _tag: string }) =>
   error._tag === "IntegrationAuthFailed"
     ? "The server refused the account’s sign-in."
-    : "reason" in error && typeof error.reason === "string"
-      ? error.reason
+    : error instanceof IntegrationRejected
+      ? english(error.reason)
       : "message" in error && typeof error.message === "string"
         ? error.message
         : "The server could not be reached.";
@@ -68,24 +70,29 @@ export const makeToolListings = (deps: {
       const lister = adapter?.listing;
       if (!row || !manifest || !adapter || !lister)
         return yield* new IntegrationRejected({
-          reason: "This integration does not list its own tools.",
+          reason: localized(m.integrations_error_not_listed),
         });
       const token = yield* repo.startListing(integrationId, connectionId);
-      if (!token) return yield* new IntegrationRejected({ reason: "This account was removed." });
+      if (!token)
+        return yield* new IntegrationRejected({
+          reason: localized(m.integrations_error_account_removed),
+        });
       // Recorded only for the setup the check started under: a move meanwhile drops it.
       const started = { token, revision: row.revision };
       const listingId = connectionId ?? integrationId;
-      const fail = (reason: string) =>
+      // Kept in English: one listing may be read by several admins, each in their own language.
+      const fail = (reason: Localized) =>
         repo
           .recordListing(
             listingId,
             started,
-            { error: reason },
+            { error: english(reason) },
             new Date(Date.now() + LISTING_RETRY_MS),
           )
           .pipe(Effect.andThen(Effect.fail(new IntegrationRejected({ reason }))));
       // A switched-off integration reaches nobody, the admin's key included.
-      if (!row.enabled) return yield* fail(`${row.name} is turned off.`);
+      if (!row.enabled)
+        return yield* fail(localized(m.integrations_error_turned_off, { name: row.name }));
       const normalized = adapter.normalizeConfig(row.config);
       if ("error" in normalized) return yield* fail(normalized.error);
 
@@ -94,16 +101,16 @@ export const makeToolListings = (deps: {
       const session = connectionId
         ? yield* Effect.gen(function* () {
             const connection = yield* repo.getConnectionById(connectionId);
-            if (!connection) return yield* fail("This account was removed.");
+            if (!connection) return yield* fail(localized(m.integrations_error_account_removed));
             owner = connection.userId;
             // Their own credential, used unattended by the sweep only while the account may
             // still act here, as its own requests must: approved, not banned, and allowed in.
             const eligible = yield* accountEligible(connection.userId).pipe(
               Effect.provideService(Db, db),
             );
-            if (!eligible) return yield* fail("Its owner can no longer use this integration.");
+            if (!eligible) return yield* fail(localized(m.integrations_error_owner_cannot_use));
             return yield* sessionFor(connection.userId, connectionId).pipe(
-              Effect.catch(() => fail("Its owner can no longer use this integration.")),
+              Effect.catch(() => fail(localized(m.integrations_error_owner_cannot_use))),
             );
           })
         : yield* Effect.gen(function* () {
@@ -116,7 +123,7 @@ export const makeToolListings = (deps: {
             );
             if (methods.open === "none") return probe(normalized.config, { kind: "none" });
             const shared = methods.open === "shared" ? yield* repo.sharedCredential(row) : null;
-            if (!shared) return yield* fail("It lists its tools to each account that connects.");
+            if (!shared) return yield* fail(localized(m.integrations_error_lists_per_account));
             const credential: Credential = { kind: "api_key", values: shared };
             return probe(normalized.config, credential);
           });
@@ -127,7 +134,7 @@ export const makeToolListings = (deps: {
       const previous = all.flatMap((listing) => listing.tools ?? []);
       const listed = yield* lister
         .list(session, integrationId, previous)
-        .pipe(Effect.catch((error) => fail(failureReason(error))));
+        .pipe(Effect.catch((error) => fail(verbatim(failureReason(error)))));
       const next = new Date(Date.now() + (listed.recheckAfterMs ?? LISTING_RECHECK_MS));
       // A newer check, or the admin moving the server, made this listing stale: drop it.
       const recorded = yield* repo.recordListing(
@@ -138,7 +145,7 @@ export const makeToolListings = (deps: {
       );
       if (!recorded)
         return yield* new IntegrationRejected({
-          reason: "Another check ran at the same time. Check again.",
+          reason: localized(m.integrations_error_check_raced),
         });
       // Most checks find what was there; only a change is news, and an account's only to its owner.
       const changed =

@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -16,7 +17,7 @@ export function useDeletePersonalServer() {
       deletePersonalServer({ data: { integrationId: target.id } }),
     onSuccess: async (result) => {
       if (!result.ok) {
-        toastError("Could not remove it.", new Error(result.error));
+        toastError(m.integrations_server_remove_error(), new Error(result.error));
         return;
       }
       await navigate({ to: "/settings/integrations" });
@@ -25,14 +26,14 @@ export function useDeletePersonalServer() {
         queryClient.invalidateQueries({ queryKey: myIntegrationsQuery.queryKey }),
       ]);
     },
-    onError: (error) => toastError("Could not remove it.", error),
+    onError: (error) => toastError(m.integrations_server_remove_error(), error),
   });
   const request = async (target: PersonalServer) => {
     if (
       await confirm({
-        title: `Remove ${target.name}?`,
-        description: "Chats, agents and schedules stop using it. Past answers keep what it found.",
-        confirmLabel: "Remove",
+        title: m.integrations_server_remove_title({ name: target.name }),
+        description: m.integrations_server_remove_description(),
+        confirmLabel: m.common_remove(),
       })
     )
       remove.mutate(target);

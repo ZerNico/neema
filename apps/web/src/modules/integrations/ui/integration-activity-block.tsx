@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +26,7 @@ import {
 import { decideIntegrationCall } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { useIntegrationDirectory } from "../client/directory.ts";
+import { toolText } from "../tool-text.ts";
 import { ElicitationCard } from "./elicitation-card.tsx";
 
 /**
@@ -40,6 +43,10 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   const [open, setOpen] = useState(false);
   const directory = useIntegrationDirectory();
   const name = directory.name(activity.integrationId);
+  const toolLabel = toolText(directory.find(activity.integrationId)?.kind, {
+    name: activity.tool,
+    label: activity.label,
+  }).label;
   // A server's own tools have no summary of their own, only their arguments:
   // those are for whoever wants them, so the row says what the call was.
   const argumentsOnly = directory.find(activity.integrationId)?.manifest.toolSource === "listed";
@@ -48,20 +55,24 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
   const failed = activity.status === "error";
   const asking = waiting?.kind === "elicitation" && waiting.prompt ? waiting : null;
   const label = asking
-    ? `Waiting for your answer: ${activity.label}`
+    ? m.integrations_activity_waiting_answer({ label: toolLabel })
     : waiting
-      ? `Waiting for your approval: ${activity.label}`
+      ? m.integrations_activity_waiting_approval({ label: toolLabel })
       : activity.refused
-        ? `${activity.label}: not done`
+        ? m.integrations_activity_refused({ label: toolLabel })
         : failed
-          ? `${activity.label}: didn’t work`
-          : activity.label;
+          ? m.integrations_activity_failed({ label: toolLabel })
+          : toolLabel;
   const detail = [
     activity.account,
     shownSummary,
-    activity.sources?.length ? `${activity.sources.length} results` : null,
+    activity.sources?.length
+      ? m.integrations_activity_results({ count: activity.sources.length })
+      : null,
     activity.decidedIn
-      ? `${activity.decidedIn.decision === "allow" ? "Approved" : "Declined"} in ${activity.decidedIn.app}`
+      ? activity.decidedIn.decision === "allow"
+        ? m.integrations_activity_approved_in({ app: activity.decidedIn.app })
+        : m.integrations_activity_declined_in({ app: activity.decidedIn.app })
       : null,
   ]
     .filter(Boolean)
@@ -86,7 +97,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
         // A new question starts a fresh form, never one filled in for the last.
         <ElicitationCard key={asking.promptId} call={asking} name={name} />
       ) : waiting ? (
-        <ApprovalCard call={waiting} name={name} label={activity.label} />
+        <ApprovalCard call={waiting} name={name} label={toolLabel} />
       ) : null}
       {!activity.error && !activity.link && !hiddenSummary ? (
         <div className={cn(activityRowClassName, "mb-2")} aria-label={`${name}: ${label}`}>
@@ -155,22 +166,22 @@ function ApprovalCard({
       decideIntegrationCall({ data: { callId: call.callId, decision } }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: pendingIntegrationCallsQuery.queryKey }),
-    onError: (error) => toastError("Could not send your answer.", error),
+    onError: (error) => toastError(m.integrations_answer_send_error(), error),
   });
-  const consequence = approvalConsequence(call, name);
+  const consequence = approvalConsequence(call, name, getLocale());
   return (
     <Card className="mb-3 gap-0 py-4">
       <CardContent className="flex min-w-0 flex-col gap-3 px-4">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <IntegrationLogo integrationId={call.integrationId} />
           <span className="min-w-0 truncate">
-            {label} in {name}?
+            {m.integrations_approval_question({ label, name })}
           </span>
         </div>
         {call.inFull ? (
           // The short list would have hidden something: everything, as it is sent.
           <pre
-            aria-label="Everything this sends"
+            aria-label={m.integrations_approval_everything()}
             className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
           >
             {call.inFull}
@@ -181,7 +192,9 @@ function ApprovalCard({
             {call.details.map((entry) => (
               <div key={entry.key} className="contents">
                 <dt className="text-muted-foreground font-mono">{entry.key}</dt>
-                <dd className="min-w-0 [overflow-wrap:anywhere]">{entry.value || "empty"}</dd>
+                <dd className="min-w-0 [overflow-wrap:anywhere]">
+                  {entry.value || m.integrations_approval_empty()}
+                </dd>
               </div>
             ))}
           </dl>
@@ -189,7 +202,7 @@ function ApprovalCard({
           <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">{call.summary}</p>
         ) : null}
         {call.targets.length > 0 ? (
-          <ul className="flex flex-wrap gap-1" aria-label="Recipients">
+          <ul className="flex flex-wrap gap-1" aria-label={m.integrations_approval_recipients()}>
             {call.targets.map((target) => (
               <li key={target}>
                 <Badge variant="secondary">{target}</Badge>
@@ -200,7 +213,7 @@ function ApprovalCard({
         <p className="text-muted-foreground text-xs">{consequence}</p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate("once")}>
-            Allow
+            {m.integrations_approval_allow()}
           </Button>
           <Button
             size="sm"
@@ -208,7 +221,7 @@ function ApprovalCard({
             disabled={decide.isPending}
             onClick={() => decide.mutate("deny")}
           >
-            Deny
+            {m.integrations_approval_deny()}
           </Button>
           {call.access !== "destructive" ? (
             <Button
@@ -217,7 +230,7 @@ function ApprovalCard({
               disabled={decide.isPending}
               onClick={() => decide.mutate("conversation")}
             >
-              Always allow in this chat
+              {m.integrations_approval_always()}
             </Button>
           ) : null}
         </div>

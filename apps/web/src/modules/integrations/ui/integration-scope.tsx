@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { ListCard, Section } from "~/ui/page-shell.tsx";
@@ -41,7 +43,7 @@ export function IntegrationScopeSection({
   const manifest = findIntegrationType(integration.kind)!;
   const scope = manifest.scope!;
   const saved = connection.scope;
-  const noun = scope.label.toLowerCase();
+  const items = scope.plural(getLocale());
   const id = useId();
   const queryClient = useQueryClient();
   const [limited, setLimited] = useState(saved !== null);
@@ -77,7 +79,7 @@ export function IntegrationScopeSection({
   );
 
   return (
-    <Section title={scope.label}>
+    <Section title={scope.label(getLocale())}>
       <ListCard>
         <RadioGroup
           variant="list"
@@ -88,13 +90,17 @@ export function IntegrationScopeSection({
             if (!next) onChange(null);
             else onChange(picked);
           }}
-          aria-label={`Which ${noun} chats reach`}
+          aria-label={m.integrations_scope_which({ items })}
         >
-          {choice("all", `All ${noun}`, `Everything this account can see in ${integration.name}.`)}
+          {choice(
+            "all",
+            m.integrations_scope_all({ items }),
+            m.integrations_scope_all_description({ name: integration.name }),
+          )}
           {choice(
             "some",
-            `Only selected ${noun}`,
-            "Nothing outside them is searched, read or changed.",
+            m.integrations_scope_some({ items }),
+            m.integrations_scope_some_description(),
           )}
         </RadioGroup>
         {limited ? (
@@ -133,11 +139,11 @@ function ScopePicker({
   onToggle: (item: string, on: boolean) => void;
 }) {
   const id = useId();
-  const noun = scope.label.toLowerCase();
+  const items = scope.plural(getLocale());
   const [filter, setFilter] = useState("");
   const options = useQuery(integrationScopeOptionsQuery(connectionId));
   const known = options.data?.ok ? options.data.options : [];
-  const items: ReadonlyArray<ScopeOption> = [
+  const listed: ReadonlyArray<ScopeOption> = [
     ...known,
     ...picked
       .filter((item) => !known.some((option) => option.id === item))
@@ -145,31 +151,33 @@ function ScopePicker({
   ].toSorted((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
   const query = filter.trim().toLowerCase();
   const shown = query
-    ? items.filter((item) => `${item.label} ${item.detail ?? ""}`.toLowerCase().includes(query))
-    : items;
+    ? listed.filter((item) => `${item.label} ${item.detail ?? ""}`.toLowerCase().includes(query))
+    : listed;
 
   return (
     <div className="border-border flex flex-col border-t">
       <div className="flex min-h-15 items-center gap-3 px-4 py-3">
         {options.isPending ? (
           <Skeleton className="h-9 w-64" />
-        ) : items.length > FILTER_FROM ? (
+        ) : listed.length > FILTER_FROM ? (
           <SearchInput
             className="max-w-64"
-            placeholder={`Filter ${noun}`}
-            aria-label={`Filter ${noun}`}
+            placeholder={m.integrations_scope_filter({ items })}
+            aria-label={m.integrations_scope_filter({ items })}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
         ) : null}
         <span className="text-muted-foreground ml-auto text-sm tabular-nums">
-          {picked.length ? `${picked.length} selected` : "None selected"}
+          {picked.length
+            ? m.integrations_scope_selected({ count: picked.length })
+            : m.integrations_scope_none_selected()}
         </span>
       </div>
       {options.isPending ? (
         // As tall as the list it stands in for, so nothing jumps when it arrives.
         <ul aria-busy className={cn(LIST, "overflow-hidden")}>
-          <li className="sr-only">Loading {noun}…</li>
+          <li className="sr-only">{m.integrations_scope_loading({ items })}</li>
           {SKELETON_WIDTHS.map((width) => (
             <li key={width} className={ROW}>
               <Skeleton className="size-4" />
@@ -187,7 +195,7 @@ function ScopePicker({
         </p>
       ) : shown.length === 0 ? (
         <p className="text-muted-foreground border-border border-t px-4 py-3 text-sm">
-          No {noun} match.
+          {m.integrations_scope_no_match({ items })}
         </p>
       ) : (
         <ul className={cn(LIST, "overflow-y-auto")}>

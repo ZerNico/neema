@@ -1,4 +1,5 @@
 import type { ComponentProps, ComponentType } from "react";
+import type { Localized } from "~/i18n/localized.ts";
 import { INTEGRATION_TYPES } from "../catalog.ts";
 import { integrationLook } from "../client/directory.ts";
 import type { IntegrationCategory } from "../manifest.ts";
@@ -15,7 +16,7 @@ export interface DirectoryEntry {
   /** Set when it is an integration already set up, which picking only connects. */
   readonly integrationId: string | null;
   readonly name: string;
-  readonly description: string;
+  readonly description: Localized;
   /** Null for a server added by address, found under All only. */
   readonly category: IntegrationCategory | null;
   readonly logo: ComponentType<ComponentProps<"svg">>;

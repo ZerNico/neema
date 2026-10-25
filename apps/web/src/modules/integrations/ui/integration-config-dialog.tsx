@@ -1,5 +1,8 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import { localized } from "~/i18n/localized.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
@@ -48,19 +51,16 @@ export function IntegrationConfigDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit {row.name}</DialogTitle>
-          <DialogDescription>
-            Secrets are encrypted at rest and never shown again. People connect their own accounts
-            from Settings.
-          </DialogDescription>
+          <DialogTitle>{m.integrations_config_title({ name: row.name })}</DialogTitle>
+          <DialogDescription>{m.integrations_admin_secrets_description()}</DialogDescription>
         </DialogHeader>
         <IntegrationSettingsForm
           row={row}
           enable={row.enabled}
-          submitLabel="Save"
+          submitLabel={m.common_save()}
           onPendingChange={setBusy}
           onSaved={() => onOpenChange(false)}
-          cancelLabel="Cancel"
+          cancelLabel={m.common_cancel()}
           onCancel={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -131,20 +131,24 @@ export function IntegrationSettingsForm({
   const noWay = choosesWays && !ownClient && !allowApiKeys;
   const ways: IntegrationField = {
     key: "ways",
-    label: "How people connect",
+    label: localized(m.integrations_config_ways_label),
     kind: "choices",
     required: true,
-    ...(noWay ? { description: "Pick at least one." } : {}),
+    ...(noWay ? { description: localized(m.integrations_config_ways_pick) } : {}),
     options: [
       {
         value: "oauth",
-        label: "Sign in",
-        description: `Through an OAuth app you register with ${manifest.name}.`,
+        label: localized(m.integrations_config_way_oauth),
+        description: localized(m.integrations_config_way_oauth_description, {
+          name: manifest.name,
+        }),
       },
       {
         value: "keys",
-        label: "Personal API keys",
-        description: `People paste a key from their own ${manifest.name} account.`,
+        label: localized(m.integrations_config_way_keys),
+        description: localized(m.integrations_config_way_keys_description, {
+          name: manifest.name,
+        }),
       },
     ],
   };
@@ -184,7 +188,7 @@ export function IntegrationSettingsForm({
       await queryClient.invalidateQueries({ queryKey: adminIntegrationsQuery.queryKey });
       onSaved();
     },
-    onError: () => setError("Could not save the integration."),
+    onError: () => setError(m.integrations_config_save_error()),
   });
   const fieldControl = (field: IntegrationField) => (
     <IntegrationFieldControl
@@ -225,7 +229,7 @@ export function IntegrationSettingsForm({
     >
       <FieldGroup>
         <Field>
-          <FieldLabel htmlFor={`${fieldId}-name`}>Name</FieldLabel>
+          <FieldLabel htmlFor={`${fieldId}-name`}>{m.common_name()}</FieldLabel>
           <Input
             id={`${fieldId}-name`}
             value={name}
@@ -233,21 +237,21 @@ export function IntegrationSettingsForm({
             onChange={(event) => setName(event.target.value)}
             disabled={save.isPending}
           />
-          <FieldDescription>Shown in chats and @mentions.</FieldDescription>
+          <FieldDescription>{m.integrations_config_name_description()}</FieldDescription>
         </Field>
         <Field>
           <FieldLabel htmlFor={`${fieldId}-description`}>
-            Description <OptionalMark />
+            {m.common_description()} <OptionalMark />
           </FieldLabel>
           <Input
             id={`${fieldId}-description`}
             value={description}
             maxLength={160}
-            placeholder={ownDescription}
+            placeholder={ownDescription(getLocale())}
             onChange={(event) => setDescription(event.target.value)}
             disabled={save.isPending}
           />
-          <FieldDescription>What people see when they choose what to connect.</FieldDescription>
+          <FieldDescription>{m.integrations_config_description_description()}</FieldDescription>
         </Field>
         {shownFields.map(fieldControl)}
         {showSharedKey && manifest.sharedCredential
@@ -257,14 +261,16 @@ export function IntegrationSettingsForm({
                 id={`${fieldId}-shared-${field.key}`}
                 field={{
                   ...field,
-                  ...(row.sharedCredentialConfigured ? { placeholder: "Unchanged" } : {}),
+                  ...(row.sharedCredentialConfigured
+                    ? { placeholder: localized(m.integrations_oauth_secret_unchanged) }
+                    : {}),
                 }}
                 value={shared[field.key] ?? ""}
                 onChange={(value) => setShared((current) => ({ ...current, [field.key]: value }))}
                 disabled={save.isPending}
               >
                 <FieldDescription>
-                  Everyone uses it, so chats only ever read with it.
+                  {m.integrations_config_shared_key_description()}
                 </FieldDescription>
               </IntegrationFieldControl>
             ))
@@ -272,7 +278,9 @@ export function IntegrationSettingsForm({
         {showOAuth && optionalClient ? (
           <Field>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={`${fieldId}-own-client`}>Registered app</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-own-client`}>
+                {m.integrations_config_registered_app()}
+              </FieldLabel>
               <Switch
                 id={`${fieldId}-own-client`}
                 checked={ownClient}
@@ -281,7 +289,7 @@ export function IntegrationSettingsForm({
               />
             </div>
             <FieldDescription>
-              For a sign-in that only accepts apps registered with it.
+              {m.integrations_config_registered_app_description()}
             </FieldDescription>
           </Field>
         ) : null}
@@ -302,7 +310,9 @@ export function IntegrationSettingsForm({
         {manifest.apiKey && !manifest.apiKey.when && !choosesWays ? (
           <Field>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={`${fieldId}-keys`}>Allow personal API keys</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-keys`}>
+                {m.integrations_config_allow_keys()}
+              </FieldLabel>
               <Switch
                 id={`${fieldId}-keys`}
                 checked={allowApiKeys}
@@ -311,7 +321,7 @@ export function IntegrationSettingsForm({
               />
             </div>
             <FieldDescription>
-              People can paste a key from their own {manifest.name} account instead of signing in.
+              {m.integrations_config_allow_keys_description({ name: manifest.name })}
             </FieldDescription>
           </Field>
         ) : null}

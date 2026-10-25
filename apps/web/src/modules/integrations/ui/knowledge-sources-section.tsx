@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -60,8 +62,6 @@ import { IntegrationLogo } from "./integration-logo.tsx";
 import { useIntegrationDirectory } from "../client/directory.ts";
 import { openSyncedPages } from "./open-synced-pages.tsx";
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
 /**
  * What the picker works on: a new source for an integration, or an existing
  * one, and the account it syncs as; null when that account was disconnected.
@@ -72,13 +72,18 @@ export type SourceTarget = {
   sourceId?: string;
 };
 
-const pages = (count: number) => `${count} ${count === 1 ? "page" : "pages"}`;
-
 const selectionSummary = (root: SourceRoot) => {
   const includes = root.rules.filter((rule) => rule.mode === "include").length;
   const excludes = root.rules.filter((rule) => rule.mode === "exclude").length;
-  if (root.mode === "all") return excludes ? `Everything except ${pages(excludes)}` : "Everything";
-  return `${pages(includes)} picked${excludes ? `, ${excludes} left out` : ""}`;
+  if (root.mode === "all")
+    return excludes
+      ? m.integrations_sources_everything_except({
+          pages: m.integrations_sources_pages({ count: excludes }),
+        })
+      : m.integrations_sources_everything();
+  return excludes
+    ? m.integrations_sources_picked_excluded({ count: includes, excluded: excludes })
+    : m.integrations_sources_picked({ count: includes });
 };
 
 /**
@@ -100,7 +105,7 @@ export function KnowledgeSourcesSection({
   const list = sources.data ?? [];
   if (list.length === 0) return null;
   return (
-    <Section title="Synced from">
+    <Section title={m.integrations_sources_title()}>
       <ListCard>
         {list.map((source) => (
           <SourceRow
@@ -138,12 +143,12 @@ function SourceRow({
   const sync = useMutation({
     mutationFn: () => syncKnowledgeSource({ data: { sourceId: source.id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not start the sync.", error),
+    onError: (error) => toastError(m.integrations_sources_sync_error(), error),
   });
   const remove = useMutation({
     mutationFn: () => removeKnowledgeSource({ data: { sourceId: source.id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not remove the source.", error),
+    onError: (error) => toastError(m.integrations_sources_remove_error(), error),
   });
   const preparing = documents.filter(
     (document) =>
@@ -166,31 +171,42 @@ function SourceRow({
       await refresh();
       toast.success(
         reembedded === 0
-          ? "Nothing needed preparing again."
-          : `Preparing search again for ${pages(reembedded)}.`,
+          ? m.integrations_sources_retry_nothing()
+          : m.integrations_sources_retry_started({ count: reembedded }),
       );
     },
-    onError: (error) => toastError("Could not prepare search again.", error),
+    onError: (error) => toastError(m.integrations_sources_retry_error(), error),
   });
   const status = !source.connected
     ? source.canEdit
-      ? `Paused: ${name} isn’t connected. Pages already synced stay searchable.`
-      : `Paused: the owner’s ${name} account is disconnected. Pages already synced stay searchable.`
+      ? m.integrations_sources_paused_own({ name })
+      : m.integrations_sources_paused_owner({ name })
     : (source.lastError ??
       [
         selectionSummary(source.root),
-        preparing ? `${preparing} preparing` : null,
-        failed ? `${failed} couldn’t be prepared` : null,
-        preparingSearch ? `${preparingSearch} preparing search` : null,
-        basicSearch ? `${basicSearch} on basic search only` : null,
-        source.stats?.elsewhere
-          ? `${pages(source.stats.elsewhere)} already synced by another source`
+        preparing ? m.integrations_sources_preparing({ count: preparing }) : null,
+        failed ? m.integrations_sources_failed({ count: failed }) : null,
+        preparingSearch
+          ? m.integrations_sources_preparing_search({ count: preparingSearch })
           : null,
-        source.stats?.tooLarge ? `${source.stats.tooLarge} too large` : null,
-        source.stats?.overLimit ? `${source.stats.overLimit} over the collection limit` : null,
+        basicSearch ? m.integrations_sources_basic_search({ count: basicSearch }) : null,
+        source.stats?.elsewhere
+          ? m.integrations_sources_elsewhere({ count: source.stats.elsewhere })
+          : null,
+        source.stats?.tooLarge
+          ? m.integrations_sources_too_large({ count: source.stats.tooLarge })
+          : null,
+        source.stats?.overLimit
+          ? m.integrations_sources_over_limit({ count: source.stats.overLimit })
+          : null,
         source.lastSyncedAt
-          ? `synced ${dateFormat.format(new Date(source.lastSyncedAt))}`
-          : "not synced yet",
+          ? m.integrations_sources_synced_at({
+              date: new Intl.DateTimeFormat(getLocale(), {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(source.lastSyncedAt)),
+            })
+          : m.integrations_sources_not_synced(),
       ]
         .filter(Boolean)
         .join(" · "));
@@ -201,9 +217,11 @@ function SourceRow({
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-2 text-sm font-medium">
           <span className="min-w-0 truncate">{source.root.title}</span>
-          {source.status === "syncing" ? <Badge variant="secondary">Syncing</Badge> : null}
+          {source.status === "syncing" ? (
+            <Badge variant="secondary">{m.integrations_sources_syncing()}</Badge>
+          ) : null}
           {source.status === "error" || !source.connected ? (
-            <Badge variant="destructive">Needs attention</Badge>
+            <Badge variant="destructive">{m.integrations_sources_attention()}</Badge>
           ) : null}
         </span>
         <span className="text-muted-foreground text-xs">{status}</span>
@@ -215,7 +233,7 @@ function SourceRow({
           pending={retrySearch.isPending}
           onClick={() => retrySearch.mutate()}
         >
-          Retry failed
+          {m.integrations_sources_retry_failed()}
         </PendingButton>
       ) : null}
       {documents.length ? (
@@ -224,7 +242,7 @@ function SourceRow({
           variant="outline"
           onClick={() => openSyncedPages(panel, source.collectionId, source.id, source.root.title)}
         >
-          {pages(documents.length)}
+          {m.integrations_sources_pages({ count: documents.length })}
         </Button>
       ) : null}
       {source.canEdit ? (
@@ -234,7 +252,7 @@ function SourceRow({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Edit what is synced from ${source.root.title}`}
+                aria-label={m.integrations_sources_edit_label({ title: source.root.title })}
                 onClick={onEdit}
               >
                 <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
@@ -242,7 +260,7 @@ function SourceRow({
               <PendingButton
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Sync ${source.root.title} now`}
+                aria-label={m.integrations_sources_sync_now_label({ title: source.root.title })}
                 pending={sync.isPending}
                 disabled={source.status === "syncing"}
                 onClick={() => sync.mutate()}
@@ -262,20 +280,20 @@ function SourceRow({
                 />
               }
             >
-              Reconnect {name}
+              {m.integrations_sources_reconnect({ name })}
             </Button>
           )}
           <PendingButton
             size="icon-sm"
             variant="ghost"
-            aria-label={`Stop syncing ${source.root.title}`}
+            aria-label={m.integrations_sources_stop_label({ title: source.root.title })}
             pending={remove.isPending}
             onClick={async () => {
               if (
                 await confirm({
-                  title: `Stop syncing “${source.root.title}”?`,
-                  description: `Every page it brought in from ${name} is removed from this collection. Chats that cited them will show those sources as unavailable.`,
-                  confirmLabel: "Stop syncing",
+                  title: m.integrations_sources_stop_title({ title: source.root.title }),
+                  description: m.integrations_sources_stop_description({ name }),
+                  confirmLabel: m.integrations_sources_stop(),
                 })
               )
                 remove.mutate();
@@ -409,7 +427,7 @@ function SourcePicker({
       await queryClient.invalidateQueries({ queryKey: ["knowledge"] });
       onOpenChange(false);
     },
-    onError: () => setError("Could not save the selection."),
+    onError: () => setError(m.integrations_sources_save_error()),
   });
 
   /**
@@ -442,16 +460,18 @@ function SourcePicker({
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{step === "where" || !root ? `Sync from ${name}` : root.title}</DialogTitle>
+          <DialogTitle>
+            {step === "where" || !root ? m.integrations_sources_dialog_title({ name }) : root.title}
+          </DialogTitle>
           <DialogDescription>
             {step === "where"
-              ? "Choose a collection or a page. You can add more sources to this collection later."
-              : "New pages arrive and deleted ones leave by themselves."}
+              ? m.integrations_sources_where_description()
+              : m.integrations_sources_what_description()}
           </DialogDescription>
         </DialogHeader>
         {accounts.length > 1 ? (
           <Field>
-            <FieldLabel>Sync as</FieldLabel>
+            <FieldLabel>{m.integrations_sources_sync_as()}</FieldLabel>
             <Select
               value={connectionId ?? ""}
               items={accounts.map((account) => ({
@@ -460,7 +480,7 @@ function SourcePicker({
               }))}
               onValueChange={(value) => setConnectionId(String(value))}
             >
-              <SelectTrigger aria-label="Account it syncs as">
+              <SelectTrigger aria-label={m.integrations_sources_sync_as_label()}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -476,7 +496,7 @@ function SourcePicker({
         <div className="max-h-[28rem] min-w-0 overflow-y-auto rounded-2xl border p-2">
           {!connectionId ? (
             <p className="text-muted-foreground p-2 text-sm">
-              Connect your {name} account in Settings to choose what to sync.
+              {m.integrations_sources_connect_first({ name })}
             </p>
           ) : step === "where" || !root ? (
             <ChooseLevel
@@ -509,15 +529,17 @@ function SourcePicker({
                 variant="outline"
                 size="sm"
                 spacing={0}
-                aria-label={`What to sync from ${root.title}`}
+                aria-label={m.integrations_sources_what_label({ title: root.title })}
               >
-                <ToggleGroupItem value="all">Everything</ToggleGroupItem>
-                <ToggleGroupItem value="selected">Only what I pick</ToggleGroupItem>
+                <ToggleGroupItem value="all">{m.integrations_sources_mode_all()}</ToggleGroupItem>
+                <ToggleGroupItem value="selected">
+                  {m.integrations_sources_mode_selected()}
+                </ToggleGroupItem>
               </ToggleGroup>
               <p className="text-muted-foreground text-xs">
                 {root.mode === "all"
-                  ? "Uncheck pages to leave them and everything under them out."
-                  : "Check pages to sync them and everything under them."}
+                  ? m.integrations_sources_mode_all_hint()
+                  : m.integrations_sources_mode_selected_hint()}
               </p>
               {root.hasChildren ? (
                 <PickLevel
@@ -528,9 +550,7 @@ function SourcePicker({
                   onToggle={togglePage}
                 />
               ) : (
-                <p className="text-muted-foreground text-sm">
-                  Nothing is under this page yet, so only the page itself is synced.
-                </p>
+                <p className="text-muted-foreground text-sm">{m.integrations_sources_leaf()}</p>
               )}
             </div>
           )}
@@ -545,15 +565,15 @@ function SourcePicker({
               onClick={() => setStep("where")}
             >
               <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} data-icon="inline-start" />
-              Change source
+              {m.integrations_sources_change()}
             </Button>
           ) : null}
           <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-            Cancel
+            {m.common_cancel()}
           </DialogClose>
           {step === "where" ? (
             <Button disabled={!root} onClick={() => setStep("what")}>
-              Next
+              {m.integrations_sources_next()}
             </Button>
           ) : (
             <PendingButton
@@ -561,7 +581,7 @@ function SourcePicker({
               disabled={!root}
               onClick={() => root && connectionId && save.mutate({ ...root, connectionId })}
             >
-              {sourceId ? "Save and sync" : "Start syncing"}
+              {sourceId ? m.integrations_sources_save_sync() : m.integrations_sources_start()}
             </PendingButton>
           )}
         </DialogFooter>
@@ -583,16 +603,18 @@ function LevelState({ level }: { level: ReturnType<typeof useBrowseLevel> }) {
   if (level.isPending)
     return (
       <div className="text-muted-foreground flex items-center gap-2 p-2 text-sm">
-        <Spinner /> Loading…
+        <Spinner /> {m.integrations_sources_loading()}
       </div>
     );
   if (!level.data?.ok)
     return (
       <p className="text-destructive p-2 text-sm">
-        {level.data?.ok === false ? level.data.error : "Could not load this level."}
+        {level.data?.ok === false ? level.data.error : m.integrations_sources_level_error()}
       </p>
     );
-  return <p className="text-muted-foreground p-2 text-sm">Nothing here.</p>;
+  return (
+    <p className="text-muted-foreground p-2 text-sm">{m.integrations_sources_level_empty()}</p>
+  );
 }
 
 function ExpandButton({
@@ -608,7 +630,11 @@ function ExpandButton({
     <Button
       size="icon-xs"
       variant="ghost"
-      aria-label={expanded ? `Collapse ${node.title}` : `Expand ${node.title}`}
+      aria-label={
+        expanded
+          ? m.integrations_sources_collapse({ title: node.title })
+          : m.integrations_sources_expand({ title: node.title })
+      }
       aria-expanded={expanded}
       disabled={!node.hasChildren}
       className={cn(!node.hasChildren && "invisible")}
@@ -638,7 +664,11 @@ function ChooseLevel({
   const level = useBrowseLevel(connectionId, parentId);
   if (!level.data?.ok || level.data.nodes.length === 0) return <LevelState level={level} />;
   return (
-    <ul className="flex flex-col" role="radiogroup" aria-label="Where to sync from">
+    <ul
+      className="flex flex-col"
+      role="radiogroup"
+      aria-label={m.integrations_sources_where_label()}
+    >
       {level.data.nodes.map((node) => (
         <ChooseRow
           key={node.id}

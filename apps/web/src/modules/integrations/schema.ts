@@ -1,4 +1,6 @@
+import { m } from "~/paraglide/messages.js";
 import { Schema } from "effect";
+import type { Locale } from "~/paraglide/runtime.js";
 import type { IntegrationToolInfo, ToolAccess } from "./manifest.ts";
 import { EntityId } from "~/entity-id.ts";
 
@@ -435,9 +437,24 @@ export interface PendingIntegrationCall {
 }
 
 /** What deciding a call would do, in the words the card and a connected app both show. */
-export const approvalConsequence = (call: PendingIntegrationCall, service: string) => {
-  const account = `your ${service} account${call.account ? ` “${call.account}”` : ""}`;
-  return call.targets.length > 0
-    ? `This will contact ${call.targets.length === 1 ? "this person" : `these ${call.targets.length} people`} from ${account}.`
-    : `This will ${call.access === "read" ? "read" : call.access === "write" ? "change" : "delete"} with ${account}.`;
+export const approvalConsequence = (
+  call: PendingIntegrationCall,
+  service: string,
+  locale: Locale,
+) => {
+  const options = { locale };
+  const account = call.account;
+  if (call.targets.length > 0) {
+    const count = call.targets.length;
+    return account
+      ? m.integrations_approval_contact_account({ count, service, account }, options)
+      : m.integrations_approval_contact({ count, service }, options);
+  }
+  const [plain, named] =
+    call.access === "read"
+      ? [m.integrations_approval_read, m.integrations_approval_read_account]
+      : call.access === "write"
+        ? [m.integrations_approval_change, m.integrations_approval_change_account]
+        : [m.integrations_approval_delete, m.integrations_approval_delete_account];
+  return account ? named({ service, account }, options) : plain({ service }, options);
 };

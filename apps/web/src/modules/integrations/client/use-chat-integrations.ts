@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toastError } from "~/ui/error-toast.ts";
@@ -40,7 +41,7 @@ export function useChatIntegrations(conversationId: string | null): ComposerInte
       setConversationIntegration({ data: { conversationId: conversationId!, ...input } }),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: chatIntegrationsQuery(conversationId).queryKey }),
-    onError: (error) => toastError("Could not change that integration for this chat.", error),
+    onError: (error) => toastError(m.integrations_chat_toggle_error(), error),
   });
 
   const items = (query.data ?? []).map((entry) => {

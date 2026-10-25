@@ -1,3 +1,4 @@
+import { getLocale } from "~/paraglide/runtime.js";
 import { useId, useState } from "react";
 import { findIntegrationType } from "~/modules/integrations/catalog.ts";
 import { ALLOWANCE_LIMITS, type IntegrationGrant } from "~/modules/integrations/grant.ts";
@@ -49,13 +50,15 @@ export function ScheduleAllowanceFields({
       <ListRow key={allowance.id} className="flex-col items-stretch gap-2">
         <div className="flex items-center gap-3">
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">{allowance.label}</span>
-            <span className="text-muted-foreground text-xs">{allowance.description}</span>
+            <span className="text-sm font-medium">{allowance.label(getLocale())}</span>
+            <span className="text-muted-foreground text-xs">
+              {allowance.description(getLocale())}
+            </span>
           </div>
           <Switch
             checked={targets !== null}
             onCheckedChange={(checked) => set(allowance.id, checked ? [] : null)}
-            aria-label={allowance.label}
+            aria-label={allowance.label(getLocale())}
           />
         </div>
         {targets !== null ? (
@@ -127,7 +130,9 @@ function AllowanceTargets({
                 ))}
                 <ComboboxChipsInput
                   id={id}
-                  aria-label={m.schedules_allowance_addresses({ label: allowance.label })}
+                  aria-label={m.schedules_allowance_addresses({
+                    label: allowance.label(getLocale()),
+                  })}
                   disabled={full}
                   placeholder={value.length ? "" : "name@example.com"}
                   onKeyDown={(event) => {

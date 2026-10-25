@@ -1,5 +1,7 @@
+import { m } from "~/paraglide/messages.js";
 import type { CallToolResult, Tool as McpTool } from "@modelcontextprotocol/client";
 import { Effect } from "effect";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationRejected, IntegrationRequestFailed } from "../../errors.ts";
 import type {
   AdapterFile,
@@ -234,11 +236,15 @@ const offered = (integrationId: string, entry: McpToolEntry): OfferedTool => ({
   prepare: (session, args, call) =>
     Effect.gen(function* () {
       const check = argumentCheck(entry.fingerprint, entry.validation ?? entry.inputSchema);
-      if ("error" in check) return yield* new IntegrationRejected({ reason: check.error });
+      // The model reads these, in English.
+      if ("error" in check)
+        return yield* new IntegrationRejected({ reason: verbatim(check.error) });
       const checked = check(args ?? {});
       if (!checked.valid)
         return yield* new IntegrationRejected({
-          reason: `The arguments do not fit ${entry.title}: ${briefValue(checked.errorMessage, 300)}`,
+          reason: verbatim(
+            `The arguments do not fit ${entry.title}: ${briefValue(checked.errorMessage, 300)}`,
+          ),
         });
       return {
         summary: null,
@@ -279,28 +285,28 @@ export const mcpAdapter: IntegrationAdapter = {
   kind: "mcp",
   normalizeConfig(config) {
     const raw = (config.url ?? "").trim();
-    if (!URL.canParse(raw)) return { error: "Enter the MCP server’s address." };
+    if (!URL.canParse(raw)) return { error: localized(m.integrations_error_mcp_url_missing) };
     const url = new URL(raw);
     const publicOnly = reachesPublicOnly(config);
     if (publicOnly && url.protocol !== "https:")
-      return { error: "The server address must start with https://." };
+      return { error: localized(m.integrations_error_mcp_url_https) };
     if (url.protocol !== "https:" && url.protocol !== "http:")
-      return { error: "The server address must start with https:// or http://." };
+      return { error: localized(m.integrations_error_mcp_url_scheme) };
     if (url.username || url.password)
-      return { error: "Leave credentials out of the address. Choose a sign-in instead." };
+      return { error: localized(m.integrations_error_mcp_url_credentials) };
     url.hash = "";
     const ticked = fieldValues(config.ways).filter(Boolean);
-    if (!ticked.length) return { error: "Choose at least one way people connect." };
+    if (!ticked.length) return { error: localized(m.integrations_error_mcp_ways_none) };
     if (!ticked.every((value) => MCP_WAYS.some((way) => way === value)))
-      return { error: "Choose how people connect." };
+      return { error: localized(m.integrations_error_mcp_ways_unknown) };
     const anonymous = MCP_ANONYMOUS.find((value) => value === config.anonymous);
     if (ticked.includes("anonymous") && !anonymous)
-      return { error: "Choose how people connect without an account." };
+      return { error: localized(m.integrations_error_mcp_anonymous) };
     const header = (config.header ?? "").trim();
     if (header && !HEADER.test(header))
-      return { error: "The header name has characters a header cannot have." };
+      return { error: localized(m.integrations_error_mcp_header) };
     const scopes = (config.scopes ?? "").trim().replace(/\s+/g, " ");
-    if (scopes.length > 500) return { error: "The scopes are too long." };
+    if (scopes.length > 500) return { error: localized(m.integrations_error_mcp_scopes) };
     const normalized: Record<string, string> = {
       url: url.toString(),
       ways: MCP_WAYS.filter((way) => ticked.includes(way)).join(" "),
@@ -308,7 +314,7 @@ export const mcpAdapter: IntegrationAdapter = {
     if (anonymous && ticked.includes("anonymous")) {
       // A personal server has no admin key to share and nobody else to turn on for.
       if (publicOnly && anonymous === "shared")
-        return { error: "Choose how you connect without an account." };
+        return { error: localized(m.integrations_error_mcp_anonymous_own) };
       normalized.anonymous = anonymous;
       if (config.everyone === "everyone" && !publicOnly) normalized.everyone = "everyone";
     }

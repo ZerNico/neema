@@ -1,3 +1,5 @@
+import { getLocale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 import { ArrowDown01Icon, Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef, useState } from "react";
@@ -20,6 +22,9 @@ import {
 import { cn } from "~/ui/utils";
 import type { OAuthSetup } from "../manifest.ts";
 
+// Stands in for the console link while the sentence around it is split.
+const SLOT = "\u0001";
+
 /**
  * The redirect URI to copy, then the manifest's steps for registering the app,
  * closed until asked for: they are long, and most admins know the console.
@@ -39,14 +44,18 @@ export function OAuthSetupGuide({
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const consoleUrl = setup.console?.url(config) ?? null;
+  const locale = getLocale();
+  const [beforeConsole, afterConsole] = m
+    .integrations_oauth_open_console({ console: SLOT })
+    .split(SLOT);
   return (
     <Field>
-      <FieldLabel htmlFor={id}>Redirect URI</FieldLabel>
+      <FieldLabel htmlFor={id}>{m.integrations_oauth_redirect_uri()}</FieldLabel>
       <InputGroup>
         <InputGroupInput id={id} readOnly value={redirectUri} />
         <InputGroupAddon align="inline-end">
           <InputGroupButton
-            aria-label={copied ? "Copied" : "Copy redirect URI"}
+            aria-label={copied ? m.common_copied() : m.integrations_oauth_copy_redirect_uri()}
             size="icon-xs"
             onClick={() => {
               void navigator.clipboard.writeText(redirectUri).then(() => {
@@ -62,7 +71,7 @@ export function OAuthSetupGuide({
       </InputGroup>
       {/* One step with nowhere to go reads as a note, not as instructions to open. */}
       {!setup.console && setup.steps.length === 1 ? (
-        <FieldDescription>{setup.steps[0]!.text}</FieldDescription>
+        <FieldDescription>{setup.steps[0]!.text(locale)}</FieldDescription>
       ) : (
         <Disclosure open={open} onOpenChange={setOpen}>
           <DisclosureTrigger className={cn(disclosureTriggerClassName, focusRingClassName)}>
@@ -71,13 +80,13 @@ export function OAuthSetupGuide({
               strokeWidth={2}
               className={cn(disclosureChevronMotionClassName, "size-4", open && "rotate-180")}
             />
-            How to set up OAuth
+            {m.integrations_oauth_how_to()}
           </DisclosureTrigger>
           <DisclosureContent>
             <ol className={cn(disclosureBodyRailClassName, "list-decimal space-y-2 pl-8")}>
               {setup.console ? (
                 <li>
-                  Open the{" "}
+                  {beforeConsole}
                   {consoleUrl ? (
                     <a
                       href={consoleUrl}
@@ -85,17 +94,17 @@ export function OAuthSetupGuide({
                       rel="noreferrer"
                       className="text-foreground underline underline-offset-4"
                     >
-                      {setup.console.label}
+                      {setup.console.label(locale)}
                     </a>
                   ) : (
-                    setup.console.label
+                    setup.console.label(locale)
                   )}
-                  .
+                  {afterConsole}
                 </li>
               ) : null}
               {setup.steps.map((step) => (
-                <li key={step.text}>
-                  {step.text}
+                <li key={step.text(locale)}>
+                  {step.text(locale)}
                   {step.values ? (
                     <span className="mt-1.5 flex flex-wrap gap-1.5">
                       {step.values.map((value) => (
@@ -163,7 +172,7 @@ export function OAuthClientFields({
       />
       <Field>
         <FieldLabel htmlFor={`${id}-client`}>
-          OAuth client ID {optional ? <OptionalMark /> : null}
+          {m.integrations_oauth_client_id()} {optional ? <OptionalMark /> : null}
         </FieldLabel>
         <Input
           id={`${id}-client`}
@@ -174,19 +183,19 @@ export function OAuthClientFields({
       </Field>
       <Field>
         <FieldLabel htmlFor={`${id}-secret`}>
-          OAuth client secret {secretRequired ? null : <OptionalMark />}
+          {m.integrations_oauth_client_secret()} {secretRequired ? null : <OptionalMark />}
         </FieldLabel>
         <Input
           id={`${id}-secret`}
           type="password"
           autoComplete="off"
-          placeholder={secretStored ? "Unchanged" : undefined}
+          placeholder={secretStored ? m.integrations_oauth_secret_unchanged() : undefined}
           value={secret}
           onChange={(event) => onSecretChange(event.target.value)}
           disabled={disabled}
         />
         {secretStored ? (
-          <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
+          <FieldDescription>{m.integrations_oauth_secret_keep()}</FieldDescription>
         ) : null}
       </Field>
     </>

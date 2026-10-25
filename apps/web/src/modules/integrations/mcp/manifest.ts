@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { fieldValues } from "../fields.ts";
 import type { IntegrationManifest } from "../manifest.ts";
 import { McpLogo } from "./logo.tsx";
@@ -47,78 +49,94 @@ const SHARED = { key: "anonymous", values: ["shared"] };
 export const mcpManifest = {
   kind: "mcp",
   name: "MCP server",
-  description: "Tools from a remote Model Context Protocol server.",
+  description: localized(m.integrations_mcp_description),
   logo: McpLogo,
   category: null,
   adminFields: [
     {
       key: "url",
-      label: "Server address",
+      label: localized(m.integrations_mcp_url_label),
       kind: "url",
-      placeholder: "https://mcp.example.com/mcp",
-      description: "Its Streamable HTTP endpoint. Older SSE servers work too.",
+      placeholder: verbatim("https://mcp.example.com/mcp"),
+      description: localized(m.integrations_mcp_url_description),
       required: true,
     },
     {
       key: "ways",
-      label: "How people connect",
+      label: localized(m.integrations_mcp_ways_label),
       kind: "choices",
       required: true,
       options: [
-        { value: "oauth", label: "Sign in", description: "With their own account on the server." },
-        { value: "token", label: "Personal token", description: "Pasted from their own account." },
+        {
+          value: "oauth",
+          label: localized(m.integrations_mcp_way_oauth),
+          description: localized(m.integrations_mcp_way_oauth_description),
+        },
+        {
+          value: "token",
+          label: localized(m.integrations_mcp_way_token),
+          description: localized(m.integrations_mcp_way_token_description),
+        },
         {
           value: "anonymous",
-          label: "Without an account",
-          description: "For servers anyone can use.",
+          label: localized(m.integrations_mcp_way_anonymous),
+          description: localized(m.integrations_mcp_way_anonymous_description),
         },
       ],
     },
     {
       key: "anonymous",
-      label: "Without an account",
+      label: localized(m.integrations_mcp_anonymous_label),
       kind: "choice",
       required: true,
       when: ANONYMOUS,
       options: [
-        { value: "open", label: "No key", description: "The server needs nothing." },
+        {
+          value: "open",
+          label: localized(m.integrations_mcp_anonymous_open),
+          description: localized(m.integrations_mcp_anonymous_open_description),
+        },
         {
           value: "shared",
-          label: "One shared key",
-          description: "Everyone uses your key, so chats only read.",
+          label: localized(m.integrations_mcp_anonymous_shared),
+          description: localized(m.integrations_mcp_anonymous_shared_description),
         },
       ],
     },
     {
       key: "everyone",
-      label: "Turned on by",
+      label: localized(m.integrations_mcp_everyone_label),
       kind: "choice",
       // Unset reads as each person, the first option.
       required: true,
       when: ANONYMOUS,
       options: [
-        { value: "person", label: "Each person", description: "In their Settings." },
+        {
+          value: "person",
+          label: localized(m.integrations_mcp_everyone_person),
+          description: localized(m.integrations_mcp_everyone_person_description),
+        },
         {
           value: "everyone",
-          label: "Everyone at once",
-          description: "On for everyone who can use it, and in their new chats.",
+          label: localized(m.integrations_mcp_everyone_all),
+          description: localized(m.integrations_mcp_everyone_all_description),
         },
       ],
     },
     {
       key: "header",
-      label: "Header",
+      label: localized(m.integrations_mcp_header_label),
       kind: "text",
-      placeholder: "Authorization",
-      description: "Where the token goes. Authorization sends it as a bearer token.",
+      placeholder: verbatim("Authorization"),
+      description: localized(m.integrations_mcp_header_description),
       required: false,
       when: [TOKEN, SHARED],
     },
     {
       key: "scopes",
-      label: "Scopes",
+      label: localized(m.integrations_mcp_scopes_label),
       kind: "text",
-      placeholder: "Leave empty to ask for what the server needs",
+      placeholder: localized(m.integrations_mcp_scopes_placeholder),
       required: false,
       when: OAUTH,
     },
@@ -129,21 +147,31 @@ export const mcpManifest = {
     setup: {
       // Each server signs in somewhere else, so there is no one console to name.
       console: null,
-      steps: [
-        {
-          text: "Register the app with this redirect URI, then paste its client ID and secret.",
-        },
-      ],
+      steps: [{ text: localized(m.integrations_mcp_step_register) }],
     },
   },
   apiKey: {
-    noun: "a token",
+    noun: localized(m.integrations_mcp_api_key_noun),
     when: TOKEN,
-    fields: [{ key: "token", label: "Token", kind: "secret", required: true }],
+    fields: [
+      {
+        key: "token",
+        label: localized(m.integrations_mcp_token_label),
+        kind: "secret",
+        required: true,
+      },
+    ],
     helpUrl: () => null,
   },
   sharedCredential: {
-    fields: [{ key: "token", label: "Shared key", kind: "secret", required: true }],
+    fields: [
+      {
+        key: "token",
+        label: localized(m.integrations_mcp_shared_key_label),
+        kind: "secret",
+        required: true,
+      },
+    ],
     when: SHARED,
   },
   toolSource: "listed",

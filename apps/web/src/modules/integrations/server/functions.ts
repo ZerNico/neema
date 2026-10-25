@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import {
@@ -5,6 +6,8 @@ import {
   requireOwnSession,
   requireSession,
 } from "~/modules/auth/server/middleware.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
 import { publicUrl } from "~/server/public-url.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
@@ -32,20 +35,19 @@ import { KnowledgeSourceService } from "./sync.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
+/**
+ * A refusal as data the form shows, worded in `locale`: read by the caller while
+ * still in the request, since the effect's fibers do not carry it.
+ */
+const refusedIn =
+  (locale: Locale, otherwise: Localized = localized(m.integrations_error_not_available)) =>
+  (error: { _tag: string; reason?: Localized }) =>
+    Effect.succeed({ ok: false as const, error: (error.reason ?? otherwise)(locale) });
+
 /** Expected refusals come back as data the form can show; nothing else does. */
-const outcome = <E extends { _tag: string }, R>(effect: Effect.Effect<void, E, R>) =>
-  effect.pipe(
-    Effect.as({ ok: true as const }),
-    Effect.catch((error: E) =>
-      Effect.succeed({
-        ok: false as const,
-        error:
-          "reason" in error && typeof error.reason === "string"
-            ? error.reason
-            : "That integration is not available to you right now.",
-      }),
-    ),
-  );
+const outcome = <E extends { _tag: string; reason?: Localized }, R>(
+  effect: Effect.Effect<void, E, R>,
+) => effect.pipe(Effect.as({ ok: true as const }), Effect.catch(refusedIn(getLocale())));
 
 /** Where callbacks land, for the admin to register with the service. */
 export const appOrigin = (request?: Request) =>
@@ -101,7 +103,7 @@ export const savePersonalServer = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.map((server) => ({ ok: true as const, server })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+        Effect.catch(refusedIn(getLocale())),
       ),
     ),
   );
@@ -129,7 +131,7 @@ export const probeServer = createServerFn({ method: "POST" })
         service.probeServer(context.session.user.id, data.url),
       ).pipe(
         Effect.map((found) => ({ ok: true as const, ...found })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+        Effect.catch(refusedIn(getLocale())),
       ),
     ),
   );
@@ -144,7 +146,7 @@ export const getServerSetup = createServerFn({ method: "POST" })
         service.serverSetup(context.session.user.id, data.integrationId),
       ).pipe(
         Effect.map((integration) => ({ ok: true as const, integration })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+        Effect.catch(refusedIn(getLocale())),
       ),
     ),
   );
@@ -208,7 +210,7 @@ export const createIntegration = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.map((created) => ({ ok: true as const, id: created.id })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+        Effect.catch(refusedIn(getLocale())),
       ),
     ),
   );
@@ -311,7 +313,7 @@ export const setIntegrationTool = createServerFn({ method: "POST" })
         service.setTool(data.integrationId, data.tool, { off: data.off, access: data.access }),
       ).pipe(
         Effect.map((integration) => ({ ok: true as const, integration })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.reason })),
+        Effect.catch(refusedIn(getLocale())),
       ),
     ),
   );
@@ -455,11 +457,8 @@ export const listIntegrationScopeOptions = createServerFn({ method: "GET" })
         service.scopeOptions(context.session.user.id, data.connectionId),
       ).pipe(
         Effect.map((options) => ({ ok: true as const, options })),
-        Effect.catch((error) =>
-          Effect.succeed({
-            ok: false as const,
-            error: "reason" in error ? error.reason : "Connect this integration first.",
-          }),
+        Effect.catch(
+          refusedIn(getLocale(), localized(m.integrations_error_connect_integration_first)),
         ),
       ),
     ),
@@ -475,12 +474,7 @@ export const browseIntegration = createServerFn({ method: "GET" })
         sources.browse(context.session.user.id, data.connectionId, data.parentId ?? null),
       ).pipe(
         Effect.map((nodes) => ({ ok: true as const, nodes })),
-        Effect.catch((error) =>
-          Effect.succeed({
-            ok: false as const,
-            error: "reason" in error ? error.reason : "Connect this integration in Settings first.",
-          }),
-        ),
+        Effect.catch(refusedIn(getLocale(), localized(m.integrations_error_connect_in_settings))),
       ),
     ),
   );

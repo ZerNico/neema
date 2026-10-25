@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /**
  * Off, unconfigured, not shared with this person, or not connected. Names the integration when it
@@ -9,10 +10,10 @@ export class IntegrationNotAvailable extends Schema.TaggedError<IntegrationNotAv
   { integrationId: Schema.NullOr(Schema.String), connectionId: Schema.optionalKey(Schema.String) },
 ) {}
 
-/** A request the person can fix: shown to them as written. */
+/** A request the person can fix: shown to them in their language, read by the model in English. */
 export class IntegrationRejected extends Schema.TaggedError<IntegrationRejected>()(
   "IntegrationRejected",
-  { reason: Schema.String },
+  { reason: Localized },
 ) {}
 
 export const CredentialIdentity = Schema.Struct({

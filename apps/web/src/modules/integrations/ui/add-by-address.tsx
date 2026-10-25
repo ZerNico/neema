@@ -1,5 +1,7 @@
+import { m } from "~/paraglide/messages.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
+import { localized } from "~/i18n/localized.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { DialogFooter } from "~/ui/primitives/dialog";
@@ -20,11 +22,7 @@ import { OAuthClientFields } from "./oauth-setup-guide.tsx";
 /** For a server whose sign-in only takes apps registered there, which nothing here can do. */
 const OWN_APP_SETUP = {
   console: null,
-  steps: [
-    {
-      text: "This server only lets in apps registered with it. Register one there with this redirect URI, then paste its client ID and secret.",
-    },
-  ],
+  steps: [{ text: localized(m.integrations_address_own_app_step) }],
 };
 
 /**
@@ -76,7 +74,7 @@ export function AddByAddress({
       if (result.needsClient) setNeedsApp(result.server);
       else setAdded(result.server.id);
     },
-    onError: () => setError("Could not reach the server."),
+    onError: () => setError(m.integrations_address_unreachable()),
   });
   const withApp = useMutation({
     mutationFn: (server: PersonalServer) =>
@@ -97,7 +95,7 @@ export function AddByAddress({
       setNeedsApp(null);
       setAdded(result.server.id);
     },
-    onError: () => setError("Could not save the app."),
+    onError: () => setError(m.integrations_address_app_save_error()),
   });
   // Not signed into yet: nothing of it stays behind.
   const discard = (integrationId: string) =>
@@ -166,10 +164,10 @@ export function AddByAddress({
               setError(null);
             }}
           >
-            Back
+            {m.common_back()}
           </Button>
           <PendingButton type="submit" pending={withApp.isPending} disabled={!clientId.trim()}>
-            Continue
+            {m.common_continue()}
           </PendingButton>
         </DialogFooter>
       </form>
@@ -185,28 +183,29 @@ export function AddByAddress({
       }}
     >
       <Field>
-        <FieldLabel htmlFor={`${fieldId}-url`}>Server address</FieldLabel>
+        <FieldLabel htmlFor={`${fieldId}-url`}>{m.integrations_address_label()}</FieldLabel>
         <Input
           id={`${fieldId}-url`}
           type="url"
+          // oxlint-disable-next-line i18n/no-literal-text -- an example address, the same in every language
           placeholder="https://mcp.example.com/mcp"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           disabled={add.isPending || added !== null || needsApp !== null}
         />
-        <FieldDescription>Its public HTTPS address. Only you use it.</FieldDescription>
+        <FieldDescription>{m.integrations_address_description()}</FieldDescription>
       </Field>
       {error ? <FieldError>{error}</FieldError> : null}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={add.isPending} onClick={onBack}>
-          Back
+          {m.common_back()}
         </Button>
         <PendingButton
           type="submit"
           pending={add.isPending || (added !== null && !live)}
           disabled={!url.trim()}
         >
-          Continue
+          {m.common_continue()}
         </PendingButton>
       </DialogFooter>
     </form>

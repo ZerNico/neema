@@ -7,6 +7,7 @@ import { prepareIntegrationTools, shippedTools } from "../../server/tools.ts";
 import { jiraManifest } from "../manifest.ts";
 import type { IntegrationModelResult } from "../../tool-schema.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
+import { english } from "~/i18n/localized.ts";
 import { jiraAdapter } from "./adapter.ts";
 
 const SITE = "https://acme.atlassian.net";
@@ -180,7 +181,7 @@ const prepared = (tool: string, args: unknown) => run(handlers[tool]!(session, a
 const executed = async (tool: string, args: unknown) => run((await prepared(tool, args)).execute);
 const refusal = (tool: string, args: unknown) =>
   run(Effect.flip(handlers[tool]!(session, args))).then((error) =>
-    "reason" in error ? error.reason : error.message,
+    "reason" in error ? english(error.reason) : error.message,
   );
 const sent = (method: string, suffix: string) =>
   requests.filter((request) => request.method === method && request.url.endsWith(suffix));

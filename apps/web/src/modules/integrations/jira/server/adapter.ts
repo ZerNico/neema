@@ -1,4 +1,6 @@
+import { m } from "~/paraglide/messages.js";
 import { Effect } from "effect";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationRejected } from "../../errors.ts";
 import { INTEGRATION_LIMITS, type ScopeOption } from "../../schema.ts";
 import {
@@ -23,7 +25,9 @@ import {
 import { queryPath } from "../../server/rest-call.ts";
 
 const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
-const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
+// Arguments the model got wrong: only it reads this, in English.
+const reject = (reason: string) =>
+  Effect.fail(new IntegrationRejected({ reason: verbatim(reason) }));
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" }) === 0;
 
 const SEARCH_RESULTS = 20;
@@ -620,8 +624,7 @@ export const jiraAdapter: IntegrationAdapter = {
       ? new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname
       : "";
     const site = host.includes(".") ? host : host && `${host}.atlassian.net`;
-    if (!SITE.test(site))
-      return { error: "Enter your Jira Cloud site, such as acme.atlassian.net." };
+    if (!SITE.test(site)) return { error: localized(m.integrations_error_jira_site) };
     return { config: { site: `https://${site}` }, fingerprint: site };
   },
   oauth: {

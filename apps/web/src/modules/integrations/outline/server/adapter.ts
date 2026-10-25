@@ -1,4 +1,6 @@
+import { m } from "~/paraglide/messages.js";
 import { Effect } from "effect";
+import { localized, verbatim } from "~/i18n/localized.ts";
 import { IntegrationRejected } from "../../errors.ts";
 import { INTEGRATION_LIMITS, type BrowseNode } from "../../schema.ts";
 import {
@@ -22,7 +24,9 @@ import {
 } from "./client.ts";
 
 const text = (value: string | undefined) => (value?.trim() ? value.trim() : null);
-const reject = (reason: string) => Effect.fail(new IntegrationRejected({ reason }));
+// Arguments the model got wrong: only it reads this, in English.
+const reject = (reason: string) =>
+  Effect.fail(new IntegrationRejected({ reason: verbatim(reason) }));
 
 // Search snippets arrive with <b> highlighting; the model wants plain text.
 const plain = (snippet: string) =>
@@ -350,10 +354,10 @@ export const outlineAdapter: IntegrationAdapter = {
     try {
       url = new URL(raw);
     } catch {
-      return { error: "Enter the Outline address, like https://app.getoutline.com." };
+      return { error: localized(m.integrations_error_outline_url_missing) };
     }
     if (url.protocol !== "https:" && url.protocol !== "http:")
-      return { error: "The Outline address must start with https:// or http://." };
+      return { error: localized(m.integrations_error_outline_url_scheme) };
     const baseUrl = `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
     return { config: { baseUrl }, fingerprint: baseUrl };
   },

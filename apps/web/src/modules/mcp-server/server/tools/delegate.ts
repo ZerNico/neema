@@ -177,7 +177,7 @@ export const followTurn = Effect.fn("mcp.followTurn")(function* (
   if (current) {
     const waiting = yield* waitingOn(userId, turn.messageId);
     const fresh = waiting.filter((call) => !known.has(callKey(call)) && canAsk(call));
-    const asked = fresh.length ? yield* askPerson(fresh, support) : null;
+    const asked = fresh.length ? yield* askPerson(userId, fresh, support) : null;
     // Again once the questions are built: a retry in between parks calls that
     // belong to the new attempt, which this follower must not put to anyone.
     if (asked && (yield* liveAttempt(turn))) {

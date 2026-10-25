@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import {
   discoverOAuthServerInfo,
   exchangeAuthorization,
@@ -12,13 +13,14 @@ import {
   type OAuthTokens,
 } from "@modelcontextprotocol/client";
 import { Effect } from "effect";
+import { type Localized, localized } from "~/i18n/localized.ts";
 import { IntegrationRejected } from "../../errors.ts";
 import type { DiscoveredOAuth } from "../../server/adapter.ts";
 import { reachesPublicOnly } from "../manifest.ts";
 import type { TokenOutcome, TokenSet } from "../../server/oauth.ts";
 import { scopedFetch } from "./http.ts";
 
-const reject = (reason: string) => new IntegrationRejected({ reason });
+const reject = (reason: Localized) => new IntegrationRejected({ reason });
 
 /** A sign-in request ends with its caller, or on its own after this long. */
 const OAUTH_TIMEOUT_MS = 30_000;
@@ -99,7 +101,7 @@ const challenge = (url: URL, publicOnly: boolean) =>
       await response.body?.cancel().catch(() => undefined);
       return response.status === 401 ? extractWWWAuthenticateParams(response) : null;
     },
-    catch: () => reject("The MCP server could not be reached."),
+    catch: () => reject(localized(m.integrations_error_mcp_unreachable)),
   });
 
 /**
@@ -141,20 +143,19 @@ export const mcpOAuth: DiscoveredOAuth = {
             fetchFn: bounded(url, signal, publicOnly),
             ...(hint?.resourceMetadataUrl ? { resourceMetadataUrl: hint.resourceMetadataUrl } : {}),
           }),
-        catch: (error) => reject(`Could not find the server’s sign-in: ${messageOf(error)}`),
+        catch: (error) =>
+          reject(localized(m.integrations_error_mcp_no_sign_in, { error: messageOf(error) })),
       });
       const metadata = info.authorizationServerMetadata;
       if (!metadata)
         return yield* reject(
           hint
-            ? "The server asks for sign-in but does not say where. Ask its operator for an OAuth setup, or use a token."
-            : "This server does not ask anyone to sign in. Choose “No sign-in” for it.",
+            ? localized(m.integrations_error_mcp_sign_in_nowhere)
+            : localized(m.integrations_error_mcp_no_sign_in_needed),
         );
       // PKCE is not optional here: without S256 the code could be redeemed by whoever saw it.
       if (!metadata.code_challenge_methods_supported?.includes("S256"))
-        return yield* reject(
-          "The server’s sign-in does not support PKCE, so it is not safe to use.",
-        );
+        return yield* reject(localized(m.integrations_error_mcp_no_pkce));
       // The page people sign in on and the endpoint tokens come from both need
       // HTTPS, unless they are the server itself, which the admin chose.
       const insecure = [metadata.authorization_endpoint, metadata.token_endpoint].some(
@@ -163,7 +164,7 @@ export const mcpOAuth: DiscoveredOAuth = {
           return address.protocol !== "https:" && address.origin !== url.origin;
         },
       );
-      if (insecure) return yield* reject("The server’s sign-in does not use HTTPS.");
+      if (insecure) return yield* reject(localized(m.integrations_error_mcp_no_https));
 
       // The resource the tokens are bound to: what the server says it is, as
       // long as that is the address configured, else the address itself.
@@ -173,9 +174,7 @@ export const mcpOAuth: DiscoveredOAuth = {
         resource &&
         (resource.origin !== url.origin || !url.pathname.startsWith(resource.pathname))
       )
-        return yield* reject(
-          "The server’s sign-in names another server as itself, so it was not used.",
-        );
+        return yield* reject(localized(m.integrations_error_mcp_other_resource));
       const resourceUri = canonical(resource ?? resourceUrlFromServerUrl(url));
 
       const requested = words(input.config.scopes);
@@ -204,7 +203,8 @@ export const mcpOAuth: DiscoveredOAuth = {
             state: input.state,
             resource: new URL(resourceUri),
           }),
-        catch: (error) => reject(`Could not start the sign-in: ${messageOf(error)}`),
+        catch: (error) =>
+          reject(localized(m.integrations_error_mcp_start_failed, { error: messageOf(error) })),
       });
       return {
         url: started.authorizationUrl.toString(),
@@ -238,8 +238,8 @@ export const mcpOAuth: DiscoveredOAuth = {
         }),
       catch: (error) =>
         error instanceof IssuerMismatchError || /\biss\b|issuer/i.test(messageOf(error))
-          ? reject("The sign-in came back from another server than it went to, so it was not used.")
-          : reject("The server refused the sign-in. Try again."),
+          ? reject(localized(m.integrations_error_mcp_issuer_mismatch))
+          : reject(localized(m.integrations_error_mcp_sign_in_refused)),
     }).pipe(Effect.map(tokensOf)),
 
   refresh: (input) =>
@@ -285,7 +285,9 @@ const clientFor = (
       const pinned = yield* admin.pin(metadata.issuer);
       if (pinned !== metadata.issuer)
         return yield* reject(
-          `The server now signs in through ${metadata.issuer}, not ${pinned ?? "the server"} where your admin’s client ID was set up. Ask your admin to check it.`,
+          pinned
+            ? localized(m.integrations_error_mcp_issuer_moved, { issuer: metadata.issuer, pinned })
+            : localized(m.integrations_error_mcp_issuer_moved_server, { issuer: metadata.issuer }),
         );
       return { clientId: admin.clientId, clientSecret: admin.clientSecret };
     }
@@ -296,8 +298,8 @@ const clientFor = (
     if (!metadata.registration_endpoint)
       return yield* reject(
         reachesPublicOnly(input.config)
-          ? "The server’s sign-in only accepts registered apps. Use a token instead."
-          : "The server’s sign-in only accepts registered apps. Ask your admin to add a client ID for it.",
+          ? localized(m.integrations_error_mcp_registered_only_token)
+          : localized(m.integrations_error_mcp_registered_only_admin),
       );
     // The method the token request will use (the SDK prefers basic, then post),
     // so the client is registered for how it then authenticates. Silence means basic (RFC 8414).
@@ -322,7 +324,9 @@ const clientFor = (
           fetchFn: bounded(url, signal, reachesPublicOnly(input.config)),
         }),
       catch: (error) =>
-        reject(`The server’s sign-in refused to register this app: ${messageOf(error)}`),
+        reject(
+          localized(m.integrations_error_mcp_registration_refused, { error: messageOf(error) }),
+        ),
     });
     const client = {
       clientId: registered.client_id,

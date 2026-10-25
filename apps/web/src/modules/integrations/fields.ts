@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import type { Localized } from "~/i18n/localized.ts";
+import type { Locale } from "~/paraglide/runtime.js";
 import type { FieldCondition, IntegrationField } from "./manifest.ts";
 import { parseMailbox } from "./mailbox.ts";
 
@@ -40,6 +43,14 @@ export const fieldDefaults = (
   return values;
 };
 
+type FieldMessage = (inputs: { field: string }, options: { locale: Locale }) => string;
+
+/** What is wrong with a field, named by its label in whichever locale reads it. */
+const about =
+  (message: FieldMessage, field: IntegrationField): Localized =>
+  (locale) =>
+    message({ field: field.label(locale) }, { locale });
+
 /**
  * What a person typed into a declared form, trimmed and checked by kind, or
  * the first thing wrong with it. Keys the form does not declare are dropped,
@@ -48,32 +59,32 @@ export const fieldDefaults = (
 export const readFields = (
   fields: ReadonlyArray<IntegrationField>,
   input: Readonly<Record<string, string>>,
-): { values: Record<string, string> } | { error: string } => {
+): { values: Record<string, string> } | { error: Localized } => {
   const values: Record<string, string> = {};
   for (const field of fields) {
     const raw = (input[field.key] ?? "").trim();
     if (!raw) {
-      if (field.required) return { error: `Enter the ${field.label}.` };
+      if (field.required) return { error: about(m.integrations_field_required, field) };
       continue;
     }
-    if (raw.length > MAX_LENGTH) return { error: `The ${field.label} is too long.` };
+    if (raw.length > MAX_LENGTH) return { error: about(m.integrations_field_too_long, field) };
     if (field.kind === "email") {
       const address = parseMailbox(raw);
-      if (!address) return { error: `The ${field.label} is not an email address.` };
+      if (!address) return { error: about(m.integrations_field_not_email, field) };
       values[field.key] = address;
     } else if (field.kind === "url") {
       if (!URL.canParse(raw) || !/^https?:$/.test(new URL(raw).protocol))
-        return { error: `The ${field.label} is not a web address.` };
+        return { error: about(m.integrations_field_not_url, field) };
       values[field.key] = raw;
     } else if (field.kind === "choice") {
       if (!field.options?.some((option) => option.value === raw))
-        return { error: `Choose one of the ${field.label} options.` };
+        return { error: about(m.integrations_field_choose_one, field) };
       values[field.key] = raw;
     } else if (field.kind === "choices") {
       const picked = raw.split(/\s+/);
       const options = field.options ?? [];
       if (!picked.every((value) => options.some((option) => option.value === value)))
-        return { error: `Choose from the ${field.label} options.` };
+        return { error: about(m.integrations_field_choose_from, field) };
       values[field.key] = options
         .filter((option) => picked.includes(option.value))
         .map((option) => option.value)

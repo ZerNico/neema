@@ -1,3 +1,5 @@
+import { localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import type { IntegrationManifest } from "../manifest.ts";
 import { JiraLogo } from "./logo.tsx";
 import { JIRA_TOOLS } from "./tools.ts";
@@ -5,35 +7,34 @@ import { JIRA_TOOLS } from "./tools.ts";
 export const jiraManifest = {
   kind: "jira",
   name: "Jira",
-  description:
-    "Search and read Jira issues, create and edit them, comment, assign and move them along.",
+  description: localized(m.integrations_jira_description),
   logo: JiraLogo,
   category: "projects",
   adminFields: [
     {
       key: "site",
-      label: "Jira site",
+      label: localized(m.integrations_jira_site_label),
       kind: "text",
-      placeholder: "acme.atlassian.net",
-      description: "Your Jira Cloud site.",
+      placeholder: verbatim("acme.atlassian.net"),
+      description: localized(m.integrations_jira_site_description),
       required: true,
     },
   ],
   oauth: {
     setup: {
       console: {
-        label: "Atlassian developer console",
+        label: localized(m.integrations_jira_console),
         url: () => "https://developer.atlassian.com/console/myapps/",
       },
       steps: [
-        { text: "Create an OAuth 2.0 integration with Resource-level access." },
+        { text: localized(m.integrations_jira_step_create) },
         {
-          text: "Under Permissions, add the Jira API with these scopes:",
+          text: localized(m.integrations_jira_step_permissions),
           values: ["read:jira-work", "write:jira-work", "read:jira-user"],
         },
-        { text: "Under Authorization, add the redirect URI above as its callback URL." },
-        { text: "Under Distribution, turn on sharing so others in your organization can connect." },
-        { text: "Paste the client ID and secret from Settings below." },
+        { text: localized(m.integrations_jira_step_authorization) },
+        { text: localized(m.integrations_jira_step_distribution) },
+        { text: localized(m.integrations_jira_step_paste) },
       ],
     },
   },
@@ -41,16 +42,16 @@ export const jiraManifest = {
     fields: [
       {
         key: "email",
-        label: "Atlassian account email",
+        label: localized(m.integrations_jira_email_label),
         kind: "email",
-        placeholder: "you@example.com",
+        placeholder: verbatim("you@example.com"),
         required: true,
       },
       {
         key: "token",
-        label: "API token",
+        label: localized(m.integrations_jira_token_label),
         kind: "secret",
-        description: "A token without scopes; Jira takes it together with your account's email.",
+        description: localized(m.integrations_jira_token_description),
         required: true,
       },
     ],
@@ -60,6 +61,10 @@ export const jiraManifest = {
   toolSource: "static",
   tools: JIRA_TOOLS,
   allowances: [],
-  scope: { label: "Projects", noun: "project" },
+  scope: {
+    label: localized(m.integrations_jira_scope_label),
+    noun: localized(m.integrations_jira_scope_noun),
+    plural: localized(m.integrations_jira_scope_plural),
+  },
   knowledgeSource: false,
 } satisfies IntegrationManifest;
