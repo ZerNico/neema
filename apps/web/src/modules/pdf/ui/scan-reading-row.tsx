@@ -25,42 +25,34 @@ import { SaveLabel } from "~/ui/save-status.tsx";
 import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { cn } from "~/ui/utils";
 import { scanReadingQuery } from "../../tools/client/queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 type Mode = "off" | "local" | "mistral" | "model";
 type Quality = "accurate" | "fast";
 type Settings = NonNullable<Awaited<ReturnType<typeof getScanReading>>>;
 type FileStatus = Settings["localFiles"][Quality];
 
-const MODES: ReadonlyArray<{ value: Mode; label: string; detail: string }> = [
-  {
-    value: "off",
-    label: "None",
-    detail: "Pages without a text layer are skipped.",
-  },
-  {
-    value: "local",
-    label: "Local (PP-OCRv6)",
-    detail: "Runs on this server. Pages never leave it.",
-  },
-  {
-    value: "mistral",
-    label: "Mistral OCR",
-    detail: "Sends scanned pages to Mistral.",
-  },
-  {
-    value: "model",
-    label: "Vision LLM",
-    detail: "Sends each scanned page to a model as an image.",
-  },
+const MODES: ReadonlyArray<{ value: Mode; label: () => string; detail: () => string }> = [
+  { value: "off", label: m.pdf_scans_mode_off, detail: m.pdf_scans_mode_off_detail },
+  { value: "local", label: m.pdf_scans_mode_local, detail: m.pdf_scans_mode_local_detail },
+  // A product name, the same in every language.
+  { value: "mistral", label: () => "Mistral OCR", detail: m.pdf_scans_mode_mistral_detail },
+  { value: "model", label: m.pdf_scans_mode_model, detail: m.pdf_scans_mode_model_detail },
 ];
-const QUALITIES: ReadonlyArray<{ value: Quality; label: string; detail: string }> = [
-  { value: "accurate", label: "Accurate (small, 31 MB)", detail: "About a second a page" },
+const QUALITIES: ReadonlyArray<{ value: Quality; label: () => string; detail: () => string }> = [
+  {
+    value: "accurate",
+    label: () => m.pdf_scans_quality_accurate({ size: 31 }),
+    detail: m.pdf_scans_quality_accurate_detail,
+  },
   {
     value: "fast",
-    label: "Fast (tiny, 6 MB)",
-    detail: "Three times faster, misses more on poor scans",
+    label: () => m.pdf_scans_quality_fast({ size: 6 }),
+    detail: m.pdf_scans_quality_fast_detail,
   },
 ];
+/** Where a message's link goes, split out so the anchor can take its place. */
+const LINK = "\u0000";
 /** The UI's copy of the server default; the server normalises whatever is saved. */
 const DEFAULT_BASE_URL = "https://api.mistral.ai/v1";
 
@@ -69,15 +61,18 @@ const megabytes = (bytes: number) => Math.round(bytes / 1_000_000);
 function fileStatusText(status: FileStatus) {
   switch (status.state) {
     case "ready":
-      return "Ready.";
+      return m.pdf_scans_file_ready();
     case "missing":
-      return "Not downloaded yet. Saving starts the download.";
+      return m.pdf_scans_file_missing();
     case "downloading":
-      return `Downloading… ${megabytes(status.done)} of ${megabytes(status.total)} MB`;
+      return m.pdf_scans_file_downloading({
+        done: megabytes(status.done),
+        total: megabytes(status.total),
+      });
     case "failed":
-      return `Download failed: ${status.error}`;
+      return m.pdf_scans_file_failed({ error: status.error });
     case "unsupported":
-      return "This server’s platform can’t run local OCR. Choose another provider.";
+      return m.pdf_scans_file_unsupported();
   }
 }
 
@@ -90,7 +85,7 @@ const hostOf = (url: string) => {
   }
 };
 const destination = (mode: Mode, baseUrl: string, modelName: string | null) =>
-  mode === "mistral" ? hostOf(baseUrl) : (modelName ?? "the model");
+  mode === "mistral" ? hostOf(baseUrl) : (modelName ?? m.pdf_scans_the_model());
 
 /**
  * The scanned-pages choice inside Document parsing: not read, read here, or
@@ -158,7 +153,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
       markSaved();
       await refresh();
     },
-    onError: (error) => toastError("Could not save the OCR provider.", error),
+    onError: (error) => toastError(m.pdf_scans_error_save(), error),
   });
   const retry = useMutation({
     mutationFn: () =>
@@ -166,7 +161,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
         data: { quality: saved.mode === "local" ? saved.quality : quality },
       }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not start the download.", error),
+    onError: (error) => toastError(m.pdf_scans_error_download(), error),
   });
   const runTest = useMutation({
     mutationFn: () =>
@@ -177,7 +172,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
         },
       }),
     onSuccess: setTest,
-    onError: (error) => toastError("Could not test the OCR service.", error),
+    onError: (error) => toastError(m.pdf_scans_error_test(), error),
   });
 
   const submit = async () => {
@@ -193,10 +188,11 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
         settings.visionModels.find((model) => model.id === modelId)?.displayName ?? null;
       const ok = await confirm({
         destructive: false,
-        title: `Send scanned pages to ${destination(mode, effectiveBaseUrl, modelName)}?`,
-        description:
-          "Pages without a text layer are sent there to be read: from PDFs attached in chats, project files, documents in collections, files tools return and PDFs read from the web. Pages with text, and every other file, stay on this server.",
-        confirmLabel: "Send pages",
+        title: m.pdf_scans_confirm_title({
+          destination: destination(mode, effectiveBaseUrl, modelName),
+        }),
+        description: m.pdf_scans_confirm_description(),
+        confirmLabel: m.pdf_scans_confirm(),
       });
       if (!ok) return;
     }
@@ -206,13 +202,15 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
   const busy = disabled || save.isPending;
   const files = settings.localFiles[quality];
   const current = MODES.find((option) => option.value === mode)!;
+  // The link sits inside the sentence wherever the language puts it.
+  const keyLink = m.pdf_scans_key_get({ link: LINK }).split(LINK);
 
   return (
     <ListRow className="flex-col items-stretch gap-3">
       <Field>
-        <FieldLabel htmlFor={`${id}-mode`}>OCR provider</FieldLabel>
+        <FieldLabel htmlFor={`${id}-mode`}>{m.pdf_scans_provider()}</FieldLabel>
         <Select
-          items={MODES.map(({ value, label }) => ({ value, label }))}
+          items={MODES.map(({ value, label }) => ({ value, label: label() }))}
           value={mode}
           onValueChange={(next) => {
             if (!next) return;
@@ -227,19 +225,19 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
           <SelectContent>
             {MODES.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {option.label()}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>{current.detail}</FieldDescription>
+        <FieldDescription>{current.detail()}</FieldDescription>
       </Field>
 
       {mode === "local" ? (
         <Field>
-          <FieldLabel htmlFor={`${id}-quality`}>Quality</FieldLabel>
+          <FieldLabel htmlFor={`${id}-quality`}>{m.pdf_scans_quality()}</FieldLabel>
           <Select
-            items={QUALITIES.map(({ value, label }) => ({ value, label }))}
+            items={QUALITIES.map(({ value, label }) => ({ value, label: label() }))}
             value={quality}
             onValueChange={(next) => next && setQuality(next as Quality)}
             disabled={busy}
@@ -250,8 +248,8 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
             <SelectContent>
               {QUALITIES.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                  <span className="text-muted-foreground ml-2 text-xs">{option.detail}</span>
+                  {option.label()}
+                  <span className="text-muted-foreground ml-2 text-xs">{option.detail()}</span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -276,7 +274,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
                 disabled={busy}
                 onClick={() => retry.mutate()}
               >
-                Retry
+                {m.pdf_scans_retry()}
               </PendingButton>
             ) : null}
           </div>
@@ -287,7 +285,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
         <>
           <Field>
             <FieldLabel htmlFor={`${id}-base-url`}>
-              Base URL <OptionalMark />
+              {m.pdf_scans_base_url()} <OptionalMark />
             </FieldLabel>
             <Input
               id={`${id}-base-url`}
@@ -302,12 +300,12 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor={`${id}-key`}>API key</FieldLabel>
+            <FieldLabel htmlFor={`${id}-key`}>{m.pdf_scans_api_key()}</FieldLabel>
             <Input
               id={`${id}-key`}
               type="password"
               autoComplete="off"
-              placeholder={settings.keyConfigured ? "Unchanged" : undefined}
+              placeholder={settings.keyConfigured ? m.pdf_scans_key_unchanged() : undefined}
               value={secret}
               onChange={(event) => {
                 setSecret(event.target.value);
@@ -316,12 +314,13 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
               disabled={busy}
             />
             <FieldDescription>
-              {settings.keyConfigured ? "Leave empty to keep the stored one. " : ""}
-              Get a key at{" "}
+              {settings.keyConfigured ? `${m.pdf_scans_key_keep()} ` : ""}
+              {keyLink[0]}
               <a href="https://console.mistral.ai/api-keys" target="_blank" rel="noreferrer">
+                {/* oxlint-disable-next-line i18n/no-literal-text -- a host name */}
                 console.mistral.ai
               </a>
-              .
+              {keyLink[1]}
             </FieldDescription>
           </Field>
           {test ? (
@@ -330,8 +329,8 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
               className={cn("text-xs", test.ok ? "text-success" : "text-destructive")}
             >
               {test.ok
-                ? `Works: read the sample page in ${test.latencyMs}ms.`
-                : `Didn’t work: ${test.error}`}
+                ? m.pdf_scans_test_ok({ latency: test.latencyMs })
+                : m.pdf_scans_test_failed({ error: test.error })}
             </p>
           ) : null}
         </>
@@ -339,21 +338,18 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
 
       {mode === "model" ? (
         <Field>
-          <FieldLabel htmlFor={`${id}-model`}>Model</FieldLabel>
+          <FieldLabel htmlFor={`${id}-model`}>{m.pdf_scans_model()}</FieldLabel>
           <ModelSelect
             id={`${id}-model`}
-            aria-label="Model that reads scanned pages"
+            aria-label={m.pdf_scans_model_label()}
             models={settings.visionModels}
             value={modelId}
             onChange={setModelId}
             disabled={busy}
-            emptyPlaceholder="Add a public model that can see images first"
+            emptyPlaceholder={m.pdf_scans_model_empty()}
           />
           {settings.needsApproval && saved.mode === "model" ? (
-            <FieldError>
-              The model or its provider was edited, so no pages are sent to it. Save to approve it
-              again.
-            </FieldError>
+            <FieldError>{m.pdf_scans_model_needs_approval()}</FieldError>
           ) : null}
         </Field>
       ) : null}
@@ -365,7 +361,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
           disabled={busy || !changed || !complete}
           onClick={() => void submit()}
         >
-          <SaveLabel justSaved={justSaved}>Save</SaveLabel>
+          <SaveLabel justSaved={justSaved}>{m.common_save()}</SaveLabel>
         </PendingButton>
         {mode === "mistral" ? (
           <PendingButton
@@ -378,7 +374,7 @@ function ScanReadingForm({ settings, disabled }: { settings: Settings; disabled:
               runTest.mutate();
             }}
           >
-            Test
+            {m.pdf_scans_test()}
           </PendingButton>
         ) : null}
       </FormActions>
