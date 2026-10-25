@@ -17,7 +17,6 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import {
   forwardRef,
-  useEffect,
   useId,
   useImperativeHandle,
   useMemo,
@@ -25,7 +24,6 @@ import {
   useState,
 } from "react";
 import { chatModelsQuery, composerAvailabilityQuery } from "../client/queries.ts";
-import { resolveChatModel } from "../client/selected-model.ts";
 import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
 import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";
 import { ModelPicker } from "./model-picker.tsx";
@@ -160,7 +158,8 @@ export const ChatInput = forwardRef<
     textareaDisabled?: boolean;
     controlsDisabled?: boolean;
     modelId: string | null;
-    onModelChange: (modelId: string, source?: "default") => void;
+    /** A pick in the model menu; the owner resolves what is sent. */
+    onModelChange: (modelId: string) => void;
     searchEnabled: boolean;
     onSearchEnabledChange: (enabled: boolean) => void;
     reasoningEffort?: ReasoningEffort | null | undefined;
@@ -406,11 +405,7 @@ export const ChatInput = forwardRef<
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noModels = models.length === 0;
-  const selectedModel = resolveChatModel(models, modelId);
-
-  useEffect(() => {
-    if (selectedModel && selectedModel.id !== modelId) onModelChange(selectedModel.id, "default");
-  }, [modelId, onModelChange, selectedModel]);
+  const selectedModel = models.find((model) => model.id === modelId);
   // Tools never depend on which model is selected: the gateway polyfills
   // prompt-based calling for models without native support. Only an empty
   // model list hides the toggle, since nothing could be sent anyway.
@@ -466,7 +461,6 @@ export const ChatInput = forwardRef<
   const canSubmit =
     !disabled &&
     !!selectedModel &&
-    selectedModel.id === modelId &&
     !blocked &&
     !(researchEnabled && (!canResearch || researchUnavailableReason)) &&
     !blockedReason &&

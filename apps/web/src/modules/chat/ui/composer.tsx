@@ -93,7 +93,7 @@ interface ComposerProps {
   disabled: boolean;
   textareaDisabled?: boolean;
   modelId: string | null;
-  onModelChange: (modelId: string, source?: "default") => void;
+  onModelChange: (modelId: string) => void;
   searchEnabled: boolean;
   onSearchEnabledChange: (enabled: boolean) => void;
   reasoningEffort?: ReasoningEffort | null | undefined;

@@ -50,6 +50,7 @@ import { useMarkRead } from "./use-mark-read.ts";
 import { useMessageEdit } from "./use-message-edit.ts";
 import { useMessageRows } from "./use-message-rows.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
+import { useModelChoice } from "../client/use-model-choice.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import { VirtualMessageList } from "./virtual-message-list.tsx";
 
@@ -104,7 +105,7 @@ export function ChatView({
   // Stays in step with an asynchronously generated title: `conversation.updated`
   // invalidates this query, so the tab renames itself when the title lands.
   useDocumentTitle(data.conversation.title);
-  const [modelId, setModelId] = useState<string | null>(null);
+  const model = useModelChoice(data.conversation.modelId);
   // A pick in this view; the chat's own lock shows until one is made.
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const imagePick = imageModelId ? { imageModelId } : {};
@@ -157,16 +158,10 @@ export function ChatView({
     () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
     [data.messages, data.toolCalls, data.attachments],
   );
-  const effectiveModelId = modelId ?? data.conversation.modelId;
+  const effectiveModelId = model.modelId;
   const { effort: reasoningEffort, setEffort: setReasoningEffort } =
     useReasoningEffort(effectiveModelId);
-  const changeModel = useCallback(
-    (id: string) => {
-      if (id !== effectiveModelId) setReasoningEffort(null);
-      setModelId(id);
-    },
-    [effectiveModelId, setReasoningEffort],
-  );
+  const changeModel = model.pick;
   const {
     enabled: searchEnabled,
     preferred: searchPreference,
@@ -301,8 +296,8 @@ export function ChatView({
       await flushPending();
     },
     settings: {
-      modelId,
-      setModelId,
+      modelId: model.picked,
+      setModelId: model.pick,
       imageModelId,
       setImageModelId,
       reasoningEffort,

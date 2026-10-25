@@ -10,6 +10,7 @@ import { ALL_CAPABILITIES, type Capabilities } from "~/modules/groups/policy.ts"
 import { AppMotionProvider } from "~/ui/motion.tsx";
 import { renderToString } from "react-dom/server";
 import { useSearchMode } from "./use-search-mode.ts";
+import { useModelChoice } from "../client/use-model-choice.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import {
@@ -222,8 +223,9 @@ beforeEach(() => {
   URL.revokeObjectURL = vi.fn();
 });
 
+/** Owns the model the way the views do: the chat's suggestion, a pick, the opened default. */
 function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
-  const [modelId, setModelId] = useState(initialModelId);
+  const { modelId, pick } = useModelChoice(initialModelId);
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
   return (
@@ -231,14 +233,14 @@ function DefaultProbe({ initialModelId }: { initialModelId: string | null }) {
       <output data-testid="selected-default">{modelId ?? "none"}</output>
       <output data-testid="default-search">{searchEnabled ? "on" : "off"}</output>
       <output data-testid="selected-effort">{reasoningEffort ?? "default"}</output>
-      <button onClick={() => setModelId("text-only")}>Choose Alpha</button>
+      <button onClick={() => pick("text-only")}>Choose Alpha</button>
       <ChatInput
         value=""
         onValueChange={() => {}}
         onSubmit={() => {}}
         disabled={false}
         modelId={modelId}
-        onModelChange={setModelId}
+        onModelChange={pick}
         searchEnabled={searchEnabled}
         onSearchEnabledChange={setSearchEnabled}
         reasoningEffort={reasoningEffort}
@@ -365,15 +367,16 @@ describe("ChatInput default model", () => {
 });
 
 function InitialControls({
-  modelId,
+  suggested,
   onModelChange,
   onSubmit,
 }: {
-  modelId: string | null;
+  suggested: string | null;
   onModelChange: (id: string) => void;
   onSubmit: () => void;
 }) {
   const search = useSearchMode();
+  const { modelId } = useModelChoice(suggested);
   return (
     <ChatInput
       value="Hello"
@@ -421,9 +424,13 @@ describe("ChatInput first render", () => {
       }));
       const onModelChange = vi.fn();
       const onSubmit = vi.fn();
-      const input = (modelId: string | null) => (
+      const input = (suggested: string | null) => (
         <QueryClientProvider client={client}>
-          <InitialControls modelId={modelId} onModelChange={onModelChange} onSubmit={onSubmit} />
+          <InitialControls
+            suggested={suggested}
+            onModelChange={onModelChange}
+            onSubmit={onSubmit}
+          />
         </QueryClientProvider>
       );
       // Server rendering never runs effects: this catches a placeholder flash
@@ -438,17 +445,13 @@ describe("ChatInput first render", () => {
       expect(onModelChange).not.toHaveBeenCalled();
 
       if (!empty && (id === null || id === "removed")) {
-        expect(initial.getByRole("button", { name: "Send" })).toBeDisabled();
-        const { rerender } = render(input(id));
-        expect(onModelChange).toHaveBeenCalledWith("vision", "default");
-        // The owner has not applied the callback yet: neither click nor Enter
-        // may send with a different model from the one shown in the trigger.
-        fireEvent.click(sendButton());
-        fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
-        expect(onSubmit).not.toHaveBeenCalled();
-        rerender(input("vision"));
+        // The owner resolved the default before the first render: the model
+        // shown is the one sent, with nothing written back to wait for.
+        expect(initial.getByRole("button", { name: "Send" })).toBeEnabled();
+        render(input(id));
         fireEvent.click(sendButton());
         expect(onSubmit).toHaveBeenCalledTimes(1);
+        expect(onModelChange).not.toHaveBeenCalled();
       }
     },
   );

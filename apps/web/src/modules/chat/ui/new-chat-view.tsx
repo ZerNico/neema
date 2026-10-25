@@ -29,6 +29,7 @@ import { Composer, type ComposerHandle } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
+import { useModelChoice } from "../client/use-model-choice.ts";
 import { useSearchMode } from "./use-search-mode.ts";
 import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
@@ -65,35 +66,22 @@ export function NewChatView({
   const queryClient = useQueryClient();
   // Fixed per visit so the line doesn't change while you type.
   const [greetingMoment] = useState(() => ({ now: new Date(), roll: Math.random() }));
-  const [modelId, setModelId] = useState<string | null>(null);
-  const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   // Null leaves the first answer to pick: the agent's image model, else the admin's first.
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const context = useContextSelection({
     mode: "draft",
     agent: initialAgentId ? { id: initialAgentId, name: null } : null,
   });
-  const selectedAgentId = context.selection.agent?.id ?? null;
   const selectedAgent = context.detail;
   const {
     enabled: searchEnabled,
     setEnabled: setSearchEnabled,
     reset: resetSearchEnabled,
   } = useSearchMode(selectedAgent.data?.searchEnabled ?? true);
-  const preferredModelApplied = useRef<string | null>(null);
-  const modelOverride = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selectedAgentId) {
-      preferredModelApplied.current = null;
-      return;
-    }
-    if (!selectedAgent.data || preferredModelApplied.current === selectedAgentId) return;
-    preferredModelApplied.current = selectedAgentId;
-    if (modelOverride.current !== selectedAgentId && selectedAgent.data.model?.available) {
-      setReasoningEffort(null);
-      setModelId(selectedAgent.data.model.id);
-    }
-  }, [selectedAgentId, selectedAgent.data, setReasoningEffort]);
+  // A chosen agent suggests its own model; a pick wins until the agent changes.
+  const agentModel = selectedAgent.data?.model?.available ? selectedAgent.data.model.id : null;
+  const { modelId, pick: pickModel } = useModelChoice(agentModel);
+  const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
   const [mode, setMode] = useState<ConversationMode>("chat");
@@ -361,11 +349,7 @@ export function NewChatView({
             }
             disabled={sendMutation.isPending}
             modelId={modelId}
-            onModelChange={(id, source) => {
-              if (source !== "default") modelOverride.current = selectedAgentId;
-              if (id !== modelId) setReasoningEffort(null);
-              setModelId(id);
-            }}
+            onModelChange={pickModel}
             searchEnabled={searchEnabled}
             onSearchEnabledChange={setSearchEnabled}
             reasoningEffort={reasoningEffort}
@@ -378,9 +362,8 @@ export function NewChatView({
             context={{
               ...context,
               onAgentChange: (id) => {
-                preferredModelApplied.current = null;
-                modelOverride.current = null;
-                // Picking another agent starts from that agent's default again.
+                // Picking another agent starts from that agent's defaults again.
+                pickModel(null);
                 resetSearchEnabled();
                 context.onAgentChange(id);
               },
