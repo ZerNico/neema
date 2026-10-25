@@ -383,11 +383,13 @@ const toolsFor = (
     Effect.gen(function* () {
       const service = yield* IntegrationService;
       const approvals = yield* IntegrationApprovals;
-      const offered = (yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null })).map(
-        (offer) =>
-          unattended
-            ? { ...offer, unattended: { access: "write" as const, allowances: {} } }
-            : offer,
+      const offered = (yield* service.resolveOffer({
+        userId,
+        conversationId,
+        grants: null,
+        agentIntegrationIds: null,
+      })).map((offer) =>
+        unattended ? { ...offer, unattended: { access: "write" as const, allowances: {} } } : offer,
       );
       return prepareIntegrationTools({
         offered,

@@ -44,7 +44,9 @@ export function makeDraftSession<
   normalize?: (key: string, value: unknown) => unknown;
 }) {
   const isChange = Schema.is(config.changes);
-  const nullable = new Set(Object.keys(config.changes.fields).filter((key) => isChange({ [key]: null })));
+  const nullable = new Set(
+    Object.keys(config.changes.fields).filter((key) => isChange({ [key]: null })),
+  );
   // Models write "no value" as null and small integers as strings. Both mean the
   // key is absent or the number itself; refusing them only burns a round trip.
   const lenient = (raw: unknown, changes = false): unknown => {

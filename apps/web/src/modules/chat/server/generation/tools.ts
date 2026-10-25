@@ -3,11 +3,7 @@ import { readWordDocument } from "~/modules/documents/server/word-import.ts";
 import { prepareDocumentTools } from "~/modules/documents/server/document-tools.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts";
-import {
-  prepareResearchTool,
-  researchAvailable,
-  type ToolCallRowRef,
-} from "../research/tool.ts";
+import { prepareResearchTool, researchAvailable, type ToolCallRowRef } from "../research/tool.ts";
 
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
 import { prepareScheduleDraftTools } from "~/modules/schedules/server/authoring-tools.ts";

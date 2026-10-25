@@ -174,8 +174,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
       nextCursor?: string;
     }
   >();
-  let selected: Partial<Record<OptionKind, ReadonlyArray<ResourceOption>>> =
-    {};
+  let selected: Partial<Record<OptionKind, ReadonlyArray<ResourceOption>>> = {};
   // The models this user can pick, marked with the one answering right now.
   // Short and already visible in the composer's picker, so a draft can name a
   // preference without a discovery round trip.

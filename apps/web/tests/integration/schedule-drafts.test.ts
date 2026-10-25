@@ -168,7 +168,10 @@ describe("saving a schedule draft", () => {
         service.reload(context.userId, { draftId: draft.id, expectedRevision: draft.revision }),
       ),
     );
-    expect(reloaded).toMatchObject({ outcome: "reloaded", draft: { settings: { chatId: adopted } } });
+    expect(reloaded).toMatchObject({
+      outcome: "reloaded",
+      draft: { settings: { chatId: adopted } },
+    });
     expect(await save(context.userId, reloaded.draft)).toMatchObject({ outcome: "saved" });
     expect(await storedChat(context.schedule.id)).toBe(adopted);
   });

@@ -218,35 +218,32 @@ export class ScheduleService extends Context.Service<
           yield* changed(userId, row.id);
           return row;
         }),
-        update: Effect.fn("ScheduleService.update")(function* (
-          userId,
-          scheduleId,
-          expectedRevision,
-          input,
-        ) {
-          const settings = yield* validate(userId, input);
-          const row = yield* db
-            .transaction((tx) =>
-              Effect.gen(function* () {
-                if (!(yield* policy.can(userId, "schedules", tx)))
-                  return yield* new ScheduleNotAvailable({ scheduleId });
-                yield* checkScheduleResources(tx, userId, settings);
-                return yield* repo.update(
-                  userId,
-                  scheduleId,
-                  { ...settings, nextFireAt: firstFireAt(settings) },
-                  tx,
-                  expectedRevision,
-                );
-              }),
-            )
-            .pipe(
-              Effect.catchTag("EffectDrizzleQueryError", Effect.die),
-              Effect.catchTag("SqlError", Effect.die),
-            );
-          yield* changed(userId, row.id);
-          return row;
-        }),
+        update: Effect.fn("ScheduleService.update")(
+          function* (userId, scheduleId, expectedRevision, input) {
+            const settings = yield* validate(userId, input);
+            const row = yield* db
+              .transaction((tx) =>
+                Effect.gen(function* () {
+                  if (!(yield* policy.can(userId, "schedules", tx)))
+                    return yield* new ScheduleNotAvailable({ scheduleId });
+                  yield* checkScheduleResources(tx, userId, settings);
+                  return yield* repo.update(
+                    userId,
+                    scheduleId,
+                    { ...settings, nextFireAt: firstFireAt(settings) },
+                    tx,
+                    expectedRevision,
+                  );
+                }),
+              )
+              .pipe(
+                Effect.catchTag("EffectDrizzleQueryError", Effect.die),
+                Effect.catchTag("SqlError", Effect.die),
+              );
+            yield* changed(userId, row.id);
+            return row;
+          },
+        ),
         pause: Effect.fn("ScheduleService.pause")(function* (userId, scheduleId) {
           yield* get(userId, scheduleId);
           if (!(yield* repo.setPaused(userId, scheduleId, true, null)))

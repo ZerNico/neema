@@ -44,10 +44,7 @@ export const resolveImageModel = Effect.fn("images.resolveImageModel")(function*
     return kept ? { id: kept.id, name: kept.displayName } : null;
   }
   const chosen =
-    usable(input.explicitId) ??
-    usable(input.lockId) ??
-    usable(input.agentChoice) ??
-    available[0]!;
+    usable(input.explicitId) ?? usable(input.lockId) ?? usable(input.agentChoice) ?? available[0]!;
   if (input.conversationId && input.lockId !== chosen.id)
     yield* tx
       .update(conversations)

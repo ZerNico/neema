@@ -300,20 +300,17 @@ export class ScheduleRepo extends Context.Service<
           const [stored] = yield* withGrants(tx, [row]);
           return stored!;
         }),
-        setPaused: Effect.fn("ScheduleRepo.setPaused")(function* (
-          userId,
-          scheduleId,
-          paused,
-          nextFireAt,
-        ) {
-          const rows = yield* db
-            .update(schedules)
-            .set({ paused, nextFireAt, updatedAt: new Date() })
-            .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
-            .returning({ id: schedules.id })
-            .pipe(Effect.orDie);
-          return rows.length > 0;
-        }),
+        setPaused: Effect.fn("ScheduleRepo.setPaused")(
+          function* (userId, scheduleId, paused, nextFireAt) {
+            const rows = yield* db
+              .update(schedules)
+              .set({ paused, nextFireAt, updatedAt: new Date() })
+              .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
+              .returning({ id: schedules.id })
+              .pipe(Effect.orDie);
+            return rows.length > 0;
+          },
+        ),
         remove: Effect.fn("ScheduleRepo.remove")(function* (userId, scheduleId) {
           yield* db
             .delete(schedules)

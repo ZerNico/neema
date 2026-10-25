@@ -10,7 +10,8 @@ export const SCHEDULE_TEXT_LIMITS = {
   timezone: 100,
   prompt: 8000,
 } as const;
-const required = (max: number) => Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(max));
+const required = (max: number) =>
+  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(max));
 
 /** 5-field cron expression; the module's cron.ts validates it parses. */
 export const CronExpression = required(SCHEDULE_TEXT_LIMITS.cron);
@@ -54,9 +55,11 @@ export const ScheduleSettings = Schema.Struct({
 export type ScheduleSettings = typeof ScheduleSettings.Type;
 
 /** A stored schedule as the settings its editors start from. */
-export const scheduleToSettings = (schedule: {
-  readonly [K in Exclude<keyof ScheduleSettings, "endAt">]: ScheduleSettings[K];
-} & { readonly endAt: Date | null }): ScheduleSettings => ({
+export const scheduleToSettings = (
+  schedule: {
+    readonly [K in Exclude<keyof ScheduleSettings, "endAt">]: ScheduleSettings[K];
+  } & { readonly endAt: Date | null },
+): ScheduleSettings => ({
   name: schedule.name,
   scheduleText: schedule.scheduleText,
   cron: schedule.cron,

@@ -49,13 +49,15 @@ const agentConfig = (
   // and the user review the live configuration, not a blank form. Only an
   // owned agent; a shared one is the recipient's to read, not to edit.
   readTarget: (agentId, tx) =>
-    agents.get(userId, agentId, tx).pipe(
-      Effect.map((target) =>
-        target && target.row.userId === userId
-          ? { settings: storedAgentToDraftSettings(target), revision: target.row.configRevision }
-          : null,
+    agents
+      .get(userId, agentId, tx)
+      .pipe(
+        Effect.map((target) =>
+          target && target.row.userId === userId
+            ? { settings: storedAgentToDraftSettings(target), revision: target.row.configRevision }
+            : null,
+        ),
       ),
-    ),
 });
 
 export class AgentDraftService extends Context.Service<

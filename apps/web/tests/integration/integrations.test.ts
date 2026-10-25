@@ -1455,7 +1455,12 @@ describe("approvals", () => {
         Effect.gen(function* () {
           const service = yield* IntegrationService;
           const approvals = yield* IntegrationApprovals;
-          const offered = yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
+          const offered = yield* service.resolveOffer({
+            userId,
+            conversationId,
+            grants: null,
+            agentIntegrationIds: null,
+          });
           const prepared = prepareIntegrationTools({
             offered,
             indexer: createSourceIndexer([]),
@@ -1537,7 +1542,12 @@ describe("prepared calls", () => {
     Effect.gen(function* () {
       const service = yield* IntegrationService;
       const approvals = yield* IntegrationApprovals;
-      const offered = yield* service.resolveOffer({ userId, conversationId, grants, agentIntegrationIds: null });
+      const offered = yield* service.resolveOffer({
+        userId,
+        conversationId,
+        grants,
+        agentIntegrationIds: null,
+      });
       const prepared = prepareIntegrationTools({
         offered,
         indexer: createSourceIndexer([]),
@@ -1594,7 +1604,12 @@ describe("prepared calls", () => {
         await run(
           Effect.gen(function* () {
             const service = yield* IntegrationService;
-            const offered = yield* service.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
+            const offered = yield* service.resolveOffer({
+              userId,
+              conversationId,
+              grants: null,
+              agentIntegrationIds: null,
+            });
             let checks = 0;
             const prepared = prepareIntegrationTools({
               offered,
@@ -2405,7 +2420,12 @@ describe("several accounts of one integration", () => {
     run(
       Effect.gen(function* () {
         const integrations = yield* IntegrationService;
-        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants, agentIntegrationIds: null });
+        const offered = yield* integrations.resolveOffer({
+          userId,
+          conversationId,
+          grants,
+          agentIntegrationIds: null,
+        });
         const prepared = prepareIntegrationTools({
           offered,
           indexer: createSourceIndexer([]),
@@ -2685,7 +2705,12 @@ describe("several integrations of one type", () => {
       Effect.gen(function* () {
         const integrations = yield* IntegrationService;
         const approvals = yield* IntegrationApprovals;
-        const offered = yield* integrations.resolveOffer({ userId, conversationId, grants: null, agentIntegrationIds: null });
+        const offered = yield* integrations.resolveOffer({
+          userId,
+          conversationId,
+          grants: null,
+          agentIntegrationIds: null,
+        });
         const prepared = prepareIntegrationTools({
           offered,
           indexer: createSourceIndexer([]),

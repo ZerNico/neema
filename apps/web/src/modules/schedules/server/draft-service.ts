@@ -40,7 +40,6 @@ const asSchedule = (draft: ConversationDraft): ScheduleDraft => ({
   settings: draft.settings as ScheduleDraftSettings,
 });
 
-
 export class ScheduleDraftService extends Context.Service<
   ScheduleDraftService,
   {

@@ -10,10 +10,7 @@ import {
   initialResearchProgress,
   type ResearchFence,
 } from "~/modules/chat/server/research/repo.ts";
-import {
-  lockGeneration,
-  type GenerationIdentity,
-} from "~/modules/chat/server/generation-fence.ts";
+import { lockGeneration, type GenerationIdentity } from "~/modules/chat/server/generation-fence.ts";
 import { hashSourceMessageContent } from "~/modules/memory/server/content-hash.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
 import { Db } from "~/server/db.ts";

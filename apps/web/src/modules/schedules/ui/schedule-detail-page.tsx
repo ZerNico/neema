@@ -49,7 +49,6 @@ const runStamp = (date: Date) => {
   return day === "Today" ? clockLabel(date) : day;
 };
 
-
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {
   const detail = useQuery({ ...scheduleQuery(scheduleId), retry: false });
   if (detail.isError)
