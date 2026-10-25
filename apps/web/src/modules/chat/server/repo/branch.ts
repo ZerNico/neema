@@ -6,6 +6,7 @@ import { composeFileReferenceAliases } from "../../file-reference-aliases.ts";
 import { projectResearchProgress } from "../../research-schema.ts";
 import { researchRuns, researchTasks } from "~/db/schema/research.ts";
 import { uuidv7 } from "uuidv7";
+import { readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import {
   conversationAgents,
   conversationCompactionCheckpoints,
@@ -79,6 +80,13 @@ const remapUiImages = (images: UiImages, attachmentIds: ReadonlyMap<string, stri
       },
     ]),
   );
+
+/** An answer's copy, naming the copy of the call it answered. */
+const answerCopy = (value: JsonValue | null, toolIds: ReadonlyMap<string, string>) => {
+  const answered = readQuestionResponse(value);
+  const callId = answered ? toolIds.get(answered.callId) : undefined;
+  return answered && callId ? ({ ...answered, callId } as JsonValue) : null;
+};
 
 export const branchMethods = ({ db, attachments }: RepoContext) =>
   ({
@@ -188,6 +196,12 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 .pipe(Effect.orDie);
 
             const clonedIds = new Map(prefix.map((m) => [m.id, uuidv7()] as const));
+            const toolCalls = yield* tx
+              .select()
+              .from(messageToolCalls)
+              .where(inArray(messageToolCalls.messageId, [...clonedIds.keys()]))
+              .pipe(Effect.orDie);
+            const toolIds = new Map(toolCalls.map((call) => [call.id, uuidv7()] as const));
             yield* tx
               .insert(messages)
               .values(
@@ -205,18 +219,14 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                   steeredIntoMessageId: m.steeredIntoMessageId
                     ? (clonedIds.get(m.steeredIntoMessageId) ?? null)
                     : null,
+                  // The question an answer names is earlier, so in the prefix too.
+                  questionResponse: answerCopy(m.questionResponse, toolIds),
                   // createdAt/completedAt/editedAt stay as they were: the
                   // branch shows the same history, day dividers included.
                 })),
               )
               .pipe(Effect.orDie);
 
-            const toolCalls = yield* tx
-              .select()
-              .from(messageToolCalls)
-              .where(inArray(messageToolCalls.messageId, [...clonedIds.keys()]))
-              .pipe(Effect.orDie);
-            const toolIds = new Map(toolCalls.map((call) => [call.id, uuidv7()] as const));
             const runs = yield* tx
               .select()
               .from(researchRuns)

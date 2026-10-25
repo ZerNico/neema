@@ -678,6 +678,62 @@ describe("loadConversationDetail", () => {
     );
   });
 
+  it("names the call an older answer replied to, and turns an unmatched one into a message", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const repo = yield* ChatRepo;
+        const db = yield* Db;
+        const thread = yield* seedThread(userId, "Questions");
+        const questions = [{ question: "Which?", options: [{ label: "A" }, { label: "B" }] }];
+        const askId = uuidv7();
+        yield* db.insert(messageToolCalls).values({
+          id: askId,
+          messageId: thread.assistantId,
+          turnIndex: 0,
+          callIndex: 0,
+          providerCallId: "ask",
+          toolName: "ask_user",
+          arguments: { questions },
+          status: "complete",
+          result: { v: 1, outcome: "presented", questions },
+        });
+        const response = { kind: "answers", answers: [{ selected: [0], custom: "" }] };
+        const reply = yield* repo.insertMessage({
+          conversationId: thread.conversationId,
+          role: "user",
+          content: "Q1: A",
+        });
+        // A second reply follows a user message, so nothing asked it anything.
+        const stray = yield* repo.insertMessage({
+          conversationId: thread.conversationId,
+          role: "user",
+          content: "Q1: B",
+        });
+        yield* db
+          .update(messages)
+          .set({ questionResponse: { v: 1, response } })
+          .where(inArray(messages.id, [reply.id, stray.id]));
+        const migration = readFileSync(
+          new URL(
+            "../../drizzle/20261025132740_question_response_call/migration.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        );
+        for (const statement of migration.split("--> statement-breakpoint"))
+          yield* db.execute(statement as never);
+        const rows = yield* db
+          .select({ id: messages.id, questionResponse: messages.questionResponse })
+          .from(messages)
+          .where(inArray(messages.id, [reply.id, stray.id]));
+        const byId = new Map(rows.map((row) => [row.id, row.questionResponse]));
+        expect(byId.get(reply.id)).toEqual({ v: 1, callId: askId, response });
+        expect(byId.get(stray.id)).toBeNull();
+      }),
+    );
+  });
+
   it("fails before reading anything for a conversation the caller does not own", async () => {
     const owner = await run(makeUser());
     const stranger = await run(makeUser());

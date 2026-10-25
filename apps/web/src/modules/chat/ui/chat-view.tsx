@@ -155,8 +155,8 @@ export function ChatView({
     onError: (error) => toastError("Could not change the approval level.", error),
   });
   const questionResponses = useMemo(
-    () => associateQuestionResponses(data.messages, data.toolCalls, data.attachments),
-    [data.messages, data.toolCalls, data.attachments],
+    () => associateQuestionResponses(data.messages, data.toolCalls),
+    [data.messages, data.toolCalls],
   );
   const effectiveModelId = model.modelId;
   const { effort: reasoningEffort, setEffort: setReasoningEffort } =

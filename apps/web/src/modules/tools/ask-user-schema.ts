@@ -59,17 +59,16 @@ export const QuestionResponse = Schema.Union([
 ]);
 export type QuestionResponse = typeof QuestionResponse.Type;
 
+/** A message that answers an `ask_user` batch, naming the call it answers. */
 export const StoredQuestionResponse = Schema.Struct({
   v: Schema.Literals([1]),
+  callId: Schema.String,
   response: QuestionResponse,
 });
 export type StoredQuestionResponse = typeof StoredQuestionResponse.Type;
 
-export function readQuestionResponse(value: unknown): QuestionResponse | null {
-  return (
-    Option.getOrNull(Schema.decodeUnknownOption(StoredQuestionResponse)(value))?.response ?? null
-  );
-}
+export const readQuestionResponse = (value: unknown): StoredQuestionResponse | null =>
+  Option.getOrNull(Schema.decodeUnknownOption(StoredQuestionResponse)(value));
 
 /**
  * Only explicit selections and user-written text enter the user role. Questions,

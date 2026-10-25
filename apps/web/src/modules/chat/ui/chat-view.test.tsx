@@ -915,7 +915,7 @@ const structuredReply = (
   response: QuestionResponse = { kind: "answers", answers: [{ selected: [0], custom: "" }] },
 ) => ({
   ...message("structured-user", "user", formatQuestionResponse(askQuestions, response)!),
-  questionResponse: { v: 1, response },
+  questionResponse: { v: 1, callId: askRow.id, response },
 });
 
 const resolvedPayload = (response?: QuestionResponse) =>

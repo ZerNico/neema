@@ -3395,12 +3395,17 @@ describe("structured answer persistence and edits", () => {
       expect(result.invalid).toMatchObject({ _tag: "InvalidMessage" });
       expect(result.answer).toMatchObject({
         content: "Q1: My own style",
-        questionResponse: { v: 1, response: result.response },
+        questionResponse: { v: 1, callId: result.originalCalls[0]!.id, response: result.response },
       });
       expect(result.afterCalls).toEqual(result.originalCalls);
       expect(result.branchMessages[2]).toMatchObject({
         content: result.answer!.content,
-        questionResponse: result.answer!.questionResponse,
+        // The copy names the branch's own copy of the question.
+        questionResponse: {
+          v: 1,
+          callId: result.calls[0]!.id,
+          response: result.response,
+        },
       });
       expect(result.calls[0]).toMatchObject({ textOffset: 0 });
       expect(result.calls[0]!.id).not.toBe(result.originalCalls[0]!.id);
@@ -3700,8 +3705,10 @@ describe("atomic question answers", () => {
     expect(result.calls[0]?.id).not.toBe(result.originalId);
     expect(result.sourceTurn.userMessage.content).toBe("Q1: Detailed");
     expect(result.branchTurn.userMessage.content).toContain("skipping is not approval");
+    // The branch's answer names the branch's own copy of the question.
     expect(result.branchTurn.userMessage.questionResponse).toEqual({
       v: 1,
+      callId: result.calls[0]!.id,
       response: { kind: "skip" },
     });
     expect(result.sourceTurn.conversation.id).not.toBe(result.branchTurn.conversation.id);

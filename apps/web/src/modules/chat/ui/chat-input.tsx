@@ -15,14 +15,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import {
-  forwardRef,
-  useId,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { chatModelsQuery, composerAvailabilityQuery } from "../client/queries.ts";
 import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
 import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";

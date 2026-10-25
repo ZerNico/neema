@@ -26,13 +26,18 @@ const handler = () =>
 describe("ask_user contract", () => {
   it("decodes only supported structured response metadata", () => {
     const response = { kind: "skip" };
-    expect(readQuestionResponse({ v: 1, response })).toEqual(response);
+    expect(readQuestionResponse({ v: 1, callId: "ask", response })).toEqual({
+      v: 1,
+      callId: "ask",
+      response,
+    });
     for (const value of [
       null,
       "Q1: Detailed",
       { response },
-      { v: 2, response },
-      { v: 1, response: { kind: "answers", answers: [] } },
+      { v: 1, response },
+      { v: 2, callId: "ask", response },
+      { v: 1, callId: "ask", response: { kind: "answers", answers: [] } },
     ])
       expect(readQuestionResponse(value)).toBeNull();
   });

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { formatQuestionResponse, readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
+import { readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { uuidv7 } from "uuidv7";
 import {
   conversationAgents,
@@ -10,7 +10,6 @@ import {
   conversations,
   conversationQueueEntries,
   messageChunks,
-  messageAttachments,
   messageCompactionEvents,
   messageGenerationConfig,
   messageKnowledgeVersions,
@@ -33,7 +32,12 @@ import { lockAccount } from "~/modules/auth/server/account-eligibility.ts";
 import { readDefaults, readConfig, writeConfig } from "./generation-config.ts";
 import { queueOrder, readQueueGate } from "./queue.ts";
 import { freshLease, joinChunks } from "./generation-writes.ts";
-import { turnMessagesOf, questionForMessage, questionContent } from "./questions.ts";
+import {
+  turnMessagesOf,
+  questionByCall,
+  questionForMessage,
+  questionContent,
+} from "./questions.ts";
 import { lockWorkTurn, expireWorkTurns, rejectReservedWorkTurn } from "./work-turns.ts";
 import type { RepoContext } from "./context.ts";
 import type {
@@ -103,36 +107,20 @@ const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
   messageId: string,
   input: EditContent & { attachmentIds: ReadonlyArray<string> },
 ) {
-  const index = current.findIndex((message) => message.id === messageId);
-  const target = current[index];
+  const target = current.find((message) => message.id === messageId);
   if (target?.role !== "user" || target.status !== "complete")
     return yield* new InvalidMessage({ reason: "Only completed user messages can be edited." });
-  const previousResponse = readQuestionResponse(target.questionResponse);
-  // The answer it replied to, past any steers that answer took in.
-  let before = index - 1;
-  while (current[before]?.steeredIntoMessageId) before -= 1;
-  const batch = previousResponse ? yield* questionForMessage(tx, current[before]) : null;
-  const attached = previousResponse
-    ? yield* tx
-        .select({ id: messageAttachments.attachmentId })
-        .from(messageAttachments)
-        .where(eq(messageAttachments.messageId, messageId))
-        .limit(1)
-        .pipe(Effect.orDie)
-    : [];
-  const structured =
-    previousResponse &&
-    batch &&
-    attached.length === 0 &&
-    formatQuestionResponse(batch.questions, previousResponse) === target.content;
+  // An answer stays one while the call it names can still be answered.
+  const answered = readQuestionResponse(target.questionResponse);
+  const batch = answered ? yield* questionByCall(tx, answered.callId) : null;
   if (input.questionResponse) {
-    if (!structured || !batch || input.attachmentIds.length > 0)
+    if (!batch || input.attachmentIds.length > 0)
       return yield* new InvalidMessage({
         reason: "These answers can no longer be edited as a question response.",
       });
-    return yield* questionContent(batch.questions, input.questionResponse);
+    return yield* questionContent(batch, input.questionResponse);
   }
-  if (structured)
+  if (batch)
     return yield* new InvalidMessage({
       reason: "Use Edit answers to change a structured question response.",
     });
@@ -301,7 +289,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               if (!batch || batch.call.id !== callId)
                 return yield* new QuestionUnavailable({ callId });
               continuation = yield* readConfig(tx, tail!.id);
-              const formatted = yield* questionContent(batch.questions, response);
+              const formatted = yield* questionContent(batch, response);
               content = formatted.content;
               questionResponse = formatted.questionResponse;
             }
