@@ -1,5 +1,25 @@
+import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { ResearchStepActivity } from "./research-panel.tsx";
 import { hostOf } from "./host-of.ts";
+
+/** A call a research run made itself: its run's row shows it, never the answer body. */
+export const isResearchStep = (
+  activity: ToolActivity,
+): activity is ResearchStepActivity & { runId: string } =>
+  (activity.family === "web" || activity.family === "knowledge" || activity.family === "skill") &&
+  !!activity.runId;
+
+/** One run's own steps, in the order its message holds them. */
+export const researchSteps = (
+  activities: ReadonlyArray<ToolActivity>,
+  runId: string | undefined,
+): ResearchStepActivity[] =>
+  runId
+    ? activities.filter(
+        (activity): activity is ResearchStepActivity =>
+          isResearchStep(activity) && activity.runId === runId,
+      )
+    : [];
 
 /** The newest running target, else the newest target seen: what it is on now. */
 export const currentDetail = (

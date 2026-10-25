@@ -61,6 +61,7 @@ import {
 } from "./citations.ts";
 import { ResearchActivityBlock } from "./research-activity-block.tsx";
 import { type ResearchStepActivity } from "./research-panel.tsx";
+import { researchSteps } from "./research-steps.ts";
 import { useResearchPanel } from "./use-research-panel.tsx";
 import { researchPosition } from "./research-panel-id.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
@@ -862,35 +863,20 @@ const AssistantBody = memo(function AssistantBody({
           }}
         />
       );
-    if (part.activity.family === "research") {
-      const runId = part.activity.progress?.runId;
+    if (part.activity.family === "research")
       return (
         <ResearchActivityRow
           key={part.key}
           messageId={message.id}
           position={researchPosition(message.toolActivities, part.activity.callId)}
           activity={part.activity}
-          webActivities={message.toolActivities.filter(
-            (activity): activity is ResearchStepActivity =>
-              (activity.family === "web" ||
-                activity.family === "knowledge" ||
-                activity.family === "skill") &&
-              !!runId &&
-              activity.runId === runId,
-          )}
+          webActivities={researchSteps(message.toolActivities, part.activity.progress?.runId)}
           sourceCount={sources.length}
         />
       );
-    }
     // Direct context is shown on the question that added the collection, not
-    // as an activity on the answer; its citations still resolve. Tool loads
-    // never reach here (`assistant-body.ts` drops them).
-    if (
-      part.activity.family === "knowledge" ||
-      part.activity.family === "skill" ||
-      part.activity.family === "tool-load"
-    )
-      return null;
+    // as an activity on the answer; its citations still resolve.
+    if (part.activity.family === "knowledge" || part.activity.family === "skill") return null;
     if (part.activity.family === "plan")
       return <PlanActivityBlock key={part.key} activity={part.activity} />;
     if (part.activity.family === "agent-draft")

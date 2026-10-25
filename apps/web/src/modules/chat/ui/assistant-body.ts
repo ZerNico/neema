@@ -1,4 +1,5 @@
 import type { AssistantFile } from "../assistant-output.ts";
+import { isResearchStep } from "./research-steps.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type {
   CompactionActivity,
@@ -8,6 +9,7 @@ import type {
   OfficeActivity,
   ToolActivity,
   ToolFileActivity,
+  ToolLoadActivity,
   WebToolActivity,
   KnowledgeToolActivity,
   SkillToolActivity,
@@ -35,9 +37,12 @@ export interface AssistantSteer {
 
 type PositionedActivity =
   | { kind: "file"; activity: AssistantFile }
-  | { kind: "tool"; activity: ToolActivity }
+  | { kind: "tool"; activity: BodyToolActivity }
   | { kind: "compaction"; activity: CompactionActivity }
   | { kind: "steer"; activity: AssistantSteer };
+
+/** Loading tools shows nothing, so the body never holds one. */
+type BodyToolActivity = Exclude<ToolActivity, ToolLoadActivity>;
 
 export type AssistantBodyPart =
   | { kind: "file"; key: string; file: AssistantFile }
@@ -65,7 +70,7 @@ export type AssistantBodyPart =
       kind: "tool";
       key: string;
       activity: Exclude<
-        ToolActivity,
+        BodyToolActivity,
         WebToolActivity | OfficeActivity | ToolFileActivity | ImageToolActivity
       >;
     }
@@ -280,17 +285,8 @@ export function projectAssistantBody({
     ...tools
       // Loading tools shows nothing; left in, it would split a run of calls
       // that otherwise group into one row.
-      .filter((activity) => activity.family !== "tool-load")
-      .filter(
-        (activity) =>
-          !(
-            (activity.family === "web" ||
-              activity.family === "knowledge" ||
-              activity.family === "skill") &&
-            activity.runId &&
-            researchRuns.has(activity.runId)
-          ),
-      )
+      .filter((activity): activity is BodyToolActivity => activity.family !== "tool-load")
+      .filter((activity) => !(isResearchStep(activity) && researchRuns.has(activity.runId)))
       .map((activity): PositionedActivity => ({ kind: "tool", activity })),
     ...compactions
       .filter((activity) => !(activity.runId && researchRuns.has(activity.runId)))

@@ -55,6 +55,40 @@ const projectAssistantBody = (input: Parameters<typeof projectGrouped>[0]) => {
 };
 
 describe("projectAssistantBody", () => {
+  it("leaves a research run's own steps to its row and keeps the answer's own calls", () => {
+    const research: ToolActivity = {
+      family: "research",
+      name: "deep_research",
+      callId: "research",
+      textOffset: 0,
+      turnIndex: 0,
+      callIndex: 0,
+      status: "running",
+      progress: {
+        runId: "run-1",
+        phase: "researching",
+        tasks: [],
+        limitations: [],
+        usageComplete: false,
+      },
+    };
+    const step = { ...web("step", 0, 1), runId: "run-1" } as ToolActivity;
+    const own = web("own", 0, 2);
+    const result = projectAssistantBody({
+      content: "",
+      streaming: true,
+      tools: [research, step, own],
+      compactions: [],
+    });
+    const calls = result.parts.flatMap((part) =>
+      part.kind === "web" ? part.activities.map((activity) => activity.callId) : [],
+    );
+    expect(calls).toEqual(["own"]);
+    expect(
+      result.parts.some((part) => part.kind === "tool" && part.activity.callId === "research"),
+    ).toBe(true);
+  });
+
   it("joins a run of browser calls into one row, apart from other desktop calls", () => {
     const result = projectAssistantBody({
       content: "",

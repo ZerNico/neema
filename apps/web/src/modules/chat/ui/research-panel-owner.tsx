@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { ResearchToolActivity, ToolActivity } from "../client/use-message-stream.ts";
 import type { DisplayMessage } from "./message-list.tsx";
 import { researchPanelId, researchPosition } from "./research-panel-id.ts";
-import type { ResearchStepActivity } from "./research-panel.tsx";
+import { researchSteps } from "./research-steps.ts";
 import { researchPanelRequest } from "./use-research-panel.tsx";
 import { useDetailPanelTabContent, useDetailPanelTabIds } from "~/ui/detail-panel-context.ts";
 
@@ -49,20 +49,11 @@ function ResearchTabOwner({
   const request = useMemo(() => {
     const activity = current;
     if (!message || !activity || replaced) return null;
-    const runId = runIdOf(activity);
-    const webActivities = message.toolActivities.filter(
-      (candidate): candidate is ResearchStepActivity =>
-        (candidate.family === "web" ||
-          candidate.family === "knowledge" ||
-          candidate.family === "skill") &&
-        !!runId &&
-        candidate.runId === runId,
-    );
     return researchPanelRequest(
       message.id,
       researchPosition(message.toolActivities, activity.callId),
       activity,
-      webActivities,
+      researchSteps(message.toolActivities, runIdOf(activity)),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the message's activities, not its text
   }, [message?.id, message?.toolActivities, id, replaced]);
