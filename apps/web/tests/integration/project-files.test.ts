@@ -376,7 +376,7 @@ describe("project files", () => {
           basedOnVersion: 1,
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "ProjectRejected" });
+    ).rejects.toMatchObject({ _tag: "ProjectFileConflict", basedOnVersion: 1, current: 2 });
     const restored = await files((s) => s.restore(owner, draft!.id, 2));
     expect(restored.version).toBe(3);
     // The restore reuses draft one's bytes, so usage counts them once, as the owner's storage does.
@@ -384,7 +384,7 @@ describe("project files", () => {
       usedBytes: text("draft one").length + text("draft two").length,
     });
     await expect(files((s) => s.restore(owner, draft!.id, 2))).rejects.toMatchObject({
-      _tag: "ProjectRejected",
+      _tag: "ProjectFileConflict",
     });
     expect((await files((s) => s.download(owner, again.versionId)))!.bytes).toEqual(
       text("draft two"),
@@ -419,7 +419,7 @@ describe("project files", () => {
           basedOnVersion: 4,
         }),
       ),
-    ).rejects.toMatchObject({ _tag: "ProjectRejected" });
+    ).rejects.toMatchObject({ _tag: "ProjectFileConflict", basedOnVersion: 4, current: 5 });
     expect((await files((s) => s.download(owner, byModel.versionId)))!.bytes).toEqual(
       text("model draft"),
     );
@@ -476,7 +476,7 @@ describe("project files", () => {
     const stranger = await createUser();
     const before = puts.length;
     for (const [writerId, refusal] of [
-      [viewer, { _tag: "ProjectRejected", reason: "project files are read-only for you" }],
+      [viewer, { _tag: "ProjectRejected", reason: "this project is read-only for you" }],
       [stranger, { _tag: "ProjectNotAvailable", projectId }],
     ] as const) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each denial must precede physical storage.

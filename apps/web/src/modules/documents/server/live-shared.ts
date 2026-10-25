@@ -1,8 +1,5 @@
 import { Effect, Semaphore } from "effect";
-import { eq } from "drizzle-orm";
-import { projects } from "~/db/schema/index.ts";
-import { projectCan } from "~/modules/projects/schema.ts";
-import { projectAudience, projectRole } from "~/modules/projects/server/access.ts";
+import { projectAudience, requireProject } from "~/modules/projects/server/access.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { Db, DbTx } from "~/server/db.ts";
 import { uuidv7 } from "uuidv7";
@@ -69,18 +66,13 @@ export const notifyDocumentChanged =
 
 /** Holds the project row against deletion while a document is added to it. */
 export const lockProjectForEditing = (tx: DbTx, userId: string, projectId: string) =>
-  Effect.gen(function* () {
-    const [row] = yield* tx
-      .select({ id: projects.id })
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .for("share")
-      .pipe(Effect.orDie);
-    const role = row ? yield* projectRole(tx, userId, projectId) : null;
-    if (!role) return yield* new DocumentNotAvailable({ documentId: projectId });
-    if (!projectCan.edit(role))
-      return yield* new DocumentRejected({ reason: "this project is read-only for you" });
-  });
+  requireProject(tx, userId, projectId, "edit", "share").pipe(
+    Effect.asVoid,
+    Effect.catchTags({
+      ProjectNotAvailable: () => Effect.fail(new DocumentNotAvailable({})),
+      ProjectRejected: ({ reason }) => Effect.fail(new DocumentRejected({ reason })),
+    }),
+  );
 
 type Repo = DocumentRepo["Service"];
 

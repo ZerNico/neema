@@ -19,22 +19,21 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { DocumentParser } from "~/modules/attachments/server/document-parser.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
-import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
+import { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   PROJECT_FILE_LIMITS,
   type ProjectFileList,
   type ProjectFileSummary,
   type ProjectFileVersion,
 } from "../files.ts";
-import { projectCan } from "../schema.ts";
-import { projectAudience, projectRole } from "./access.ts";
+import { projectAccess, projectNotifier, projectRole, requireProject } from "./access.ts";
 import { attachmentKind } from "~/modules/attachments/constants.ts";
 import { readImageSize } from "~/modules/attachments/image-header.ts";
 import { fileText } from "~/modules/attachments/server/file-text.ts";
 import { currentAttachmentId } from "~/modules/chat/server/file-aliases.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 
-type ProjectFileError = ProjectNotAvailable | ProjectRejected;
+type ProjectFileError = ProjectNotAvailable | ProjectRejected | ProjectFileConflict;
 /** Who is writing: a person, or the model inside one answer. */
 export type FileWriter =
   | { origin: "user"; userId: string }
@@ -213,30 +212,7 @@ export class ProjectFileService extends Context.Service<
       const transaction = <A, E, R>(body: (tx: DbTx) => Effect.Effect<A, E, R>) =>
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
 
-      const changed = (projectId: string) =>
-        projectAudience(db, projectId).pipe(
-          Effect.flatMap((members) =>
-            Effect.forEach(
-              members,
-              (memberId) => bus.publish(memberId, { type: "project.changed", projectId }),
-              { discard: true },
-            ),
-          ),
-          Effect.catchCause(() => Effect.logWarning("project file invalidation failed")),
-        );
-      /** Fails unless the person may use (or, with `edit`, change) the project. */
-      const requireRole = (
-        tx: DbTx | typeof db,
-        userId: string,
-        projectId: string,
-        edit: boolean,
-      ) =>
-        Effect.gen(function* () {
-          const role = yield* projectRole(tx, userId, projectId);
-          if (!role) return yield* new ProjectNotAvailable({ projectId });
-          if (edit && !projectCan.edit(role))
-            return yield* new ProjectRejected({ reason: "project files are read-only for you" });
-        });
+      const changed = projectNotifier(db, bus);
       const fileProject = (tx: DbTx | typeof db, fileId: string) =>
         tx
           .select({ projectId: projectFiles.projectId, name: projectFiles.name })
@@ -287,7 +263,7 @@ export class ProjectFileService extends Context.Service<
         transaction((tx) =>
           Effect.gen(function* () {
             if (writer.origin === "model") yield* writer.guard(tx);
-            yield* requireRole(tx, writer.userId, projectId, true);
+            yield* requireProject(tx, writer.userId, projectId, "edit");
           }),
         );
 
@@ -339,9 +315,7 @@ export class ProjectFileService extends Context.Service<
             // Conversation before project, the order every attempt takes them in.
             if (writer.origin === "model") yield* writer.guard(tx);
             // Serialize the project's versions and retention before registering any blobs.
-            const [locked] = yield* lockProject(tx, input.projectId);
-            if (!locked) return yield* new ProjectNotAvailable({ projectId: input.projectId });
-            yield* requireRole(tx, writer.userId, input.projectId, true);
+            yield* requireProject(tx, writer.userId, input.projectId, "edit", "update");
             const [existingBlob] = yield* tx
               .select({ id: attachmentBlobs.id })
               .from(attachmentBlobs)
@@ -435,8 +409,9 @@ export class ProjectFileService extends Context.Service<
               .pipe(Effect.orDie);
             const current = last?.number ?? 0;
             if (input.basedOnVersion !== undefined && input.basedOnVersion !== current)
-              return yield* new ProjectRejected({
-                reason: `the file changed since version ${input.basedOnVersion}; it is at version ${current} now`,
+              return yield* new ProjectFileConflict({
+                basedOnVersion: input.basedOnVersion,
+                current,
               });
             // Published IDs always name the same bytes, including repeated model saves.
             yield* tx
@@ -544,7 +519,7 @@ export class ProjectFileService extends Context.Service<
         projectId: string,
         target: { fileId?: string | undefined; name?: string | undefined },
       ) {
-        yield* requireRole(db, userId, projectId, false);
+        yield* projectAccess(db, userId, projectId);
         const file = (yield* summaries(db, projectId)).find((each) =>
           target.fileId ? each.id === target.fileId : each.name === target.name,
         );
@@ -557,9 +532,7 @@ export class ProjectFileService extends Context.Service<
       });
       return ProjectFileService.of({
         list: Effect.fn("ProjectFileService.list")(function* (userId, projectId) {
-          yield* requireRole(db, userId, projectId, false).pipe(
-            Effect.catchTag("ProjectRejected", () => Effect.void),
-          );
+          yield* projectAccess(db, userId, projectId);
           const files = yield* summaries(db, projectId);
           // Each stored file once, as the owner's storage counts it: a restore reuses its bytes.
           const [used] = yield* db
@@ -581,9 +554,7 @@ export class ProjectFileService extends Context.Service<
         versions: Effect.fn("ProjectFileService.versions")(function* (userId, fileId) {
           const file = yield* fileProject(db, fileId);
           if (!file) return yield* new ProjectNotAvailable({ projectId: fileId });
-          yield* requireRole(db, userId, file.projectId, false).pipe(
-            Effect.catchTag("ProjectRejected", () => Effect.void),
-          );
+          yield* projectAccess(db, userId, file.projectId);
           const rows = yield* db
             .select({ version: projectFileVersions, createdBy: user.name })
             .from(projectFileVersions)
@@ -685,8 +656,7 @@ export class ProjectFileService extends Context.Service<
           if (!row) return yield* new ProjectRejected({ reason: "that version is gone" });
           yield* transaction((tx) =>
             Effect.gen(function* () {
-              yield* lockProject(tx, row.projectId);
-              yield* requireRole(tx, userId, row.projectId, true);
+              yield* requireProject(tx, userId, row.projectId, "edit", "update");
               const [current] = yield* tx
                 .select({ pinned: projectFileVersions.pinned })
                 .from(projectFileVersions)
@@ -726,8 +696,7 @@ export class ProjectFileService extends Context.Service<
           if (!file) return;
           const discard = yield* transaction((tx) =>
             Effect.gen(function* () {
-              yield* lockProject(tx, file.projectId);
-              yield* requireRole(tx, userId, file.projectId, true);
+              yield* requireProject(tx, userId, file.projectId, "edit", "update");
               const versions = yield* tx
                 .select({ blobId: projectFileVersions.blobId })
                 .from(projectFileVersions)

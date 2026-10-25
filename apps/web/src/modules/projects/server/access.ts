@@ -2,8 +2,9 @@ import { eq, sql, type SQL } from "drizzle-orm";
 import { Effect } from "effect";
 import { groupMembers, projectGroupGrants, projectMembers, projects } from "~/db/schema/index.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
-import { ProjectNotAvailable } from "../errors.ts";
-import type { ProjectRole, ResolvedProject } from "../schema.ts";
+import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
+import { projectCan, type ProjectRole, type ResolvedProject } from "../schema.ts";
+import type { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { DbTx } from "~/server/db.ts";
 
 type Reader = Pick<DbTx, "select">;
@@ -49,6 +50,46 @@ export const projectRole = (tx: Reader, userId: string, projectId: string) =>
       Effect.orDie,
       Effect.map(([row]) => row?.role ?? null),
     );
+
+/**
+ * The person's role in a project, failing when they have none. `lock` holds
+ * the project row for the rest of the transaction: `update` where the write
+ * counts or orders the project's contents, `share` where the project only
+ * must not be deleted meanwhile.
+ */
+export const projectAccess = Effect.fn("projects.access")(function* (
+  tx: Pick<DbTx, "select">,
+  userId: string,
+  projectId: string,
+  lock?: "update" | "share",
+) {
+  const query = tx
+    .select({ role: projectRoleSql(userId) })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const [row] = yield* (lock ? query.for(lock) : query).pipe(Effect.orDie);
+  if (!row?.role) return yield* new ProjectNotAvailable({ projectId });
+  return row.role;
+});
+
+/** Like `projectAccess`, and refuses a role that may not edit, or manage, the project. */
+export const requireProject = Effect.fn("projects.require")(function* (
+  tx: Pick<DbTx, "select">,
+  userId: string,
+  projectId: string,
+  need: "edit" | "manage",
+  lock?: "update" | "share",
+) {
+  const role = yield* projectAccess(tx, userId, projectId, lock);
+  if (!projectCan[need](role))
+    return yield* new ProjectRejected({
+      reason:
+        need === "edit"
+          ? "this project is read-only for you"
+          : "only the project's owner can do that",
+    });
+  return role;
+});
 
 /**
  * What an attempt in a project chat runs with, read inside the attempt's
@@ -100,3 +141,18 @@ export const projectAudience = (tx: Reader, projectId: string) =>
       .pipe(Effect.orDie);
     return [...new Set([owner, ...direct, ...grouped].map((row) => row.userId))];
   });
+
+/** Tells everyone in a project, and `alsoTo`, that it changed; each refetch is authorized alone. */
+export const projectNotifier =
+  (db: Reader, bus: SyncBus["Service"]) =>
+  (projectId: string, alsoTo: ReadonlyArray<string> = []) =>
+    projectAudience(db, projectId).pipe(
+      Effect.flatMap((members) =>
+        Effect.forEach(
+          [...new Set([...members, ...alsoTo])],
+          (memberId) => bus.publish(memberId, { type: "project.changed", projectId }),
+          { discard: true },
+        ),
+      ),
+      Effect.catchCause(() => Effect.logWarning("project invalidation failed")),
+    );

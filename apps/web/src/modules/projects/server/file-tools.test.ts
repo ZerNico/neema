@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { projectProjectFileResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";
-import { ProjectRejected } from "../errors.ts";
+import { ProjectFileConflict } from "../errors.ts";
 import { prepareProjectFileTools } from "./file-tools.ts";
 
 const deck: ProjectFileSummary = {
@@ -33,8 +33,9 @@ function setup(canEdit = true) {
         Effect.gen(function* () {
           writes.push({ basedOnVersion: input.basedOnVersion, fileId: input.fileId });
           if (input.basedOnVersion !== undefined && input.basedOnVersion !== deck.version)
-            return yield* new ProjectRejected({
-              reason: `the file changed since version ${input.basedOnVersion}`,
+            return yield* new ProjectFileConflict({
+              basedOnVersion: input.basedOnVersion,
+              current: deck.version,
             });
           return { ...deck, id: input.fileId ?? "file-2", name: input.name, version: 4 };
         }),

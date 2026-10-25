@@ -3,7 +3,7 @@ import { Tool, Toolkit } from "effect/ai";
 import { advertisedAs, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import { ProjectFileActivityResult } from "../file-tool-schema.ts";
 import type { ProjectFileSummary } from "../files.ts";
-import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
+import type { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import type { ProjectFileService } from "./project-files.ts";
 import { EntityId } from "~/entity-id.ts";
 import type { DbTx } from "~/server/db.ts";
@@ -74,11 +74,11 @@ const entry = (file: ProjectFileSummary): typeof FileEntry.Type => ({
   updatedAt: file.updatedAt,
   updatedBy: file.updatedBy,
 });
-const failure = (error: ProjectNotAvailable | ProjectRejected): Result =>
+const failure = (error: ProjectNotAvailable | ProjectRejected | ProjectFileConflict): Result =>
   error._tag === "ProjectNotAvailable"
     ? { outcome: "unavailable", message: "This chat's project is no longer available to you." }
     : {
-        outcome: error.reason.startsWith("the file changed") ? "conflict" : "invalid",
+        outcome: error._tag === "ProjectFileConflict" ? "conflict" : "invalid",
         message: `Not saved: ${error.reason}.`,
       };
 const lenient = (raw: unknown) =>

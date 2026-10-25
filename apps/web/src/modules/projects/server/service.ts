@@ -24,7 +24,6 @@ import { Db, type DbTx } from "~/server/db.ts";
 import { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   PROJECT_LIMITS,
-  projectCan,
   type CreateProjectInput,
   type ProjectChat,
   type ProjectDetail,
@@ -34,7 +33,14 @@ import {
   type ProjectSummary,
   type UpdateProjectInput,
 } from "../schema.ts";
-import { projectAudience, projectRole, projectRoleSql } from "./access.ts";
+import {
+  projectAudience,
+  projectNotifier,
+  projectRole,
+  projectRoleSql,
+  projectAccess,
+  requireProject,
+} from "./access.ts";
 
 type ProjectError = ProjectNotAvailable | ProjectRejected;
 type MemberChange =
@@ -72,23 +78,6 @@ const detailOf = (row: {
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
 });
-/** Fails unless the person holds at least this much of the project. */
-const requireRole = (
-  tx: DbTx,
-  userId: string,
-  projectId: string,
-  allowed: (role: ProjectRole | null) => boolean,
-) =>
-  Effect.gen(function* () {
-    const role = yield* projectRole(tx, userId, projectId);
-    if (!role) return yield* new ProjectNotAvailable({ projectId });
-    if (!allowed(role))
-      return yield* new ProjectRejected({
-        reason: "your role in this project does not allow that",
-      });
-    return role;
-  });
-
 export class ProjectService extends Context.Service<
   ProjectService,
   {
@@ -141,17 +130,7 @@ export class ProjectService extends Context.Service<
         });
       const audience = (projectId: string, tx?: DbTx) => projectAudience(tx ?? db, projectId);
       /** Hints to everyone who was or is a member, so a removal reaches the removed. */
-      const changed = (projectId: string, alsoTo: ReadonlyArray<string> = []) =>
-        audience(projectId).pipe(
-          Effect.flatMap((members) =>
-            Effect.forEach(
-              [...new Set([...members, ...alsoTo])],
-              (memberId) => bus.publish(memberId, { type: "project.changed", projectId }),
-              { discard: true },
-            ),
-          ),
-          Effect.catchCause(() => Effect.logWarning("project invalidation failed")),
-        );
+      const changed = projectNotifier(db, bus);
 
       const list = Effect.fn("ProjectService.list")(function* (userId: string) {
         const role = projectRoleSql(userId);
@@ -196,7 +175,7 @@ export class ProjectService extends Context.Service<
       ) {
         yield* transaction((tx) =>
           Effect.gen(function* () {
-            yield* requireRole(tx, userId, input.projectId, projectCan.edit);
+            yield* requireProject(tx, userId, input.projectId, "edit");
             yield* tx
               .update(projects)
               .set({
@@ -354,18 +333,13 @@ export class ProjectService extends Context.Service<
         const affected = yield* transaction((tx) =>
           Effect.gen(function* () {
             // The row lock serializes membership changes with each other and with delete.
-            const [locked] = yield* tx
-              .select({ id: projects.id })
-              .from(projects)
-              .where(eq(projects.id, projectId))
-              .for("update")
-              .pipe(Effect.orDie);
-            if (!locked) return yield* new ProjectNotAvailable({ projectId });
-            const role = yield* requireRole(tx, userId, projectId, (current) =>
-              leaving ? current !== "owner" : projectCan.manage(current),
-            );
-            if (role === "owner" && !(yield* policy.can(userId, "projectsCreate", tx)))
-              return yield* new ProjectNotAvailable({ projectId });
+            const role = leaving
+              ? yield* projectAccess(tx, userId, projectId, "update")
+              : yield* requireProject(tx, userId, projectId, "manage", "update");
+            if (role === "owner" && leaving)
+              return yield* new ProjectRejected({
+                reason: "the owner cannot leave; delete the project instead",
+              });
             switch (change.action) {
               case "addUser": {
                 const email = change.email.trim().toLowerCase();

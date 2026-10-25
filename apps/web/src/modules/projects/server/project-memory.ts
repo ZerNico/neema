@@ -13,7 +13,7 @@ import {
   type ProjectMemory,
   type ProjectRole,
 } from "../schema.ts";
-import { projectAudience, projectRole } from "./access.ts";
+import { projectNotifier, projectRole, requireProject } from "./access.ts";
 
 type ProjectMemoryError = ProjectNotAvailable | ProjectRejected;
 export type ProjectMemorySave =
@@ -140,25 +140,7 @@ export class ProjectMemoryService extends Context.Service<
         db.transaction(body).pipe(Effect.catchTag("SqlError", Effect.die));
       const access = (userId: string, projectId: string, tx?: DbTx) =>
         projectRole(tx ?? db, userId, projectId);
-      const requireEditor = (tx: DbTx, userId: string, projectId: string) =>
-        Effect.gen(function* () {
-          const role = yield* access(userId, projectId, tx);
-          if (!role) return yield* new ProjectNotAvailable({ projectId });
-          if (!projectCan.edit(role))
-            return yield* new ProjectRejected({ reason: "project memory is read-only for you" });
-          return role;
-        });
-      const changed = (projectId: string) =>
-        projectAudience(db, projectId).pipe(
-          Effect.flatMap((members) =>
-            Effect.forEach(
-              members,
-              (memberId) => bus.publish(memberId, { type: "project.changed", projectId }),
-              { discard: true },
-            ),
-          ),
-          Effect.catchCause(() => Effect.logWarning("project memory invalidation failed")),
-        );
+      const changed = projectNotifier(db, bus);
       const list = Effect.fn("ProjectMemoryService.list")(function* (
         userId: string,
         projectId: string,
@@ -183,7 +165,7 @@ export class ProjectMemoryService extends Context.Service<
             return yield* new ProjectRejected({ reason: rejectionText[prepared.reason] });
           const outcome = yield* transaction((tx) =>
             Effect.gen(function* () {
-              yield* requireEditor(tx, userId, projectId);
+              yield* requireProject(tx, userId, projectId, "edit");
               yield* lockProject(tx, projectId);
               return yield* insert(tx, { projectId, userId, origin: "manual", ...prepared });
             }),
@@ -203,7 +185,7 @@ export class ProjectMemoryService extends Context.Service<
               });
             yield* transaction((tx) =>
               Effect.gen(function* () {
-                yield* requireEditor(tx, userId, projectId);
+                yield* requireProject(tx, userId, projectId, "edit");
                 yield* lockProject(tx, projectId);
                 const [duplicate] = yield* tx
                   .select({ id: projectMemories.id })
@@ -242,7 +224,7 @@ export class ProjectMemoryService extends Context.Service<
         remove: Effect.fn("ProjectMemoryService.remove")(function* (userId, projectId, memoryId) {
           yield* transaction((tx) =>
             Effect.gen(function* () {
-              yield* requireEditor(tx, userId, projectId);
+              yield* requireProject(tx, userId, projectId, "edit");
               yield* tx
                 .delete(projectMemories)
                 .where(

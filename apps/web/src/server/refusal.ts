@@ -50,7 +50,11 @@ import type { LimitRejected, StorageFull, UsageLimitReached } from "~/modules/li
 import type { MailFailed } from "~/modules/notifications/server/mail.ts";
 import type { PushRejected } from "~/modules/notifications/server/push.ts";
 import type { FontRejected } from "~/modules/presentations/server/fonts.ts";
-import type { ProjectNotAvailable, ProjectRejected } from "~/modules/projects/errors.ts";
+import type {
+  ProjectFileConflict,
+  ProjectNotAvailable,
+  ProjectRejected,
+} from "~/modules/projects/errors.ts";
 import type {
   InvalidDefaultModelOrder,
   InvalidUtilityModel,
@@ -115,6 +119,7 @@ export type Refusable =
   | NoActiveGeneration
   | ProjectNotAvailable
   | ProjectRejected
+  | ProjectFileConflict
   | PushRejected
   | QuestionUnavailable
   | QueueEntryNotFound
@@ -200,6 +205,7 @@ const refusals: RefusalTable = {
   NoActiveGeneration: () => ({ status: 409, body: "That response already finished" }),
   ProjectNotAvailable: notFound,
   ProjectRejected: because(400),
+  ProjectFileConflict: because(409),
   PushRejected: because(400),
   QuestionUnavailable: () => ({
     status: 409,

@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
-import type { ProjectNotAvailable, ProjectRejected } from "../errors.ts";
+import type { ProjectFileConflict, ProjectNotAvailable, ProjectRejected } from "../errors.ts";
 import {
   AddProjectGroupInput,
   AddProjectMemberInput,
@@ -172,7 +172,7 @@ export const deleteProjectMemory = createServerFn({ method: "POST" })
 const runFiles = <A>(
   body: (
     service: ProjectFileService["Service"],
-  ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected>,
+  ) => Effect.Effect<A, ProjectNotAvailable | ProjectRejected | ProjectFileConflict>,
 ) => runServerFn(Effect.flatMap(ProjectFileService, body));
 /** FormData at the root, so the client sends multipart; fields are checked here. */
 const readFileUpload = (data: FormData) => {

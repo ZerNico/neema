@@ -253,7 +253,7 @@ describe("roles", () => {
     );
     expect(failureOf(byEditor)).toMatchObject({
       _tag: "ProjectRejected",
-      reason: "your role in this project does not allow that",
+      reason: "only the project's owner can do that",
     });
     await projects((s) =>
       s.changeMembers(editor, project.id, { action: "removeUser", userId: editor }),
