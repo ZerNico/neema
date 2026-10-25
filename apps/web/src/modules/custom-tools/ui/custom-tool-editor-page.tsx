@@ -77,6 +77,8 @@ import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { errorMessage } from "../client/error-message.ts";
 import { customToolQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale, type Locale, locales } from "~/paraglide/runtime.js";
 
 // Same surface as the skill editor: app tokens, a bounded pane that scrolls
 // its own content, and the text cursor the host stylesheet resets.
@@ -111,12 +113,15 @@ const editorTheme = EditorView.theme({
 const editorExtensions = [
   javascript({ typescript: true }),
   lintGutter(),
-  EditorView.contentAttributes.of({ "aria-label": "TypeScript source" }),
+  EditorView.contentAttributes.of({ "aria-label": m.custom_tools_editor_source_label() }),
 ];
 
 const validateIdentity = Schema.toStandardSchemaV1(CustomToolIdentityInput)["~standard"].validate;
 
-/** First message per identity field, from the same schema the server applies. */
+/**
+ * One message per failing identity field. The schema the server applies decides
+ * which fields fail; the words are the page's, since the schema's are English.
+ */
 const identityIssues = (input: {
   slug: string;
   name: string;
@@ -124,16 +129,32 @@ const identityIssues = (input: {
 }): Partial<Record<"slug" | "name" | "description", string>> => {
   const result = validateIdentity(input);
   if (result instanceof Promise || !result.issues) return {};
-  const issues: Partial<Record<"slug" | "name" | "description", string>> = {};
-  for (const issue of result.issues) {
-    const key = issue.path?.[0];
-    const field = typeof key === "object" ? key.key : key;
-    if ((field === "slug" || field === "name" || field === "description") && !issues[field]) {
-      issues[field] = issue.message;
-    }
-  }
-  return issues;
+  const failed = new Set(
+    result.issues.map((issue) => {
+      const key = issue.path?.[0];
+      return typeof key === "object" ? key.key : key;
+    }),
+  );
+  return {
+    ...(failed.has("slug")
+      ? { slug: m.custom_tools_editor_slug_invalid({ max: CUSTOM_TOOL_LIMITS.slug }) }
+      : {}),
+    ...(failed.has("name")
+      ? {
+          name: input.name
+            ? m.custom_tools_editor_too_long({ max: CUSTOM_TOOL_LIMITS.name })
+            : m.custom_tools_editor_name_required(),
+        }
+      : {}),
+    ...(failed.has("description")
+      ? { description: m.custom_tools_editor_too_long({ max: CUSTOM_TOOL_LIMITS.description }) }
+      : {}),
+  };
 };
+
+/** Whether a refusal is this message, in whichever locale the server worded it. */
+const isRefusal = (text: string, render: (locale: Locale) => string) =>
+  locales.some((locale) => text === render(locale));
 
 /** "Weather tools" becomes "weather_tools": the identifier an admin would type anyway. */
 const slugFromName = (name: string) =>
@@ -176,7 +197,7 @@ const parseBuildProblems = (text: string): ReadonlyArray<BuildProblem> => {
   }
   return problems.length
     ? problems
-    : [{ message: text.trim() || "The module could not be built." }];
+    : [{ message: text.trim() || m.custom_tools_editor_build_failed() }];
 };
 
 const invalidateLists = (queryClient: ReturnType<typeof useQueryClient>) =>
@@ -214,7 +235,8 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
   // The server's answer to a Create with a taken identifier, shown on the
   // field until the identifier changes.
   const [slugTaken, setSlugTaken] = useState<string | null>(null);
-  const slugError = identity.slug ?? (slugTaken === slug ? "That identifier is taken." : null);
+  const slugError =
+    identity.slug ?? (slugTaken === slug ? m.custom_tools_editor_slug_taken() : null);
   const [source, setSource] = useState(tool?.source ?? TEMPLATE_SOURCE);
   const [dependencies, setDependencies] = useState<CustomToolDependency[]>(
     tool ? [...tool.dependencies] : [],
@@ -366,15 +388,20 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     },
     onError: async (error, submitted) => {
       const message = errorMessage(error);
-      if (/changed elsewhere/i.test(message)) {
+      if (isRefusal(message, (locale) => m.custom_tools_error_conflict({}, { locale }))) {
         if (tool)
           await queryClient.invalidateQueries({
             queryKey: customToolQuery(tool.id).queryKey,
             exact: true,
           });
         setConflict(true);
-        toast.error("This module changed elsewhere. Reload it before saving.");
-      } else if (/already in use/i.test(message)) setSlugTaken(submitted.slug);
+        toast.error(m.custom_tools_error_conflict());
+      } else if (
+        isRefusal(message, (locale) =>
+          m.custom_tools_error_slug_taken({ slug: submitted.slug }, { locale }),
+        )
+      )
+        setSlugTaken(submitted.slug);
       else if (submitted.revision === buildRevision.current)
         setProblems(parseBuildProblems(message));
     },
@@ -385,7 +412,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       await invalidateLists(queryClient);
       await queryClient.invalidateQueries({ queryKey: ["admin", "custom-tools", tool!.id] });
     },
-    onError: (error) => toastError("Could not update the module.", error),
+    onError: (error) => toastError(m.custom_tools_editor_error_update(), error),
   });
   const remove = useMutation({
     mutationFn: () => deleteCustomTool({ data: { toolId: tool!.id } }),
@@ -393,7 +420,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       await invalidateLists(queryClient);
       await navigate({ to: "/admin/custom-tools", ignoreBlocker: true });
     },
-    onError: (error) => toastError("Could not delete the module.", error),
+    onError: (error) => toastError(m.custom_tools_editor_error_delete(), error),
   });
   const test = useMutation({
     mutationFn: async (): Promise<CustomToolTestResult> => {
@@ -435,9 +462,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
     shouldBlockFn: async () =>
       dirty &&
       !(await confirm({
-        title: "Discard unsaved changes?",
-        description: "Your module has not been saved.",
-        confirmLabel: "Discard changes",
+        title: m.common_discard_title(),
+        description: m.custom_tools_editor_unsaved(),
+        confirmLabel: m.common_discard_changes(),
       })),
     enableBeforeUnload: dirty,
   });
@@ -447,16 +474,16 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
 
   return (
     <Page
-      title={tool ? tool.name : "New module"}
+      title={tool ? tool.name : m.custom_tools_editor_new_title()}
       backTo="/admin/custom-tools"
-      backLabel="Custom tools"
+      backLabel={m.custom_tools_editor_back()}
       actions={
         <>
           <SaveStatus justSaved={justSaved} />
           {tool ? (
             <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
               <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-              Access
+              {m.custom_tools_editor_access()}
             </Button>
           ) : null}
           {tool ? (
@@ -467,7 +494,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                   htmlFor={`${id}-enabled`}
                   className="text-muted-foreground max-sm:sr-only"
                 >
-                  Enabled
+                  {m.custom_tools_editor_enabled()}
                 </FieldLabel>
                 <Switch
                   id={`${id}-enabled`}
@@ -478,7 +505,13 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               </Field>
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  render={<Button variant="ghost" size="icon-sm" aria-label="Module actions" />}
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={m.custom_tools_editor_actions()}
+                    />
+                  }
                 >
                   <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                 </DropdownMenuTrigger>
@@ -488,10 +521,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     onClick={async () => {
                       if (
                         await confirm({
-                          title: `Delete “${tool.name}”?`,
-                          description:
-                            "Agents lose the module from future attempts; earlier answers keep their tool rows.",
-                          confirmLabel: "Delete module",
+                          title: m.custom_tools_editor_delete_title({ name: tool.name }),
+                          description: m.custom_tools_editor_delete_description(),
+                          confirmLabel: m.custom_tools_editor_delete_confirm(),
                         })
                       ) {
                         remove.mutate();
@@ -499,7 +531,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     }}
                   >
                     <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                    Delete module
+                    {m.custom_tools_editor_delete_menu()}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -521,36 +553,38 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             }
             disabled={!canSave || (!!tool && !dirty)}
           >
-            <SaveLabel justSaved={justSaved}>{tool ? "Save changes" : "Create module"}</SaveLabel>
+            <SaveLabel justSaved={justSaved}>
+              {tool ? m.common_save_changes() : m.custom_tools_editor_create()}
+            </SaveLabel>
           </PendingButton>
         </>
       }
     >
       {conflict && tool ? (
         <div role="alert" className="flex items-center gap-3">
-          <p className="text-muted-foreground text-sm">This module changed elsewhere.</p>
+          <p className="text-muted-foreground text-sm">{m.custom_tools_editor_conflict()}</p>
           <Button
             variant="outline"
             size="sm"
             onClick={async () => {
               if (
                 await confirm({
-                  title: "Discard unsaved changes?",
-                  description: "Your module has not been saved.",
-                  confirmLabel: "Reload module",
+                  title: m.common_discard_title(),
+                  description: m.custom_tools_editor_unsaved(),
+                  confirmLabel: m.custom_tools_editor_reload(),
                 })
               )
                 adopt(tool);
             }}
           >
-            Reload module
+            {m.custom_tools_editor_reload()}
           </Button>
         </div>
       ) : null}
-      <Section title="Module">
+      <Section title={m.custom_tools_editor_module_section()}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field data-invalid={(nameTouched && identity.name) || undefined}>
-            <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+            <FieldLabel htmlFor={`${id}-name`}>{m.common_name()}</FieldLabel>
             <Input
               id={`${id}-name`}
               value={name}
@@ -559,17 +593,17 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                 setName(event.target.value);
                 if (slugEdit === null) invalidatePreview();
               }}
-              placeholder="Weather tools"
+              placeholder={m.custom_tools_editor_name_placeholder()}
               aria-invalid={(nameTouched && !!identity.name) || undefined}
             />
             {nameTouched && identity.name ? (
               <FieldError errors={[{ message: identity.name }]} />
             ) : (
-              <FieldDescription>Shown wherever the module is listed.</FieldDescription>
+              <FieldDescription>{m.custom_tools_editor_name_description()}</FieldDescription>
             )}
           </Field>
           <Field data-invalid={(slug.length > 0 && slugError) || undefined}>
-            <FieldLabel htmlFor={`${id}-slug`}>Identifier</FieldLabel>
+            <FieldLabel htmlFor={`${id}-slug`}>{m.custom_tools_editor_slug_label()}</FieldLabel>
             <Input
               id={`${id}-slug`}
               value={slug}
@@ -577,6 +611,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                 setSlugEdit(event.target.value);
                 invalidatePreview();
               }}
+              // oxlint-disable-next-line i18n/no-literal-text -- an identifier, typed as code
               placeholder="weather_tools"
               aria-invalid={(slug.length > 0 && !!slugError) || undefined}
               aria-describedby={`${id}-slug-description`}
@@ -586,21 +621,21 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             ) : (
               <FieldDescription id={`${id}-slug-description`}>
                 {tool
-                  ? "Renaming changes the functions offered from the next message on."
-                  : "Names the functions for the model."}
+                  ? m.custom_tools_editor_slug_rename_description()
+                  : m.custom_tools_editor_slug_description()}
               </FieldDescription>
             )}
           </Field>
         </div>
         <Field data-invalid={identity.description || undefined}>
           <FieldLabel htmlFor={`${id}-description`}>
-            Description <OptionalMark />
+            {m.common_description()} <OptionalMark />
           </FieldLabel>
           <Textarea
             id={`${id}-description`}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="What this group of functions is for."
+            placeholder={m.custom_tools_editor_description_placeholder()}
             rows={2}
             aria-invalid={!!identity.description || undefined}
           />
@@ -611,7 +646,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
       </Section>
 
       <Section
-        title="Dependencies"
+        title={m.custom_tools_editor_dependencies()}
         actions={
           <Button
             type="button"
@@ -622,32 +657,38 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               invalidatePreview();
             }}
           >
-            Add dependency
+            {m.custom_tools_editor_add_dependency()}
           </Button>
         }
       >
         {dependencies.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No external packages.</p>
+          <p className="text-muted-foreground text-sm">{m.custom_tools_editor_no_dependencies()}</p>
         ) : (
           <div className="flex flex-col gap-2">
             {dependencies.map((dependency, index) => (
               // oxlint-disable-next-line react/no-array-index-key -- rows are controlled inputs holding no state of their own
               <div key={index} className="grid grid-cols-[1fr_10rem_auto] items-end gap-2">
                 <Field>
-                  <FieldLabel htmlFor={`${id}-dep-${index}-name`}>Package</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-dep-${index}-name`}>
+                    {m.custom_tools_editor_package()}
+                  </FieldLabel>
                   <Input
                     id={`${id}-dep-${index}-name`}
                     value={dependency.name}
                     onChange={(event) => updateDependency(index, { name: event.target.value })}
+                    // oxlint-disable-next-line i18n/no-literal-text -- an npm package name
                     placeholder="ky"
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${id}-dep-${index}-version`}>Version</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-dep-${index}-version`}>
+                    {m.custom_tools_editor_version()}
+                  </FieldLabel>
                   <Input
                     id={`${id}-dep-${index}-version`}
                     value={dependency.version}
                     onChange={(event) => updateDependency(index, { version: event.target.value })}
+                    // oxlint-disable-next-line i18n/no-literal-text -- a version number
                     placeholder="1.10.0"
                   />
                 </Field>
@@ -662,20 +703,17 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     invalidatePreview();
                   }}
                 >
-                  Remove
+                  {m.common_remove()}
                 </Button>
               </div>
             ))}
           </div>
         )}
-        <p className="text-muted-foreground text-xs">
-          Registry package names with exact versions. Install scripts and native addons are
-          unsupported.
-        </p>
+        <p className="text-muted-foreground text-xs">{m.custom_tools_editor_dependencies_hint()}</p>
       </Section>
 
       <Section
-        title="Source"
+        title={m.custom_tools_editor_source_section()}
         actions={
           <>
             <Button
@@ -685,7 +723,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               disabled={!preview || preview.functions.length === 0}
             >
               <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
-              Debug
+              {m.custom_tools_editor_debug()}
             </Button>
             <PendingButton
               size="sm"
@@ -696,7 +734,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               }
               disabled={!!identity.slug}
             >
-              Verify
+              {m.custom_tools_editor_verify()}
             </PendingButton>
           </>
         }
@@ -732,16 +770,15 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
         <Dialog open={debugOpen} onOpenChange={setDebugOpen}>
           <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Debug</DialogTitle>
-              <DialogDescription>
-                Rebuilds the current source and runs it on the server. Returned files are not
-                stored.
-              </DialogDescription>
+              <DialogTitle>{m.custom_tools_editor_debug_title()}</DialogTitle>
+              <DialogDescription>{m.custom_tools_editor_debug_description()}</DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-3">
               <div className="grid gap-3 sm:grid-cols-[14rem_1fr]">
                 <Field>
-                  <FieldLabel htmlFor={`${id}-test-function`}>Function</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-test-function`}>
+                    {m.custom_tools_editor_function()}
+                  </FieldLabel>
                   <Select
                     value={functionKey}
                     onValueChange={(value) => {
@@ -766,7 +803,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                   </Select>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${id}-test-args`}>Arguments</FieldLabel>
+                  <FieldLabel htmlFor={`${id}-test-args`}>
+                    {m.custom_tools_editor_arguments()}
+                  </FieldLabel>
                   <Textarea
                     id={`${id}-test-args`}
                     value={argumentsText}
@@ -774,20 +813,22 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     rows={Math.min(12, Math.max(3, argumentsText.split("\n").length))}
                   />
                   <FieldDescription>
-                    Pre-filled from the function’s parameters.{" "}
+                    {m.custom_tools_editor_arguments_prefilled()}{" "}
                     <button
                       type="button"
                       className="underline underline-offset-4"
                       onClick={() => setSchemaOpen((open) => !open)}
                     >
-                      {schemaOpen ? "Hide schema" : "Show schema"}
+                      {schemaOpen
+                        ? m.custom_tools_editor_hide_schema()
+                        : m.custom_tools_editor_show_schema()}
                     </button>
                   </FieldDescription>
                 </Field>
               </div>
               <Field>
                 <FieldLabel htmlFor={`${id}-test-files`}>
-                  Files <OptionalMark />
+                  {m.custom_tools_editor_files()} <OptionalMark />
                 </FieldLabel>
                 <Input
                   id={`${id}-test-files`}
@@ -806,11 +847,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     );
                   }}
                 />
-                <FieldDescription>
-                  For file parameters: pass a file’s name in the arguments, as the assistant would.
-                </FieldDescription>
+                <FieldDescription>{m.custom_tools_editor_files_hint()}</FieldDescription>
                 {testFiles.length > 0 ? (
-                  <AttachmentChipRow aria-label="Test files">
+                  <AttachmentChipRow aria-label={m.custom_tools_editor_test_files()}>
                     {testFiles.map((file) => (
                       <AttachmentChip
                         key={file.name}
@@ -829,7 +868,7 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
               </Field>
               {schemaOpen && selectedFunction ? (
                 <pre
-                  aria-label="Parameter schema"
+                  aria-label={m.custom_tools_editor_parameter_schema()}
                   className="bg-muted/50 max-h-60 overflow-auto rounded-md p-3 text-xs [overflow-wrap:anywhere]"
                 >
                   {JSON.stringify(selectedFunction.parametersSchema, null, 2)}
@@ -843,7 +882,11 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                       testOutcome.ok ? "text-muted-foreground" : "text-destructive",
                     )}
                   >
-                    {testOutcome.ok ? "Completed" : "Failed"} in {testOutcome.durationMs} ms
+                    {(testOutcome.ok
+                      ? m.custom_tools_editor_test_completed
+                      : m.custom_tools_editor_test_failed)({
+                      duration: new Intl.NumberFormat(getLocale()).format(testOutcome.durationMs),
+                    })}
                   </p>
                   {testOutcome.output ? (
                     <pre className="mt-1 max-h-60 overflow-auto text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
@@ -851,7 +894,10 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     </pre>
                   ) : null}
                   {testOutcome.files.length > 0 ? (
-                    <AttachmentChipRow className="mt-2" aria-label="Returned files">
+                    <AttachmentChipRow
+                      className="mt-2"
+                      aria-label={m.custom_tools_editor_returned_files()}
+                    >
                       {testOutcome.files.map((file) => (
                         <TestFileChip key={`${file.name}:${file.size}`} file={file} />
                       ))}
@@ -867,14 +913,14 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
             </div>
             <DialogFooter>
               <DialogClose render={<Button variant="outline" disabled={test.isPending} />}>
-                Close
+                {m.common_close()}
               </DialogClose>
               <PendingButton
                 pending={test.isPending}
                 onClick={() => test.mutate()}
                 disabled={!functionKey}
               >
-                Run
+                {m.custom_tools_editor_run()}
               </PendingButton>
             </DialogFooter>
           </DialogContent>
@@ -902,7 +948,9 @@ function TestFileChip({ file }: { file: CustomToolTestFile }) {
   const kind = attachmentKind(file.mediaType);
   const item = { fileName: file.name, size: file.size, kind };
   if (!file.dataUrl)
-    return <AttachmentChip item={{ ...item, error: "Too large to preview from Test." }} />;
+    return (
+      <AttachmentChip item={{ ...item, error: m.custom_tools_editor_test_file_too_large() }} />
+    );
   return (
     <AttachmentChip
       item={{ ...item, previewUrl: kind === "image" ? file.dataUrl : null }}
@@ -910,7 +958,7 @@ function TestFileChip({ file }: { file: CustomToolTestFile }) {
       previewActions={
         <PreviewAction
           icon={Download01Icon}
-          label="Download"
+          label={m.common_download()}
           href={file.dataUrl}
           download={file.name}
         />
@@ -950,11 +998,11 @@ function BuildStatus({
         )}
       >
         {pending ? (
-          "Verifying…"
+          m.custom_tools_editor_verifying()
         ) : failed ? (
           <>
             <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-4 shrink-0" />
-            {problems.length === 1 ? "1 problem" : `${problems.length} problems`}
+            {m.custom_tools_editor_problem_count({ count: problems.length })}
           </>
         ) : passed ? (
           <>
@@ -963,7 +1011,7 @@ function BuildStatus({
               strokeWidth={2}
               className="text-success size-4 shrink-0"
             />
-            {functions.length === 1 ? "1 function:" : `${functions.length} functions:`}
+            {m.custom_tools_editor_function_count({ count: functions.length })}
             {functions.map((fn) => (
               <code key={fn.key} className="text-foreground text-xs">
                 {fn.modelName}

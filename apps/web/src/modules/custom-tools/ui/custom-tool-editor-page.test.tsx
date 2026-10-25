@@ -417,7 +417,9 @@ describe("CustomToolEditorPage", () => {
   });
 
   it("refreshes the remote version after a save conflict before offering reload", async () => {
-    vi.mocked(saveCustomTool).mockRejectedValueOnce(new Error("This module changed elsewhere."));
+    vi.mocked(saveCustomTool).mockRejectedValueOnce(
+      new Error("This module changed elsewhere. Reload it before saving."),
+    );
     vi.mocked(getCustomTool).mockResolvedValue(
       detail({ version: "v2", source: "Remote A" }) as never,
     );

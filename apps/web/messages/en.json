@@ -181,8 +181,111 @@
   "common_settings": "Settings",
   "common_something_went_wrong": "Something went wrong",
   "common_unexpected_failure": "Something went wrong on our side. Reference {reference}.",
+  "custom_tools_editor_access": "Access",
+  "custom_tools_editor_actions": "Module actions",
+  "custom_tools_editor_add_dependency": "Add dependency",
+  "custom_tools_editor_arguments": "Arguments",
+  "custom_tools_editor_arguments_prefilled": "Pre-filled from the function’s parameters.",
+  "custom_tools_editor_back": "Custom tools",
+  "custom_tools_editor_build_failed": "The module could not be built.",
+  "custom_tools_editor_conflict": "This module changed elsewhere.",
+  "custom_tools_editor_create": "Create module",
+  "custom_tools_editor_debug": "Debug",
+  "custom_tools_editor_debug_description": "Rebuilds the current source and runs it on the server. Returned files are not stored.",
+  "custom_tools_editor_debug_title": "Debug",
+  "custom_tools_editor_delete_confirm": "Delete module",
+  "custom_tools_editor_delete_description": "Agents lose the module from future attempts; earlier answers keep their tool rows.",
+  "custom_tools_editor_delete_menu": "Delete module",
+  "custom_tools_editor_delete_title": "Delete “{name}”?",
+  "custom_tools_editor_dependencies": "Dependencies",
+  "custom_tools_editor_dependencies_hint": "Registry package names with exact versions. Install scripts and native addons are unsupported.",
+  "custom_tools_editor_description_placeholder": "What this group of functions is for.",
+  "custom_tools_editor_enabled": "Enabled",
+  "custom_tools_editor_error_delete": "Could not delete the module.",
+  "custom_tools_editor_error_update": "Could not update the module.",
+  "custom_tools_editor_files": "Files",
+  "custom_tools_editor_files_hint": "For file parameters: pass a file’s name in the arguments, as the assistant would.",
+  "custom_tools_editor_function": "Function",
+  "custom_tools_editor_function_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} function:",
+        "countPlural=*": "{count} functions:"
+      }
+    }
+  ],
+  "custom_tools_editor_hide_schema": "Hide schema",
+  "custom_tools_editor_module_section": "Module",
+  "custom_tools_editor_name_description": "Shown wherever the module is listed.",
+  "custom_tools_editor_name_placeholder": "Weather tools",
+  "custom_tools_editor_name_required": "Enter a name.",
+  "custom_tools_editor_new_title": "New module",
+  "custom_tools_editor_no_dependencies": "No external packages.",
+  "custom_tools_editor_package": "Package",
+  "custom_tools_editor_parameter_schema": "Parameter schema",
+  "custom_tools_editor_problem_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} problem",
+        "countPlural=*": "{count} problems"
+      }
+    }
+  ],
+  "custom_tools_editor_reload": "Reload module",
+  "custom_tools_editor_returned_files": "Returned files",
+  "custom_tools_editor_run": "Run",
+  "custom_tools_editor_show_schema": "Show schema",
+  "custom_tools_editor_slug_description": "Names the functions for the model.",
+  "custom_tools_editor_slug_invalid": "Lowercase letters, digits and single underscores; start with a letter, up to {max} characters",
+  "custom_tools_editor_slug_label": "Identifier",
+  "custom_tools_editor_slug_rename_description": "Renaming changes the functions offered from the next message on.",
+  "custom_tools_editor_slug_taken": "That identifier is taken.",
+  "custom_tools_editor_source_label": "TypeScript source",
+  "custom_tools_editor_source_section": "Source",
+  "custom_tools_editor_test_completed": "Completed in {duration} ms",
+  "custom_tools_editor_test_failed": "Failed in {duration} ms",
+  "custom_tools_editor_test_file_too_large": "Too large to preview from Test.",
+  "custom_tools_editor_test_files": "Test files",
+  "custom_tools_editor_too_long": "Up to {max} characters.",
+  "custom_tools_editor_unsaved": "Your module has not been saved.",
+  "custom_tools_editor_verify": "Verify",
+  "custom_tools_editor_verifying": "Verifying…",
+  "custom_tools_editor_version": "Version",
   "custom_tools_error_conflict": "This module changed elsewhere. Reload it before saving.",
   "custom_tools_error_slug_taken": "The slug {slug} is already in use.",
+  "custom_tools_list_dependency_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} dependency",
+        "countPlural=*": "{count} dependencies"
+      }
+    }
+  ],
+  "custom_tools_list_description": "TypeScript modules the model can call in any chat. Their code runs with the server’s full authority, so only trusted admins should write it.",
+  "custom_tools_list_disabled": "Disabled",
+  "custom_tools_list_empty_description": "Write one and its functions are offered in every chat you share it with.",
+  "custom_tools_list_empty_title": "No modules yet",
+  "custom_tools_list_function_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} function",
+        "countPlural=*": "{count} functions"
+      }
+    }
+  ],
+  "custom_tools_list_new": "New module",
+  "custom_tools_list_private": "Private",
+  "custom_tools_list_title": "Custom tools",
+  "custom_tools_test_files_too_large": "The test files are too large together.",
+  "custom_tools_test_invalid_json": "The arguments are not valid JSON.",
   "groups_error_name_taken": "Group name already taken",
   "help_agents_body": "An agent keeps how you want a task done: its instructions, the documents it may look at and the tools it may use. Pick one when you start a chat and it works that way every time.",
   "help_agents_example": "A “Contract reviewer” that checks every contract you share against your company’s rules.",

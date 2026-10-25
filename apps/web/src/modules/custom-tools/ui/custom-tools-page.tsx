@@ -5,31 +5,29 @@ import { Link } from "@tanstack/react-router";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { buttonVariants } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 import { customToolsQuery } from "../client/queries.ts";
-
-const plural = (count: number, singular: string, pluralForm = `${singular}s`) =>
-  `${count} ${count === 1 ? singular : pluralForm}`;
 
 export function CustomToolsPage() {
   const { data: tools } = useSuspenseQuery(customToolsQuery);
   const newModule = (
     <Link to="/admin/custom-tools/new" className={buttonVariants({ size: "sm" })}>
       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      New module
+      {m.custom_tools_list_new()}
     </Link>
   );
 
   return (
     <Page
-      title="Custom tools"
-      description="TypeScript modules the model can call in any chat. Their code runs with the server’s full authority, so only trusted admins should write it."
+      title={m.custom_tools_list_title()}
+      description={m.custom_tools_list_description()}
       actions={newModule}
     >
       {tools.length === 0 ? (
         <EmptyState
           icon={CodeIcon}
-          title="No modules yet"
-          description="Write one and its functions are offered in every chat you share it with."
+          title={m.custom_tools_list_empty_title()}
+          description={m.custom_tools_list_empty_description()}
           action={newModule}
         />
       ) : (
@@ -48,15 +46,19 @@ export function CustomToolsPage() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <span className="truncate">{tool.name}</span>
-                    {tool.audience === "private" ? <Badge variant="outline">Private</Badge> : null}
-                    {tool.enabled ? null : <Badge variant="outline">Disabled</Badge>}
+                    {tool.audience === "private" ? (
+                      <Badge variant="outline">{m.custom_tools_list_private()}</Badge>
+                    ) : null}
+                    {tool.enabled ? null : (
+                      <Badge variant="outline">{m.custom_tools_list_disabled()}</Badge>
+                    )}
                   </span>
                   <span className="text-muted-foreground truncate text-xs">
                     {[
                       tool.slug,
-                      plural(tool.functionCount, "function"),
+                      m.custom_tools_list_function_count({ count: tool.functionCount }),
                       tool.dependencyCount > 0
-                        ? plural(tool.dependencyCount, "dependency", "dependencies")
+                        ? m.custom_tools_list_dependency_count({ count: tool.dependencyCount })
                         : null,
                     ]
                       .filter(Boolean)

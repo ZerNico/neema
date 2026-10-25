@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { Effect, Schema } from "effect";
 import { requireAdmin, requireSession } from "~/modules/auth/server/middleware.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { formatFileRef } from "../authoring.ts";
 import { CustomToolNotFound } from "../errors.ts";
 import {
@@ -130,8 +132,10 @@ export const deleteCustomTool = createServerFn({ method: "POST" })
 export const testCustomTool = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(TestCustomToolInput))
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    // Read while still in the request: the effect's fibers do not carry it.
+    const locale = getLocale();
+    return runServerFn(
       Effect.gen(function* () {
         let args: unknown;
         try {
@@ -139,7 +143,7 @@ export const testCustomTool = createServerFn({ method: "POST" })
         } catch {
           return {
             ok: false,
-            output: "The arguments are not valid JSON.",
+            output: m.custom_tools_test_invalid_json({}, { locale }),
             durationMs: 0,
             logs: [],
             files: [],
@@ -165,7 +169,7 @@ export const testCustomTool = createServerFn({ method: "POST" })
         )
           return {
             ok: false,
-            output: "The test files are too large together.",
+            output: m.custom_tools_test_files_too_large({}, { locale }),
             durationMs: 0,
             logs: [],
             files: [],
@@ -205,8 +209,8 @@ export const testCustomTool = createServerFn({ method: "POST" })
           })),
         } satisfies CustomToolTestResult;
       }),
-    ),
-  );
+    );
+  });
 
 /** What a user may pick for an agent: no source, no bundles. */
 export const listUsableCustomTools = createServerFn({ method: "GET" })

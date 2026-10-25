@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { Suspense } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { m } from "~/paraglide/messages.js";
 import type { CustomToolSummary } from "../schema.ts";
 import { CustomToolsPage } from "./custom-tools-page.tsx";
 
@@ -70,5 +71,13 @@ describe("CustomToolsPage", () => {
     expect(screen.getByText("No modules yet")).toBeInTheDocument();
     for (const link of screen.getAllByRole("link", { name: "New module" }))
       expect(link).toHaveAttribute("href", "/admin/custom-tools/new");
+  });
+
+  it("counts functions and dependencies in German", () => {
+    expect(m.custom_tools_list_function_count({ count: 1 }, { locale: "de" })).toBe("1 Funktion");
+    expect(m.custom_tools_list_function_count({ count: 2 }, { locale: "de" })).toBe("2 Funktionen");
+    expect(m.custom_tools_list_dependency_count({ count: 3 }, { locale: "de" })).toBe(
+      "3 Abhängigkeiten",
+    );
   });
 });

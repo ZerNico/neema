@@ -181,8 +181,111 @@
   "common_settings": "Einstellungen",
   "common_something_went_wrong": "Etwas ist schiefgelaufen",
   "common_unexpected_failure": "Bei uns ist etwas schiefgelaufen. Referenz {reference}.",
+  "custom_tools_editor_access": "Zugriff",
+  "custom_tools_editor_actions": "Modulaktionen",
+  "custom_tools_editor_add_dependency": "Abhängigkeit hinzufügen",
+  "custom_tools_editor_arguments": "Argumente",
+  "custom_tools_editor_arguments_prefilled": "Aus den Parametern der Funktion vorausgefüllt.",
+  "custom_tools_editor_back": "Eigene Tools",
+  "custom_tools_editor_build_failed": "Das Modul konnte nicht gebaut werden.",
+  "custom_tools_editor_conflict": "Dieses Modul wurde woanders geändert.",
+  "custom_tools_editor_create": "Modul erstellen",
+  "custom_tools_editor_debug": "Debuggen",
+  "custom_tools_editor_debug_description": "Baut den aktuellen Quelltext neu und führt ihn auf dem Server aus. Zurückgegebene Dateien werden nicht gespeichert.",
+  "custom_tools_editor_debug_title": "Debuggen",
+  "custom_tools_editor_delete_confirm": "Modul löschen",
+  "custom_tools_editor_delete_description": "Agenten verlieren das Modul für künftige Antworten. Frühere Antworten behalten ihre Tool-Aufrufe.",
+  "custom_tools_editor_delete_menu": "Modul löschen",
+  "custom_tools_editor_delete_title": "„{name}“ löschen?",
+  "custom_tools_editor_dependencies": "Abhängigkeiten",
+  "custom_tools_editor_dependencies_hint": "Paketnamen aus der Registry mit exakter Version. Installationsskripte und native Add-ons werden nicht unterstützt.",
+  "custom_tools_editor_description_placeholder": "Wofür diese Gruppe von Funktionen da ist.",
+  "custom_tools_editor_enabled": "Aktiviert",
+  "custom_tools_editor_error_delete": "Das Modul konnte nicht gelöscht werden.",
+  "custom_tools_editor_error_update": "Das Modul konnte nicht aktualisiert werden.",
+  "custom_tools_editor_files": "Dateien",
+  "custom_tools_editor_files_hint": "Für Dateiparameter: Gib den Dateinamen in den Argumenten an, wie es der Assistent tun würde.",
+  "custom_tools_editor_function": "Funktion",
+  "custom_tools_editor_function_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} Funktion:",
+        "countPlural=*": "{count} Funktionen:"
+      }
+    }
+  ],
+  "custom_tools_editor_hide_schema": "Schema ausblenden",
+  "custom_tools_editor_module_section": "Modul",
+  "custom_tools_editor_name_description": "Wird überall angezeigt, wo das Modul aufgeführt ist.",
+  "custom_tools_editor_name_placeholder": "Wetter-Tools",
+  "custom_tools_editor_name_required": "Gib einen Namen ein.",
+  "custom_tools_editor_new_title": "Neues Modul",
+  "custom_tools_editor_no_dependencies": "Keine externen Pakete.",
+  "custom_tools_editor_package": "Paket",
+  "custom_tools_editor_parameter_schema": "Parameterschema",
+  "custom_tools_editor_problem_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} Problem",
+        "countPlural=*": "{count} Probleme"
+      }
+    }
+  ],
+  "custom_tools_editor_reload": "Modul neu laden",
+  "custom_tools_editor_returned_files": "Zurückgegebene Dateien",
+  "custom_tools_editor_run": "Ausführen",
+  "custom_tools_editor_show_schema": "Schema anzeigen",
+  "custom_tools_editor_slug_description": "Benennt die Funktionen für das Modell.",
+  "custom_tools_editor_slug_invalid": "Kleinbuchstaben, Ziffern und einzelne Unterstriche, beginnend mit einem Buchstaben, höchstens {max} Zeichen",
+  "custom_tools_editor_slug_label": "Kennung",
+  "custom_tools_editor_slug_rename_description": "Eine Umbenennung ändert die angebotenen Funktionen ab der nächsten Nachricht.",
+  "custom_tools_editor_slug_taken": "Diese Kennung ist schon vergeben.",
+  "custom_tools_editor_source_label": "TypeScript-Quelltext",
+  "custom_tools_editor_source_section": "Quelltext",
+  "custom_tools_editor_test_completed": "Abgeschlossen in {duration} ms",
+  "custom_tools_editor_test_failed": "Fehlgeschlagen nach {duration} ms",
+  "custom_tools_editor_test_file_too_large": "Zu groß für eine Vorschau im Test.",
+  "custom_tools_editor_test_files": "Testdateien",
+  "custom_tools_editor_too_long": "Höchstens {max} Zeichen.",
+  "custom_tools_editor_unsaved": "Dein Modul ist noch nicht gespeichert.",
+  "custom_tools_editor_verify": "Prüfen",
+  "custom_tools_editor_verifying": "Wird geprüft…",
+  "custom_tools_editor_version": "Version",
   "custom_tools_error_conflict": "Dieses Modul wurde woanders geändert. Lade es neu, bevor du speicherst.",
   "custom_tools_error_slug_taken": "Der Slug {slug} wird schon verwendet.",
+  "custom_tools_list_dependency_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} Abhängigkeit",
+        "countPlural=*": "{count} Abhängigkeiten"
+      }
+    }
+  ],
+  "custom_tools_list_description": "TypeScript-Module, die das Modell in jedem Chat aufrufen kann. Ihr Code läuft mit allen Rechten des Servers, deshalb sollten ihn nur vertrauenswürdige Admins schreiben.",
+  "custom_tools_list_disabled": "Deaktiviert",
+  "custom_tools_list_empty_description": "Schreib ein Modul, und seine Funktionen stehen in jedem Chat bereit, mit dem du es teilst.",
+  "custom_tools_list_empty_title": "Noch keine Module",
+  "custom_tools_list_function_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} Funktion",
+        "countPlural=*": "{count} Funktionen"
+      }
+    }
+  ],
+  "custom_tools_list_new": "Neues Modul",
+  "custom_tools_list_private": "Privat",
+  "custom_tools_list_title": "Eigene Tools",
+  "custom_tools_test_files_too_large": "Die Testdateien sind zusammen zu groß.",
+  "custom_tools_test_invalid_json": "Die Argumente sind kein gültiges JSON.",
   "groups_error_name_taken": "Dieser Gruppenname ist schon vergeben",
   "help_agents_body": "Ein Agent merkt sich, wie du eine Aufgabe erledigt haben willst: seine Anweisungen, die Dokumente, die er ansehen darf, und die Tools, die er nutzen darf. Wähle ihn zu Beginn eines Chats, und er arbeitet jedes Mal so.",
   "help_agents_example": "Ein „Vertragsprüfer“, der jeden Vertrag, den du teilst, mit den Regeln deines Unternehmens abgleicht.",

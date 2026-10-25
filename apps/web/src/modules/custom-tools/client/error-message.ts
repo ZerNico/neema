@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+
 /** A failed validator answers with its issue list as JSON; show the messages, not the envelope. */
 const validationMessages = (body: string): string | null => {
   try {
@@ -14,5 +16,5 @@ const validationMessages = (body: string): string | null => {
 
 export const errorMessage = (error: unknown): string => {
   if (error instanceof Error) return validationMessages(error.message) ?? error.message;
-  return "Something went wrong.";
+  return m.common_something_went_wrong();
 };
