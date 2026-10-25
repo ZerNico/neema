@@ -1516,7 +1516,8 @@ export class ChatRepo extends Context.Service<
           const rows = yield* db
             .select({
               messageId: messageGenerationConfig.messageId,
-              // The person's picks the turn's agent did not also bring.
+              // The person's picks the turn's agent did not also bring. Storage keeps
+              // an overlapping pick, so a retry holds it if the agent later drops it.
               collectionIds: sql<string[]>`coalesce((
                 select jsonb_agg(picked.id order by picked.ord)
                 from jsonb_array_elements(${messageGenerationConfig.standaloneCollectionIds}) with ordinality as picked(id, ord)

@@ -152,7 +152,11 @@ export const messageGenerationConfig = pgTable(
     resolvedAgent: jsonb("resolved_agent").$type<ResolvedAgentConfig>(),
     /** The project this attempt ran in, as it stood then; null outside a project. */
     resolvedProject: jsonb("resolved_project").$type<ResolvedProject>(),
-    /** The collections the person chose for the turn, beside its agent's; what its question shows. */
+    /**
+     * The collections the person chose for the turn, including any its agent also
+     * brings: a retry keeps those if the agent later drops them. The question
+     * shows these minus the agent's.
+     */
     standaloneCollectionIds: jsonb("standalone_collection_ids")
       .$type<string[]>()
       .notNull()
