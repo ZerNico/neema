@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+
 /**
  * The picker's view of a cron expression. The cron stays the stored truth;
  * this recognizes the shapes the picker can offer and falls back to `cron`
@@ -38,30 +41,18 @@ export type CadenceKind = Cadence["kind"];
 export const HOUR_STEPS: ReadonlyArray<number> = [1, 2, 3, 4, 6, 8, 12];
 export const MONTH_STEPS: ReadonlyArray<number> = [1, 2, 3, 4, 6];
 
-export const WEEKDAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-] as const;
+// Named by Intl in the page's locale. January 2023 began on a Sunday, so day
+// N of it is cron weekday N; UTC keeps the reader's zone from shifting it.
+const nameFormat = (options: Intl.DateTimeFormatOptions) =>
+  new Intl.DateTimeFormat(getLocale(), { ...options, timeZone: "UTC" });
 
-export const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-] as const;
+/** A cron weekday's name, 0 = Sunday. */
+export const weekdayName = (day: number) =>
+  nameFormat({ weekday: "long" }).format(Date.UTC(2023, 0, 1 + day));
+
+/** A month's name, 1 = January. */
+export const monthName = (month: number) =>
+  nameFormat({ month: "long" }).format(Date.UTC(2023, month - 1, 1));
 
 const WORKWEEK = [1, 2, 3, 4, 5];
 
@@ -181,54 +172,60 @@ const pad = (value: number) => String(value).padStart(2, "0");
 
 export const clockText = (time: ClockTime) => `${pad(time.hour)}:${pad(time.minute)}`;
 
-export const ordinal = (day: number) => {
-  const tens = day % 100;
-  if (tens >= 11 && tens <= 13) return `${day}th`;
-  return `${day}${["th", "st", "nd", "rd"][day % 10] ?? "th"}`;
-};
-
-const list = new Intl.ListFormat("en", { type: "conjunction" });
+export const ordinal = (day: number) => m.schedules_cadence_ordinal({ day });
 
 export const weekdaysText = (days: ReadonlyArray<number>) =>
-  list.format(days.map((day) => WEEKDAY_NAMES[day]!));
+  new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(days.map(weekdayName));
 
-export const monthDayText = (day: number) => (day === LAST_DAY ? "last day" : ordinal(day));
+export const monthDayText = (day: number) =>
+  day === LAST_DAY ? m.schedules_cadence_last_day() : ordinal(day);
 
-export const monthDaysText = (days: ReadonlyArray<number>) => list.format(days.map(monthDayText));
+export const monthDaysText = (days: ReadonlyArray<number>) =>
+  new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(days.map(monthDayText));
 
 /**
- * The stored `scheduleText` for a picked cadence; null for a raw cron, which
- * keeps its own. `compact` counts long day lists instead of naming them, for
- * one-line places like the schedule list.
+ * The stored `scheduleText` for a picked cadence, in the page's language, as
+ * the person would have typed it; null for a raw cron, which keeps its own.
+ * `compact` counts long day lists instead of naming them, for one-line places
+ * like the schedule list.
  */
 export function cadenceText(cadence: Cadence, compact = false): string | null {
-  const weekdays = (days: ReadonlyArray<number>) =>
-    compact && days.length > 3 ? `${days.length} days a week` : weekdaysText(days);
-  const monthDays = (days: ReadonlyArray<number>) =>
-    compact && days.length > 3 ? `${days.length} days` : `the ${monthDaysText(days)}`;
   if (cadence.kind === "cron") return null;
-  if (cadence.kind === "hourly") {
-    const every = cadence.every === 1 ? "Every hour" : `Every ${cadence.every} hours`;
-    return cadence.minute === 0 ? every : `${every} at :${pad(cadence.minute)}`;
-  }
-  const at = `at ${clockText(cadence.time)}`;
+  if (cadence.kind === "hourly")
+    return cadence.minute === 0
+      ? m.schedules_cadence_hourly({ every: cadence.every })
+      : m.schedules_cadence_hourly_at({ every: cadence.every, minute: pad(cadence.minute) });
+  const time = clockText(cadence.time);
+  const counted = compact && "days" in cadence && cadence.days.length > 3;
   switch (cadence.kind) {
     case "daily":
-      return `Every day ${at}`;
+      return m.schedules_cadence_daily({ time });
     case "weekdays":
-      return `Every weekday ${at}`;
+      return m.schedules_cadence_weekdays({ time });
     case "weekly":
       return sameDays(cadence.days, WORKWEEK)
-        ? `Every weekday ${at}`
-        : compact && cadence.days.length > 3
-          ? `${weekdays(cadence.days)} ${at}`
-          : `Every ${weekdays(cadence.days)} ${at}`;
-    case "monthly": {
-      const every = cadence.every === 1 ? "Every month" : `Every ${cadence.every} months`;
-      return `${every} on ${monthDays(cadence.days)} ${at}`;
+        ? m.schedules_cadence_weekdays({ time })
+        : counted
+          ? m.schedules_cadence_weekly_count({ count: cadence.days.length, time })
+          : m.schedules_cadence_weekly({ days: weekdaysText(cadence.days), time });
+    case "monthly":
+      return counted
+        ? m.schedules_cadence_monthly_count({
+            every: cadence.every,
+            count: cadence.days.length,
+            time,
+          })
+        : m.schedules_cadence_monthly({
+            every: cadence.every,
+            days: monthDaysText(cadence.days),
+            time,
+          });
+    case "yearly": {
+      const month = monthName(cadence.month);
+      return counted
+        ? m.schedules_cadence_yearly_count({ month, count: cadence.days.length, time })
+        : m.schedules_cadence_yearly({ month, days: monthDaysText(cadence.days), time });
     }
-    case "yearly":
-      return `Every ${MONTH_NAMES[cadence.month - 1]} on ${monthDays(cadence.days)} ${at}`;
   }
 }
 

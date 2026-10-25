@@ -5,11 +5,17 @@ import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
 import { ScheduleSettlement } from "./settle.ts";
+import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** Started, or why not: skipped for a cause that passes, error for one to fix. */
 export type FireOutcome =
   | { conversationId: string }
-  | { conversationId: null; status: "error" | "skipped"; reason: string };
+  | { conversationId: null; status: "error" | "skipped"; reason: Localized };
+
+// MIGRATION: other modules' reasons may still be plain English strings.
+const words = (reason: Localized | string) =>
+  typeof reason === "string" ? verbatim(reason) : reason;
 
 /**
  * A chat that is still answering is waited on rather than skipped at once:
@@ -123,62 +129,62 @@ export class ScheduleFire extends Context.Service<
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "skipped",
-                  reason: "the account is not permitted to run schedules",
+                  reason: localized(m.schedules_run_error_account_not_permitted),
                 }),
               ModelNotFound: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: "no available model",
+                  reason: localized(m.schedules_run_error_no_model),
                 }),
               ToolUnavailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: "web search is unavailable",
+                  reason: localized(m.schedules_run_error_search_unavailable),
                 }),
               InvalidMessage: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: error.reason,
+                  reason: words(error.reason),
                 }),
               KnowledgeNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: "a selected collection is unavailable",
+                  reason: localized(m.schedules_run_error_collection_unavailable),
                 }),
               KnowledgeRejected: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: error.reason,
+                  reason: words(error.reason),
                 }),
               SkillNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: "a selected skill is unavailable",
+                  reason: localized(m.schedules_run_error_skill_unavailable),
                 }),
               SkillRejected: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: error.reason,
+                  reason: words(error.reason),
                 }),
               // An error, not a skip, so the person hears that it did not run.
               UsageLimitReached: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: error.reason,
+                  reason: words(error.reason),
                 }),
               ConversationBusy: () =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "skipped",
-                  reason: "the chat was still answering",
+                  reason: localized(m.schedules_run_error_chat_busy),
                 }),
               GrantUnavailable: (error) =>
                 Effect.succeed<FireOutcome>({
@@ -186,8 +192,10 @@ export class ScheduleFire extends Context.Service<
                   status: "error",
                   reason:
                     error.name === null
-                      ? "an integration this schedule uses was deleted"
-                      : `${error.name} is not connected or needs reconnecting`,
+                      ? localized(m.schedules_run_error_integration_deleted)
+                      : localized(m.schedules_run_error_integration_not_connected, {
+                          name: error.name,
+                        }),
                 }),
             }),
             // The remaining failures are composer-path errors a scheduled turn
@@ -198,7 +206,7 @@ export class ScheduleFire extends Context.Service<
                 Effect.as<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: "the scheduled message could not be sent",
+                  reason: localized(m.schedules_run_error_not_sent),
                 }),
               ),
             ),

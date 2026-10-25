@@ -1,4 +1,6 @@
 import { Cron } from "croner";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * The only place croner is constructed, so the library stays swappable.
@@ -21,19 +23,57 @@ export const nextFireAt = (cron: string, timezone: string, from: Date): Date | n
 export const MIN_FIRE_GAP_MS = 60 * 60 * 1000;
 const GAP_SAMPLE = 48;
 
-/** Null when valid; a short reason otherwise, safe to hand back to a model. */
-export const validateCron = (cron: string, timezone: string): string | null => {
+type CronProblem =
+  | { kind: "fields" | "never" | "too_often" }
+  /** croner's own words, English whoever reads them. */
+  | { kind: "syntax"; detail: string };
+
+const cronProblem = (cron: string, timezone: string): CronProblem | null => {
   // croner also takes a leading seconds field, which would fire every tick.
-  if (cron.trim().split(/\s+/).length !== 5)
-    return "use a 5-field cron expression (minute hour day month weekday)";
+  if (cron.trim().split(/\s+/).length !== 5) return { kind: "fields" };
   try {
     const instance = make(cron, timezone);
     if (!instance.nextRun(new Date(0)) && !hasFarFutureRun(cron, timezone))
-      return "this expression never fires";
-    if (firesTooOften(instance)) return "a schedule can run at most once an hour";
+      return { kind: "never" };
+    if (firesTooOften(instance)) return { kind: "too_often" };
     return null;
   } catch (error) {
-    return error instanceof Error ? error.message.slice(0, 200) : "invalid cron expression";
+    return {
+      kind: "syntax",
+      detail: error instanceof Error ? error.message.slice(0, 200) : "invalid cron expression",
+    };
+  }
+};
+
+/** Null when valid; a short reason otherwise, in English for the model. */
+export const validateCron = (cron: string, timezone: string): string | null => {
+  const problem = cronProblem(cron, timezone);
+  if (!problem) return null;
+  switch (problem.kind) {
+    case "fields":
+      return "use a 5-field cron expression (minute hour day month weekday)";
+    case "never":
+      return "this expression never fires";
+    case "too_often":
+      return "a schedule can run at most once an hour";
+    case "syntax":
+      return problem.detail;
+  }
+};
+
+/** The same problem worded for the person saving the schedule. */
+const cronIssue = (cron: string, timezone: string): Localized | null => {
+  const problem = cronProblem(cron, timezone);
+  if (!problem) return null;
+  switch (problem.kind) {
+    case "fields":
+      return localized(m.schedules_error_cron_fields);
+    case "never":
+      return localized(m.schedules_error_cron_never);
+    case "too_often":
+      return localized(m.schedules_error_cron_too_often);
+    case "syntax":
+      return localized(m.schedules_error_cron_syntax, { detail: problem.detail });
   }
 };
 
@@ -61,11 +101,12 @@ export const cadenceIssue = (cadence: {
   cron: string;
   timezone: string;
   endAt?: string | null | undefined;
-}): string | null => {
-  if (!isValidTimezone(cadence.timezone)) return "unknown timezone";
-  const cronIssue = validateCron(cadence.cron, cadence.timezone);
-  if (cronIssue) return `invalid schedule: ${cronIssue}`;
-  if (cadence.endAt && Number.isNaN(new Date(cadence.endAt).getTime())) return "invalid end time";
+}): Localized | null => {
+  if (!isValidTimezone(cadence.timezone)) return localized(m.schedules_error_unknown_timezone);
+  const issue = cronIssue(cadence.cron, cadence.timezone);
+  if (issue) return issue;
+  if (cadence.endAt && Number.isNaN(new Date(cadence.endAt).getTime()))
+    return localized(m.schedules_error_invalid_end);
   return null;
 };
 

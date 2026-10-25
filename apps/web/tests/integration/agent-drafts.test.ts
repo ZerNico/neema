@@ -37,6 +37,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { SyncEvent } from "~/modules/sync/events.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { english } from "~/i18n/localized.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -177,13 +178,20 @@ const patch = (userId: string, draft: AgentDraft, changes: AgentDraftPatch) =>
       }),
     ),
   );
+/** The outcome as the page receives it, its reason worded in English. */
 const save = (userId: string, draft: AgentDraft) =>
   run(
     Effect.flatMap(AgentDraftService, (service) =>
-      service.save(userId, {
-        draftId: draft.id,
-        expectedRevision: draft.revision,
-      }),
+      service
+        .save(userId, {
+          draftId: draft.id,
+          expectedRevision: draft.revision,
+        })
+        .pipe(
+          Effect.map((result) =>
+            result.outcome === "invalid" ? { ...result, reason: english(result.reason) } : result,
+          ),
+        ),
     ),
   );
 const reload = (userId: string, draft: AgentDraft) =>

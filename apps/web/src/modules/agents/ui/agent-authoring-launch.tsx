@@ -4,13 +4,14 @@ import { Link } from "@tanstack/react-router";
 import { agentAuthoringRequest } from "../authoring.ts";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import { DropdownMenuItem } from "~/ui/primitives/dropdown-menu";
+import { m } from "~/paraglide/messages.js";
 
 /** Creation through chat; editing an existing agent is the menu item below. */
 export function AgentAuthoringLaunchButton({ disabled = false }: { disabled?: boolean }) {
   const content = (
     <>
       <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} data-icon="inline-start" />
-      Create with chat
+      {m.agents_launch_create_with_chat()}
     </>
   );
   if (disabled)
@@ -37,7 +38,7 @@ export function AgentAuthoringLaunchMenuItem({ agentId }: { agentId: string }) {
       render={<Link to="/" search={{}} state={{ chatPrefill: agentAuthoringRequest(agentId) }} />}
     >
       <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
-      Edit with chat
+      {m.agents_launch_edit_with_chat()}
     </DropdownMenuItem>
   );
 }

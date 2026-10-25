@@ -25,6 +25,18 @@ import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { m } from "~/paraglide/messages.js";
+
+const ICON_NAMES = {
+  book: m.agents_icon_book,
+  briefcase: m.agents_icon_briefcase,
+  chart: m.agents_icon_chart,
+  code: m.agents_icon_code,
+  pen: m.agents_icon_pen,
+  robot: m.agents_icon_robot,
+  search: m.agents_icon_search,
+  sparkles: m.agents_icon_sparkles,
+} satisfies Record<keyof typeof AGENT_ICONS, () => string>;
 
 /** The page and the draft rail use the same fields; each host owns its form and persistence. */
 export const AgentSettingsFields = withForm({
@@ -39,14 +51,19 @@ export const AgentSettingsFields = withForm({
       <>
         <div className="flex flex-col gap-5">
           <form.AppField name="name">
-            {(field) => <field.TextField label="Name" placeholder="Contract reviewer" />}
+            {(field) => (
+              <field.TextField
+                label={m.common_name()}
+                placeholder={m.agents_settings_name_placeholder()}
+              />
+            )}
           </form.AppField>
           <form.AppField name="description">
             {(field) => (
               <field.TextField
-                label="Description"
+                label={m.common_description()}
                 optional
-                placeholder="What this agent is for, in one line."
+                placeholder={m.agents_settings_description_placeholder()}
               />
             )}
           </form.AppField>
@@ -55,16 +72,16 @@ export const AgentSettingsFields = withForm({
           <form.AppField name="instructions">
             {(field) => (
               <field.TextareaField
-                label="Instructions"
-                placeholder="What should this agent do?"
+                label={m.agents_settings_instructions()}
+                placeholder={m.agents_settings_instructions_placeholder()}
                 rows={8}
               />
             )}
           </form.AppField>
         </div>
         <Section
-          title="Knowledge"
-          description="People using this agent need their own access to these."
+          title={m.agents_settings_knowledge()}
+          description={m.agents_settings_own_access()}
           actions={
             <Button
               size="sm"
@@ -75,11 +92,11 @@ export const AgentSettingsFields = withForm({
                   KNOWLEDGE_LIMITS.maxCollectionsPerSelection
                 )
                   setCreatingCollection(true);
-                else toast.error("Select at most five knowledge collections.");
+                else toast.error(m.agents_settings_too_many_collections());
               }}
             >
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              New collection
+              {m.agents_settings_new_collection()}
             </Button>
           }
         >
@@ -94,24 +111,21 @@ export const AgentSettingsFields = withForm({
             )}
           </form.Field>
         </Section>
-        <Section
-          title="Skills"
-          description="People using this agent need their own access to these."
-        >
+        <Section title={m.agents_settings_skills()} description={m.agents_settings_own_access()}>
           <form.Field name="skillIds">
             {(field) => (
               <SkillsField
                 value={field.state.value ?? []}
                 onChange={field.handleChange}
                 errors={field.state.meta.errors}
-                unavailableHint="Remove this dependency or restore access before using the agent."
+                unavailableHint={m.agents_settings_skill_unavailable_hint()}
               />
             )}
           </form.Field>
         </Section>
         <Section
-          title="Custom tools"
-          description="Extra actions set up by an admin. A chat without an agent can use all of them; this agent uses only the ones picked here."
+          title={m.agents_settings_custom_tools()}
+          description={m.agents_settings_custom_tools_description()}
         >
           <form.Field name="customToolIds">
             {(field) => {
@@ -126,18 +140,22 @@ export const AgentSettingsFields = withForm({
                           <ListRow key={id}>
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium">
-                                {tool?.name ?? "Unavailable custom tool"}
+                                {tool?.name ?? m.agents_settings_custom_tool_unavailable()}
                               </p>
                               <p className="text-muted-foreground truncate text-xs">
                                 {tool?.description ??
-                                  "Remove this dependency or ask an admin to re-enable it."}
+                                  m.agents_settings_custom_tool_unavailable_hint()}
                               </p>
                             </div>
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              aria-label={`Remove ${tool?.name ?? "unavailable custom tool"}`}
+                              aria-label={
+                                tool
+                                  ? m.agents_settings_remove_named({ name: tool.name })
+                                  : m.agents_settings_remove_unavailable_custom_tool()
+                              }
                               onClick={() =>
                                 field.handleChange(ids.filter((value) => value !== id))
                               }
@@ -151,7 +169,7 @@ export const AgentSettingsFields = withForm({
                   ) : null}
                   {customTools.isError ? (
                     <ErrorState
-                      title="Could not load custom tools"
+                      title={m.agents_settings_custom_tools_load_failed()}
                       onRetry={() => void customTools.refetch()}
                     />
                   ) : (
@@ -163,7 +181,7 @@ export const AgentSettingsFields = withForm({
                       onClick={() => setCustomToolPickerOpen(true)}
                     >
                       <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" strokeWidth={2} />
-                      Add custom tools
+                      {m.agents_settings_add_custom_tools()}
                     </Button>
                   )}
                   <ResourcePicker
@@ -174,8 +192,8 @@ export const AgentSettingsFields = withForm({
                     onOpenChange={setCustomToolPickerOpen}
                     anchor={customToolAnchor}
                     limit={20}
-                    placeholder="Search custom tools…"
-                    empty="No matching custom tools."
+                    placeholder={m.agents_settings_custom_tools_search()}
+                    empty={m.agents_settings_custom_tools_empty()}
                   />
                   <FieldError errors={field.state.meta.errors} />
                 </div>
@@ -184,8 +202,8 @@ export const AgentSettingsFields = withForm({
           </form.Field>
         </Section>
         <Section
-          title="Integrations"
-          description="Services this agent uses by default. Each person uses their own connected account; someone who hasn’t connected one simply won’t have it."
+          title={m.agents_settings_integrations()}
+          description={m.agents_settings_integrations_description()}
         >
           <form.Field name="integrationIds">
             {(field) => {
@@ -196,7 +214,7 @@ export const AgentSettingsFields = withForm({
               if (usable.length === 0 && lost.length === 0)
                 return (
                   <p className="text-muted-foreground text-sm">
-                    No integrations are available to you yet.
+                    {m.agents_settings_integrations_empty()}
                   </p>
                 );
               return (
@@ -212,7 +230,7 @@ export const AgentSettingsFields = withForm({
                       </div>
                       <Switch
                         checked={ids.includes(integration.id)}
-                        aria-label={`Use ${integration.name}`}
+                        aria-label={m.agents_settings_use_integration({ name: integration.name })}
                         onCheckedChange={(checked) =>
                           field.handleChange(
                             checked
@@ -226,16 +244,18 @@ export const AgentSettingsFields = withForm({
                   {lost.map((id) => (
                     <ListRow key={id}>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">Unavailable integration</p>
+                        <p className="truncate text-sm font-medium">
+                          {m.agents_settings_integration_unavailable()}
+                        </p>
                         <p className="text-muted-foreground truncate text-xs">
-                          Remove this dependency or ask an admin to share it with you.
+                          {m.agents_settings_integration_unavailable_hint()}
                         </p>
                       </div>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        aria-label="Remove unavailable integration"
+                        aria-label={m.agents_settings_remove_unavailable_integration()}
                         onClick={() => field.handleChange(ids.filter((value) => value !== id))}
                       >
                         <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
@@ -250,7 +270,7 @@ export const AgentSettingsFields = withForm({
         <form.Field name="icon">
           {(field) => (
             <Field>
-              <FieldLabel>Icon</FieldLabel>
+              <FieldLabel>{m.agents_settings_icon()}</FieldLabel>
               <ToggleGroup
                 aria-invalid={field.state.meta.errors.length > 0 || undefined}
                 value={[field.state.value]}
@@ -258,11 +278,11 @@ export const AgentSettingsFields = withForm({
                   const next = value.at(-1);
                   if (next && Schema.is(AgentIcon)(next)) field.handleChange(next);
                 }}
-                aria-label="Icon"
+                aria-label={m.agents_settings_icon()}
                 className="w-full flex-wrap"
               >
                 {(Object.keys(AGENT_ICONS) as Array<keyof typeof AGENT_ICONS>).map((icon) => (
-                  <ToggleGroupItem key={icon} value={icon} aria-label={icon}>
+                  <ToggleGroupItem key={icon} value={icon} aria-label={ICON_NAMES[icon]()}>
                     <HugeiconsIcon icon={AGENT_ICONS[icon]} strokeWidth={2} />
                   </ToggleGroupItem>
                 ))}
@@ -271,7 +291,7 @@ export const AgentSettingsFields = withForm({
             </Field>
           )}
         </form.Field>
-        <Section title="Model and tools">
+        <Section title={m.agents_settings_model_and_tools()}>
           <ListCard>
             <form.Field name="modelId">
               {(field) => (
@@ -287,35 +307,39 @@ export const AgentSettingsFields = withForm({
                 <ImageModelSettingRow
                   value={field.state.value}
                   onChange={(modelId) => field.handleChange(modelId)}
-                  description="A new chat draws with it."
+                  description={m.agents_settings_image_model_description()}
                 />
               )}
             </form.Field>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Web search by default</span>
+                <span className="text-sm font-medium">
+                  {m.agents_settings_web_search_default()}
+                </span>
               </div>
               <form.Field name="searchEnabled">
                 {(field) => (
                   <Switch
                     checked={field.state.value}
                     onCheckedChange={(checked) => field.handleChange(checked)}
-                    aria-label="Web search by default"
+                    aria-label={m.agents_settings_web_search_default()}
                   />
                 )}
               </form.Field>
             </ListRow>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Working checklist</span>
-                <span className="text-muted-foreground text-xs">For multi-step requests.</span>
+                <span className="text-sm font-medium">{m.agents_settings_checklist()}</span>
+                <span className="text-muted-foreground text-xs">
+                  {m.agents_settings_checklist_description()}
+                </span>
               </div>
               <form.Field name="planEnabled">
                 {(field) => (
                   <Switch
                     checked={field.state.value}
                     onCheckedChange={field.handleChange}
-                    aria-label="Working checklist"
+                    aria-label={m.agents_settings_checklist()}
                   />
                 )}
               </form.Field>
@@ -323,8 +347,8 @@ export const AgentSettingsFields = withForm({
           </ListCard>
         </Section>
         <Section
-          title="Conversation starters"
-          description="Shown when someone starts a chat with this agent."
+          title={m.agents_settings_starters()}
+          description={m.agents_settings_starters_description()}
         >
           <form.Field name="starters">
             {(field) => (
@@ -340,12 +364,12 @@ export const AgentSettingsFields = withForm({
                             onChange={(event) => starterField.handleChange(event.target.value)}
                             onBlur={starterField.handleBlur}
                             aria-invalid={starterField.state.meta.errors.length > 0 || undefined}
-                            aria-label={`Starter ${index + 1}`}
+                            aria-label={m.agents_settings_starter({ number: index + 1 })}
                           />
                           <Button
                             size="icon-sm"
                             variant="ghost"
-                            aria-label={`Remove starter ${index + 1}`}
+                            aria-label={m.agents_settings_remove_starter({ number: index + 1 })}
                             onClick={() => field.removeValue(index)}
                           >
                             <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
@@ -364,7 +388,7 @@ export const AgentSettingsFields = withForm({
                     onClick={() => field.handleChange([...field.state.value, ""])}
                   >
                     <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                    Add starter
+                    {m.agents_settings_add_starter()}
                   </Button>
                 ) : null}
                 <FieldError errors={field.state.meta.errors} />

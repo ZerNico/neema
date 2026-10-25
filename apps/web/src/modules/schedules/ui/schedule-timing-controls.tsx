@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
+import { m } from "~/paraglide/messages.js";
 
 const MONTH_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
 
@@ -81,7 +82,7 @@ export function TimeInput({
         <HugeiconsIcon icon={Clock01Icon} strokeWidth={2} aria-hidden />
       </InputGroupAddon>
       <InputGroupInput
-        aria-label="Time"
+        aria-label={m.schedules_timing_time()}
         type="time"
         className="appearance-none [&::-webkit-calendar-picker-indicator]:hidden"
         value={clockText(time)}
@@ -110,7 +111,7 @@ export function MinuteSelect({
     .map((value) => ({ value: String(value), label: `:${String(value).padStart(2, "0")}` }));
   return (
     <OptionSelect
-      label="Minutes past the hour"
+      label={m.schedules_timing_minutes_past()}
       items={items}
       className="w-24"
       value={String(minute)}
@@ -136,14 +137,16 @@ export function Row({ label, children }: { label: string; children: ReactNode })
 // Past three names the label would grow with every pick and push the
 // popover around, so longer selections are counted instead.
 const daysSummary = (days: ReadonlyArray<number>) =>
-  days.length <= 3 ? monthDaysText(days) : `${days.length} days`;
+  days.length <= 3 ? monthDaysText(days) : m.schedules_timing_days_count({ count: days.length });
 
 const SHORT_MONTH_DAYS = new Set([29, 30, 31]);
 
 const shortMonthHint = (days: ReadonlyArray<number>) => {
   const short = days.filter((day) => SHORT_MONTH_DAYS.has(day));
-  const skip = `Months without the ${monthDaysText(short)} skip ${short.length === 1 ? "it" : "them"}.`;
-  return days.includes(LAST_DAY) ? skip : `${skip} Choose Last day to run every month.`;
+  const words = { count: short.length, days: monthDaysText(short) };
+  return days.includes(LAST_DAY)
+    ? m.schedules_timing_short_months_skip(words)
+    : m.schedules_timing_short_months_skip_last(words);
 };
 
 export function MonthDaysPicker({
@@ -156,7 +159,7 @@ export function MonthDaysPicker({
   onChange: (days: number[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const label = multiple ? "Days of the month" : "Day of the month";
+  const label = multiple ? m.schedules_timing_days_of_month() : m.schedules_timing_day_of_month();
   const shortMonthDays = days.filter((day) => SHORT_MONTH_DAYS.has(day));
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -194,7 +197,7 @@ export function MonthDaysPicker({
             size="sm"
             className="col-span-4"
           >
-            Last day
+            {m.schedules_timing_last_day()}
           </ToggleGroupItem>
         </ToggleGroup>
         {shortMonthDays.length > 0 ? (

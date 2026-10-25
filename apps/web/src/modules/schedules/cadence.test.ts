@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { getLocale, overwriteGetLocale } from "~/paraglide/runtime.js";
 import { cadenceCron, cadenceText, isPreset, parseCadence, withKind } from "./cadence.ts";
 
 const time = (hour: number, minute = 0) => ({ hour, minute });
@@ -65,6 +66,24 @@ describe("cadenceText", () => {
 
   it("leaves a raw cron's description to the author", () => {
     expect(cadenceText(parseCadence("*/5 * * * *"))).toBeNull();
+  });
+
+  describe("in German", () => {
+    const original = getLocale;
+    beforeAll(() => overwriteGetLocale(() => "de"));
+    afterAll(() => overwriteGetLocale(original));
+
+    it.each([
+      ["0 * * * *", "Jede Stunde"],
+      ["5 */2 * * *", "Alle 2 Stunden um :05"],
+      ["0 7 * * *", "Täglich um 07:00 Uhr"],
+      ["0 9 * * 1,3,5", "Jeden Montag, Mittwoch und Freitag um 09:00 Uhr"],
+      ["0 8 1,11 */3 *", "Alle 3 Monate am 1. und 11. um 08:00 Uhr"],
+      ["0 8 24 12 *", "Jedes Jahr am 24. Dezember um 08:00 Uhr"],
+      ["0 9 15,L * *", "Jeden Monat am 15. und letzten Tag um 09:00 Uhr"],
+    ])("describes %s", (cron, text) => {
+      expect(cadenceText(parseCadence(cron))).toBe(text);
+    });
   });
 });
 

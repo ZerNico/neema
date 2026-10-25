@@ -1,7 +1,13 @@
+import { m } from "~/paraglide/messages.js";
+
+/**
+ * The unsent chat request that starts agent authoring. It is the person's own
+ * message, so it is in their language.
+ */
 export const agentAuthoringRequest = (agentId: string | null = null) =>
   agentId
-    ? `Help me improve [this agent](/agents/${encodeURIComponent(agentId)}). Ask what I’d like to change, then prepare a draft for me to review before saving.`
-    : "Help me create an agent. Find out what I want it to help with, ask any useful follow-up questions, and prepare its instructions and settings for me to review before saving.";
+    ? m.agents_authoring_request_edit({ link: `/agents/${encodeURIComponent(agentId)}` })
+    : m.agents_authoring_request_create();
 
 export const readChatPrefill = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 && value.length <= 2_000 ? value : null;

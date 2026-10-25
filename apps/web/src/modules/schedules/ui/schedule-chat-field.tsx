@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { m } from "~/paraglide/messages.js";
 
 interface ChatChoice {
   /** Null is "start one on the first run". */
@@ -29,12 +30,13 @@ interface ChatChoice {
   title: string;
 }
 
-const MODES = [
-  { value: "new", label: "New chat each time" },
-  { value: "same", label: "Same chat every time" },
-] as const;
+const modes = () =>
+  [
+    { value: "new", label: m.schedules_chat_mode_new() },
+    { value: "same", label: m.schedules_chat_mode_same() },
+  ] as const;
 
-const FIRST_RUN: ChatChoice = { id: null, title: "Start one on the first run" };
+const firstRun = (): ChatChoice => ({ id: null, title: m.schedules_chat_first_run() });
 
 /**
  * Where a schedule's runs land: a fresh chat each time, or one chat every
@@ -46,6 +48,8 @@ export const ScheduleChatField = withForm({
   render: function ScheduleChatField({ form }) {
     const chatMode = useStore(form.store, (state) => state.values.chatMode);
     const chatId = useStore(form.store, (state) => state.values.chatId);
+    const MODES = modes();
+    const FIRST_RUN = firstRun();
     const recent = useInfiniteQuery({
       ...conversationsInfiniteQuery(""),
       enabled: chatMode === "same",
@@ -53,13 +57,19 @@ export const ScheduleChatField = withForm({
     const chats: ChatChoice[] = (recent.data?.pages ?? [])
       .flatMap((page) => page.conversations)
       .filter((conversation) => conversation.mode === "chat")
-      .map((conversation) => ({ id: conversation.id, title: conversation.title ?? "New chat" }));
+      .map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title ?? m.schedules_chat_untitled(),
+      }));
     const selected = chatId
-      ? (chats.find((chat) => chat.id === chatId) ?? { id: chatId, title: "Chosen chat" })
+      ? (chats.find((chat) => chat.id === chatId) ?? {
+          id: chatId,
+          title: m.schedules_chat_chosen(),
+        })
       : FIRST_RUN;
     return (
       <div className="flex flex-col gap-3">
-        <FieldLabel>Chat</FieldLabel>
+        <FieldLabel>{m.schedules_chat_label()}</FieldLabel>
         <div className="flex flex-wrap items-center gap-2">
           <Select
             items={MODES}
@@ -70,7 +80,7 @@ export const ScheduleChatField = withForm({
               if (mode === "new") form.setFieldValue("chatId", null);
             }}
           >
-            <SelectTrigger aria-label="Chat" className="w-52">
+            <SelectTrigger aria-label={m.schedules_chat_label()} className="w-52">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -93,14 +103,14 @@ export const ScheduleChatField = withForm({
               autoHighlight
             >
               <ComboboxTrigger
-                aria-label="Which chat"
+                aria-label={m.schedules_chat_which()}
                 render={<Button variant="outline" className="max-w-72 justify-between" />}
               >
                 <span className="truncate">{selected.title}</span>
               </ComboboxTrigger>
               <ComboboxContent align="start" className="w-80">
-                <ComboboxInput placeholder="Search chats…" showTrigger={false} />
-                <ComboboxEmpty>No chats match</ComboboxEmpty>
+                <ComboboxInput placeholder={m.schedules_chat_search()} showTrigger={false} />
+                <ComboboxEmpty>{m.schedules_chat_empty()}</ComboboxEmpty>
                 <ComboboxList>
                   {(choice: ChatChoice) => (
                     <ComboboxItem key={choice.id ?? "first-run"} value={choice}>
@@ -114,13 +124,13 @@ export const ScheduleChatField = withForm({
         </div>
         {chatMode === "same" && chatId ? (
           <FieldDescription>
-            Runs use this chat’s own agent.{" "}
+            {m.schedules_chat_own_agent()}{" "}
             <Link
               to="/chat/$conversationId"
               params={{ conversationId: chatId }}
               className="underline underline-offset-2"
             >
-              Open the chat
+              {m.schedules_chat_open()}
             </Link>
           </FieldDescription>
         ) : null}

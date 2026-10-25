@@ -5,6 +5,7 @@ import {
   type ReloadDraftOutcome,
   type SaveDraftOutcome,
 } from "~/modules/drafts/client/use-draft.ts";
+import { m } from "~/paraglide/messages.js";
 import { DraftSettings, EMPTY_AGENT_DRAFT } from "../draft-schema.ts";
 import {
   discardAgentDraft,
@@ -17,7 +18,14 @@ import {
 export type DraftField = keyof DraftSettings;
 export const agentDraftClient: DraftClient<DraftSettings> = {
   kind: "agent",
-  noun: "agent",
+  words: {
+    draftGone: m.agents_draft_gone,
+    targetChanged: m.agents_draft_target_changed,
+    targetUnavailable: m.agents_draft_target_unavailable,
+    reloadUnavailable: m.agents_draft_reload_unavailable,
+    saveFailed: m.agents_draft_save_failed,
+    reloadFailed: m.agents_draft_reload_failed,
+  },
   fields: Object.keys(EMPTY_AGENT_DRAFT) as DraftField[],
   empty: EMPTY_AGENT_DRAFT,
   isValid: Schema.is(DraftSettings),

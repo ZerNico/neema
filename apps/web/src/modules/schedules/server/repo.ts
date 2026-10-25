@@ -392,8 +392,10 @@ export class ScheduleRepo extends Context.Service<
           return yield* db
             .update(scheduleRuns)
             .set({
+              // No reason: it would be stored in one language for every
+              // owner, and the page already says the run could not start.
               status: "error",
-              error: "the scheduled fire was interrupted before its turn started",
+              error: null,
             })
             // A live fire renews its lease while waiting for the turn. A crashed
             // one cannot safely be replayed, even if its turn never became visible.

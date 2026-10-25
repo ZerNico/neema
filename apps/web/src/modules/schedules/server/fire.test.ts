@@ -60,9 +60,15 @@ const fireWith = (grants: ScheduleGrant[]) =>
     ),
   );
 
+/** The outcome with its reason worded in `locale`, as the run row stores it. */
+const worded = async (grants: ScheduleGrant[], locale: "en" | "de" = "en") => {
+  const outcome = await fireWith(grants);
+  return "reason" in outcome ? { ...outcome, reason: outcome.reason(locale) } : outcome;
+};
+
 describe("a fire's grants", () => {
   it("ends the run with a reason when a granted integration was deleted", async () => {
-    expect(await fireWith([{ connectionId: null, integrationId: null, access: "write" }])).toEqual({
+    expect(await worded([{ connectionId: null, integrationId: null, access: "write" }])).toEqual({
       conversationId: null,
       status: "error",
       reason: "an integration this schedule uses was deleted",
@@ -70,12 +76,16 @@ describe("a fire's grants", () => {
   });
 
   it("ends the run when a granted account is gone or refused", async () => {
-    expect(
-      await fireWith([{ connectionId: "gone", integrationId: "outline", access: "read" }]),
-    ).toEqual({
+    const gone: ScheduleGrant[] = [
+      { connectionId: "gone", integrationId: "outline", access: "read" },
+    ];
+    expect(await worded(gone)).toEqual({
       conversationId: null,
       status: "error",
       reason: "Docs is not connected or needs reconnecting",
+    });
+    expect(await worded(gone, "de")).toMatchObject({
+      reason: "Docs ist nicht verbunden oder muss neu verbunden werden",
     });
   });
 });

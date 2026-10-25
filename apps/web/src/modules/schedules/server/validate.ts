@@ -20,6 +20,8 @@ import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ScheduleRejected, ScheduleSettings } from "../schema.ts";
 import { cadenceIssue, nextFireAt } from "./cron.ts";
 import type { DbTx } from "~/server/db.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type ValidatedSchedule = Omit<
   ScheduleSettings,
@@ -38,12 +40,10 @@ export type ValidatedSchedule = Omit<
  * in `checkScheduleResources`. Returns the reason otherwise, also for a
  * grant whose account is gone.
  */
-export const normalizeGrant = (grant: ScheduleGrant): IntegrationGrant | string => {
+export const normalizeGrant = (grant: ScheduleGrant): IntegrationGrant | Localized => {
   // Kept on the schedule so the editor shows it; never saved again.
-  if (grant.integrationId === null)
-    return "an integration this schedule used was deleted: turn it off";
-  if (grant.connectionId === null)
-    return "an account this schedule used was disconnected: turn it off or connect it again";
+  if (grant.integrationId === null) return localized(m.schedules_error_grant_integration_deleted);
+  if (grant.connectionId === null) return localized(m.schedules_error_grant_account_disconnected);
   const entries = Object.entries(grant.allowances ?? {});
   const named = {
     connectionId: grant.connectionId,
@@ -51,14 +51,16 @@ export const normalizeGrant = (grant: ScheduleGrant): IntegrationGrant | string 
     access: grant.access,
   };
   if (entries.length === 0) return named;
-  if (grant.access !== "write") return "only read-and-write access can let runs contact people";
+  if (grant.access !== "write") return localized(m.schedules_error_grant_needs_write);
   const allowances: Record<string, { targets: string[] }> = {};
   for (const [id, entry] of entries) {
     const targets = entry.targets.map(parseMailbox);
     if (targets.some((target) => target === null))
-      return `“${entry.targets[targets.indexOf(null)]}” is not a plain email address`;
+      return localized(m.schedules_error_grant_not_plain, {
+        address: entry.targets[targets.indexOf(null)]!,
+      });
     const unique = [...new Set(targets as string[])];
-    if (unique.length === 0) return "add at least one address to each allowance";
+    if (unique.length === 0) return localized(m.schedules_error_grant_no_address);
     allowances[id] = { targets: unique };
   }
   return { ...named, allowances };
@@ -89,12 +91,14 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
   raw: unknown,
 ) {
   const settings = yield* Schema.decodeUnknownEffect(ScheduleSettings)(raw).pipe(
-    Effect.mapError(() => new ScheduleRejected({ reason: "invalid schedule settings" })),
+    Effect.mapError(
+      () => new ScheduleRejected({ reason: localized(m.schedules_error_invalid_settings) }),
+    ),
   );
   if (!settings.name.trim())
-    return yield* new ScheduleRejected({ reason: "name must not be blank" });
+    return yield* new ScheduleRejected({ reason: localized(m.schedules_error_name_blank) });
   if (!settings.prompt.trim())
-    return yield* new ScheduleRejected({ reason: "prompt must not be blank" });
+    return yield* new ScheduleRejected({ reason: localized(m.schedules_error_prompt_blank) });
   const cadence = cadenceIssue(settings);
   if (cadence) return yield* new ScheduleRejected({ reason: cadence });
   const endAt = settings.endAt ? new Date(settings.endAt) : null;
@@ -102,29 +106,39 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     // A usable chat model, as a send requires: a fire would otherwise fall
     // back to the default without saying, and the page would name the wrong one.
     if (!(yield* deps.providers.usableModel(userId, settings.modelId, "chat")))
-      return yield* new ScheduleRejected({ reason: "selected model is unavailable" });
+      return yield* new ScheduleRejected({
+        reason: localized(m.schedules_error_model_unavailable),
+      });
   }
   if (
     settings.imageModelId &&
     !(yield* deps.providers.usableModel(userId, settings.imageModelId, "image"))
   )
-    return yield* new ScheduleRejected({ reason: "selected image model is unavailable" });
+    return yield* new ScheduleRejected({
+      reason: localized(m.schedules_error_image_model_unavailable),
+    });
   if (settings.searchEnabled && !(yield* deps.policy.can(userId, "webSearch")))
-    return yield* new ScheduleRejected({ reason: "web search is not permitted" });
+    return yield* new ScheduleRejected({
+      reason: localized(m.schedules_error_search_not_permitted),
+    });
   if (
     settings.researchEnabled &&
     (!(yield* deps.policy.can(userId, "deepResearch")) ||
       !(yield* deps.policy.can(userId, "webSearch")))
   )
-    return yield* new ScheduleRejected({ reason: "deep research is not permitted" });
+    return yield* new ScheduleRejected({
+      reason: localized(m.schedules_error_research_not_permitted),
+    });
   if (settings.agentId) {
     const agent = yield* deps.agents.get(userId, settings.agentId);
     if (!agent || agent.row.userId !== userId)
-      return yield* new ScheduleRejected({ reason: "selected agent is unavailable" });
+      return yield* new ScheduleRejected({
+        reason: localized(m.schedules_error_agent_unavailable),
+      });
   }
   const { integrationGrants, ...fields } = settings;
   const grants = integrationGrants.map(normalizeGrant);
-  const invalid = grants.find((grant) => typeof grant === "string");
+  const invalid = grants.find((grant) => typeof grant === "function");
   if (invalid) return yield* new ScheduleRejected({ reason: invalid });
   const validated: ValidatedSchedule = {
     ...fields,
@@ -137,7 +151,7 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
     integrationGrants: [
       ...new Map(
         grants
-          .filter((grant) => typeof grant !== "string")
+          .filter((grant) => typeof grant !== "function")
           .map((grant) => [grant.connectionId, grant]),
       ).values(),
     ],
@@ -182,11 +196,13 @@ export const checkScheduleResources = (
         return yield* new ScheduleRejected({
           reason:
             state?.reason === "unavailable"
-              ? "an integration this schedule uses is turned off or no longer shared with you"
-              : "connect the integration in Settings before letting a schedule use it",
+              ? localized(m.schedules_error_integration_unavailable)
+              : localized(m.schedules_error_integration_not_connected),
         });
       if (undeclaredAllowance(grant, found!.config.kind))
-        return yield* new ScheduleRejected({ reason: "unknown integration allowance" });
+        return yield* new ScheduleRejected({
+          reason: localized(m.schedules_error_unknown_allowance),
+        });
     }
     // A chosen chat must be the owner's and a plain chat: a work chat needs
     // the desktop app, which an unattended fire never has, and a temporary one
@@ -197,11 +213,16 @@ export const checkScheduleResources = (
         .from(conversations)
         .where(ownedConversationById(settings.chatId, userId))
         .limit(1);
-      if (!chat) return yield* new ScheduleRejected({ reason: "the selected chat is unavailable" });
+      if (!chat)
+        return yield* new ScheduleRejected({
+          reason: localized(m.schedules_error_chat_unavailable),
+        });
       if (chat.mode !== "chat")
-        return yield* new ScheduleRejected({ reason: "a work chat cannot run a schedule" });
+        return yield* new ScheduleRejected({ reason: localized(m.schedules_error_work_chat) });
       if (chat.temporary)
-        return yield* new ScheduleRejected({ reason: "a temporary chat cannot run a schedule" });
+        return yield* new ScheduleRejected({
+          reason: localized(m.schedules_error_temporary_chat),
+        });
     }
     if (settings.skillIds.length) {
       const available = yield* tx
@@ -209,7 +230,9 @@ export const checkScheduleResources = (
         .from(skills)
         .where(and(inArray(skills.id, settings.skillIds), readableBy("skill", userId)));
       if (available.length !== settings.skillIds.length)
-        return yield* new ScheduleRejected({ reason: "a selected skill is unavailable" });
+        return yield* new ScheduleRejected({
+          reason: localized(m.schedules_error_skill_unavailable),
+        });
     }
     if (settings.collectionIds.length) {
       const available = yield* tx
@@ -222,7 +245,9 @@ export const checkScheduleResources = (
           ),
         );
       if (available.length !== settings.collectionIds.length)
-        return yield* new ScheduleRejected({ reason: "a selected collection is unavailable" });
+        return yield* new ScheduleRejected({
+          reason: localized(m.schedules_error_collection_unavailable),
+        });
     }
   });
 

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { answered, runEmail, runNotification } from "../settled-run.ts";
 import { ScheduleRepo } from "./repo.ts";
 
@@ -20,6 +21,7 @@ export class ScheduleSettlement extends Context.Service<
       const repo = yield* ScheduleRepo;
       const bus = yield* SyncBus;
       const notifications = yield* NotificationService;
+      const languages = yield* LanguageRepo;
       const settle = Effect.gen(function* () {
         const runs = yield* repo.settleRuns();
         yield* Effect.forEach(
@@ -31,7 +33,7 @@ export class ScheduleSettlement extends Context.Service<
                   type: "conversation.updated",
                   conversationId: run.conversationId!,
                 });
-              const notification = runNotification(run);
+              const notification = runNotification(run, yield* languages.localeOf(run.userId));
               if (notification)
                 yield* notifications.deliver(run.userId, notification, runEmail(run));
             }).pipe(
@@ -47,5 +49,5 @@ export class ScheduleSettlement extends Context.Service<
       }).pipe(Effect.withSpan("ScheduleSettlement.settle"));
       return ScheduleSettlement.of({ settle });
     }),
-  ).pipe(Layer.provide(ScheduleRepo.layer));
+  ).pipe(Layer.provide([ScheduleRepo.layer, LanguageRepo.layer]));
 }

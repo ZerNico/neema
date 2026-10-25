@@ -5,6 +5,8 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { AgentChanged, AgentNotAvailable, AgentRejected } from "../errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import {
   AgentSettings,
   type AgentDetail,
@@ -30,7 +32,9 @@ export const validateAgentSettings = Effect.fn(function* (
   input: AgentSettings,
 ) {
   const settings = yield* Schema.decodeUnknownEffect(AgentSettings)(input).pipe(
-    Effect.mapError(() => new AgentRejected({ reason: "invalid agent settings" })),
+    Effect.mapError(
+      () => new AgentRejected({ reason: localized(m.agents_error_invalid_settings) }),
+    ),
   );
   if (
     !settings.name.trim() ||
@@ -38,15 +42,17 @@ export const validateAgentSettings = Effect.fn(function* (
     settings.starters.some((starter) => !starter.trim())
   )
     return yield* new AgentRejected({
-      reason: "name, instructions and conversation starters must not be blank",
+      reason: localized(m.agents_error_blank),
     });
   if (settings.modelId && !(yield* modelFor(providers, userId, settings.modelId)))
-    return yield* new AgentRejected({ reason: "selected model is unavailable" });
+    return yield* new AgentRejected({ reason: localized(m.agents_error_model_unavailable) });
   if (
     settings.imageModelId &&
     !(yield* providers.usableModel(userId, settings.imageModelId, "image"))
   )
-    return yield* new AgentRejected({ reason: "selected image model is unavailable" });
+    return yield* new AgentRejected({
+      reason: localized(m.agents_error_image_model_unavailable),
+    });
   return {
     ...settings,
     name: settings.name.trim(),

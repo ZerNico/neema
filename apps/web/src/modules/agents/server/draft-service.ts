@@ -21,6 +21,8 @@ import {
   type SaveAgentDraftResult,
 } from "../draft-schema.ts";
 import { AgentNotAvailable } from "../errors.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { AgentRepo } from "./repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { storedAgentToDraftSettings } from "./draft-map.ts";
@@ -82,7 +84,7 @@ export class AgentDraftService extends Context.Service<
     save(
       userId: string,
       input: AgentDraftRevisionInput,
-    ): Effect.Effect<SaveAgentDraftResult, DraftNotAvailable | DraftRejected>;
+    ): Effect.Effect<SaveAgentDraftResult<Localized>, DraftNotAvailable | DraftRejected>;
     reload(
       userId: string,
       input: AgentDraftRevisionInput,
@@ -117,14 +119,22 @@ export class AgentDraftService extends Context.Service<
       const bus = yield* SyncBus;
       const revisionInput = decodeDraftRequest(
         AgentDraftRevisionInput,
-        "invalid agent draft revision",
+        localized(m.agents_error_draft_revision),
       );
-      const openInput = decodeDraftRequest(OpenAgentDraftInput, "invalid agent draft request", {
-        onExcessProperty: "error",
-      });
-      const patchInput = decodeDraftRequest(PatchAgentDraftInput, "invalid agent draft changes", {
-        onExcessProperty: "error",
-      });
+      const openInput = decodeDraftRequest(
+        OpenAgentDraftInput,
+        localized(m.agents_error_draft_request),
+        {
+          onExcessProperty: "error",
+        },
+      );
+      const patchInput = decodeDraftRequest(
+        PatchAgentDraftInput,
+        localized(m.agents_error_draft_changes),
+        {
+          onExcessProperty: "error",
+        },
+      );
       const config = (userId: string) => agentConfig(agents, userId);
       return AgentDraftService.of({
         ...allowedDraftReads({

@@ -14,6 +14,7 @@ import {
 } from "~/ui/primitives/combobox";
 import { FieldDescription } from "~/ui/primitives/field";
 import { Switch } from "~/ui/primitives/switch";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * One switch per allowance the integration declares, shown under "Read and
@@ -126,7 +127,7 @@ function AllowanceTargets({
                 ))}
                 <ComboboxChipsInput
                   id={id}
-                  aria-label={`${allowance.label}: addresses`}
+                  aria-label={m.schedules_allowance_addresses({ label: allowance.label })}
                   disabled={full}
                   placeholder={value.length ? "" : "name@example.com"}
                   onKeyDown={(event) => {
@@ -146,10 +147,10 @@ function AllowanceTargets({
       </Combobox>
       <FieldDescription>
         {rejected
-          ? `“${rejected}” is not a plain email address.`
+          ? m.schedules_allowance_not_plain({ address: rejected })
           : targets.length === 0
-            ? "Add at least one address."
-            : `Runs may contact only these addresses, at most ${allowance.cap} times per run.`}
+            ? m.schedules_allowance_add_one()
+            : m.schedules_allowance_cap({ cap: allowance.cap })}
       </FieldDescription>
     </div>
   );

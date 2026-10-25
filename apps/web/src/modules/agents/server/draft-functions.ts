@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
+import { getLocale } from "~/paraglide/runtime.js";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   AgentDraftIdInput,
@@ -30,11 +31,21 @@ export const patchAgentDraft = createServerFn({ method: "POST" })
 export const saveAgentDraft = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(Schema.toStandardSchemaV1(AgentDraftRevisionInput))
-  .handler(({ context, data }) =>
-    runServerFn(
-      Effect.flatMap(AgentDraftService, (service) => service.save(context.session.user.id, data)),
-    ),
-  );
+  .handler(({ context, data }) => {
+    // Read here, still in the request: the effect's fibers do not carry it.
+    const locale = getLocale();
+    return runServerFn(
+      Effect.flatMap(AgentDraftService, (service) =>
+        service
+          .save(context.session.user.id, data)
+          .pipe(
+            Effect.map((result) =>
+              result.outcome === "invalid" ? { ...result, reason: result.reason(locale) } : result,
+            ),
+          ),
+      ),
+    );
+  });
 export const discardAgentDraft = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(Schema.toStandardSchemaV1(AgentDraftIdInput))

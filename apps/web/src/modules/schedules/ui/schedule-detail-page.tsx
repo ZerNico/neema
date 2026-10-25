@@ -42,21 +42,25 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 /** Today's runs by clock time, older ones by day, like the chats list. */
 const runStamp = (date: Date) => {
-  const day = dayLabel(date);
-  return day === "Today" ? clockLabel(date) : day;
+  const now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? clockLabel(date, getLocale())
+    : dayLabel(date, now, getLocale());
 };
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {
   const detail = useQuery({ ...scheduleQuery(scheduleId), retry: false });
   if (detail.isError)
     return (
-      <Page title="Schedule" backTo="/schedules" backLabel="Schedules">
+      <Page title={m.schedules_detail_title()} backTo="/schedules" backLabel={m.schedules_title()}>
         <ErrorState
-          title="Could not load this schedule"
-          description="It may have been deleted."
+          title={m.schedules_detail_load_failed()}
+          description={m.schedules_detail_load_failed_description()}
           onRetry={() => {
             void detail.refetch();
           }}
@@ -86,24 +90,24 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const pause = useMutation({
     mutationFn: () => pauseSchedule({ data: { scheduleId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not pause the schedule.", error),
+    onError: (error) => toastError(m.schedules_detail_pause_failed(), error),
   });
   const resume = useMutation({
     mutationFn: () => resumeSchedule({ data: { scheduleId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not resume the schedule.", error),
+    onError: (error) => toastError(m.schedules_detail_resume_failed(), error),
   });
   const runNow = useMutation({
     mutationFn: () => runScheduleNow({ data: { scheduleId } }),
     onSuccess: () => {
-      toast.success("Run started.");
+      toast.success(m.schedules_detail_run_started());
       void invalidate();
     },
-    onError: (error) => toastError("Could not start a run.", error),
+    onError: (error) => toastError(m.schedules_detail_run_failed(), error),
   });
   const remove = useMutation({
     mutationFn: () => deleteSchedule({ data: { scheduleId } }),
-    onError: (error) => toastError("Could not delete the schedule.", error),
+    onError: (error) => toastError(m.schedules_detail_delete_failed(), error),
   });
   const formId = useId();
   // Dirty values keep the revision they came from, not the latest query's: a
@@ -125,7 +129,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           formApi.reset(value, { keepDefaultValues: true });
         await invalidate();
       } catch (error) {
-        toastError("Could not save the schedule.", error);
+        toastError(m.schedules_detail_save_failed(), error);
       }
     },
   });
@@ -149,9 +153,9 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       dirty &&
       !submitting &&
       !(await confirm({
-        title: "Discard unsaved changes?",
-        description: "Your schedule has not been saved.",
-        confirmLabel: "Discard changes",
+        title: m.common_discard_title(),
+        description: m.schedules_unsaved_description(),
+        confirmLabel: m.common_discard_changes(),
       })),
     enableBeforeUnload: dirty,
   });
@@ -159,7 +163,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     <Page
       title={schedule.name}
       backTo="/schedules"
-      backLabel="Schedules"
+      backLabel={m.schedules_title()}
       actions={
         <>
           <SaveStatus justSaved={justSaved} />
@@ -169,7 +173,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             disabled={pause.isPending || resume.isPending}
             onClick={() => (schedule.paused ? resume.mutate() : pause.mutate())}
           >
-            {schedule.paused ? "Resume" : "Pause"}
+            {schedule.paused ? m.schedules_detail_resume() : m.schedules_detail_pause()}
           </Button>
           {/* A run uses the saved schedule, so with edits pending it saves
               first and runs only if that save went through: what runs is
@@ -178,7 +182,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           <PendingButton
             size="sm"
             variant="outline"
-            title={dirty ? "Saves your changes, then runs" : undefined}
+            title={dirty ? m.schedules_detail_run_saves_first() : undefined}
             pending={runNow.isPending || startingRun}
             onClick={() => {
               setStartingRun(true);
@@ -196,11 +200,13 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
             }}
           >
             <HugeiconsIcon icon={PlayIcon} strokeWidth={2} data-icon="inline-start" />
-            Run now
+            {m.schedules_detail_run_now()}
           </PendingButton>
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<Button size="icon-sm" variant="ghost" aria-label="Schedule actions" />}
+              render={
+                <Button size="icon-sm" variant="ghost" aria-label={m.schedules_detail_actions()} />
+              }
             >
               <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </DropdownMenuTrigger>
@@ -215,7 +221,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 }
               >
                 <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} />
-                Edit with chat
+                {m.schedules_detail_edit_with_chat()}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               {/* A menu item closes on activation, so it cannot carry a
@@ -225,9 +231,9 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 disabled={remove.isPending}
                 onClick={() => {
                   void confirm({
-                    title: `Delete “${schedule.name}”?`,
-                    description: "No future runs will fire. Its chats stay in your chat list.",
-                    confirmLabel: "Delete schedule",
+                    title: m.schedules_detail_delete_title({ name: schedule.name }),
+                    description: m.schedules_detail_delete_description(),
+                    confirmLabel: m.schedules_detail_delete(),
                   }).then(async (confirmed) => {
                     if (!confirmed) return;
                     try {
@@ -241,13 +247,13 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 }}
               >
                 <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                Delete schedule
+                {m.schedules_detail_delete()}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <form.AppForm>
             <form.SubmitButton size="sm" form={formId} disabled={!dirty}>
-              <SaveLabel justSaved={justSaved}>Save changes</SaveLabel>
+              <SaveLabel justSaved={justSaved}>{m.common_save_changes()}</SaveLabel>
             </form.SubmitButton>
           </form.AppForm>
         </>
@@ -263,10 +269,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
       >
         {externalChange ? (
           <div className="space-y-2">
-            <FieldError>
-              This schedule changed elsewhere. Your edits are kept. Reloading replaces them with the
-              current schedule.
-            </FieldError>
+            <FieldError>{m.schedules_detail_changed_elsewhere()}</FieldError>
             <Button
               size="sm"
               variant="outline"
@@ -275,24 +278,24 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 form.reset(scheduleToSettings(schedule), { keepDefaultValues: true });
               }}
             >
-              Reload schedule
+              {m.schedules_detail_reload()}
             </Button>
           </div>
         ) : null}
         <ScheduleSettingsFields form={form} />
       </form>
-      <Section title="Runs">
+      <Section title={m.schedules_runs_title()}>
         {runs.isError ? (
           <ErrorState
-            title="Could not load runs"
+            title={m.schedules_runs_load_failed()}
             onRetry={() => {
               void runs.refetch();
             }}
           />
         ) : runs.data === undefined ? (
-          <ListSkeleton rows={3} media="none" label="Loading runs" />
+          <ListSkeleton rows={3} media="none" label={m.schedules_runs_loading()} />
         ) : runs.data.runs.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No runs yet.</p>
+          <p className="text-muted-foreground text-sm">{m.schedules_runs_empty()}</p>
         ) : (
           // The chats page's idiom: whole-row links with a hover surface and
           // the time on the right, since each run is a chat.
@@ -302,19 +305,25 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                 <>
                   <span className="min-w-0 flex-1 truncate">
                     {run.conversationId
-                      ? (run.conversationTitle ?? "Untitled chat")
+                      ? (run.conversationTitle ?? m.schedules_runs_untitled_chat())
                       : run.status === "pending"
-                        ? "Starting scheduled chat…"
+                        ? m.schedules_runs_starting()
                         : run.status === "skipped"
-                          ? (run.error ?? "Skipped")
-                          : (run.error ?? "Could not run")}
+                          ? (run.error ?? m.schedules_runs_skipped())
+                          : (run.error ?? m.schedules_runs_could_not_run())}
                   </span>
-                  {run.status === "pending" ? <Badge variant="secondary">Pending</Badge> : null}
-                  {run.status === "error" ? <Badge variant="destructive">Failed</Badge> : null}
-                  {run.status === "skipped" ? <Badge variant="secondary">Skipped</Badge> : null}
+                  {run.status === "pending" ? (
+                    <Badge variant="secondary">{m.schedules_runs_pending()}</Badge>
+                  ) : null}
+                  {run.status === "error" ? (
+                    <Badge variant="destructive">{m.schedules_runs_failed()}</Badge>
+                  ) : null}
+                  {run.status === "skipped" ? (
+                    <Badge variant="secondary">{m.schedules_runs_skipped()}</Badge>
+                  ) : null}
                   <time
                     dateTime={new Date(run.firedAt).toISOString()}
-                    title={absoluteLabel(new Date(run.firedAt))}
+                    title={absoluteLabel(new Date(run.firedAt), getLocale())}
                     className="text-muted-foreground shrink-0 text-xs tabular-nums"
                   >
                     {runStamp(new Date(run.firedAt))}

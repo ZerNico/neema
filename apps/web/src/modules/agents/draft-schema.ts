@@ -90,10 +90,11 @@ export interface PatchAgentDraftResult {
   outcome: "updated" | "unchanged" | "conflict";
   draft: AgentDraft;
 }
-export type SaveAgentDraftResult =
+/** The service's reason is `Localized`; the server function words it for the page. */
+export type SaveAgentDraftResult<Reason = string> =
   | { outcome: "saved"; draft: AgentDraft; agentId: string; configRevision: number }
   | { outcome: "conflict" | "agent_changed" | "agent_unavailable"; draft: AgentDraft }
-  | { outcome: "invalid"; draft: AgentDraft; reason: string };
+  | { outcome: "invalid"; draft: AgentDraft; reason: Reason };
 export interface ReloadAgentDraftResult {
   outcome: "reloaded" | "conflict" | "agent_unavailable" | "no_target";
   draft: AgentDraft;

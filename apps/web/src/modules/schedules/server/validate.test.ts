@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
+import { english } from "~/i18n/localized.ts";
 import { normalizeGrant, undeclaredAllowance, validateScheduleSettings } from "./validate.ts";
 
 describe("schedule integration grants", () => {
@@ -40,7 +41,7 @@ describe("schedule integration grants", () => {
   ])("refuses %j", (grant, reason) => {
     expect(
       normalizeGrant({ connectionId: "connection", integrationId: "outlook", ...grant }),
-    ).toMatch(reason);
+    ).toSatisfy((refused) => typeof refused === "function" && reason.test(english(refused)));
   });
 
   it("finds an allowance the integration's type does not declare", () => {
@@ -92,10 +93,9 @@ describe("schedule model", () => {
   it("refuses a model a send could not use", async () => {
     const { result, asked } = await validate(false);
     expect(asked).toEqual(["m1:chat"]);
-    expect(result).toMatchObject({
-      _tag: "Failure",
-      failure: { reason: "selected model is unavailable" },
-    });
+    expect(result).toMatchObject({ _tag: "Failure" });
+    if (result._tag === "Failure")
+      expect(english(result.failure.reason)).toBe("selected model is unavailable");
   });
 
   it("accepts a usable chat model", async () => {

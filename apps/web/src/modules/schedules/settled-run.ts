@@ -2,6 +2,8 @@ import { answerExcerpt } from "~/modules/notifications/excerpt.ts";
 import type { AppNotification } from "~/modules/notifications/schema.ts";
 import type { NotificationEmail } from "~/modules/notifications/server/mail.ts";
 import type { ScheduleNotify } from "./schema.ts";
+import type { Locale } from "~/paraglide/runtime.js";
+import { m } from "~/paraglide/messages.js";
 
 /** A run the settlement claim saw end, with what it needs to decide what to say. */
 export interface SettledRun {
@@ -32,25 +34,28 @@ export const answered = (run: SettledRun) =>
   (run.answer.status === "complete" || run.answer.status === "error");
 
 /**
- * What to tell the owner, if anything. A stop was the person, a skip was them
- * being busy in the chat, and a retried answer is theirs: none of those notify.
+ * What to tell the owner, if anything, in their `locale`. A stop was the
+ * person, a skip was them being busy in the chat, and a retried answer is
+ * theirs: none of those notify.
  */
-export function runNotification(run: SettledRun): AppNotification | null {
+export function runNotification(run: SettledRun, locale: Locale): AppNotification | null {
   if (run.notify === "off") return null;
   const failed = (reason: string): AppNotification => ({
     id: run.runId,
     title: run.scheduleName,
-    body: `Couldn’t finish: ${reason}`.slice(0, 400),
+    body: m.schedules_notification_failed({ reason }, { locale }).slice(0, 400),
     path: run.conversationId ? `/chat/${run.conversationId}` : `/schedules/${run.scheduleId}`,
   });
-  if (run.status === "error") return failed(run.error ?? "the run failed");
+  if (run.status === "error")
+    return failed(run.error ?? m.schedules_notification_run_failed({}, { locale }));
   if (!answered(run)) return null;
-  if (run.answer!.status === "error") return failed("the answer stopped with an error");
+  if (run.answer!.status === "error")
+    return failed(m.schedules_notification_answer_error({}, { locale }));
   const body =
     run.notify === "conditional"
       ? run.notifyMessage
       : // An answer that is all tool work, or a question back, has no text to quote.
-        answerExcerpt(run.answer!.content) || "The run finished.";
+        answerExcerpt(run.answer!.content) || m.schedules_notification_finished({}, { locale });
   if (!body) return null;
   return {
     id: run.runId,

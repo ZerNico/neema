@@ -6,13 +6,13 @@ import {
   DEFAULT_CADENCE,
   HOUR_STEPS,
   inOrder,
-  MONTH_NAMES,
   MONTH_STEPS,
-  WEEKDAY_NAMES,
   cadenceCron,
   cadenceText,
   isPreset,
+  monthName,
   parseCadence,
+  weekdayName,
   withKind,
 } from "../cadence.ts";
 import { EMPTY_SCHEDULE_DRAFT } from "../draft-schema.ts";
@@ -32,6 +32,8 @@ import {
 import { FieldLabel } from "~/ui/primitives/field";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { useDebounced } from "~/ui/use-debounced.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import {
   Joiner,
   MinuteSelect,
@@ -52,34 +54,40 @@ const TIMEZONES: ReadonlyArray<string> = (() => {
 type PresetKind = "hourly" | "daily" | "weekdays" | "weekly" | "monthly";
 type CustomKind = "hourly" | "daily" | "weekly" | "monthly" | "yearly";
 
-const PRESETS: ReadonlyArray<{ value: PresetKind | "custom"; label: string }> = [
-  { value: "hourly", label: "Hourly" },
-  { value: "daily", label: "Daily" },
-  { value: "weekdays", label: "Weekdays" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "custom", label: "Custom" },
+// Built per render: the labels are messages, read in the page's language.
+const presets = (): ReadonlyArray<{ value: PresetKind | "custom"; label: string }> => [
+  { value: "hourly", label: m.schedules_timing_hourly() },
+  { value: "daily", label: m.schedules_timing_daily() },
+  { value: "weekdays", label: m.schedules_timing_weekdays() },
+  { value: "weekly", label: m.schedules_timing_weekly() },
+  { value: "monthly", label: m.schedules_timing_monthly() },
+  { value: "custom", label: m.schedules_timing_custom() },
 ];
 
-const REPEATS: ReadonlyArray<{ value: CustomKind; label: string }> = [
-  { value: "hourly", label: "Hourly" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "yearly", label: "Yearly" },
+const repeats = (): ReadonlyArray<{ value: CustomKind; label: string }> => [
+  { value: "hourly", label: m.schedules_timing_hourly() },
+  { value: "daily", label: m.schedules_timing_daily() },
+  { value: "weekly", label: m.schedules_timing_weekly() },
+  { value: "monthly", label: m.schedules_timing_monthly() },
+  { value: "yearly", label: m.schedules_timing_yearly() },
 ];
 
 // Monday first, the way a week reads on a calendar; values are cron weekdays.
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
-const WEEKDAY_OPTIONS = WEEK_ORDER.map((day) => ({
-  value: String(day),
-  label: WEEKDAY_NAMES[day],
-}));
-const MONTH_OPTIONS = MONTH_NAMES.map((name, index) => ({ value: String(index + 1), label: name }));
-const stepOptions = (steps: ReadonlyArray<number>, unit: string) =>
-  steps.map((n) => ({ value: String(n), label: n === 1 ? `1 ${unit}` : `${n} ${unit}s` }));
-const HOUR_STEP_OPTIONS = stepOptions(HOUR_STEPS, "hour");
-const MONTH_STEP_OPTIONS = stepOptions(MONTH_STEPS, "month");
+const weekdayOptions = () =>
+  WEEK_ORDER.map((day) => ({ value: String(day), label: weekdayName(day) }));
+const monthOptions = () =>
+  Array.from({ length: 12 }, (_, index) => ({
+    value: String(index + 1),
+    label: monthName(index + 1),
+  }));
+const hourStepOptions = () =>
+  HOUR_STEPS.map((count) => ({ value: String(count), label: m.schedules_timing_hours({ count }) }));
+const monthStepOptions = () =>
+  MONTH_STEPS.map((count) => ({
+    value: String(count),
+    label: m.schedules_timing_months({ count }),
+  }));
 
 /** Picker depth, simplest first; a cadence never shows shallower than it needs. */
 type Mode = "preset" | "custom" | "cron";
@@ -90,7 +98,7 @@ const PREVIEW_COUNT = 3;
 /** Fires are shown in the schedule's zone, which is the one the cadence means. */
 const fireLabel = (fire: string, timezone: string) => {
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(getLocale(), {
       weekday: "short",
       day: "numeric",
       month: "short",
@@ -99,21 +107,23 @@ const fireLabel = (fire: string, timezone: string) => {
       timeZone: timezone,
     }).format(new Date(fire));
   } catch {
-    return new Date(fire).toLocaleString();
+    return new Date(fire).toLocaleString(getLocale());
   }
 };
 
 const previewError = (error: unknown) =>
-  error instanceof Error && error.message ? error.message : "This schedule is not valid.";
+  error instanceof Error && error.message ? error.message : m.schedules_timing_invalid();
 
 const nextRunsText = (fires: string[] | undefined, cron: string, timezone: string) => {
-  if (!cron) return "Choose a frequency to see when it runs";
-  if (!fires) return "Next runs…";
-  if (fires.length === 0) return "No upcoming runs";
-  return `Next: ${fires
-    .slice(0, PREVIEW_COUNT)
-    .map((fire) => fireLabel(fire, timezone))
-    .join(", ")}`;
+  if (!cron) return m.schedules_timing_choose_frequency();
+  if (!fires) return m.schedules_timing_next_loading();
+  if (fires.length === 0) return m.schedules_timing_next_none();
+  return m.schedules_timing_next_list({
+    runs: fires
+      .slice(0, PREVIEW_COUNT)
+      .map((fire) => fireLabel(fire, timezone))
+      .join(", "),
+  });
 };
 
 // A selection that empties would never fire, so the last day stays pressed.
@@ -160,11 +170,11 @@ export const ScheduleTimingFields = withForm({
 
     return (
       <div className="flex flex-col gap-3">
-        <FieldLabel>Frequency</FieldLabel>
+        <FieldLabel>{m.schedules_timing_frequency()}</FieldLabel>
         <div className="flex flex-wrap items-center gap-2">
           <OptionSelect
-            label="Frequency"
-            items={PRESETS}
+            label={m.schedules_timing_frequency()}
+            items={presets()}
             className="w-36"
             value={mode === "preset" ? cadence.kind : "custom"}
             onChange={(value) => {
@@ -180,10 +190,10 @@ export const ScheduleTimingFields = withForm({
           />
           {mode === "preset" && cadence.kind === "weekly" ? (
             <>
-              <Joiner>on</Joiner>
+              <Joiner>{m.schedules_timing_joiner_on_weekday()}</Joiner>
               <OptionSelect
-                label="Day of the week"
-                items={WEEKDAY_OPTIONS}
+                label={m.schedules_timing_day_of_week()}
+                items={weekdayOptions()}
                 className="w-36"
                 value={String(cadence.days[0])}
                 onChange={(day) => apply({ ...cadence, days: [Number(day)] })}
@@ -192,7 +202,7 @@ export const ScheduleTimingFields = withForm({
           ) : null}
           {mode === "preset" && cadence.kind === "monthly" ? (
             <>
-              <Joiner>on the</Joiner>
+              <Joiner>{m.schedules_timing_joiner_on_month_day()}</Joiner>
               <MonthDaysPicker
                 days={cadence.days}
                 onChange={(days) => apply({ ...cadence, days })}
@@ -201,7 +211,7 @@ export const ScheduleTimingFields = withForm({
           ) : null}
           {mode === "preset" && cadence.kind === "hourly" ? (
             <>
-              <Joiner>at</Joiner>
+              <Joiner>{m.schedules_timing_joiner_at()}</Joiner>
               <MinuteSelect
                 minute={cadence.minute}
                 onChange={(minute) => apply({ ...cadence, minute })}
@@ -210,7 +220,7 @@ export const ScheduleTimingFields = withForm({
           ) : null}
           {mode === "preset" && "time" in cadence ? (
             <>
-              <Joiner>at</Joiner>
+              <Joiner>{m.schedules_timing_joiner_at()}</Joiner>
               <TimeInput time={cadence.time} onChange={(time) => apply({ ...cadence, time })} />
             </>
           ) : null}
@@ -219,10 +229,10 @@ export const ScheduleTimingFields = withForm({
         {mode === "custom" && view.kind !== "cron" && view.kind !== "weekdays" ? (
           <div className="flex flex-col gap-2">
             <ListCard>
-              <Row label="Repeats">
+              <Row label={m.schedules_timing_repeats()}>
                 <OptionSelect
-                  label="Repeats"
-                  items={REPEATS}
+                  label={m.schedules_timing_repeats()}
+                  items={repeats()}
                   className="w-36"
                   value={view.kind}
                   onChange={(kind) => apply(withKind(view, kind as CustomKind))}
@@ -230,16 +240,16 @@ export const ScheduleTimingFields = withForm({
               </Row>
               {view.kind === "hourly" ? (
                 <>
-                  <Row label="Every">
+                  <Row label={m.schedules_timing_every()}>
                     <OptionSelect
-                      label="Every"
-                      items={HOUR_STEP_OPTIONS}
+                      label={m.schedules_timing_every()}
+                      items={hourStepOptions()}
                       className="w-36"
                       value={String(view.every)}
                       onChange={(every) => apply({ ...view, every: Number(every) })}
                     />
                   </Row>
-                  <Row label="At">
+                  <Row label={m.schedules_timing_at()}>
                     <MinuteSelect
                       minute={view.minute}
                       onChange={(minute) => apply({ ...view, minute })}
@@ -248,10 +258,10 @@ export const ScheduleTimingFields = withForm({
                 </>
               ) : null}
               {view.kind === "monthly" ? (
-                <Row label="Every">
+                <Row label={m.schedules_timing_every()}>
                   <OptionSelect
-                    label="Every"
-                    items={MONTH_STEP_OPTIONS}
+                    label={m.schedules_timing_every()}
+                    items={monthStepOptions()}
                     className="w-36"
                     value={String(view.every)}
                     onChange={(every) => apply({ ...view, every: Number(every) })}
@@ -259,11 +269,11 @@ export const ScheduleTimingFields = withForm({
                 </Row>
               ) : null}
               {view.kind === "weekly" ? (
-                <Row label="On">
+                <Row label={m.schedules_timing_on()}>
                   <ToggleGroup
                     multiple
                     spacing={1}
-                    aria-label="Days of the week"
+                    aria-label={m.schedules_timing_days_of_week()}
                     value={view.days.map(String)}
                     onValueChange={(values: string[]) =>
                       keepOne(values, (days) => apply({ ...view, days }))
@@ -275,19 +285,19 @@ export const ScheduleTimingFields = withForm({
                         value={String(day)}
                         variant="solid"
                         size="sm"
-                        aria-label={WEEKDAY_NAMES[day]}
+                        aria-label={weekdayName(day)}
                       >
-                        {WEEKDAY_NAMES[day].slice(0, 2)}
+                        {weekdayName(day).slice(0, 2)}
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
                 </Row>
               ) : null}
               {view.kind === "yearly" ? (
-                <Row label="In">
+                <Row label={m.schedules_timing_in()}>
                   <OptionSelect
-                    label="Month"
-                    items={MONTH_OPTIONS}
+                    label={m.schedules_timing_month()}
+                    items={monthOptions()}
                     className="w-36"
                     value={String(view.month)}
                     onChange={(month) => apply({ ...view, month: Number(month) })}
@@ -295,7 +305,7 @@ export const ScheduleTimingFields = withForm({
                 </Row>
               ) : null}
               {view.kind === "monthly" || view.kind === "yearly" ? (
-                <Row label="On days">
+                <Row label={m.schedules_timing_on_days()}>
                   <MonthDaysPicker
                     multiple
                     days={view.days}
@@ -304,7 +314,7 @@ export const ScheduleTimingFields = withForm({
                 </Row>
               ) : null}
               {"time" in view ? (
-                <Row label="At">
+                <Row label={m.schedules_timing_at()}>
                   <TimeInput time={view.time} onChange={(time) => apply({ ...view, time })} />
                 </Row>
               ) : null}
@@ -319,10 +329,10 @@ export const ScheduleTimingFields = withForm({
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">
-                  {scheduleText || "No frequency yet"}
+                  {scheduleText || m.schedules_timing_no_frequency()}
                 </span>
                 <span className="text-muted-foreground text-xs">
-                  Set in chat. The picker can’t show this frequency.
+                  {m.schedules_timing_cron_hint()}
                 </span>
               </div>
               <Button
@@ -334,7 +344,7 @@ export const ScheduleTimingFields = withForm({
                   setChosen(null);
                 }}
               >
-                Change
+                {m.schedules_timing_change()}
               </Button>
             </ListRow>
           </ListCard>
@@ -357,14 +367,17 @@ export const ScheduleTimingFields = withForm({
                 }}
               >
                 <ComboboxTrigger
-                  aria-label={`Timezone, ${field.state.value}`}
+                  aria-label={m.schedules_timing_timezone({ timezone: field.state.value })}
                   render={<Button variant="ghost" size="xs" />}
                 >
                   {field.state.value}
                 </ComboboxTrigger>
                 <ComboboxContent align="start" className="w-72">
-                  <ComboboxInput placeholder="Search timezones…" showTrigger={false} />
-                  <ComboboxEmpty>No matching timezone</ComboboxEmpty>
+                  <ComboboxInput
+                    placeholder={m.schedules_timing_timezone_search()}
+                    showTrigger={false}
+                  />
+                  <ComboboxEmpty>{m.schedules_timing_timezone_empty()}</ComboboxEmpty>
                   <ComboboxList>
                     {(zone: string) => (
                       <ComboboxItem key={zone} value={zone}>

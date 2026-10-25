@@ -8,7 +8,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { agentQuery } from "../client/queries.ts";
 import { EMPTY_AGENT_DRAFT, agentDetailToSettings } from "../draft-schema.ts";
-import { AgentSettings, type AgentDetail } from "../schema.ts";
+import { AgentInstructions, AgentName, AgentSettings, type AgentDetail } from "../schema.ts";
 import { createAgent, deleteAgent, updateAgent } from "../server/functions.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AgentSettingsFields } from "./agent-settings-fields.tsx";
@@ -32,8 +32,20 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { FieldError } from "~/ui/primitives/field";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
-const agentFormValidator = Schema.toStandardSchemaV1(AgentSettings);
+// A check's message is a plain string, so the form restates the two the page
+// shows in its own language; the shared schema keeps English for the server.
+const agentFormValidator = () =>
+  Schema.toStandardSchemaV1(
+    Schema.Struct({
+      ...AgentSettings.fields,
+      name: AgentName.check(Schema.isMinLength(1, { message: m.agents_settings_name_required() })),
+      instructions: AgentInstructions.check(
+        Schema.isMinLength(1, { message: m.agents_settings_instructions_required() }),
+      ),
+    }),
+  );
 
 /**
  * Owner-only editor. Recipients start chats from the agent list instead.
@@ -46,10 +58,10 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
   const { data: capabilities } = useQuery(capabilitiesQuery);
   if (agentId !== null && detail.isError && !detail.data)
     return (
-      <Page title="Agent" backTo="/agents" backLabel="Agents">
+      <Page title={m.agents_editor_title()} backTo="/agents" backLabel={m.agents_title()}>
         <ErrorState
-          title="Could not load this agent"
-          description="It may have been deleted, or you no longer have access."
+          title={m.agents_editor_load_failed()}
+          description={m.agents_editor_load_failed_description()}
           onRetry={() => {
             void detail.refetch();
           }}
@@ -63,10 +75,10 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
   // becoming a way to read instructions the owner did not choose to display.
   if (!capabilities?.agentsCreate || (agent && !agent.canEdit))
     return (
-      <Page title="Agent" backTo="/agents" backLabel="Agents">
+      <Page title={m.agents_editor_title()} backTo="/agents" backLabel={m.agents_title()}>
         <ErrorState
-          title="Agent editing isn’t available"
-          description="You can start a chat with it from the Agents list."
+          title={m.agents_editor_unavailable()}
+          description={m.agents_editor_unavailable_description()}
         />
       </Page>
     );
@@ -82,10 +94,9 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
         agent
           ? async () => {
               await confirm({
-                title: `Delete “${agent.name}”?`,
-                description:
-                  "Chats that used it keep the instructions they ran with; nobody can select it again.",
-                confirmLabel: "Delete agent",
+                title: m.agents_delete_title({ name: agent.name }),
+                description: m.agents_delete_description(),
+                confirmLabel: m.agents_delete(),
               }).then(async (confirmed) => {
                 if (!confirmed) return;
                 try {
@@ -93,7 +104,7 @@ export function AgentEditorPage({ agentId }: { agentId: string | null }) {
                   await queryClient.invalidateQueries({ queryKey: ["agents"] });
                   await navigate({ to: "/agents", ignoreBlocker: true });
                 } catch {
-                  toast.error("Could not delete the agent.");
+                  toast.error(m.agents_list_delete_failed());
                 }
               });
             }
@@ -119,9 +130,10 @@ function AgentForm({
   const [sharing, setSharing] = useState(false);
   // Dirty values retain the revision they came from, not the latest query revision.
   const revision = useRef(agent?.configRevision ?? null);
+  const [validator] = useState(agentFormValidator);
   const form = useAppForm({
     defaultValues: agent ? agentDetailToSettings(agent) : EMPTY_AGENT_DRAFT,
-    validators: { onSubmit: agentFormValidator },
+    validators: { onSubmit: validator },
     onSubmit: async ({ value, formApi }) => {
       try {
         const settings: AgentSettings = {
@@ -144,7 +156,7 @@ function AgentForm({
           await onSaved(id);
         }
       } catch (error) {
-        toastError("Could not save the agent.", error);
+        toastError(m.agents_editor_save_failed(), error);
       }
     },
   });
@@ -161,9 +173,9 @@ function AgentForm({
       dirty &&
       !submitting &&
       !(await confirm({
-        title: "Discard unsaved changes?",
-        description: "Your agent has not been saved.",
-        confirmLabel: "Discard changes",
+        title: m.common_discard_title(),
+        description: m.agents_editor_unsaved_description(),
+        confirmLabel: m.common_discard_changes(),
       })),
     enableBeforeUnload: dirty,
   });
@@ -176,9 +188,9 @@ function AgentForm({
 
   return (
     <Page
-      title={agent ? agent.name : "New agent"}
+      title={agent ? agent.name : m.agents_editor_new()}
       backTo="/agents"
-      backLabel="Agents"
+      backLabel={m.agents_title()}
       actions={
         <>
           <SaveStatus justSaved={justSaved} />
@@ -189,15 +201,17 @@ function AgentForm({
                 search={{ agent: agent.id }}
                 className={buttonVariants({ size: "sm", variant: "outline" })}
               >
-                Start chat
+                {m.agents_start_chat()}
               </Link>
               <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
                 <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-                Access
+                {m.agents_access()}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  render={<Button size="icon-sm" variant="ghost" aria-label="Agent actions" />}
+                  render={
+                    <Button size="icon-sm" variant="ghost" aria-label={m.agents_editor_actions()} />
+                  }
                 >
                   <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
                 </DropdownMenuTrigger>
@@ -212,7 +226,7 @@ function AgentForm({
                     onClick={() => remove.mutate()}
                   >
                     <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                    Delete agent
+                    {m.agents_delete()}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -222,7 +236,9 @@ function AgentForm({
           )}
           <form.AppForm>
             <form.SubmitButton size="sm" form={formId} disabled={!!agent && !dirty}>
-              <SaveLabel justSaved={justSaved}>{agent ? "Save changes" : "Create agent"}</SaveLabel>
+              <SaveLabel justSaved={justSaved}>
+                {agent ? m.common_save_changes() : m.agents_editor_create()}
+              </SaveLabel>
             </form.SubmitButton>
           </form.AppForm>
         </>
@@ -249,10 +265,7 @@ function AgentForm({
       >
         {externalChange && agent ? (
           <div className="space-y-2">
-            <FieldError>
-              This agent changed elsewhere. Your edits are kept. Reloading replaces them with the
-              current agent.
-            </FieldError>
+            <FieldError>{m.agents_editor_changed_elsewhere()}</FieldError>
             <Button
               size="sm"
               variant="outline"
@@ -261,14 +274,12 @@ function AgentForm({
                 form.reset(agentDetailToSettings(agent), { keepDefaultValues: true });
               }}
             >
-              Reload agent
+              {m.agents_editor_reload()}
             </Button>
           </div>
         ) : null}
         <AgentSettingsFields form={form} />
-        {invalidSubmit ? (
-          <FieldError>Check the highlighted fields before saving.</FieldError>
-        ) : null}
+        {invalidSubmit ? <FieldError>{m.agents_editor_check_fields()}</FieldError> : null}
       </form>
       {agent ? (
         <AccessDialog

@@ -19,6 +19,8 @@ import { customToolUsableBy } from "~/modules/custom-tools/server/repo.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import { AgentChanged, AgentNotAvailable, AgentRejected } from "../errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import {
   AGENT_LIMITS,
   type AgentSettings,
@@ -120,13 +122,15 @@ export class AgentRepo extends Context.Service<
               .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "agentsCreate")))
               .for("update");
             if (!owner)
-              return yield* new AgentRejected({ reason: "agent creation is unavailable" });
+              return yield* new AgentRejected({
+                reason: localized(m.agents_error_creation_unavailable),
+              });
             const [count] = yield* tx
               .select({ value: sql<number>`count(*)::int` })
               .from(agents)
               .where(eq(agents.userId, userId));
             if (!owner || (count?.value ?? 0) >= AGENT_LIMITS.maxPerUser)
-              return yield* new AgentRejected({ reason: "agent limit reached" });
+              return yield* new AgentRejected({ reason: localized(m.agents_error_limit_reached) });
           }
           const { collectionIds, skillIds, customToolIds, integrationIds, ...settings } = input;
           if (integrationIds.length) {
@@ -142,7 +146,9 @@ export class AgentRepo extends Context.Service<
                 ),
               );
             if (available.length !== new Set(integrationIds).size)
-              return yield* new AgentRejected({ reason: "a selected integration is unavailable" });
+              return yield* new AgentRejected({
+                reason: localized(m.agents_error_integration_unavailable),
+              });
           }
           if (skillIds.length) {
             const available = yield* tx
@@ -150,7 +156,9 @@ export class AgentRepo extends Context.Service<
               .from(skills)
               .where(and(inArray(skills.id, [...skillIds]), readableBy("skill", userId)));
             if (available.length !== skillIds.length)
-              return yield* new AgentRejected({ reason: "a selected skill is unavailable" });
+              return yield* new AgentRejected({
+                reason: localized(m.agents_error_skill_unavailable),
+              });
           }
           if (customToolIds.length) {
             const available = yield* tx
@@ -158,7 +166,9 @@ export class AgentRepo extends Context.Service<
               .from(customTools)
               .where(and(inArray(customTools.id, [...customToolIds]), customToolUsableBy(userId)));
             if (available.length !== customToolIds.length)
-              return yield* new AgentRejected({ reason: "a selected custom tool is unavailable" });
+              return yield* new AgentRejected({
+                reason: localized(m.agents_error_custom_tool_unavailable),
+              });
           }
           if (collectionIds.length) {
             const available = yield* tx
@@ -172,7 +182,7 @@ export class AgentRepo extends Context.Service<
               );
             if (available.length !== collectionIds.length)
               return yield* new AgentRejected({
-                reason: "a selected collection is unavailable",
+                reason: localized(m.agents_error_collection_unavailable),
               });
           }
           const values = { ...settings, starters: [...settings.starters] };

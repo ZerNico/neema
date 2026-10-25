@@ -4,6 +4,9 @@ import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
+import { m } from "~/paraglide/messages.js";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import {
   type ScheduleChanged,
@@ -69,6 +72,18 @@ export class ScheduleService extends Context.Service<
       const agents = yield* AgentRepo;
       const bus = yield* SyncBus;
       const settlement = yield* ScheduleSettlement;
+      const languages = yield* LanguageRepo;
+      // A run's reason is stored, and no request is behind a fire, so it is
+      // worded once in the owner's language.
+      const finishRun = (
+        userId: string,
+        runId: string,
+        status: "error" | "skipped",
+        reason: Localized,
+      ) =>
+        languages
+          .localeOf(userId)
+          .pipe(Effect.flatMap((locale) => repo.finishRun(runId, status, reason(locale))));
       const changed = (userId: string, scheduleId: string) =>
         bus
           .publish(userId, { type: "schedule.changed", scheduleId })
@@ -95,17 +110,23 @@ export class ScheduleService extends Context.Service<
             repo.renewRun(runId).pipe(Effect.delay(Duration.seconds(10)), Effect.forever),
           );
           if (!(yield* accountEligible(row.userId).pipe(Effect.provideService(Db, db)))) {
-            yield* repo.finishRun(
+            yield* finishRun(
+              row.userId,
               runId,
               "skipped",
-              "the account is not permitted to run schedules",
+              localized(m.schedules_run_error_account_not_permitted),
             );
             yield* settlement.settle;
             yield* runChanged(row.userId, row.id, runId);
             return;
           }
           if (!(yield* policy.can(row.userId, "schedules"))) {
-            yield* repo.finishRun(runId, "skipped", "schedule access is not permitted");
+            yield* finishRun(
+              row.userId,
+              runId,
+              "skipped",
+              localized(m.schedules_run_error_access_not_permitted),
+            );
             yield* settlement.settle;
             yield* runChanged(row.userId, row.id, runId);
             return;
@@ -116,13 +137,13 @@ export class ScheduleService extends Context.Service<
                 Effect.as({
                   conversationId: null,
                   status: "error",
-                  reason: "the scheduled message could not be sent",
+                  reason: localized(m.schedules_run_error_not_sent),
                 } satisfies FireOutcome),
               ),
             ),
           );
           if (outcome.conversationId === null) {
-            yield* repo.finishRun(runId, outcome.status, outcome.reason);
+            yield* finishRun(row.userId, runId, outcome.status, outcome.reason);
             yield* settlement.settle;
           }
           yield* runChanged(row.userId, row.id, runId);
@@ -137,10 +158,11 @@ export class ScheduleService extends Context.Service<
                 Effect.logError("scheduled fire did not start", exit.cause).pipe(
                   Effect.annotateLogs({ scheduleId: row.id, runId }),
                   Effect.andThen(
-                    repo.finishRun(
+                    finishRun(
+                      row.userId,
                       runId,
                       "error",
-                      "the scheduled fire was interrupted before its turn started",
+                      localized(m.schedules_run_error_interrupted),
                     ),
                   ),
                   Effect.flatMap((settled) =>
@@ -195,14 +217,16 @@ export class ScheduleService extends Context.Service<
         }),
         create: Effect.fn("ScheduleService.create")(function* (userId, input) {
           if (!(yield* policy.can(userId, "schedules")))
-            return yield* new ScheduleRejected({ reason: "schedule creation is unavailable" });
+            return yield* new ScheduleRejected({
+              reason: localized(m.schedules_error_creation_unavailable),
+            });
           const settings = yield* validate(userId, input);
           const row = yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
                   return yield* new ScheduleRejected({
-                    reason: "schedule creation is unavailable",
+                    reason: localized(m.schedules_error_creation_unavailable),
                   });
                 yield* checkScheduleResources(tx, userId, settings);
                 return yield* repo.insert(
@@ -277,5 +301,5 @@ export class ScheduleService extends Context.Service<
         }),
       });
     }),
-  ).pipe(Layer.provide(ScheduleRepo.layer));
+  ).pipe(Layer.provide([ScheduleRepo.layer, LanguageRepo.layer]));
 }

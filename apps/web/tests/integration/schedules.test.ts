@@ -29,6 +29,7 @@ import { NotificationService } from "~/modules/notifications/server/service.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { checkScheduleResources, firstFireAt } from "~/modules/schedules/server/validate.ts";
 import { Db } from "~/server/db.ts";
+import { english, verbatim } from "~/i18n/localized.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 const settlement = ScheduleSettlement.layer.pipe(
@@ -732,7 +733,7 @@ describe("manual schedule fires", () => {
           return {
             conversationId: null,
             status: "error" as const,
-            reason: "pre-turn check failed",
+            reason: verbatim("pre-turn check failed"),
           };
         }),
       ),
@@ -945,7 +946,7 @@ describe("scheduled account eligibility", () => {
         return Effect.succeed({
           conversationId: null,
           status: "error" as const,
-          reason: "unexpected fire",
+          reason: verbatim("unexpected fire"),
         });
       };
       const serviceRuntime = ManagedRuntime.make(
@@ -1111,7 +1112,7 @@ describe("schedule removal", () => {
             chatId,
           }).pipe(
             Effect.match({
-              onFailure: (error) => ("reason" in error ? error.reason : "query failed"),
+              onFailure: (error) => ("reason" in error ? english(error.reason) : "query failed"),
               onSuccess: () => "ok",
             }),
           );

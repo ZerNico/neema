@@ -6,6 +6,7 @@ import {
   type DraftHandle,
   type DraftKindUi,
 } from "~/modules/drafts/ui/draft-owner.tsx";
+import { m } from "~/paraglide/messages.js";
 import { buttonVariants } from "~/ui/primitives/button";
 import { useScheduleDraft } from "../client/use-schedule-draft.ts";
 import type { ScheduleDraftSettings } from "../draft-schema.ts";
@@ -15,28 +16,26 @@ export type ScheduleDraftHandle = DraftHandle;
 
 const ui: DraftKindUi<ScheduleDraftSettings> = {
   kind: "schedule",
-  noun: "schedule",
-  Noun: "Schedule",
   icon: Calendar03Icon,
   useController: useScheduleDraft,
   labels: {
-    name: "Name",
-    scheduleText: "Frequency text",
-    cron: "Frequency",
-    timezone: "Timezone",
-    endAt: "End",
-    prompt: "Prompt",
-    modelId: "Preferred model",
-    imageModelId: "Image model",
-    agentId: "Agent",
-    searchEnabled: "Web search",
-    researchEnabled: "Deep research",
-    collectionIds: "Collections",
-    skillIds: "Skills",
-    integrationGrants: "Integrations",
-    chatMode: "Chat",
-    notify: "Notifications",
-    chatId: "Chat",
+    name: m.schedules_field_name,
+    scheduleText: m.schedules_field_schedule_text,
+    cron: m.schedules_field_cron,
+    timezone: m.schedules_field_timezone,
+    endAt: m.schedules_field_end_at,
+    prompt: m.schedules_field_prompt,
+    modelId: m.schedules_field_model,
+    imageModelId: m.schedules_field_image_model,
+    agentId: m.schedules_field_agent,
+    searchEnabled: m.schedules_field_web_search,
+    researchEnabled: m.schedules_field_deep_research,
+    collectionIds: m.schedules_field_collections,
+    skillIds: m.schedules_field_skills,
+    integrationGrants: m.schedules_field_integrations,
+    chatMode: m.schedules_field_chat_mode,
+    notify: m.schedules_field_notify,
+    chatId: m.schedules_field_chat,
   },
   Fields: ScheduleSettingsFields,
   targetLink: (scheduleId) => (
@@ -45,12 +44,23 @@ const ui: DraftKindUi<ScheduleDraftSettings> = {
       params={{ scheduleId }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
-      Open schedule
+      {m.schedules_draft_open()}
     </Link>
   ),
   copy: {
-    saveEffect: "Saving changes updates when this schedule fires and what it asks.",
-    createEffect: "The schedule is created only when you choose Create schedule.",
+    saving: m.schedules_draft_saving,
+    saved: m.schedules_draft_saved,
+    untitled: m.schedules_draft_untitled,
+    title: m.schedules_draft_title,
+    loadFailed: m.schedules_draft_load_failed,
+    loading: m.schedules_draft_loading,
+    create: m.schedules_draft_create,
+    reloadTitle: m.schedules_draft_reload_title,
+    reloadDescription: m.schedules_draft_reload_description,
+    reload: m.schedules_draft_reload,
+    discardSavedDescription: m.schedules_draft_discard_saved_description,
+    saveEffect: m.schedules_draft_save_effect,
+    createEffect: m.schedules_draft_create_effect,
   },
 };
 

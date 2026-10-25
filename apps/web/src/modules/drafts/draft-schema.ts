@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /** The kinds of things a chat can author through a draft. */
 export const DraftKind = Schema.Literals(["agent", "schedule"]);
@@ -32,5 +33,5 @@ export class DraftNotAvailable extends Schema.TaggedError<DraftNotAvailable>()(
   },
 ) {}
 export class DraftRejected extends Schema.TaggedError<DraftRejected>()("DraftRejected", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}

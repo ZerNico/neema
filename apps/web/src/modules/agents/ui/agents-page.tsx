@@ -40,14 +40,16 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 // Without a description the row still says something true about the agent,
 // the way a collection row falls back to its document count.
 const detail = (agent: AgentSummary) => {
-  const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt);
+  const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt, new Date(), getLocale());
   return [
-    agent.description || (age ? `Updated ${age}` : null),
-    agent.ownerName ? `Shared by ${agent.ownerName}` : null,
+    agent.description || (age ? m.agents_list_updated({ age }) : null),
+    agent.ownerName ? m.agents_list_shared_by({ name: agent.ownerName }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -62,7 +64,7 @@ export function AgentsPage() {
   const remove = useMutation({
     mutationFn: (agentId: string) => deleteAgent({ data: { agentId } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["agents"] }),
-    onError: (error) => toastError("Could not delete the agent.", error),
+    onError: (error) => toastError(m.agents_list_delete_failed(), error),
   });
   const rows = agents.data ?? [];
   const own = rows.filter((agent) => agent.canEdit);
@@ -78,18 +80,20 @@ export function AgentsPage() {
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="flex items-center gap-2 text-sm font-medium">
               <span className="truncate">{agent.name}</span>
-              {agent.audience === "instance" ? <Badge variant="outline">Everyone</Badge> : null}
+              {agent.audience === "instance" ? (
+                <Badge variant="outline">{m.agents_list_everyone()}</Badge>
+              ) : null}
             </span>
             <span className="text-muted-foreground truncate text-xs">{detail(agent)}</span>
           </div>
           <Link
             to="/"
             search={{ agent: agent.id }}
-            aria-label={`Start chat with ${agent.name}`}
+            aria-label={m.agents_list_start_chat_with({ name: agent.name })}
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
             <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={2} data-icon="inline-start" />
-            Start chat
+            {m.agents_start_chat()}
           </Link>
           {/* Editing, sharing and deleting are the owner's; a recipient only
               ever starts a chat. */}
@@ -97,7 +101,11 @@ export function AgentsPage() {
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <Button size="icon-sm" variant="ghost" aria-label={`Actions for ${agent.name}`} />
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={m.agents_list_actions_for({ name: agent.name })}
+                  />
                 }
               >
                 <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
@@ -107,12 +115,12 @@ export function AgentsPage() {
                   render={<Link to="/agents/$agentId" params={{ agentId: agent.id }} />}
                 >
                   <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                  Edit
+                  {m.common_edit()}
                 </DropdownMenuItem>
                 <AgentAuthoringLaunchMenuItem agentId={agent.id} />
                 <DropdownMenuItem onClick={() => setSharing(agent)}>
                   <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
-                  Access
+                  {m.agents_access()}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -120,17 +128,16 @@ export function AgentsPage() {
                   disabled={remove.isPending}
                   onClick={() => {
                     void confirm({
-                      title: `Delete “${agent.name}”?`,
-                      description:
-                        "Chats that used it keep the instructions they ran with; nobody can select it again.",
-                      confirmLabel: "Delete agent",
+                      title: m.agents_delete_title({ name: agent.name }),
+                      description: m.agents_delete_description(),
+                      confirmLabel: m.agents_delete(),
                     }).then((confirmed) => {
                       if (confirmed) remove.mutate(agent.id);
                     });
                   }}
                 >
                   <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  Delete
+                  {m.common_delete()}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -143,49 +150,53 @@ export function AgentsPage() {
   // a button that vanishes reads as a missing feature, not a ceiling.
   const newAgent = (
     <CreateSplitButton
-      label="New agent"
+      label={m.agents_list_new()}
       disabled={atLimit}
       options={[
         {
-          label: "Create with chat",
+          label: m.agents_launch_create_with_chat(),
           icon: BubbleChatIcon,
           link: <Link to="/" search={{}} state={{ chatPrefill: agentAuthoringRequest() }} />,
         },
-        { label: "Set up manually", icon: PencilEdit02Icon, link: <Link to="/agents/new" /> },
+        {
+          label: m.agents_list_set_up_manually(),
+          icon: PencilEdit02Icon,
+          link: <Link to="/agents/new" />,
+        },
       ]}
     />
   );
   return (
     <Page
-      title="Agents"
+      title={m.agents_title()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.agents_list_root_label()}
       actions={capabilities?.agentsCreate ? newAgent : null}
     >
       {agents.isError ? (
         <ErrorState
-          title="Could not load agents"
+          title={m.agents_list_load_failed()}
           onRetry={() => {
             void agents.refetch();
           }}
         />
       ) : agents.data === undefined ? (
-        <ListSkeleton label="Loading agents" />
+        <ListSkeleton label={m.agents_list_loading()} />
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Robot01Icon}
-          title="No agents yet"
+          title={m.agents_list_empty_title()}
           description={
-            capabilities?.agentsCreate
-              ? "Create an agent for tasks you return to often."
-              : "No agents are shared with you yet."
+            capabilities?.agentsCreate ? m.agents_list_empty_create() : m.agents_list_empty_shared()
           }
           action={capabilities?.agentsCreate ? newAgent : null}
         />
       ) : (
         <>
-          {own.length > 0 ? <Section title="Your agents">{list(own)}</Section> : null}
-          {shared.length > 0 ? <Section title="Shared with you">{list(shared)}</Section> : null}
+          {own.length > 0 ? <Section title={m.agents_list_yours()}>{list(own)}</Section> : null}
+          {shared.length > 0 ? (
+            <Section title={m.agents_list_shared_with_you()}>{list(shared)}</Section>
+          ) : null}
         </>
       )}
       {sharing ? (

@@ -6,6 +6,7 @@ import {
   type DraftHandle,
   type DraftKindUi,
 } from "~/modules/drafts/ui/draft-owner.tsx";
+import { m } from "~/paraglide/messages.js";
 import { buttonVariants } from "~/ui/primitives/button";
 import { useAgentDraft } from "../client/use-agent-draft.ts";
 import type { DraftSettings } from "../draft-schema.ts";
@@ -15,24 +16,22 @@ export type AgentDraftHandle = DraftHandle;
 
 const ui: DraftKindUi<DraftSettings> = {
   kind: "agent",
-  noun: "agent",
-  Noun: "Agent",
   icon: PencilEdit02Icon,
   useController: useAgentDraft,
   labels: {
-    name: "Name",
-    description: "Description",
-    instructions: "Instructions",
-    icon: "Icon",
-    modelId: "Preferred model",
-    imageModelId: "Image model",
-    searchEnabled: "Web search",
-    planEnabled: "Working checklist",
-    starters: "Conversation starters",
-    collectionIds: "Collections",
-    skillIds: "Skills",
-    customToolIds: "Custom tools",
-    integrationIds: "Integrations",
+    name: m.agents_field_name,
+    description: m.agents_field_description,
+    instructions: m.agents_field_instructions,
+    icon: m.agents_field_icon,
+    modelId: m.agents_field_model,
+    imageModelId: m.agents_field_image_model,
+    searchEnabled: m.agents_field_web_search,
+    planEnabled: m.agents_field_checklist,
+    starters: m.agents_field_starters,
+    collectionIds: m.agents_field_collections,
+    skillIds: m.agents_field_skills,
+    customToolIds: m.agents_field_custom_tools,
+    integrationIds: m.agents_field_integrations,
   },
   Fields: AgentSettingsFields,
   targetLink: (agentId) => (
@@ -41,7 +40,7 @@ const ui: DraftKindUi<DraftSettings> = {
       params={{ agentId }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
-      Open in editor
+      {m.agents_draft_open_editor()}
     </Link>
   ),
   targetActions: (agentId) => (
@@ -50,12 +49,23 @@ const ui: DraftKindUi<DraftSettings> = {
       search={{ agent: agentId }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
-      Start chat
+      {m.agents_start_chat()}
     </Link>
   ),
   copy: {
-    saveEffect: "Saving changes affects future replies in chats using this agent.",
-    createEffect: "The agent is created only when you choose Create agent.",
+    saving: m.agents_draft_saving,
+    saved: m.agents_draft_saved,
+    untitled: m.agents_draft_untitled,
+    title: m.agents_draft_title,
+    loadFailed: m.agents_draft_load_failed,
+    loading: m.agents_draft_loading,
+    create: m.agents_draft_create,
+    reloadTitle: m.agents_draft_reload_title,
+    reloadDescription: m.agents_draft_reload_description,
+    reload: m.agents_draft_reload,
+    discardSavedDescription: m.agents_draft_discard_saved_description,
+    saveEffect: m.agents_draft_save_effect,
+    createEffect: m.agents_draft_create_effect,
   },
 };
 

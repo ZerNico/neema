@@ -1,5 +1,6 @@
 import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import type { ScheduleDraftToolActivity } from "../client/use-message-stream.ts";
+import { m } from "~/paraglide/messages.js";
 import { cn } from "~/ui/utils";
 import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
@@ -8,20 +9,26 @@ import { DraftWidget } from "./draft-widget.tsx";
 /** Rows without a draft reference; anything naming a draft renders the widget. */
 function scheduleDraftActivityLabel(activity: ScheduleDraftToolActivity) {
   if (activity.status === "running") {
-    if (activity.name === "draft_schedule") return "Preparing the schedule draft";
-    if (activity.name === "update_schedule_draft") return "Updating the schedule draft";
+    if (activity.name === "draft_schedule") return m.schedules_activity_preparing();
+    if (activity.name === "update_schedule_draft") return m.schedules_activity_updating();
     return activity.name === "list_schedule_options"
-      ? "Checking schedule settings"
-      : "Checking schedule drafts";
+      ? m.schedules_activity_checking_settings()
+      : m.schedules_activity_checking_drafts();
   }
   return activity.result?.outcome === "options"
-    ? "Checked available options"
-    : "Couldn’t update the schedule draft";
+    ? m.drafts_activity_checked_options()
+    : m.schedules_activity_update_failed();
 }
 
 export function ScheduleDraftWidget({ draftId }: { draftId: string }) {
   return (
-    <DraftWidget kind="schedule" draftId={draftId} icon={Calendar03Icon} title="Schedule draft" />
+    <DraftWidget
+      kind="schedule"
+      draftId={draftId}
+      icon={Calendar03Icon}
+      title={m.schedules_draft_title()}
+      openLabel={(name) => m.schedules_draft_open_named({ name })}
+    />
   );
 }
 

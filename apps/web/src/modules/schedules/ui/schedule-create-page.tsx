@@ -13,6 +13,7 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { Page } from "~/ui/page-shell.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 export function ScheduleCreatePage() {
   const queryClient = useQueryClient();
@@ -35,7 +36,7 @@ export function ScheduleCreatePage() {
         await queryClient.invalidateQueries({ queryKey: ["schedules"] });
         await navigate({ to: "/schedules/$scheduleId", params: { scheduleId: created.id } });
       } catch (error) {
-        toastError("Could not create the schedule.", error);
+        toastError(m.schedules_create_failed(), error);
       }
     },
   });
@@ -46,21 +47,21 @@ export function ScheduleCreatePage() {
       dirty &&
       !submitting &&
       !(await confirm({
-        title: "Discard unsaved changes?",
-        description: "Your schedule has not been saved.",
-        confirmLabel: "Discard changes",
+        title: m.common_discard_title(),
+        description: m.schedules_unsaved_description(),
+        confirmLabel: m.common_discard_changes(),
       })),
     enableBeforeUnload: dirty,
   });
   return (
     <Page
-      title="New schedule"
+      title={m.schedules_create_title()}
       backTo="/schedules"
-      backLabel="Schedules"
+      backLabel={m.schedules_title()}
       actions={
         <form.AppForm>
           <form.SubmitButton size="sm" form={formId}>
-            Create schedule
+            {m.schedules_create_submit()}
           </form.SubmitButton>
         </form.AppForm>
       }

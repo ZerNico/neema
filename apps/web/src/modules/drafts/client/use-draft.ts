@@ -1,6 +1,7 @@
 import { useStore } from "@tanstack/react-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { m } from "~/paraglide/messages.js";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import type { ConversationDraft, DraftKind } from "../draft-schema.ts";
 import { draftQuery } from "./draft-queries.ts";
@@ -43,8 +44,17 @@ export interface DraftClient<S extends Record<string, unknown>> {
   discard: (input: { draftId: string }) => Promise<unknown>;
   /** Query keys the saved resource's own pages read; refreshed after a save. */
   invalidateOnSave: (targetId: string) => ReadonlyArray<ReadonlyArray<unknown>>;
-  /** "agent", "schedule": the noun in the copy below. */
-  noun: string;
+  /** The errors that name the thing being authored, one message each. */
+  words: DraftClientWords;
+}
+
+export interface DraftClientWords {
+  draftGone: () => string;
+  targetChanged: () => string;
+  targetUnavailable: () => string;
+  reloadUnavailable: () => string;
+  saveFailed: () => string;
+  reloadFailed: () => string;
 }
 
 const failureMessage = (error: unknown, fallback: string) =>
@@ -75,7 +85,7 @@ export function useDraft<S extends Record<string, unknown>>(
   const paused = useRef(false);
   const active = useRef(true);
   const reviewEpoch = useRef(0);
-  const { fields, noun } = client;
+  const { fields, words } = client;
   const same = useCallback((a: S, b: S) => sameDraftSettings(fields, a, b), [fields]);
   const setField = useCallback(
     (key: Field, value: S[Field]) => form.setFieldValue(key as never, value as never),
@@ -132,7 +142,7 @@ export function useDraft<S extends Record<string, unknown>>(
       try {
         if (refresh) {
           const latest = await queries.fetchQuery(draftQuery(client.kind, draftId, client.get));
-          if (!latest) throw new Error(`This ${noun} draft is no longer available.`);
+          if (!latest) throw new Error(words.draftGone());
           accept(latest);
         }
         for (let attempt = 0; attempt < 5; attempt++) {
@@ -143,19 +153,19 @@ export function useDraft<S extends Record<string, unknown>>(
             (key) => !sameDraftValue(local[key], base.settings[key]),
           );
           if (unresolved.length) {
-            setError("Choose which value to keep for the conflicting fields.");
+            setError(m.drafts_error_choose_conflicts());
             return false;
           }
           const changes = draftChanges(fields, base.settings, local);
           if (Object.keys(changes).length === 0) {
             if (reviewEpoch.current !== reviewed) {
-              setError("The draft changed. Review it before continuing.");
+              setError(m.drafts_error_changed_review());
               return false;
             }
             return true;
           }
           if (!client.isValid(local)) {
-            setError("Some draft fields are too long or invalid. Check them before continuing.");
+            setError(m.drafts_error_fields_invalid());
             return false;
           }
           pendingChanges.current = changes;
@@ -172,22 +182,17 @@ export function useDraft<S extends Record<string, unknown>>(
         // The last attempt may have persisted everything: only report failure
         // when changes are genuinely still outstanding.
         if (canonical.current && same(form.state.values, canonical.current.settings)) return true;
-        setError("The draft is still changing. Review it and try again.");
+        setError(m.drafts_error_still_changing());
         return false;
       } catch (failure) {
-        setError(
-          failureMessage(
-            failure,
-            "Could not keep your draft changes. Try again before continuing.",
-          ),
-        );
+        setError(failureMessage(failure, m.drafts_error_keep_failed()));
         return false;
       } finally {
         pendingChanges.current = null;
         if (active.current) setAutosaving(false);
       }
     },
-    [accept, client, draftId, fields, form, noun, queries, remember, same],
+    [accept, client, draftId, fields, form, words, queries, remember, same],
   );
   const enqueue = useCallback(
     (refresh: boolean) => {
@@ -224,12 +229,11 @@ export function useDraft<S extends Record<string, unknown>>(
     try {
       const ready = await flush();
       if (!ready) {
-        if (reviewed !== reviewEpoch.current)
-          setError("The draft changed. Review it, then choose Save again.");
+        if (reviewed !== reviewEpoch.current) setError(m.drafts_error_changed_save_again());
         return;
       }
       if (reviewed !== reviewEpoch.current || !sameDraftValue(seen, form.state.values)) {
-        setError("The draft changed. Review it, then choose Save again.");
+        setError(m.drafts_error_changed_save_again());
         return;
       }
       const base = canonical.current;
@@ -244,18 +248,15 @@ export function useDraft<S extends Record<string, unknown>>(
       } else if (result.outcome === "invalid") setError(result.reason);
       else if (result.outcome === "target_changed") {
         setTargetChanged(true);
-        setError(
-          `This ${noun} changed elsewhere. Your draft is kept. View the current ${noun} or reload it before saving.`,
-        );
-      } else if (result.outcome === "target_unavailable")
-        setError(`The original ${noun} is no longer available. This draft cannot replace it.`);
-      else setError("The draft changed. Review it, then choose Save again.");
+        setError(words.targetChanged());
+      } else if (result.outcome === "target_unavailable") setError(words.targetUnavailable());
+      else setError(m.drafts_error_changed_save_again());
     } catch (failure) {
-      setError(failureMessage(failure, `Could not save the ${noun}.`));
+      setError(failureMessage(failure, words.saveFailed()));
     } finally {
       if (active.current) setSaving(false);
     }
-  }, [client, draftId, flush, form, noun, queries, reloading, remember, saving]);
+  }, [client, draftId, flush, form, words, queries, reloading, remember, saving]);
   const reload = useCallback(async () => {
     if (saving || reloading) return;
     paused.current = true;
@@ -277,17 +278,17 @@ export function useDraft<S extends Record<string, unknown>>(
         remember(result.draft);
         setError(
           result.outcome === "conflict"
-            ? "The draft changed. Review it before reloading."
-            : `The original ${noun} is no longer available.`,
+            ? m.drafts_error_changed_before_reload()
+            : words.reloadUnavailable(),
         );
       }
     } catch (failure) {
-      setError(failureMessage(failure, `Could not reload the ${noun}.`));
+      setError(failureMessage(failure, words.reloadFailed()));
     } finally {
       paused.current = false;
       if (active.current) setReloading(false);
     }
-  }, [client, draftId, form, noun, reloading, remember, saving, updateConflicts]);
+  }, [client, draftId, form, words, reloading, remember, saving, updateConflicts]);
   const discard = useCallback(async () => {
     if (!canonical.current) return false;
     paused.current = true;
@@ -297,7 +298,7 @@ export function useDraft<S extends Record<string, unknown>>(
       queries.setQueryData(queryKey, null);
       return true;
     } catch (failure) {
-      setError(failureMessage(failure, "Could not discard the draft."));
+      setError(failureMessage(failure, m.drafts_error_discard_failed()));
       paused.current = false;
       return false;
     }

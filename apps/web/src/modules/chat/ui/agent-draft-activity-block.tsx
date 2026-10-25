@@ -1,5 +1,6 @@
 import { PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import type { AgentDraftToolActivity } from "../client/use-message-stream.ts";
+import { m } from "~/paraglide/messages.js";
 import { cn } from "~/ui/utils";
 import { ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
@@ -12,18 +13,26 @@ import { DraftWidget } from "./draft-widget.tsx";
  */
 function agentDraftActivityLabel(activity: AgentDraftToolActivity) {
   if (activity.status === "running") {
-    if (activity.name === "draft_agent") return "Preparing the agent draft";
+    if (activity.name === "draft_agent") return m.agents_activity_preparing();
     return activity.name === "update_agent_draft"
-      ? "Updating the agent draft"
-      : "Checking agent settings";
+      ? m.agents_activity_updating()
+      : m.agents_activity_checking_settings();
   }
   return activity.result?.outcome === "options"
-    ? "Checked available options"
-    : "Couldn’t update the agent draft";
+    ? m.drafts_activity_checked_options()
+    : m.agents_activity_update_failed();
 }
 
 export function AgentDraftWidget({ draftId }: { draftId: string }) {
-  return <DraftWidget kind="agent" draftId={draftId} icon={PencilEdit02Icon} title="Agent draft" />;
+  return (
+    <DraftWidget
+      kind="agent"
+      draftId={draftId}
+      icon={PencilEdit02Icon}
+      title={m.agents_draft_title()}
+      openLabel={(name) => m.agents_draft_open_named({ name })}
+    />
+  );
 }
 
 export function AgentDraftActivityBlock({ activity }: { activity: AgentDraftToolActivity }) {

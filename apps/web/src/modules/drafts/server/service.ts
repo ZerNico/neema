@@ -8,6 +8,7 @@ import {
   type DraftKind,
 } from "../draft-schema.ts";
 import { DraftRepo } from "./repo.ts";
+import type { Localized } from "~/i18n/localized.ts";
 
 export type DraftWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 export type DraftError = DraftNotAvailable | DraftRejected;
@@ -290,7 +291,7 @@ export class DraftService extends Context.Service<
 export const decodeDraftRequest =
   <S extends Schema.Codec<unknown, unknown, never, never>>(
     schema: S,
-    reason: string,
+    reason: Localized,
     options?: SchemaAST.ParseOptions,
   ) =>
   (input: unknown) =>

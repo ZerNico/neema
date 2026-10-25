@@ -22,6 +22,7 @@ import { withForm } from "~/ui/form/app-form.ts";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Switch } from "~/ui/primitives/switch";
+import { m } from "~/paraglide/messages.js";
 
 /** The detail page and the chat draft panel share these; each host owns persistence. */
 export const ScheduleSettingsFields = withForm({
@@ -33,7 +34,12 @@ export const ScheduleSettingsFields = withForm({
       <>
         <div className="flex flex-col gap-5">
           <form.AppField name="name">
-            {(field) => <field.TextField label="Name" placeholder="Morning briefing" />}
+            {(field) => (
+              <field.TextField
+                label={m.common_name()}
+                placeholder={m.schedules_settings_name_placeholder()}
+              />
+            )}
           </form.AppField>
         </div>
         <ScheduleTimingFields form={form} />
@@ -43,14 +49,14 @@ export const ScheduleSettingsFields = withForm({
           <form.AppField name="prompt">
             {(field) => (
               <field.TextareaField
-                label="Prompt"
-                placeholder="What should the chat do when this runs?"
+                label={m.schedules_settings_prompt()}
+                placeholder={m.schedules_settings_prompt_placeholder()}
                 rows={6}
               />
             )}
           </form.AppField>
         </div>
-        <Section title="Model and tools">
+        <Section title={m.schedules_settings_model_and_tools()}>
           <ListCard>
             <form.Field name="modelId">
               {(field) => (
@@ -66,41 +72,44 @@ export const ScheduleSettingsFields = withForm({
                 <ImageModelSettingRow
                   value={field.state.value}
                   onChange={(modelId) => field.handleChange(modelId)}
-                  description="Each run draws with it."
+                  description={m.schedules_settings_image_model_description()}
                 />
               )}
             </form.Field>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Web search</span>
+                <span className="text-sm font-medium">{m.schedules_settings_web_search()}</span>
               </div>
               <form.Field name="searchEnabled">
                 {(field) => (
                   <Switch
                     checked={field.state.value}
                     onCheckedChange={(checked) => field.handleChange(checked)}
-                    aria-label="Web search"
+                    aria-label={m.schedules_settings_web_search()}
                   />
                 )}
               </form.Field>
             </ListRow>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Deep research</span>
+                <span className="text-sm font-medium">{m.schedules_settings_deep_research()}</span>
               </div>
               <form.Field name="researchEnabled">
                 {(field) => (
                   <Switch
                     checked={field.state.value}
                     onCheckedChange={(checked) => field.handleChange(checked)}
-                    aria-label="Deep research"
+                    aria-label={m.schedules_settings_deep_research()}
                   />
                 )}
               </form.Field>
             </ListRow>
           </ListCard>
         </Section>
-        <Section title="Knowledge" description="A run needs your access to these at fire time.">
+        <Section
+          title={m.schedules_settings_knowledge()}
+          description={m.schedules_settings_access_at_fire_time()}
+        >
           <form.Field name="collectionIds">
             {(field) => (
               <CollectionsField
@@ -116,11 +125,11 @@ export const ScheduleSettingsFields = withForm({
                     onClick={() => {
                       if (field.state.value.length < KNOWLEDGE_LIMITS.maxCollectionsPerSelection)
                         setCreatingCollection(true);
-                      else toast.error("Select at most five knowledge collections.");
+                      else toast.error(m.schedules_settings_too_many_collections());
                     }}
                   >
                     <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                    New collection
+                    {m.schedules_settings_new_collection()}
                   </Button>
                 </div>
               </CollectionsField>
@@ -128,8 +137,8 @@ export const ScheduleSettingsFields = withForm({
           </form.Field>
         </Section>
         <Section
-          title="Integrations"
-          description="Nobody is there to approve during a run, so decide now how far each connected service may go. Anything more is refused, not asked."
+          title={m.schedules_settings_integrations()}
+          description={m.schedules_settings_integrations_description()}
         >
           <form.Field name="integrationGrants">
             {(field) => {
@@ -153,8 +162,8 @@ export const ScheduleSettingsFields = withForm({
                       account.status === "active"
                         ? account.accountLabel
                         : account.status === "unavailable"
-                          ? "Turned off: runs will fail until it is back."
-                          : "Not connected: runs will fail until you reconnect.",
+                          ? m.schedules_settings_integration_turned_off()
+                          : m.schedules_settings_integration_not_connected(),
                   }));
               });
               // Keyed by place in the saved list, which is all that tells two lost grants apart.
@@ -164,7 +173,7 @@ export const ScheduleSettingsFields = withForm({
               if (rows.length === 0 && lost.length === 0)
                 return (
                   <p className="text-muted-foreground text-sm">
-                    Connect a service in Settings → Integrations to let runs use it.
+                    {m.schedules_settings_integrations_empty()}
                   </p>
                 );
               return (
@@ -195,11 +204,17 @@ export const ScheduleSettingsFields = withForm({
                             variant="outline"
                             size="sm"
                             spacing={0}
-                            aria-label={`${title} during runs`}
+                            aria-label={m.schedules_settings_integration_access({ name: title })}
                           >
-                            <ToggleGroupItem value="none">Off</ToggleGroupItem>
-                            <ToggleGroupItem value="read">Read</ToggleGroupItem>
-                            <ToggleGroupItem value="write">Read and write</ToggleGroupItem>
+                            <ToggleGroupItem value="none">
+                              {m.schedules_settings_access_off()}
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="read">
+                              {m.schedules_settings_access_read()}
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="write">
+                              {m.schedules_settings_access_write()}
+                            </ToggleGroupItem>
                           </ToggleGroup>
                         </ListRow>
                         {grant?.connectionId ? (
@@ -222,8 +237,8 @@ export const ScheduleSettingsFields = withForm({
                     );
                     const deleted = grant.integrationId === null;
                     const title = deleted
-                      ? "Deleted integration"
-                      : (integration?.name ?? "An integration");
+                      ? m.schedules_settings_integration_deleted()
+                      : (integration?.name ?? m.schedules_settings_integration_unknown());
                     return (
                       <ListRow key={key}>
                         {integration ? (
@@ -233,20 +248,20 @@ export const ScheduleSettingsFields = withForm({
                           <p className="truncate text-sm font-medium">{title}</p>
                           <p className="text-muted-foreground truncate text-xs">
                             {deleted
-                              ? "It was deleted: turn this off or runs will fail."
-                              : "Its account was disconnected: turn this off or runs will fail."}
+                              ? m.schedules_settings_integration_deleted_hint()
+                              : m.schedules_settings_integration_disconnected_hint()}
                           </p>
                         </div>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          aria-label={`Turn off ${title}`}
+                          aria-label={m.schedules_settings_turn_off_named({ name: title })}
                           onClick={() =>
                             field.handleChange(grants.filter((entry) => entry !== grant))
                           }
                         >
-                          Turn off
+                          {m.schedules_settings_turn_off()}
                         </Button>
                       </ListRow>
                     );
@@ -256,14 +271,17 @@ export const ScheduleSettingsFields = withForm({
             }}
           </form.Field>
         </Section>
-        <Section title="Skills" description="A run needs your access to these at fire time.">
+        <Section
+          title={m.schedules_settings_skills()}
+          description={m.schedules_settings_access_at_fire_time()}
+        >
           <form.Field name="skillIds">
             {(field) => (
               <SkillsField
                 value={field.state.value ?? []}
                 onChange={field.handleChange}
                 errors={field.state.meta.errors}
-                unavailableHint="Remove this dependency or restore access before the next run."
+                unavailableHint={m.schedules_settings_skill_unavailable_hint()}
               />
             )}
           </form.Field>

@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { ScheduleGrant } from "~/modules/integrations/grant.ts";
 import { EntityId } from "~/entity-id.ts";
+import { Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** The longest each text setting may be, in a saved schedule and a draft alike. */
 export const SCHEDULE_TEXT_LIMITS = {
@@ -109,9 +111,9 @@ export class ScheduleChanged extends Schema.TaggedError<ScheduleChanged>()("Sche
   scheduleId: Schema.String,
 }) {
   get reason() {
-    return "schedule changed; reload before saving";
+    return localized(m.schedules_error_changed);
   }
 }
 export class ScheduleRejected extends Schema.TaggedError<ScheduleRejected>()("ScheduleRejected", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}

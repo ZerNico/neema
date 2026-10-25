@@ -1,9 +1,12 @@
+import { m } from "~/paraglide/messages.js";
+
 /**
  * The unsent chat request that starts schedule authoring. An edit names the
  * schedule by link, the way agent editing does, so the model opens the draft
- * against that schedule's ID.
+ * against that schedule's ID. It is the person's own message, so it is in
+ * their language.
  */
 export const scheduleAuthoringRequest = (scheduleId: string | null = null) =>
   scheduleId
-    ? `Help me change [this schedule](/schedules/${encodeURIComponent(scheduleId)}). Ask what I’d like to change, then prepare a draft for me to review before saving.`
-    : "Help me set up a scheduled task. Ask what it should do and how often, then prepare a draft for me to review before it goes live.";
+    ? m.schedules_authoring_request_edit({ link: `/schedules/${encodeURIComponent(scheduleId)}` })
+    : m.schedules_authoring_request_create();

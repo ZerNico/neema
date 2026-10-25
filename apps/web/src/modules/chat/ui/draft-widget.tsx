@@ -2,6 +2,7 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useDraftPanel } from "~/modules/drafts/ui/draft-panel-context.ts";
 import type { DraftKind } from "~/modules/drafts/draft-schema.ts";
+import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 import { activityCardClassName, activityCardInteractiveClassName } from "./activity-row.ts";
@@ -17,12 +18,15 @@ export function DraftWidget({
   draftId,
   icon,
   title,
+  openLabel,
 }: {
   kind: DraftKind;
   draftId: string;
   icon: IconSvgElement;
-  /** "Agent draft", also the accessible name's prefix. */
+  /** "Agent draft". */
   title: string;
+  /** The button's accessible name for a draft of that name. */
+  openLabel: (name: string) => string;
 }) {
   const { owned, entry } = useDraftPanel(kind, draftId);
   const contents = (
@@ -34,8 +38,8 @@ export function DraftWidget({
           {entry
             ? [entry.name, entry.status].filter(Boolean).join(" · ")
             : owned
-              ? "Loading draft…"
-              : "From another chat"}
+              ? m.drafts_widget_loading()
+              : m.drafts_widget_other_chat()}
         </span>
       </span>
       {entry?.open ? (
@@ -53,7 +57,7 @@ export function DraftWidget({
       <button
         type="button"
         className={cn(activityCardClassName, activityCardInteractiveClassName)}
-        aria-label={`Open ${title.toLowerCase()}: ${entry.name}`}
+        aria-label={openLabel(entry.name ?? "")}
         aria-expanded={entry.expanded}
         onClick={entry.open}
       >
@@ -65,7 +69,7 @@ export function DraftWidget({
       {contents}
       {entry?.retry ? (
         <Button size="sm" variant="ghost" onClick={entry.retry}>
-          Retry loading draft
+          {m.drafts_widget_retry()}
         </Button>
       ) : null}
     </div>

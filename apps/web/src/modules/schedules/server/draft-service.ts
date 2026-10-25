@@ -28,6 +28,8 @@ import {
   type ScheduleDraft,
 } from "../draft-schema.ts";
 import { ScheduleNotAvailable, scheduleToSettings } from "../schema.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { ScheduleRepo } from "./repo.ts";
 import { checkScheduleResources, firstFireAt, validateScheduleSettings } from "./validate.ts";
 
@@ -62,7 +64,7 @@ export class ScheduleDraftService extends Context.Service<
     save(
       userId: string,
       input: ScheduleDraftRevisionInput,
-    ): Effect.Effect<SaveScheduleDraftResult, DraftNotAvailable | DraftRejected>;
+    ): Effect.Effect<SaveScheduleDraftResult<Localized>, DraftNotAvailable | DraftRejected>;
     reload(
       userId: string,
       input: ScheduleDraftRevisionInput,
@@ -86,16 +88,16 @@ export class ScheduleDraftService extends Context.Service<
       const bus = yield* SyncBus;
       const revisionInput = decodeDraftRequest(
         ScheduleDraftRevisionInput,
-        "invalid schedule draft revision",
+        localized(m.schedules_error_draft_revision),
       );
       const openInput = decodeDraftRequest(
         OpenScheduleDraftInput,
-        "invalid schedule draft request",
+        localized(m.schedules_error_draft_request),
         { onExcessProperty: "error" },
       );
       const patchInput = decodeDraftRequest(
         PatchScheduleDraftInput,
-        "invalid schedule draft changes",
+        localized(m.schedules_error_draft_changes),
         { onExcessProperty: "error" },
       );
 
@@ -149,7 +151,9 @@ export class ScheduleDraftService extends Context.Service<
         patch: (userId, input, guard) =>
           Effect.gen(function* () {
             if (!(yield* policy.can(userId, "schedules")))
-              return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
+              return yield* new DraftRejected({
+                reason: localized(m.schedules_error_editing_unavailable),
+              });
             const parsed = yield* patchInput(input);
             const result = yield* core.patch<ScheduleDraftSettings, never, never>(
               userId,
@@ -166,7 +170,9 @@ export class ScheduleDraftService extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
-                  return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
+                  return yield* new DraftRejected({
+                    reason: localized(m.schedules_error_editing_unavailable),
+                  });
                 const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId, "schedule"));
                 // A newer draft always wins over an older receipt, even if that
                 // older request once succeeded.
@@ -239,7 +245,9 @@ export class ScheduleDraftService extends Context.Service<
             .transaction((tx) =>
               Effect.gen(function* () {
                 if (!(yield* policy.can(userId, "schedules", tx)))
-                  return yield* new DraftRejected({ reason: "schedule editing is unavailable" });
+                  return yield* new DraftRejected({
+                    reason: localized(m.schedules_error_editing_unavailable),
+                  });
                 const draft = asSchedule(yield* core.lock(tx, userId, parsed.draftId, "schedule"));
                 if (draft.revision !== parsed.expectedRevision)
                   return { outcome: "conflict" as const, draft };
@@ -272,7 +280,9 @@ export class ScheduleDraftService extends Context.Service<
                     allowed
                       ? Effect.void
                       : Effect.fail(
-                          new DraftRejected({ reason: "schedule editing is unavailable" }),
+                          new DraftRejected({
+                            reason: localized(m.schedules_error_editing_unavailable),
+                          }),
                         ),
                   ),
                 ),

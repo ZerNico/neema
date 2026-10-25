@@ -12,21 +12,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { m } from "~/paraglide/messages.js";
 
-const MODES = [
-  { value: "always", label: "When a run finishes" },
-  { value: "conditional", label: "When it’s worth it" },
-  { value: "off", label: "Never" },
-] as const satisfies ReadonlyArray<{ value: ScheduleNotify; label: string }>;
+const modes = () =>
+  [
+    { value: "always", label: m.schedules_notify_always() },
+    { value: "conditional", label: m.schedules_notify_conditional() },
+    { value: "off", label: m.schedules_notify_off() },
+  ] as const satisfies ReadonlyArray<{ value: ScheduleNotify; label: string }>;
 
 /** Whether a run tells its owner, and who decides. Failures notify unless it is off. */
 export const ScheduleNotifyField = withForm({
   defaultValues: EMPTY_SCHEDULE_DRAFT,
   render: function ScheduleNotifyField({ form }) {
     const notify = useStore(form.store, (state) => state.values.notify);
+    const MODES = modes();
     return (
       <div className="flex flex-col gap-3">
-        <FieldLabel>Notify me</FieldLabel>
+        <FieldLabel>{m.schedules_notify_label()}</FieldLabel>
         <Select
           items={MODES}
           value={notify}
@@ -34,7 +37,7 @@ export const ScheduleNotifyField = withForm({
             if (mode) form.setFieldValue("notify", mode);
           }}
         >
-          <SelectTrigger aria-label="Notify me" className="w-52">
+          <SelectTrigger aria-label={m.schedules_notify_label()} className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -48,12 +51,12 @@ export const ScheduleNotifyField = withForm({
         {notify === "off" ? null : <NotificationReachHint />}
         <FieldDescription>
           {notify === "conditional"
-            ? "Say in the prompt when it’s worth telling you."
+            ? m.schedules_notify_conditional_hint()
             : notify === "off"
-              ? "Runs still show in the sidebar."
-              : "Failed runs notify too."}{" "}
+              ? m.schedules_notify_off_hint()
+              : m.schedules_notify_always_hint()}{" "}
           <Link to="/settings/notifications" className="underline underline-offset-2">
-            Where you get them
+            {m.schedules_notify_where()}
           </Link>
         </FieldDescription>
       </div>

@@ -24,6 +24,7 @@ import { useSaveStatus } from "~/ui/use-save-status.ts";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 import { useConfirm } from "~/ui/confirm-context.ts";
+import { m } from "~/paraglide/messages.js";
 import type { DraftKind } from "../draft-schema.ts";
 import type { DraftController } from "../client/use-draft.ts";
 import { scopes, type DraftPanelEntry } from "./draft-panel-context.ts";
@@ -44,22 +45,31 @@ interface Session {
 export interface DraftKindUi<S extends Record<string, unknown>> {
   kind: DraftKind;
   useController: (draftId: string) => DraftController<S>;
-  /** "agent", "schedule": the noun in labels and confirmations. */
-  noun: string;
-  /** Capitalised for titles: "Agent draft", "Create agent". */
-  Noun: string;
   /** The transcript widget's icon, repeated on the panel tab. */
   icon: IconSvgElement;
-  labels: Record<keyof S & string, string>;
+  /** Each field's name, as a message so it reads in the page's language. */
+  labels: Record<keyof S & string, () => string>;
   /** The `withForm` component for this kind's settings. */
   Fields: FunctionComponent<{ form: DraftController<S>["form"] }>;
   /** The saved target's own page. */
   targetLink: (targetId: string) => ReactNode;
   /** Extra actions beside Save once a target exists, if any. */
   targetActions?: (targetId: string) => ReactNode;
+  /** Every line that names the kind, one message each, since German inflects the noun. */
   copy: {
-    saveEffect: string;
-    createEffect: string;
+    saving: () => string;
+    saved: () => string;
+    untitled: () => string;
+    title: () => string;
+    loadFailed: () => string;
+    loading: () => string;
+    create: () => string;
+    reloadTitle: () => string;
+    reloadDescription: () => string;
+    reload: () => string;
+    discardSavedDescription: () => string;
+    saveEffect: () => string;
+    createEffect: () => string;
   };
 }
 
@@ -192,11 +202,11 @@ function DraftSession<S extends Record<string, unknown>>({
   // "keeping…") flickers faster than anyone can read. Failures still surface
   // through the form's own error line.
   const status = controller.saving
-    ? `Saving ${ui.noun}…`
+    ? ui.copy.saving()
     : isSaved(controller)
-      ? `${ui.Noun} saved`
-      : "Draft";
-  const name = (controller.values.name as string) || `Untitled ${ui.noun}`;
+      ? ui.copy.saved()
+      : m.drafts_status_draft();
+  const name = (controller.values.name as string) || ui.copy.untitled();
   const request = useMemo(
     () => ({
       id,
@@ -204,7 +214,7 @@ function DraftSession<S extends Record<string, unknown>>({
       // No status line in the panel: the save button says it, like the editor
       // page's (disabled once saved, with the "Saved" flash), and the
       // transcript widget names it.
-      title: controller.draft ? name : `${ui.Noun} draft`,
+      title: controller.draft ? name : ui.copy.title(),
       icon: ui.icon,
       restorable: true,
       actions: <DraftActions ui={ui} controller={controller} formId={formId(id)} />,
@@ -231,10 +241,10 @@ function DraftSession<S extends Record<string, unknown>>({
       name: available ? name : null,
       status: !available
         ? failed
-          ? "Could not load draft"
-          : "Loading draft…"
+          ? m.drafts_status_load_failed()
+          : m.drafts_status_loading()
         : controller.error
-          ? "Review changes"
+          ? m.drafts_status_review()
           : status,
       expanded: selected === id,
       open: available ? () => panel.open(request) : null,
@@ -301,7 +311,7 @@ function DraftActions<S extends Record<string, unknown>>({
     <div className="space-y-2">
       <FormActions className="justify-end">
         <p className="text-muted-foreground min-w-40 flex-1 text-xs">
-          {target ? ui.copy.saveEffect : ui.copy.createEffect}
+          {target ? ui.copy.saveEffect() : ui.copy.createEffect()}
         </p>
         <SaveStatus justSaved={justSaved} />
         {target ? ui.targetActions?.(target) : null}
@@ -313,7 +323,7 @@ function DraftActions<S extends Record<string, unknown>>({
           disabled={controller.reloading || controller.conflicts.length > 0 || saved}
         >
           <SaveLabel justSaved={justSaved}>
-            {target ? "Save changes" : `Create ${ui.noun}`}
+            {target ? m.common_save_changes() : ui.copy.create()}
           </SaveLabel>
         </PendingButton>
       </FormActions>
@@ -336,16 +346,13 @@ function DraftBody<S extends Record<string, unknown>>({
   if (!draft) {
     if (controller.query.isError || controller.query.data === null)
       return (
-        <ErrorState
-          title={`Could not load the ${ui.noun} draft`}
-          onRetry={() => void controller.query.refetch()}
-        />
+        <ErrorState title={ui.copy.loadFailed()} onRetry={() => void controller.query.refetch()} />
       );
-    return <ListSkeleton rows={3} media="none" label={`Loading ${ui.noun} draft`} />;
+    return <ListSkeleton rows={3} media="none" label={ui.copy.loading()} />;
   }
   const target = draft.targetId;
   const saved = isSaved(controller);
-  const name = (controller.values.name as string) || `Untitled ${ui.noun}`;
+  const name = (controller.values.name as string) || ui.copy.untitled();
   return (
     <form
       id={id}
@@ -359,21 +366,21 @@ function DraftBody<S extends Record<string, unknown>>({
         <section
           key={key}
           className="space-y-2 rounded-2xl border p-3"
-          aria-label={`${ui.labels[key]} conflict`}
+          aria-label={m.drafts_conflict_label({ field: ui.labels[key]() })}
         >
-          <p className="text-sm font-medium">{ui.labels[key]} changed in another edit</p>
-          <p className="text-muted-foreground text-xs">
-            Your value stays in the field. The current draft has
+          <p className="text-sm font-medium">
+            {m.drafts_conflict_title({ field: ui.labels[key]() })}
           </p>
+          <p className="text-muted-foreground text-xs">{m.drafts_conflict_description()}</p>
           <pre className="bg-muted max-h-32 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap">
             {displayValue(draft.settings[key])}
           </pre>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => controller.resolve(key, "local")}>
-              Keep my {ui.labels[key].toLowerCase()}
+              {m.drafts_conflict_keep_mine({ field: ui.labels[key]().toLowerCase() })}
             </Button>
             <Button size="sm" variant="outline" onClick={() => controller.resolve(key, "remote")}>
-              Use current {ui.labels[key].toLowerCase()}
+              {m.drafts_conflict_use_current({ field: ui.labels[key]().toLowerCase() })}
             </Button>
           </div>
         </section>
@@ -399,16 +406,16 @@ function DraftBody<S extends Record<string, unknown>>({
                   return;
                 }
                 void confirm({
-                  title: `Reload from the saved ${ui.noun}?`,
-                  description: `The edits in this draft are replaced by the ${ui.noun}’s current settings.`,
-                  confirmLabel: `Reload ${ui.noun}`,
+                  title: ui.copy.reloadTitle(),
+                  description: ui.copy.reloadDescription(),
+                  confirmLabel: ui.copy.reload(),
                   destructive: true,
                 }).then((confirmed) => {
                   if (confirmed) void controller.reload();
                 });
               }}
             >
-              Reload {ui.noun}
+              {ui.copy.reload()}
             </PendingButton>
           </FormActions>
         </div>
@@ -423,16 +430,16 @@ function DraftBody<S extends Record<string, unknown>>({
             className="text-destructive hover:text-destructive"
             onClick={() =>
               void confirm({
-                title: `Discard "${name}"?`,
+                title: m.drafts_discard_title({ name }),
                 description: target
-                  ? `The draft is removed from this chat. The saved ${ui.noun} itself is not affected.`
-                  : "The draft is removed from this chat. Nothing was saved, so it cannot be recovered.",
-                confirmLabel: "Discard draft",
+                  ? ui.copy.discardSavedDescription()
+                  : m.drafts_discard_unsaved_description(),
+                confirmLabel: m.drafts_discard(),
                 destructive: true,
               }).then((confirmed) => confirmed && controller.discard())
             }
           >
-            Discard draft
+            {m.drafts_discard()}
           </Button>
         </div>
       )}
@@ -440,9 +447,9 @@ function DraftBody<S extends Record<string, unknown>>({
   );
 }
 function displayValue(value: unknown) {
-  if (value === null) return "No preference";
-  if (value === "") return "(blank)";
-  if (typeof value === "boolean") return value ? "On" : "Off";
-  if (Array.isArray(value)) return value.length ? value.join("\n") : "(none)";
+  if (value === null) return m.drafts_value_no_preference();
+  if (value === "") return m.drafts_value_blank();
+  if (typeof value === "boolean") return value ? m.drafts_value_on() : m.drafts_value_off();
+  if (Array.isArray(value)) return value.length ? value.join("\n") : m.drafts_value_none();
   return String(value);
 }

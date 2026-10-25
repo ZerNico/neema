@@ -5,6 +5,7 @@ import {
   type ReloadDraftOutcome,
   type SaveDraftOutcome,
 } from "~/modules/drafts/client/use-draft.ts";
+import { m } from "~/paraglide/messages.js";
 import { EMPTY_SCHEDULE_DRAFT, ScheduleDraftSettings } from "../draft-schema.ts";
 import {
   discardScheduleDraft,
@@ -17,7 +18,14 @@ import {
 export type ScheduleDraftField = keyof ScheduleDraftSettings;
 export const scheduleDraftClient: DraftClient<ScheduleDraftSettings> = {
   kind: "schedule",
-  noun: "schedule",
+  words: {
+    draftGone: m.schedules_draft_gone,
+    targetChanged: m.schedules_draft_target_changed,
+    targetUnavailable: m.schedules_draft_target_unavailable,
+    reloadUnavailable: m.schedules_draft_reload_unavailable,
+    saveFailed: m.schedules_draft_save_failed,
+    reloadFailed: m.schedules_draft_reload_failed,
+  },
   fields: Object.keys(EMPTY_SCHEDULE_DRAFT) as ScheduleDraftField[],
   empty: EMPTY_SCHEDULE_DRAFT,
   isValid: Schema.is(ScheduleDraftSettings),

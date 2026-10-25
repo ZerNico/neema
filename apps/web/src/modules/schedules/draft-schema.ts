@@ -75,10 +75,11 @@ export interface PatchScheduleDraftResult {
   outcome: "updated" | "unchanged" | "conflict";
   draft: ScheduleDraft;
 }
-export type SaveScheduleDraftResult =
+/** The service's reason is `Localized`; the server function words it for the page. */
+export type SaveScheduleDraftResult<Reason = string> =
   | { outcome: "saved"; draft: ScheduleDraft; scheduleId: string }
   | { outcome: "conflict" | "schedule_changed" | "schedule_unavailable"; draft: ScheduleDraft }
-  | { outcome: "invalid"; draft: ScheduleDraft; reason: string };
+  | { outcome: "invalid"; draft: ScheduleDraft; reason: Reason };
 export interface ReloadScheduleDraftResult {
   outcome: "reloaded" | "conflict" | "schedule_unavailable" | "no_target";
   draft: ScheduleDraft;
