@@ -734,6 +734,64 @@ describe("loadConversationDetail", () => {
     );
   });
 
+  it("turns an old project file read into a file read, as the one reader now is", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const db = yield* Db;
+        const thread = yield* seedThread(userId, "Project reads");
+        const call = (callIndex: number, outcome: string, message?: string) => ({
+          id: uuidv7(),
+          messageId: thread.assistantId,
+          turnIndex: 0,
+          callIndex,
+          providerCallId: `call-${outcome}`,
+          toolName: "read_project_file",
+          arguments: { name: "plan.md" },
+          status: outcome === "read" ? ("complete" as const) : ("error" as const),
+          result: { outcome, fileName: "plan.md", ...(message ? { message } : {}) },
+        });
+        const read = call(0, "read");
+        const refused = call(
+          1,
+          "unavailable",
+          "This chat's project is no longer available to you.",
+        );
+        yield* db.insert(messageToolCalls).values([read, refused]);
+        yield* db.execute(
+          readFileSync(
+            new URL(
+              "../../drizzle/20261025142106_project_file_reads_as_attachment_reads/migration.sql",
+              import.meta.url,
+            ),
+            "utf8",
+          ) as never,
+        );
+        const rows = yield* db
+          .select({
+            id: messageToolCalls.id,
+            name: messageToolCalls.toolName,
+            result: messageToolCalls.result,
+          })
+          .from(messageToolCalls)
+          .where(inArray(messageToolCalls.id, [read.id, refused.id]));
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        expect(byId.get(read.id)).toMatchObject({
+          name: "read_attachment",
+          result: { ok: true, fileName: "plan.md" },
+        });
+        expect(byId.get(refused.id)).toMatchObject({
+          name: "read_attachment",
+          result: {
+            ok: false,
+            fileName: "plan.md",
+            error: "This chat's project is no longer available to you.",
+          },
+        });
+      }),
+    );
+  });
+
   it("fails before reading anything for a conversation the caller does not own", async () => {
     const owner = await run(makeUser());
     const stranger = await run(makeUser());
