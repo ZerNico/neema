@@ -50,6 +50,7 @@ const settings = {
   admitDomains: [] as string[],
   smtpConfigured: false,
   passwordLoginForced: false,
+  verificationRequired: false,
 };
 
 type Provider = {

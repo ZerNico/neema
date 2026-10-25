@@ -12,7 +12,7 @@ import {
   SetOAuthProviderEnabledInput,
 } from "../oauth.ts";
 import { invalidateAuth } from "./auth.ts";
-import { passwordLoginForced } from "./config.ts";
+import { passwordLoginForced } from "./password-login.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo, type UpsertOAuthProvider } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";

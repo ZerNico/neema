@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import { passwordLoginForced, type SignupGate } from "./config.ts";
+import type { SignupGate } from "./config.ts";
+import { passwordLoginForced, verificationRequired } from "./password-login.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { accountEligible } from "./account-eligibility.ts";
@@ -30,7 +31,7 @@ const decideAdmission = ({
   const domain = emailDomain(email);
   const listed = domain !== null && settings.admitDomains.includes(domain);
   const domainAdmits = listed && verified;
-  const awaitsProof = listed && password && settings.requireEmailVerification;
+  const awaitsProof = listed && password && verificationRequired(settings);
   return {
     allowed: mode !== "closed" || domainAdmits || awaitsProof,
     approved: mode === "open" || domainAdmits,

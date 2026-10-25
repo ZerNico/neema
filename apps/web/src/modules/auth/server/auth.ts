@@ -8,7 +8,8 @@ import { fetchClientMetadata } from "~/modules/mcp-server/server/client-metadata
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { publicUrl } from "~/server/public-url.ts";
 import { runtime } from "~/server/runtime.ts";
-import { createAppAuth, passwordLoginForced, type AuthMail } from "./config.ts";
+import { createAppAuth, type AuthMail } from "./config.ts";
+import { verificationRequired } from "./password-login.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { makeSignupGate } from "./signup-gate.ts";
 import { SignupRepo } from "./signup-repo.ts";
@@ -96,9 +97,7 @@ const authMail = () =>
       if (!(yield* Effect.flatMap(MailService, (mail) => mail.available))) return undefined;
       const settings = yield* Effect.flatMap(SignupRepo, (repo) => repo.settings());
       return {
-        // The operator's way back in also lifts verification: a broken mail
-        // server would otherwise keep every password account out.
-        requireVerification: settings.requireEmailVerification && !passwordLoginForced(),
+        requireVerification: verificationRequired(settings),
         send: sendAuthMail,
       } satisfies AuthMail;
     }),

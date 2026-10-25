@@ -1,4 +1,7 @@
-import { addressableByEmailSql } from "~/modules/auth/server/account-eligibility.ts";
+import {
+  addressableByEmailSql,
+  verificationRequiredIn,
+} from "~/modules/auth/server/account-eligibility.ts";
 import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -347,10 +350,11 @@ export class ProjectService extends Context.Service<
                   return yield* new ProjectRejected({
                     reason: "enter an existing account's email address",
                   });
+                const required = yield* verificationRequiredIn(tx);
                 const [recipient] = yield* tx
                   .select({ id: user.id })
                   .from(user)
-                  .where(and(eq(user.email, email), addressableByEmailSql))
+                  .where(and(eq(user.email, email), addressableByEmailSql(required)))
                   .for("key share")
                   .pipe(Effect.orDie);
                 if (!recipient || recipient.id === userId)

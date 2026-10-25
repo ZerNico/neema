@@ -14,7 +14,7 @@ import {
   type SignInOptions,
 } from "../signup.ts";
 import { invalidateAuth } from "./auth.ts";
-import { passwordLoginForced } from "./config.ts";
+import { passwordLoginForced, verificationRequired } from "./password-login.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
@@ -39,7 +39,7 @@ export const getSignInOptions = createServerFn({ method: "GET" }).handler(() =>
       const passwordLogin = settings.passwordLogin || passwordLoginForced();
       // A listed domain joins through any provider, and through a password it then proves.
       const domains = settings.admitDomains.length > 0;
-      const domainProof = settings.requireEmailVerification && domains;
+      const domainProof = verificationRequired(settings) && domains;
       return {
         passwordLogin,
         passwordSignup: passwordLogin && (settings.passwordSignup !== "closed" || domainProof),
@@ -67,6 +67,7 @@ export const getAuthSettings = createServerFn({ method: "GET" })
           ...settings,
           smtpConfigured,
           passwordLoginForced: passwordLoginForced(),
+          verificationRequired: verificationRequired(settings),
         } satisfies AuthSettingsView;
       }),
     ),

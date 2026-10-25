@@ -1,7 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
 import { Duration, Effect, Schema } from "effect";
-import { AUTH_SETTINGS_ID, session, user, userApprovals } from "~/db/schema/index.ts";
+import { AUTH_SETTINGS_ID, authSettings, session, user, userApprovals } from "~/db/schema/index.ts";
 import { Db, type DbTx } from "~/server/db.ts";
+import { verificationRequired } from "./password-login.ts";
 
 type DbClient = Db["Service"] | DbTx;
 
@@ -81,15 +82,25 @@ export const activeAccountOf = (alias: string) => {
 export const activeAccountSql = activeAccountOf("user");
 
 /**
- * An active account someone may find by typing its address. While the instance
- * requires verification, an unproven address is whatever its owner typed, and
- * finding it would hand them whatever was meant for the real person.
+ * An active account someone may find by typing its address. While addresses
+ * must be proven, an unproven one is whatever its owner typed, and finding it
+ * would hand them whatever was meant for the real person.
  */
-export const addressableByEmailSql = sql<boolean>`(${activeAccountSql} and (
-  ${user.emailVerified}
-  or not coalesce((select s.require_email_verification from auth_settings s
-    where s.id = ${AUTH_SETTINGS_ID}), false)
-))`;
+export const addressableByEmailSql = (required: boolean) =>
+  required ? sql<boolean>`(${activeAccountSql} and ${user.emailVerified})` : activeAccountSql;
+
+/** `verificationRequired` as stored now, read through the caller's client or transaction. */
+export const verificationRequiredIn = (db: DbClient) =>
+  db
+    .select({ stored: authSettings.requireEmailVerification })
+    .from(authSettings)
+    .where(eq(authSettings.id, AUTH_SETTINGS_ID))
+    .pipe(
+      Effect.orDie,
+      Effect.map(([row]) =>
+        verificationRequired({ requireEmailVerification: row?.stored ?? false }),
+      ),
+    );
 
 /**
  * A short preflight, not a substitute for the check in the acceptance

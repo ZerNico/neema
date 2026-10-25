@@ -139,7 +139,7 @@ export function UsersPage() {
                       +{hiddenGroups} more
                     </Badge>
                   ) : null}
-                  {authSettings?.requireEmailVerification && !user.emailVerified ? (
+                  {authSettings?.verificationRequired && !user.emailVerified ? (
                     <Badge variant="outline">Unverified</Badge>
                   ) : null}
                   {user.banned ? <Badge variant="destructive">Banned</Badge> : null}

@@ -45,6 +45,8 @@ export interface AuthSettingsView extends AuthSettings {
   readonly smtpConfigured: boolean;
   /** `AUTH_PASSWORD_LOGIN=force`: the operator's way back in, beyond the setting. */
   readonly passwordLoginForced: boolean;
+  /** Whether addresses must be proven now: the setting, unless the override lifts it. */
+  readonly verificationRequired: boolean;
 }
 
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;

@@ -20,7 +20,10 @@ import {
   user,
   userApprovals,
 } from "~/db/schema/index.ts";
-import { addressableByEmailSql } from "~/modules/auth/server/account-eligibility.ts";
+import {
+  addressableByEmailSql,
+  verificationRequiredIn,
+} from "~/modules/auth/server/account-eligibility.ts";
 import { createAppAuth, type AuthMail } from "~/modules/auth/server/config.ts";
 import { OAuthRepo } from "~/modules/auth/server/oauth-repo.ts";
 import { makeSignupGate } from "~/modules/auth/server/signup-gate.ts";
@@ -756,19 +759,51 @@ describe("email verification", () => {
     await signUp("founder");
     const id = await insertUser("unproven");
     await signups((repo) => repo.record({ userId: id, status: "approved" }));
-    const found = async () =>
-      (
+    const found = async () => {
+      const required = await runtime.runPromise(Effect.flatMap(Db, verificationRequiredIn));
+      return (
         await db
           .select({ id: user.id })
           .from(user)
-          .where(sql`${user.email} = 'unproven@example.test' and ${addressableByEmailSql}`)
+          .where(
+            sql`${user.email} = 'unproven@example.test' and ${addressableByEmailSql(required)}`,
+          )
       ).length;
+    };
 
     expect(await found()).toBe(1);
     await configure({ requireEmailVerification: true });
     expect(await found()).toBe(0);
+    process.env.AUTH_PASSWORD_LOGIN = "force";
+    try {
+      expect(await found()).toBe(1);
+    } finally {
+      delete process.env.AUTH_PASSWORD_LOGIN;
+    }
     await signups((repo) => repo.markVerified(id));
     expect(await found()).toBe(1);
+  });
+
+  it("lifts verification everywhere under the operator's override", async () => {
+    await signUp("founder");
+    await configure({
+      passwordSignup: "closed",
+      requireEmailVerification: true,
+      admitDomains: ["example.test"],
+    });
+    process.env.AUTH_PASSWORD_LOGIN = "force";
+    try {
+      // The instance is built as production builds it: no verification under force.
+      auth = makeAuth({ ...mail, requireVerification: false });
+      // No link will be sent, so a listed domain can no longer prove itself
+      // into a closed signup: refused outright, never left waiting.
+      const refused = await signUp("member");
+      expect(refused.status).toBe(403);
+      expect(await statusOf("member")).toBeNull();
+      expect(sent).toHaveLength(0);
+    } finally {
+      delete process.env.AUTH_PASSWORD_LOGIN;
+    }
   });
 });
 

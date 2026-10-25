@@ -70,7 +70,9 @@ new. Nothing is instance-wide except the domain list, verification, and the boot
   While it is off, nobody can unlink their last account on an enabled provider, and an admin
   cannot switch off or delete the last enabled provider.
 - `AUTH_PASSWORD_LOGIN=force` keeps password sign-in on and lifts the verification requirement,
-  for the day the identity provider or the mail server breaks.
+  for the day the identity provider or the mail server breaks. Every reader of the requirement
+  asks `verificationRequired()`, never the stored flag, so admission, email lookups and the
+  admin pages all agree that nothing waits on a link.
 
 ## A provider as the only sign-in
 

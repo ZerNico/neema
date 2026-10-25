@@ -1,4 +1,7 @@
-import { addressableByEmailSql } from "~/modules/auth/server/account-eligibility.ts";
+import {
+  addressableByEmailSql,
+  verificationRequiredIn,
+} from "~/modules/auth/server/account-eligibility.ts";
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { groups, groupMembers, user } from "~/db/schema/index.ts";
@@ -118,6 +121,7 @@ export class SharingService extends Context.Service<
         // exposed, and it never reveals who already has access to what.
         recipients: Effect.fn("SharingService.recipients")(function* (userId, q) {
           const needle = escapeLike(q.trim());
+          const required = yield* verificationRequiredIn(db);
           return yield* db
             .select({ userId: user.id, name: user.name, email: user.email })
             .from(user)
@@ -125,7 +129,7 @@ export class SharingService extends Context.Service<
               and(
                 ne(user.id, userId),
                 // The picker shares by address, so it offers only addresses a share can reach.
-                addressableByEmailSql,
+                addressableByEmailSql(required),
                 needle
                   ? or(ilike(user.name, `%${needle}%`), ilike(user.email, `%${needle}%`))
                   : undefined,
@@ -173,10 +177,11 @@ export class SharingService extends Context.Service<
                       return yield* new SharingNotAllowed({
                         reason: "enter an existing account's email address",
                       });
+                    const required = yield* verificationRequiredIn(tx);
                     const [recipient] = yield* tx
                       .select({ id: user.id })
                       .from(user)
-                      .where(and(eq(user.email, email), addressableByEmailSql))
+                      .where(and(eq(user.email, email), addressableByEmailSql(required)))
                       .for("key share");
                     if (!recipient || recipient.id === userId)
                       return yield* new SharingNotAllowed({

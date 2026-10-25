@@ -20,6 +20,7 @@ import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
 import { SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
+import { passwordLoginForced } from "./password-login.ts";
 import {
   resetPasswordMail,
   verifyEmailMail,
@@ -143,9 +144,6 @@ export interface AuthMail {
   requireVerification: boolean;
   send: (to: string, subject: string, content: MailContent) => Promise<void>;
 }
-
-/** The operator's way back in when no identity provider works. */
-export const passwordLoginForced = () => process.env.AUTH_PASSWORD_LOGIN?.trim() === "force";
 
 /**
  * Endpoints that create a session for someone already signed in: a desktop
