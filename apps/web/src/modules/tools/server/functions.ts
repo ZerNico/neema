@@ -193,7 +193,7 @@ export const getScanReading = createServerFn({ method: "GET" })
         const db = yield* Db;
         const row = yield* repo.getDocumentParser();
         if (!row) return null;
-        const scans = row.config.scans ?? { mode: "off" as const };
+        const { scans } = row.config;
         const providerRows = yield* providers.listProviders();
         const providerName = new Map(providerRows.map((provider) => [provider.id, provider.name]));
         const visionModels = (yield* providers.listModels({ enabledOnly: true }))

@@ -230,8 +230,7 @@ export class DocumentParser extends Context.Service<
 
       const availability = Effect.fn("DocumentParser.availability")(function* () {
         const row = yield* repo.getDocumentParser();
-        const scans = row?.config.scans ?? { mode: "off" as const };
-        const engine = row ? yield* resolveEngine(scans, row.secret) : null;
+        const engine = row ? yield* resolveEngine(row.config.scans, row.secret) : null;
         return {
           configured: row !== null,
           enabled: row?.enabled ?? false,
@@ -265,7 +264,7 @@ export class DocumentParser extends Context.Service<
         const row = yield* repo.getDocumentParser();
         if (!row || !row.enabled) return yield* fail("document parsing is disabled");
         const limits = input.limits ?? row.config;
-        const scans = row.config.scans ?? { mode: "off" as const };
+        const { scans } = row.config;
         const runOptions = {
           ...(input.owner ? { owner: input.owner } : {}),
           ...(input.background ? { priority: "background" as const } : {}),

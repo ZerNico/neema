@@ -8,13 +8,16 @@ import {
   WebSearchConfig,
 } from "./schema.ts";
 
-const config = { maxResults: 8 };
+const config = { maxResults: 8, researchMaxSearchQueries: 80 };
 const decodeConfig = Schema.decodeUnknownSync(WebSearchConfig);
 const decodeUpdate = Schema.decodeUnknownSync(UpdateWebSearchToolInput);
 
 describe("research search configuration", () => {
-  it("keeps unrelated patches from resetting the budget", () => {
+  it("stores the budget with every row and keeps unrelated patches from resetting it", () => {
     expect(decodeConfig(config)).toEqual(config);
+    expect(() => decodeConfig({ maxResults: 8 })).toThrow(
+      /^Missing key\n  at \["researchMaxSearchQueries"\]$/,
+    );
     expect(decodeUpdate({ enabled: false })).toEqual({ enabled: false });
   });
 

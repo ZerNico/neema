@@ -26,11 +26,9 @@ import { Source, WebSource } from "./source-schema.ts";
 export { Source, WebSource, DocumentSource } from "./source-schema.ts";
 
 export const RESEARCH_SEARCH_BUDGET = { default: 80, min: 12, max: 120 } as const;
-const researchMaxSearchQueries = Schema.optionalKey(
-  Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(RESEARCH_SEARCH_BUDGET.min),
-    Schema.isLessThanOrEqualTo(RESEARCH_SEARCH_BUDGET.max),
-  ),
+const researchMaxSearchQueries = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(RESEARCH_SEARCH_BUDGET.min),
+  Schema.isLessThanOrEqualTo(RESEARCH_SEARCH_BUDGET.max),
 );
 
 /**
@@ -39,7 +37,6 @@ const researchMaxSearchQueries = Schema.optionalKey(
  */
 export const WebSearchConfig = Schema.Struct({
   maxResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(20)),
-  // Older rows omit this and use the shared default; no backfill is needed.
   researchMaxSearchQueries,
 });
 export type WebSearchConfig = typeof WebSearchConfig.Type;
@@ -113,8 +110,7 @@ export const DocumentParserConfig = Schema.Struct({
     Schema.isLessThanOrEqualTo(500_000),
   ),
   maxPages: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(2000)),
-  // Rows from before scans could be read omit this; absent means off.
-  scans: Schema.optionalKey(ScanReading),
+  scans: ScanReading,
 });
 export type DocumentParserConfig = typeof DocumentParserConfig.Type;
 
@@ -455,7 +451,7 @@ export type ToolChunkEnvelope = typeof ToolChunkEnvelope.Type;
 export const UpdateWebSearchToolInput = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   maxResults: Schema.optionalKey(WebSearchConfig.fields.maxResults),
-  researchMaxSearchQueries: WebSearchConfig.fields.researchMaxSearchQueries,
+  researchMaxSearchQueries: Schema.optionalKey(WebSearchConfig.fields.researchMaxSearchQueries),
 });
 export type UpdateWebSearchToolInput = typeof UpdateWebSearchToolInput.Type;
 

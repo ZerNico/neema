@@ -22,7 +22,7 @@ type Row = {
 
 const row = (config: Partial<DocumentParserConfig> = {}, secret: string | null = null): Row => ({
   enabled: true,
-  config: { maxChars: 100_000, maxPages: 100, ...config },
+  config: { maxChars: 100_000, maxPages: 100, scans: { mode: "off" }, ...config },
   secret: secret === null ? null : Redacted.make(secret),
 });
 

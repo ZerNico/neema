@@ -17,6 +17,7 @@ import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
 const searchConfig = {
   maxResults: 5,
+  researchMaxSearchQueries: 80,
 };
 
 const FakeRepo = (readerEnabled: boolean) =>

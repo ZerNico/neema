@@ -26,7 +26,7 @@ import { createUrlAuthority } from "./url-authority.ts";
 import { UrlReaderExecutor } from "./url-reader.ts";
 import { WebSearchExecutor, type WebToolResult } from "./web-search.ts";
 
-const config = { maxResults: 5 };
+const config = { maxResults: 5, researchMaxSearchQueries: 80 };
 
 const FakeRepo = Layer.succeed(
   ToolsRepo,
