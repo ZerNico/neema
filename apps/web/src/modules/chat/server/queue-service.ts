@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { type Localized, localized } from "~/i18n/localized.ts";
+import { localized } from "~/i18n/localized.ts";
 import type { Locale } from "~/paraglide/runtime.js";
 import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
@@ -17,6 +17,7 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { UsageLimitReached } from "~/modules/limits/errors.ts";
 import { ChatRepo, type ResolveError } from "./repo.ts";
 import { StreamEngine, type StartGenerationInput } from "./streaming.ts";
 import type { AttemptOptions } from "./attempt-options.ts";
@@ -47,6 +48,8 @@ export type QueueSubmissionError =
  * stored, so it is worded once, in the owner's language.
  */
 const queueFailure = (error: { readonly _tag: string }, locale: Locale) => {
+  // The limits module words its own reason.
+  if (error instanceof UsageLimitReached) return error.reason(locale);
   switch (error._tag) {
     case "AttachmentUnsupported":
     case "AttachmentNotAvailable":
@@ -55,12 +58,6 @@ const queueFailure = (error: { readonly _tag: string }, locale: Locale) => {
       return m.chat_queue_failure_account({}, { locale });
     case "ModelNotFound":
       return m.chat_queue_failure_model({}, { locale });
-    case "UsageLimitReached": {
-      // The limits module words its own reason, as a string or as Localized.
-      const reason: unknown = "reason" in error ? error.reason : undefined;
-      if (typeof reason === "function") return (reason as Localized)(locale);
-      return typeof reason === "string" ? reason : m.chat_queue_failure_limit({}, { locale });
-    }
     default:
       return m.chat_queue_failure_other({}, { locale });
   }

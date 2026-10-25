@@ -19,11 +19,13 @@ import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { storageQuotasQuery } from "../client/queries.ts";
 import { formatBytes } from "../rules.ts";
+import { m } from "~/paraglide/messages.js";
 import { setEveryoneStorage, setGroupStorage } from "../server/functions.ts";
 
 const GB = 1024 ** 3;
 
-const describe = (bytes: number | null) => (bytes === null ? "No quota" : formatBytes(bytes));
+const describe = (bytes: number | null) =>
+  bytes === null ? m.limits_storage_none() : formatBytes(bytes);
 
 /**
  * What a person may store: everyone's quota, or on a group's page what this
@@ -41,7 +43,7 @@ export function StorageQuotaSection({ groupId }: { groupId: string | null }) {
   const reset = useMutation({
     mutationFn: () => setGroupStorage({ data: { groupId: groupId! } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not change the quota.", error),
+    onError: (error) => toastError(m.limits_storage_error_change(), error),
   });
   if (!data) return null;
   const everyone = data.everyone;
@@ -49,11 +51,11 @@ export function StorageQuotaSection({ groupId }: { groupId: string | null }) {
 
   return (
     <Section
-      title="Storage"
+      title={m.limits_storage_title()}
       description={
         groupId === null
-          ? "What each person but admins may store, unless their group changes it."
-          : "What this group’s members may store."
+          ? m.limits_storage_description_everyone()
+          : m.limits_storage_description_group()
       }
     >
       <ListCard>
@@ -62,13 +64,15 @@ export function StorageQuotaSection({ groupId }: { groupId: string | null }) {
             <span className="text-sm font-medium">{describe(own ? own.bytes : everyone)}</span>
             {groupId !== null ? (
               <span className="text-muted-foreground text-xs">
-                {own ? `Everyone else: ${describe(everyone)}` : "Everyone’s quota"}
+                {own
+                  ? m.limits_storage_everyone_else({ quota: describe(everyone) })
+                  : m.limits_storage_everyone()}
               </span>
             ) : null}
           </div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              {groupId !== null && !own ? "Change for this group" : "Edit"}
+              {groupId !== null && !own ? m.limits_storage_change_group() : m.common_edit()}
             </Button>
             {own ? (
               <PendingButton
@@ -77,7 +81,7 @@ export function StorageQuotaSection({ groupId }: { groupId: string | null }) {
                 pending={reset.isPending}
                 onClick={() => reset.mutate()}
               >
-                Use everyone’s
+                {m.limits_storage_use_everyone()}
               </PendingButton>
             ) : null}
           </div>
@@ -127,16 +131,19 @@ function QuotaDialog({
       await onSaved();
       onOpenChange(false);
     },
-    onError: (failure) => setError(readServerError(failure).reason ?? "Could not save the quota."),
+    onError: (failure) =>
+      setError(readServerError(failure).reason ?? m.limits_storage_error_save()),
   });
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{groupId === null ? "Storage quota" : "Storage for this group"}</DialogTitle>
-          <DialogDescription>
-            Uploads stop once it is full. Files an answer makes are still kept.
-          </DialogDescription>
+          <DialogTitle>
+            {groupId === null
+              ? m.limits_storage_dialog_everyone()
+              : m.limits_storage_dialog_group()}
+          </DialogTitle>
+          <DialogDescription>{m.limits_storage_dialog_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -147,7 +154,7 @@ function QuotaDialog({
           }}
         >
           <Field>
-            <FieldLabel htmlFor={`${fieldId}-size`}>Size in GB</FieldLabel>
+            <FieldLabel htmlFor={`${fieldId}-size`}>{m.limits_storage_size()}</FieldLabel>
             <Input
               id={`${fieldId}-size`}
               type="number"
@@ -160,20 +167,20 @@ function QuotaDialog({
             />
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={unlimited} onCheckedChange={(on) => setUnlimited(Boolean(on))} />
-              {groupId === null ? "No quota" : "No quota for this group"}
+              {groupId === null ? m.limits_storage_none() : m.limits_storage_unlimited_group()}
             </label>
           </Field>
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton
               type="submit"
               pending={save.isPending}
               disabled={!unlimited && !(Number(size) > 0)}
             >
-              Save
+              {m.common_save()}
             </PendingButton>
           </DialogFooter>
         </form>

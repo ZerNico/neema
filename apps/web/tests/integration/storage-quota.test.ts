@@ -6,6 +6,7 @@ import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { GroupRepo } from "~/modules/groups/server/repo.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { Db } from "~/server/db.ts";
+import { english } from "~/i18n/localized.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { engineLayer } from "./engine-harness.ts";
 
@@ -61,6 +62,10 @@ const store = (userId: string, bytes: Uint8Array) =>
 
 const file = (size: number, fill = 1) => new Uint8Array(size).fill(fill);
 
+/** A result as JSON with its reason in English, which JSON alone would drop as a function. */
+const shown = (value: unknown) =>
+  JSON.stringify(value, (_key, part) => (typeof part === "function" ? english(part) : part));
+
 const admitted = (userId: string, files: Uint8Array[]) =>
   quota((service) => service.admit(userId, files).pipe(Effect.result));
 
@@ -82,7 +87,7 @@ describe("storage quotas", () => {
     expect((await admitted(person, [file(400, 2)]))._tag).toBe("Success");
     const refused = await admitted(person, [file(401, 3)]);
     expect(refused._tag).toBe("Failure");
-    expect(JSON.stringify(refused)).toMatch(/Not enough storage/);
+    expect(shown(refused)).toMatch(/Not enough storage/);
     // The same bytes again cost nothing: they are stored once.
     expect((await admitted(person, [file(600)]))._tag).toBe("Success");
     // Two copies of one new file in one upload count once.
@@ -126,14 +131,14 @@ describe("storage quotas", () => {
     const refused = await quota((service) =>
       service.admitFor(owner, editor, [file(200, 5)]).pipe(Effect.result),
     );
-    expect(JSON.stringify(refused)).toMatch(/owner of where this goes is out of storage/);
+    expect(shown(refused)).toMatch(/owner of where this goes is out of storage/);
     // Neither the owner's use nor their quota is told to the writer.
-    expect(JSON.stringify(refused)).not.toMatch(/\d+ (bytes|KB)/);
+    expect(shown(refused)).not.toMatch(/\d+ (bytes|KB)/);
     // The editor's own space is not what pays.
     expect((await admitted(editor, [file(200, 5)]))._tag).toBe("Success");
     // Writing to one's own, it reads as one's own.
     expect(
-      JSON.stringify(
+      shown(
         await quota((service) =>
           service.admitFor(owner, owner, [file(200, 5)]).pipe(Effect.result),
         ),
@@ -146,8 +151,8 @@ describe("storage quotas", () => {
     const person = await makeUser();
     expect((await admitted(person, [file(100_000)]))._tag).toBe("Success");
     for (const bad of [0, -5, 1.5])
-      expect(
-        JSON.stringify(await quota((service) => service.setEveryone(bad).pipe(Effect.result))),
-      ).toMatch(/between zero and 1 PB/);
+      expect(shown(await quota((service) => service.setEveryone(bad).pipe(Effect.result)))).toMatch(
+        /between zero and 1 PB/,
+      );
   });
 });

@@ -3872,6 +3872,238 @@
   "language_automatic_description": "Folgt deinem Browser, gerade {language}",
   "language_error_save": "Die Sprache konnte nicht geändert werden.",
   "language_title": "Sprache",
+  "limits_add": "Limit hinzufügen",
+  "limits_all_models": "Alle Modelle",
+  "limits_amount_answers": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Antwort",
+        "countPlural=*": "{count} Antworten"
+      }
+    }
+  ],
+  "limits_bytes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} Byte",
+        "countPlural=*": "{count} Byte"
+      }
+    }
+  ],
+  "limits_change_group": "Für diese Gruppe ändern",
+  "limits_confirm_remove_action": "Entfernen",
+  "limits_confirm_remove_everyone": "Es gilt dann für niemanden mehr, und die Änderungen der Gruppen daran werden ebenfalls entfernt.",
+  "limits_confirm_remove_group": "Für die Mitglieder gilt es dann nicht mehr.",
+  "limits_confirm_remove_title": "Dieses Limit entfernen?",
+  "limits_confirm_restore_action": "Limit für alle nutzen",
+  "limits_confirm_restore_description": "Für diese Gruppe gilt wieder das Limit, das alle haben.",
+  "limits_confirm_restore_title": "Wieder das Limit für alle verwenden?",
+  "limits_description_everyone": "Sie gelten für alle außer Admins, sofern ihre Gruppe nichts anderes festlegt.",
+  "limits_description_group": "Was diese Gruppe an den Limits für alle ändert, und ihre eigenen Limits.",
+  "limits_dialog_description": "Ist es aufgebraucht, gibt es bis zum nächsten Zeitraum keine Antworten mehr.",
+  "limits_dialog_edit": "Limit bearbeiten",
+  "limits_empty": "Keine Limits.",
+  "limits_error_amount_required": "Limits für alle brauchen einen Wert.",
+  "limits_error_answers_amount": "Gib eine ganze Zahl von Antworten über null an.",
+  "limits_error_cost_amount": "Gib einen Betrag über null an.",
+  "limits_error_duplicate": "Dafür gibt es schon ein Limit. Ändere stattdessen dieses.",
+  "limits_error_group_gone": "Diese Gruppe gibt es nicht mehr.",
+  "limits_error_lift_only_everyone": "„Kein Limit“ kann nur ein Limit für alle aufheben.",
+  "limits_error_model_gone": "Ein ausgewähltes Modell gibt es nicht mehr.",
+  "limits_error_models_required": "Wähle mindestens ein Modell aus.",
+  "limits_error_owner_storage_full": "Der Speicherplatz der Person, der das Ziel gehört, ist voll.",
+  "limits_error_quota_range": "Gib eine Größe zwischen null und 1 PB an.",
+  "limits_error_remove": "Das Limit konnte nicht entfernt werden.",
+  "limits_error_rule_gone": "Dieses Limit gibt es nicht mehr.",
+  "limits_error_save": "Das Limit konnte nicht gespeichert werden.",
+  "limits_error_storage_full": "Nicht genug Speicherplatz: Benötigt werden {needed}, frei sind {free}. Lösche Dateien unter Einstellungen › Speicher, um Platz zu schaffen.",
+  "limits_error_time_zone": "Die Zeitzone konnte nicht geändert werden.",
+  "limits_error_time_zone_unknown": "Diese Zeitzone ist unbekannt.",
+  "limits_everyone": "Limit für alle",
+  "limits_everyone_else": "Alle anderen: {rule}",
+  "limits_everyone_else_sentence": "Alle anderen: {rule}.",
+  "limits_field_amount_answers": "Anzahl der Antworten",
+  "limits_field_amount_cost": "Betrag in USD",
+  "limits_field_metric": "Was gezählt wird",
+  "limits_field_models": "Modelle",
+  "limits_field_period": "Wie oft es neu beginnt",
+  "limits_group_changes_removed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Die Änderung einer Gruppe an diesem Limit wird entfernt.",
+        "countPlural=*": "Die Änderungen von {count} Gruppen an diesem Limit werden entfernt."
+      }
+    }
+  ],
+  "limits_metric_answers": "Antworten",
+  "limits_metric_cost": "Kosten in USD",
+  "limits_mine_description": "Von deinem Admin festgelegt. Sobald eines aufgebraucht ist, gibt es keine Antworten mehr.",
+  "limits_mine_resets_at": "wird um {time} zurückgesetzt",
+  "limits_mine_resets_on": "wird am {day} zurückgesetzt",
+  "limits_mine_title": "Limits",
+  "limits_mine_usage": [
+    {
+      "declarations": [
+        "input period",
+        "input used",
+        "input amount"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "{used} von {amount} heute",
+        "period=week": "{used} von {amount} diese Woche",
+        "period=*": "{used} von {amount} diesen Monat"
+      }
+    }
+  ],
+  "limits_mine_used_up": "Aufgebraucht",
+  "limits_period_day": "Pro Tag",
+  "limits_period_month": "Pro Monat",
+  "limits_period_week": "Pro Woche",
+  "limits_reached": [
+    {
+      "declarations": [
+        "input period",
+        "input amount"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "Du hast das heutige Limit von {amount} erreicht.",
+        "period=week": "Du hast das Limit dieser Woche von {amount} erreicht.",
+        "period=*": "Du hast das Limit dieses Monats von {amount} erreicht."
+      }
+    }
+  ],
+  "limits_reached_models": [
+    {
+      "declarations": [
+        "input period",
+        "input amount",
+        "input models"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "Du hast das heutige Limit von {amount} für {models} erreicht.",
+        "period=week": "Du hast das Limit dieser Woche von {amount} für {models} erreicht.",
+        "period=*": "Du hast das Limit dieses Monats von {amount} für {models} erreicht."
+      }
+    }
+  ],
+  "limits_remove": "Entfernen",
+  "limits_removed_model": "ein entferntes Modell",
+  "limits_resets_midnight": "Es wird um Mitternacht zurückgesetzt (Zeitzone {zone}).",
+  "limits_resets_on": "Es wird am {day} zurückgesetzt.",
+  "limits_rule": [
+    {
+      "declarations": [
+        "input period",
+        "input scope",
+        "input amount",
+        "input models"
+      ],
+      "selectors": [
+        "period",
+        "scope"
+      ],
+      "match": {
+        "period=day, scope=all": "Bis zu {amount} pro Tag",
+        "period=day, scope=models": "Bis zu {amount} pro Tag für {models}",
+        "period=day, scope=*": "Bis zu {amount} pro Tag für entfernte Modelle, begrenzt also nichts",
+        "period=week, scope=all": "Bis zu {amount} pro Woche",
+        "period=week, scope=models": "Bis zu {amount} pro Woche für {models}",
+        "period=week, scope=*": "Bis zu {amount} pro Woche für entfernte Modelle, begrenzt also nichts",
+        "period=month, scope=all": "Bis zu {amount} pro Monat",
+        "period=month, scope=models": "Bis zu {amount} pro Monat für {models}",
+        "period=month, scope=*": "Bis zu {amount} pro Monat für entfernte Modelle, begrenzt also nichts"
+      }
+    }
+  ],
+  "limits_rule_lifted": [
+    {
+      "declarations": [
+        "input metric",
+        "input period",
+        "input scope",
+        "input models"
+      ],
+      "selectors": [
+        "metric",
+        "period",
+        "scope"
+      ],
+      "match": {
+        "metric=cost, period=day, scope=all": "Kein Kostenlimit pro Tag",
+        "metric=cost, period=day, scope=models": "Kein Kostenlimit pro Tag für {models}",
+        "metric=cost, period=day, scope=*": "Kein Kostenlimit pro Tag für entfernte Modelle, begrenzt also nichts",
+        "metric=cost, period=week, scope=all": "Kein Kostenlimit pro Woche",
+        "metric=cost, period=week, scope=models": "Kein Kostenlimit pro Woche für {models}",
+        "metric=cost, period=week, scope=*": "Kein Kostenlimit pro Woche für entfernte Modelle, begrenzt also nichts",
+        "metric=cost, period=month, scope=all": "Kein Kostenlimit pro Monat",
+        "metric=cost, period=month, scope=models": "Kein Kostenlimit pro Monat für {models}",
+        "metric=cost, period=month, scope=*": "Kein Kostenlimit pro Monat für entfernte Modelle, begrenzt also nichts",
+        "metric=answers, period=day, scope=all": "Kein Antwortlimit pro Tag",
+        "metric=answers, period=day, scope=models": "Kein Antwortlimit pro Tag für {models}",
+        "metric=answers, period=day, scope=*": "Kein Antwortlimit pro Tag für entfernte Modelle, begrenzt also nichts",
+        "metric=answers, period=week, scope=all": "Kein Antwortlimit pro Woche",
+        "metric=answers, period=week, scope=models": "Kein Antwortlimit pro Woche für {models}",
+        "metric=answers, period=week, scope=*": "Kein Antwortlimit pro Woche für entfernte Modelle, begrenzt also nichts",
+        "metric=answers, period=month, scope=all": "Kein Antwortlimit pro Monat",
+        "metric=answers, period=month, scope=models": "Kein Antwortlimit pro Monat für {models}",
+        "metric=answers, period=month, scope=*": "Kein Antwortlimit pro Monat für entfernte Modelle, begrenzt also nichts"
+      }
+    }
+  ],
+  "limits_size": "{size} {unit}",
+  "limits_storage_change_group": "Für diese Gruppe ändern",
+  "limits_storage_description_everyone": "Wie viel jede Person außer Admins speichern darf, sofern ihre Gruppe nichts anderes festlegt.",
+  "limits_storage_description_group": "Wie viel die Mitglieder dieser Gruppe speichern dürfen.",
+  "limits_storage_dialog_description": "Ist es voll, sind keine Uploads mehr möglich. Dateien aus Antworten werden weiterhin gespeichert.",
+  "limits_storage_dialog_everyone": "Speicherkontingent",
+  "limits_storage_dialog_group": "Speicher für diese Gruppe",
+  "limits_storage_error_change": "Das Kontingent konnte nicht geändert werden.",
+  "limits_storage_error_save": "Das Kontingent konnte nicht gespeichert werden.",
+  "limits_storage_everyone": "Kontingent für alle",
+  "limits_storage_everyone_else": "Alle anderen: {quota}",
+  "limits_storage_none": "Kein Kontingent",
+  "limits_storage_size": "Größe in GB",
+  "limits_storage_title": "Speicher",
+  "limits_storage_unlimited_group": "Kein Kontingent für diese Gruppe",
+  "limits_storage_use_everyone": "Kontingent für alle nutzen",
+  "limits_this_model": "dieses Modell",
+  "limits_time_zone_empty": "Keine passende Zeitzone",
+  "limits_time_zone_label": "Zeitzone, {zone}",
+  "limits_time_zone_prefix": "Tage, Wochen und Monate richten sich nach",
+  "limits_time_zone_search": "Zeitzonen durchsuchen …",
+  "limits_title": "Nutzungslimits",
+  "limits_unlimited_group": "Kein Limit für diese Gruppe",
+  "limits_use_everyone": "Limit für alle nutzen",
   "mcp_server_access_change": "Kann {areas} ändern",
   "mcp_server_access_change_see": "Kann {changes} ändern und {sees} sehen",
   "mcp_server_access_full": "Voller Zugriff",

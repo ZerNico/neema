@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { effectiveLimits, effectiveQuota, formatBytes, limitKey, type LimitRule } from "./rules.ts";
+import { m } from "~/paraglide/messages.js";
+import {
+  effectiveLimits,
+  effectiveQuota,
+  formatAmount,
+  formatBytes,
+  limitKey,
+  type LimitRule,
+} from "./rules.ts";
 
 const rule = (overrides: Partial<LimitRule> & Pick<LimitRule, "id">): LimitRule => ({
   groupId: null,
@@ -106,5 +114,29 @@ describe("the storage quota", () => {
     expect(formatBytes(1536)).toBe("1.5 KB");
     expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB");
     expect(formatBytes(20 * 1024 ** 2)).toBe("20 MB");
+  });
+
+  it("reads in German with a decimal comma and a space that does not break", () => {
+    expect(formatBytes(1, "de")).toBe("1 Byte");
+    expect(formatBytes(1536, "de")).toBe("1,5\u00a0KB");
+    expect(formatBytes(1, "en")).toBe("1 byte");
+  });
+});
+
+describe("amounts", () => {
+  it("read as currency and counted answers in each language", () => {
+    expect(formatAmount("cost", 10, "en")).toBe("$10.00");
+    expect(formatAmount("cost", 10, "de")).toBe("10,00\u00a0$");
+    expect(formatAmount("answers", 1, "en")).toBe("1 answer");
+    expect(formatAmount("answers", 20, "de")).toBe("20 Antworten");
+  });
+
+  it("say how many groups lose their change, in one sentence per count", () => {
+    expect(m.limits_group_changes_removed({ count: 1 }, { locale: "en" })).toBe(
+      "A group’s change to this limit will be removed.",
+    );
+    expect(m.limits_group_changes_removed({ count: 3 }, { locale: "de" })).toBe(
+      "Die Änderungen von 3 Gruppen an diesem Limit werden entfernt.",
+    );
   });
 });

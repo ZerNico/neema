@@ -50,7 +50,6 @@ import {
   DocumentNotAvailable,
   DocumentRejected,
   documentImagePath,
-  foreignReason,
   IMAGE_REFUSED,
   PushDocumentInput,
   type DocumentImageInput,
@@ -660,7 +659,7 @@ export class DocumentService extends Context.Service<
             .admitFor(ownerId, userId, images)
             .pipe(
               Effect.catchTag("StorageFull", (full) =>
-                Effect.fail(new DocumentRejected({ reason: foreignReason(full.reason) })),
+                Effect.fail(new DocumentRejected({ reason: full.reason })),
               ),
             );
           for (const attachmentId of attachmentIds) {

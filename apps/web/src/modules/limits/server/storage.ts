@@ -12,6 +12,8 @@ import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { Db } from "~/server/db.ts";
 import { LimitRejected, StorageFull } from "../errors.ts";
 import { effectiveQuota, formatBytes } from "../rules.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** What a person stores and may store; a null quota is none. */
 export interface StorageStanding {
@@ -31,7 +33,7 @@ const MAX_QUOTA = 1024 ** 5;
 const checkBytes = (bytes: number | null) =>
   bytes === null || (Number.isInteger(bytes) && bytes > 0 && bytes <= MAX_QUOTA)
     ? Effect.void
-    : Effect.fail(new LimitRejected({ reason: "Use a size between zero and 1 PB." }));
+    : Effect.fail(new LimitRejected({ reason: localized(m.limits_error_quota_range) }));
 
 /**
  * Storage quotas for everyone and for groups, combined like usage limits.
@@ -131,8 +133,15 @@ export class StorageQuota extends Context.Service<
         return yield* new StorageFull({
           reason:
             charged === "own"
-              ? `Not enough storage: this needs ${formatBytes(needed)} and ${formatBytes(Math.max(0, quota - stored))} is free. Delete files in Settings › Storage to make room.`
-              : "The owner of where this goes is out of storage.",
+              ? (locale) =>
+                  m.limits_error_storage_full(
+                    {
+                      needed: formatBytes(needed, locale),
+                      free: formatBytes(Math.max(0, quota - stored), locale),
+                    },
+                    { locale },
+                  )
+              : localized(m.limits_error_owner_storage_full),
         });
       });
 
@@ -180,7 +189,8 @@ export class StorageQuota extends Context.Service<
             .from(groups)
             .where(eq(groups.id, groupId))
             .pipe(Effect.orDie);
-          if (!group) return yield* new LimitRejected({ reason: "That group is gone." });
+          if (!group)
+            return yield* new LimitRejected({ reason: localized(m.limits_error_group_gone) });
           yield* db
             .insert(groupStorageQuotas)
             .values({ groupId, bytes })

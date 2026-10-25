@@ -41,21 +41,21 @@ import { usageLimitRulesQuery } from "../client/queries.ts";
 import {
   formatAmount,
   limitKey,
-  PERIOD_WORDS,
   type LimitMetric,
   type LimitPeriod,
   type LimitRule,
 } from "../rules.ts";
 import { deleteUsageLimit, saveUsageLimit, setLimitTimeZone } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
-const METRICS: ReadonlyArray<{ value: LimitMetric; label: string }> = [
-  { value: "cost", label: "Cost in USD" },
-  { value: "answers", label: "Answers" },
+const metrics = (): ReadonlyArray<{ value: LimitMetric; label: string }> => [
+  { value: "cost", label: m.limits_metric_cost() },
+  { value: "answers", label: m.limits_metric_answers() },
 ];
-const PERIODS: ReadonlyArray<{ value: LimitPeriod; label: string }> = [
-  { value: "day", label: "Per day" },
-  { value: "week", label: "Per week" },
-  { value: "month", label: "Per month" },
+const periods = (): ReadonlyArray<{ value: LimitPeriod; label: string }> => [
+  { value: "day", label: m.limits_period_day() },
+  { value: "week", label: m.limits_period_week() },
+  { value: "month", label: m.limits_period_month() },
 ];
 
 // UTC first: it is the default, and the list browsers give leaves it out.
@@ -71,15 +71,16 @@ type ModelName = (id: string) => string;
 
 /** "$10.00 per month", "20 answers per day with Opus", "No limit per day". */
 const describe = (rule: LimitRule, name: ModelName) => {
-  const amount =
-    rule.amount === null ? "No limit" : `Up to ${formatAmount(rule.metric, rule.amount)}`;
-  const models = rule.modelIds
-    ? rule.modelIds.length
-      ? ` with ${rule.modelIds.map(name).join(", ")}`
-      : " with removed models, so it limits nothing"
-    : "";
-  const what = rule.amount === null ? ` on ${rule.metric === "cost" ? "cost" : "answers"}` : "";
-  return `${amount}${what} per ${PERIOD_WORDS[rule.period].noun}${models}`;
+  const scope = rule.modelIds ? (rule.modelIds.length ? "models" : "none") : "all";
+  const models = rule.modelIds?.map(name).join(", ") ?? "";
+  return rule.amount === null
+    ? m.limits_rule_lifted({ metric: rule.metric, period: rule.period, scope, models })
+    : m.limits_rule({
+        period: rule.period,
+        scope,
+        amount: formatAmount(rule.metric, rule.amount),
+        models,
+      });
 };
 
 /**
@@ -91,7 +92,7 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
   const { data: allModels = [] } = useQuery(modelsQuery);
   const chatModels = allModels.filter((model) => model.type === "chat");
   const name: ModelName = (id) =>
-    chatModels.find((model) => model.id === id)?.displayName ?? "a removed model";
+    chatModels.find((model) => model.id === id)?.displayName ?? m.limits_removed_model();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [editing, setEditing] = useState<{
@@ -107,7 +108,7 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
   const remove = useMutation({
     mutationFn: (id: string) => deleteUsageLimit({ data: { id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not remove the limit.", error),
+    onError: (error) => toastError(m.limits_error_remove(), error),
   });
 
   const rules = data?.rules ?? [];
@@ -121,13 +122,15 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
   const removeRule = async (rule: LimitRule, inherited: boolean) => {
     if (
       await confirm({
-        title: inherited ? "Use everyone’s limit again?" : "Remove this limit?",
+        title: inherited ? m.limits_confirm_restore_title() : m.limits_confirm_remove_title(),
         description: inherited
-          ? "This group goes back to the limit everyone has."
+          ? m.limits_confirm_restore_description()
           : groupId === null
-            ? "Nobody is held to it anymore, and groups’ changes to it go too."
-            : "Members are no longer held to it.",
-        confirmLabel: inherited ? "Use everyone’s" : "Remove",
+            ? m.limits_confirm_remove_everyone()
+            : m.limits_confirm_remove_group(),
+        confirmLabel: inherited
+          ? m.limits_confirm_restore_action()
+          : m.limits_confirm_remove_action(),
       })
     )
       remove.mutate(rule.id);
@@ -135,11 +138,9 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
 
   return (
     <Section
-      title="Usage limits"
+      title={m.limits_title()}
       description={
-        groupId === null
-          ? "Everyone but admins is held to these, unless their group changes them."
-          : "What this group changes of everyone’s limits, and its own."
+        groupId === null ? m.limits_description_everyone() : m.limits_description_group()
       }
       actions={
         <Button
@@ -148,7 +149,7 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
           onClick={() => setEditing({ rule: null, inherited: null })}
         >
           <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-          Add limit
+          {m.limits_add()}
         </Button>
       }
     >
@@ -166,7 +167,9 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
                   <span className="text-sm font-medium">{describe(override ?? rule, name)}</span>
                   {inherited ? (
                     <span className="text-muted-foreground text-xs">
-                      {override ? `Everyone else: ${describe(rule, name)}` : "Everyone’s limit"}
+                      {override
+                        ? m.limits_everyone_else({ rule: describe(rule, name) })
+                        : m.limits_everyone()}
                     </span>
                   ) : null}
                 </div>
@@ -178,7 +181,7 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
                       variant="outline"
                       onClick={() => setEditing({ rule: null, inherited: rule })}
                     >
-                      Change for this group
+                      {m.limits_change_group()}
                     </Button>
                   ) : (
                     <>
@@ -189,14 +192,14 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
                           setEditing({ rule: override ?? rule, inherited: inherited ? rule : null })
                         }
                       >
-                        Edit
+                        {m.common_edit()}
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => void removeRule(override ?? rule, inherited)}
                       >
-                        {inherited ? "Use everyone’s" : "Remove"}
+                        {inherited ? m.limits_use_everyone() : m.limits_remove()}
                       </Button>
                     </>
                   )}
@@ -206,7 +209,7 @@ export function LimitsSection({ groupId }: { groupId: string | null }) {
           })}
         </ListCard>
       ) : (
-        <p className="text-muted-foreground text-sm">No limits.</p>
+        <p className="text-muted-foreground text-sm">{m.limits_empty()}</p>
       )}
       {editing ? (
         <LimitDialog
@@ -235,11 +238,11 @@ function TimeZoneRow({ timeZone, onSaved }: { timeZone: string; onSaved: () => P
   const save = useMutation({
     mutationFn: (zone: string) => setLimitTimeZone({ data: { timeZone: zone } }),
     onSuccess: onSaved,
-    onError: (error) => toastError("Could not change the time zone.", error),
+    onError: (error) => toastError(m.limits_error_time_zone(), error),
   });
   return (
     <div className="text-muted-foreground flex flex-wrap items-center gap-1 text-sm">
-      Days, weeks and months begin in
+      {m.limits_time_zone_prefix()}
       <Combobox
         items={[...TIMEZONES]}
         value={timeZone}
@@ -248,15 +251,15 @@ function TimeZoneRow({ timeZone, onSaved }: { timeZone: string; onSaved: () => P
         }}
       >
         <ComboboxTrigger
-          aria-label={`Time zone, ${timeZone}`}
+          aria-label={m.limits_time_zone_label({ zone: timeZone })}
           render={<Button variant="ghost" size="xs" />}
           disabled={save.isPending}
         >
           {timeZone}
         </ComboboxTrigger>
         <ComboboxContent align="start" className="w-72">
-          <ComboboxInput placeholder="Search time zones…" showTrigger={false} />
-          <ComboboxEmpty>No matching time zone</ComboboxEmpty>
+          <ComboboxInput placeholder={m.limits_time_zone_search()} showTrigger={false} />
+          <ComboboxEmpty>{m.limits_time_zone_empty()}</ComboboxEmpty>
           <ComboboxList>
             {(zone: string) => (
               <ComboboxItem key={zone} value={zone}>
@@ -323,7 +326,7 @@ function LimitDialog({
       await onSaved();
       onOpenChange(false);
     },
-    onError: (failure) => setError(readServerError(failure).reason ?? "Could not save the limit."),
+    onError: (failure) => setError(readServerError(failure).reason ?? m.limits_error_save()),
   });
 
   return (
@@ -331,12 +334,19 @@ function LimitDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {fixed ? "Change for this group" : rule ? "Edit limit" : "Add limit"}
+            {fixed ? m.limits_change_group() : rule ? m.limits_dialog_edit() : m.limits_add()}
           </DialogTitle>
           <DialogDescription>
             {fixed
-              ? `Everyone else: ${describe(inherited, (id) => models.find((m) => m.id === id)?.displayName ?? "a removed model")}.`
-              : "Answers stop once it is used up, until the period starts again."}
+              ? m.limits_everyone_else_sentence({
+                  rule: describe(
+                    inherited,
+                    (id) =>
+                      models.find((model) => model.id === id)?.displayName ??
+                      m.limits_removed_model(),
+                  ),
+                })
+              : m.limits_dialog_description()}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -351,17 +361,17 @@ function LimitDialog({
             {fixed ? null : (
               <>
                 <Field>
-                  <FieldLabel htmlFor={`${fieldId}-metric`}>What it counts</FieldLabel>
+                  <FieldLabel htmlFor={`${fieldId}-metric`}>{m.limits_field_metric()}</FieldLabel>
                   <Select
                     value={metric}
-                    items={METRICS}
+                    items={metrics()}
                     onValueChange={(value) => setMetric(value as LimitMetric)}
                   >
                     <SelectTrigger id={`${fieldId}-metric`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {METRICS.map((option) => (
+                      {metrics().map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -370,17 +380,17 @@ function LimitDialog({
                   </Select>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${fieldId}-period`}>How often it starts again</FieldLabel>
+                  <FieldLabel htmlFor={`${fieldId}-period`}>{m.limits_field_period()}</FieldLabel>
                   <Select
                     value={period}
-                    items={PERIODS}
+                    items={periods()}
                     onValueChange={(value) => setPeriod(value as LimitPeriod)}
                   >
                     <SelectTrigger id={`${fieldId}-period`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {PERIODS.map((option) => (
+                      {periods().map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -389,13 +399,13 @@ function LimitDialog({
                   </Select>
                 </Field>
                 <Field>
-                  <FieldLabel>Models</FieldLabel>
+                  <FieldLabel>{m.limits_field_models()}</FieldLabel>
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox
                       checked={chosen === null}
                       onCheckedChange={(all) => setChosen(all ? null : [])}
                     />
-                    All models
+                    {m.limits_all_models()}
                   </label>
                   {chosen !== null ? (
                     <div className="flex max-h-48 flex-col gap-2 overflow-y-auto pl-6">
@@ -419,7 +429,7 @@ function LimitDialog({
             )}
             <Field>
               <FieldLabel htmlFor={`${fieldId}-amount`}>
-                {metric === "cost" ? "Amount in USD" : "Number of answers"}
+                {metric === "cost" ? m.limits_field_amount_cost() : m.limits_field_amount_answers()}
               </FieldLabel>
               <Input
                 id={`${fieldId}-amount`}
@@ -437,28 +447,27 @@ function LimitDialog({
                     checked={unlimited}
                     onCheckedChange={(on) => setUnlimited(Boolean(on))}
                   />
-                  No limit for this group
+                  {m.limits_unlimited_group()}
                 </label>
               ) : null}
             </Field>
           </FieldGroup>
           {groupChanges > 0 && rule && (metric !== rule.metric || period !== rule.period) ? (
             <p className="text-muted-foreground text-sm">
-              {groupChanges === 1 ? "A group’s change" : `${groupChanges} groups’ changes`} to this
-              limit will be removed.
+              {m.limits_group_changes_removed({ count: groupChanges })}
             </p>
           ) : null}
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton
               type="submit"
               pending={save.isPending}
               disabled={!unlimited && !(Number(amount) > 0)}
             >
-              Save
+              {m.common_save()}
             </PendingButton>
           </DialogFooter>
         </form>

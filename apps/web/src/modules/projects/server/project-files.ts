@@ -1,4 +1,4 @@
-import { localized, verbatim } from "~/i18n/localized.ts";
+import { localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
@@ -283,7 +283,7 @@ export class ProjectFileService extends Context.Service<
             Effect.catchTag("StorageFull", (full) =>
               Effect.fail(
                 new ProjectRejected({
-                  reason: typeof full.reason === "string" ? verbatim(full.reason) : full.reason,
+                  reason: full.reason,
                 }),
               ),
             ),

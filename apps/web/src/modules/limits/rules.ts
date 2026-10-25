@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
+
 export const LIMIT_METRICS = ["cost", "answers"] as const;
 export type LimitMetric = (typeof LIMIT_METRICS)[number];
 
@@ -90,15 +93,11 @@ export const effectiveLimits = (
 export const coversModel = (limit: Pick<EffectiveLimit, "modelIds">, modelId: string) =>
   limit.modelIds === null || limit.modelIds.includes(modelId);
 
-export const PERIOD_WORDS: Record<LimitPeriod, { noun: string; current: string; whose: string }> = {
-  day: { noun: "day", current: "today", whose: "today’s" },
-  week: { noun: "week", current: "this week", whose: "this week’s" },
-  month: { noun: "month", current: "this month", whose: "this month’s" },
-};
-
-/** "$10.00" or "20 answers". */
-export const formatAmount = (metric: LimitMetric, amount: number) =>
-  metric === "cost" ? `$${amount.toFixed(2)}` : `${amount} ${amount === 1 ? "answer" : "answers"}`;
+/** "$10.00" or "20 answers", in the reader's locale unless the caller names one. */
+export const formatAmount = (metric: LimitMetric, amount: number, locale: Locale = getLocale()) =>
+  metric === "cost"
+    ? new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(amount)
+    : m.limits_amount_answers({ count: amount }, { locale });
 
 /**
  * The bytes a person may store: everyone's quota, unless groups set their own, when the most
@@ -115,17 +114,21 @@ export const effectiveQuota = (
     : everyone;
 
 /** "1.5 GB", "300 MB", in the binary units file managers use. */
-export const formatBytes = (bytes: number) => {
-  const units = ["bytes", "KB", "MB", "GB", "TB"];
+export const formatBytes = (bytes: number, locale: Locale = getLocale()) => {
+  const units = ["bytes", "KB", "MB", "GB", "TB"] as const;
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit++;
   }
-  return unit === 0
-    ? `${value} bytes`
-    : `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+  if (unit === 0) return m.limits_bytes({ count: value }, { locale });
+  const digits = value >= 10 ? 0 : 1;
+  const size = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+  return m.limits_size({ size, unit: units[unit]! }, { locale });
 };
 
 /** The largest files Settings › Storage lists; past it the list says it is cut. */

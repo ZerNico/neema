@@ -3854,6 +3854,238 @@
   "language_automatic_description": "Follows your browser, now {language}",
   "language_error_save": "Could not change the language.",
   "language_title": "Language",
+  "limits_add": "Add limit",
+  "limits_all_models": "All models",
+  "limits_amount_answers": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} answer",
+        "countPlural=*": "{count} answers"
+      }
+    }
+  ],
+  "limits_bytes": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} byte",
+        "countPlural=*": "{count} bytes"
+      }
+    }
+  ],
+  "limits_change_group": "Change for this group",
+  "limits_confirm_remove_action": "Remove",
+  "limits_confirm_remove_everyone": "Nobody is held to it anymore, and groups’ changes to it go too.",
+  "limits_confirm_remove_group": "Members are no longer held to it.",
+  "limits_confirm_remove_title": "Remove this limit?",
+  "limits_confirm_restore_action": "Use everyone’s",
+  "limits_confirm_restore_description": "This group goes back to the limit everyone has.",
+  "limits_confirm_restore_title": "Use everyone’s limit again?",
+  "limits_description_everyone": "Everyone but admins is held to these, unless their group changes them.",
+  "limits_description_group": "What this group changes of everyone’s limits, and its own.",
+  "limits_dialog_description": "Answers stop once it is used up, until the period starts again.",
+  "limits_dialog_edit": "Edit limit",
+  "limits_empty": "No limits.",
+  "limits_error_amount_required": "Everyone’s limits need an amount.",
+  "limits_error_answers_amount": "Use a whole number of answers above zero.",
+  "limits_error_cost_amount": "Use an amount above zero.",
+  "limits_error_duplicate": "There is already a limit for this. Change that one instead.",
+  "limits_error_group_gone": "That group is gone.",
+  "limits_error_lift_only_everyone": "No limit only lifts one of everyone’s limits.",
+  "limits_error_model_gone": "A chosen model is gone.",
+  "limits_error_models_required": "Choose at least one model.",
+  "limits_error_owner_storage_full": "The owner of where this goes is out of storage.",
+  "limits_error_quota_range": "Use a size between zero and 1 PB.",
+  "limits_error_remove": "Could not remove the limit.",
+  "limits_error_rule_gone": "That limit is gone.",
+  "limits_error_save": "Could not save the limit.",
+  "limits_error_storage_full": "Not enough storage: this needs {needed} and {free} is free. Delete files in Settings › Storage to make room.",
+  "limits_error_time_zone": "Could not change the time zone.",
+  "limits_error_time_zone_unknown": "That time zone is unknown.",
+  "limits_everyone": "Everyone’s limit",
+  "limits_everyone_else": "Everyone else: {rule}",
+  "limits_everyone_else_sentence": "Everyone else: {rule}.",
+  "limits_field_amount_answers": "Number of answers",
+  "limits_field_amount_cost": "Amount in USD",
+  "limits_field_metric": "What it counts",
+  "limits_field_models": "Models",
+  "limits_field_period": "How often it starts again",
+  "limits_group_changes_removed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "A group’s change to this limit will be removed.",
+        "countPlural=*": "{count} groups’ changes to this limit will be removed."
+      }
+    }
+  ],
+  "limits_metric_answers": "Answers",
+  "limits_metric_cost": "Cost in USD",
+  "limits_mine_description": "Set by your admin. Answers stop once one is used up.",
+  "limits_mine_resets_at": "resets at {time}",
+  "limits_mine_resets_on": "resets {day}",
+  "limits_mine_title": "Limits",
+  "limits_mine_usage": [
+    {
+      "declarations": [
+        "input period",
+        "input used",
+        "input amount"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "{used} of {amount} today",
+        "period=week": "{used} of {amount} this week",
+        "period=*": "{used} of {amount} this month"
+      }
+    }
+  ],
+  "limits_mine_used_up": "Used up",
+  "limits_period_day": "Per day",
+  "limits_period_month": "Per month",
+  "limits_period_week": "Per week",
+  "limits_reached": [
+    {
+      "declarations": [
+        "input period",
+        "input amount"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "You’ve reached today’s limit of {amount}.",
+        "period=week": "You’ve reached this week’s limit of {amount}.",
+        "period=*": "You’ve reached this month’s limit of {amount}."
+      }
+    }
+  ],
+  "limits_reached_models": [
+    {
+      "declarations": [
+        "input period",
+        "input amount",
+        "input models"
+      ],
+      "selectors": [
+        "period"
+      ],
+      "match": {
+        "period=day": "You’ve reached today’s limit of {amount} with {models}.",
+        "period=week": "You’ve reached this week’s limit of {amount} with {models}.",
+        "period=*": "You’ve reached this month’s limit of {amount} with {models}."
+      }
+    }
+  ],
+  "limits_remove": "Remove",
+  "limits_removed_model": "a removed model",
+  "limits_resets_midnight": "It resets at midnight, {zone} time.",
+  "limits_resets_on": "It resets on {day}.",
+  "limits_rule": [
+    {
+      "declarations": [
+        "input period",
+        "input scope",
+        "input amount",
+        "input models"
+      ],
+      "selectors": [
+        "period",
+        "scope"
+      ],
+      "match": {
+        "period=day, scope=all": "Up to {amount} per day",
+        "period=day, scope=models": "Up to {amount} per day with {models}",
+        "period=day, scope=*": "Up to {amount} per day with removed models, so it limits nothing",
+        "period=week, scope=all": "Up to {amount} per week",
+        "period=week, scope=models": "Up to {amount} per week with {models}",
+        "period=week, scope=*": "Up to {amount} per week with removed models, so it limits nothing",
+        "period=month, scope=all": "Up to {amount} per month",
+        "period=month, scope=models": "Up to {amount} per month with {models}",
+        "period=month, scope=*": "Up to {amount} per month with removed models, so it limits nothing"
+      }
+    }
+  ],
+  "limits_rule_lifted": [
+    {
+      "declarations": [
+        "input metric",
+        "input period",
+        "input scope",
+        "input models"
+      ],
+      "selectors": [
+        "metric",
+        "period",
+        "scope"
+      ],
+      "match": {
+        "metric=cost, period=day, scope=all": "No limit on cost per day",
+        "metric=cost, period=day, scope=models": "No limit on cost per day with {models}",
+        "metric=cost, period=day, scope=*": "No limit on cost per day with removed models, so it limits nothing",
+        "metric=cost, period=week, scope=all": "No limit on cost per week",
+        "metric=cost, period=week, scope=models": "No limit on cost per week with {models}",
+        "metric=cost, period=week, scope=*": "No limit on cost per week with removed models, so it limits nothing",
+        "metric=cost, period=month, scope=all": "No limit on cost per month",
+        "metric=cost, period=month, scope=models": "No limit on cost per month with {models}",
+        "metric=cost, period=month, scope=*": "No limit on cost per month with removed models, so it limits nothing",
+        "metric=answers, period=day, scope=all": "No limit on answers per day",
+        "metric=answers, period=day, scope=models": "No limit on answers per day with {models}",
+        "metric=answers, period=day, scope=*": "No limit on answers per day with removed models, so it limits nothing",
+        "metric=answers, period=week, scope=all": "No limit on answers per week",
+        "metric=answers, period=week, scope=models": "No limit on answers per week with {models}",
+        "metric=answers, period=week, scope=*": "No limit on answers per week with removed models, so it limits nothing",
+        "metric=answers, period=month, scope=all": "No limit on answers per month",
+        "metric=answers, period=month, scope=models": "No limit on answers per month with {models}",
+        "metric=answers, period=month, scope=*": "No limit on answers per month with removed models, so it limits nothing"
+      }
+    }
+  ],
+  "limits_size": "{size} {unit}",
+  "limits_storage_change_group": "Change for this group",
+  "limits_storage_description_everyone": "What each person but admins may store, unless their group changes it.",
+  "limits_storage_description_group": "What this group’s members may store.",
+  "limits_storage_dialog_description": "Uploads stop once it is full. Files an answer makes are still kept.",
+  "limits_storage_dialog_everyone": "Storage quota",
+  "limits_storage_dialog_group": "Storage for this group",
+  "limits_storage_error_change": "Could not change the quota.",
+  "limits_storage_error_save": "Could not save the quota.",
+  "limits_storage_everyone": "Everyone’s quota",
+  "limits_storage_everyone_else": "Everyone else: {quota}",
+  "limits_storage_none": "No quota",
+  "limits_storage_size": "Size in GB",
+  "limits_storage_title": "Storage",
+  "limits_storage_unlimited_group": "No quota for this group",
+  "limits_storage_use_everyone": "Use everyone’s",
+  "limits_this_model": "this model",
+  "limits_time_zone_empty": "No matching time zone",
+  "limits_time_zone_label": "Time zone, {zone}",
+  "limits_time_zone_prefix": "Days, weeks and months begin in",
+  "limits_time_zone_search": "Search time zones…",
+  "limits_title": "Usage limits",
+  "limits_unlimited_group": "No limit for this group",
+  "limits_use_everyone": "Use everyone’s",
   "mcp_server_access_change": "Can change {areas}",
   "mcp_server_access_change_see": "Can change {changes}, can see {sees}",
   "mcp_server_access_full": "Full access",

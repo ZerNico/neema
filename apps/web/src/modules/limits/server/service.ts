@@ -13,13 +13,15 @@ import {
 } from "~/db/schema/index.ts";
 import { isValidTimezone } from "~/modules/schedules/server/cron.ts";
 import { Db, type DbTx } from "~/server/db.ts";
+import { localized, type Localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import type { Locale } from "~/paraglide/runtime.js";
 import { LimitRejected, UsageLimitReached } from "../errors.ts";
 import {
   coversModel,
   effectiveLimits,
   formatAmount,
   limitKey,
-  PERIOD_WORDS,
   type EffectiveLimit,
   type LimitMetric,
   type LimitPeriod,
@@ -48,31 +50,44 @@ const periodBounds = (period: LimitPeriod, timeZone: string) => {
   };
 };
 
-/** "today", "this week": how the limit's period reads in a sentence. */
-const resetWords = (period: LimitPeriod, resetsAt: Date, timeZone: string) => {
-  if (period === "day") return `It resets at midnight, ${timeZone} time.`;
-  const day = new Intl.DateTimeFormat("en-GB", {
+/** When the limit opens again, as its own sentence. */
+const resetWords = (period: LimitPeriod, resetsAt: Date, timeZone: string, locale: Locale) => {
+  if (period === "day") return m.limits_resets_midnight({ zone: timeZone }, { locale });
+  // English reads "Monday 3 March" rather than the US order.
+  const day = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : locale, {
     timeZone,
     weekday: period === "week" ? "long" : undefined,
     day: "numeric",
     month: "long",
   }).format(resetsAt);
-  return `It resets on ${day}.`;
+  return m.limits_resets_on({ day }, { locale });
 };
 
 /** Why an answer was refused, naming the limit and when it opens again. */
-const reachedReason = (
-  limit: EffectiveLimit,
-  names: ReadonlyMap<string, string>,
-  resetsAt: Date,
-  zone: string,
-) => {
-  const scope =
-    limit.modelIds === null
-      ? ""
-      : ` with ${limit.modelIds.map((id) => names.get(id) ?? "this model").join(" and ")}`;
-  return `You’ve reached ${PERIOD_WORDS[limit.period].whose} limit of ${formatAmount(limit.metric, limit.amount)}${scope}. ${resetWords(limit.period, resetsAt, zone)}`;
-};
+const reachedReason =
+  (
+    limit: EffectiveLimit,
+    names: ReadonlyMap<string, string>,
+    resetsAt: Date,
+    zone: string,
+  ): Localized =>
+  (locale) => {
+    const amount = formatAmount(limit.metric, limit.amount, locale);
+    const reached =
+      limit.modelIds === null
+        ? m.limits_reached({ period: limit.period, amount }, { locale })
+        : m.limits_reached_models(
+            {
+              period: limit.period,
+              amount,
+              models: new Intl.ListFormat(locale, { type: "conjunction" }).format(
+                limit.modelIds.map((id) => names.get(id) ?? m.limits_this_model({}, { locale })),
+              ),
+            },
+            { locale },
+          );
+    return `${reached} ${resetWords(limit.period, resetsAt, zone, locale)}`;
+  };
 
 /**
  * Usage limits for everyone and for groups, held at the start of every
@@ -321,7 +336,7 @@ export class UsageLimits extends Context.Service<
       const saveRule = Effect.fn("UsageLimits.saveRule")(function* (input: SaveLimitInput) {
         const amount = input.amount;
         if (amount === null && input.groupId === null)
-          return yield* new LimitRejected({ reason: "Everyone’s limits need an amount." });
+          return yield* new LimitRejected({ reason: localized(m.limits_error_amount_required) });
         if (
           amount !== null &&
           (!Number.isFinite(amount) ||
@@ -330,14 +345,15 @@ export class UsageLimits extends Context.Service<
             (input.metric === "answers" && !Number.isInteger(amount)))
         )
           return yield* new LimitRejected({
-            reason:
+            reason: localized(
               input.metric === "answers"
-                ? "Use a whole number of answers above zero."
-                : "Use an amount above zero.",
+                ? m.limits_error_answers_amount
+                : m.limits_error_cost_amount,
+            ),
           });
         const modelIds = input.modelIds === null ? null : [...new Set(input.modelIds)];
         if (modelIds !== null && modelIds.length === 0)
-          return yield* new LimitRejected({ reason: "Choose at least one model." });
+          return yield* new LimitRejected({ reason: localized(m.limits_error_models_required) });
         return yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
@@ -349,12 +365,13 @@ export class UsageLimits extends Context.Service<
                   .where(eq(groups.id, input.groupId))
                   .for("update")
                   .pipe(Effect.orDie);
-                if (!group) return yield* new LimitRejected({ reason: "That group is gone." });
+                if (!group)
+                  return yield* new LimitRejected({ reason: localized(m.limits_error_group_gone) });
               }
               if (modelIds !== null) {
                 const known = yield* modelNames(modelIds, tx);
                 if (known.size !== modelIds.length)
-                  return yield* new LimitRejected({ reason: "A chosen model is gone." });
+                  return yield* new LimitRejected({ reason: localized(m.limits_error_model_gone) });
               }
               const scope = yield* loadRules(
                 input.groupId === null
@@ -370,11 +387,11 @@ export class UsageLimits extends Context.Service<
                 )
               )
                 return yield* new LimitRejected({
-                  reason: "No limit only lifts one of everyone’s limits.",
+                  reason: localized(m.limits_error_lift_only_everyone),
                 });
               if (scope.some((rule) => rule.id !== input.id && limitKey(rule) === key))
                 return yield* new LimitRejected({
-                  reason: "There is already a limit for this. Change that one instead.",
+                  reason: localized(m.limits_error_duplicate),
                 });
               const id = input.id ?? uuidv7();
               const previous = input.id ? scope.find((rule) => rule.id === input.id) : undefined;
@@ -398,7 +415,7 @@ export class UsageLimits extends Context.Service<
                   .returning({ id: usageLimits.id })
                   .pipe(Effect.orDie);
                 if (!updated.length)
-                  return yield* new LimitRejected({ reason: "That limit is gone." });
+                  return yield* new LimitRejected({ reason: localized(m.limits_error_rule_gone) });
                 yield* tx
                   .delete(usageLimitModels)
                   .where(eq(usageLimitModels.limitId, id))
@@ -495,7 +512,10 @@ export class UsageLimits extends Context.Service<
                 Effect.as(true),
                 Effect.catch(() => Effect.succeed(false)),
               ));
-          if (!known) return yield* new LimitRejected({ reason: "That time zone is unknown." });
+          if (!known)
+            return yield* new LimitRejected({
+              reason: localized(m.limits_error_time_zone_unknown),
+            });
           yield* db
             .insert(limitSettings)
             .values({ id: 1, timeZone: zone })

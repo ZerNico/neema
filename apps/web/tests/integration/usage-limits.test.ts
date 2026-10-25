@@ -11,6 +11,7 @@ import { UsageLimits } from "~/modules/limits/server/service.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { Db } from "~/server/db.ts";
+import { english } from "~/i18n/localized.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { engineLayer } from "./engine-harness.ts";
 
@@ -134,6 +135,10 @@ const spend = (
 const limits = <A, E>(f: (service: UsageLimits["Service"]) => Effect.Effect<A, E>) =>
   run(Effect.flatMap(UsageLimits, f));
 
+/** A result as JSON with its reason in English, which JSON alone would drop as a function. */
+const shown = (value: unknown) =>
+  JSON.stringify(value, (_key, part) => (typeof part === "function" ? english(part) : part));
+
 const checked = (userId: string, modelId: string) =>
   limits((service) => service.check(userId, modelId).pipe(Effect.result));
 
@@ -182,7 +187,7 @@ describe("usage limits", () => {
     await spend(person, model.id, { cost: 4, kind: "title" });
     const refused = await checked(person, model.id);
     expect(refused._tag).toBe("Failure");
-    expect(JSON.stringify(refused)).toMatch(/this month’s limit of \$10\.00/);
+    expect(shown(refused)).toMatch(/this month’s limit of \$10\.00/);
     // Nobody else is touched, and admins are never limited.
     expect((await checked(await makeUser(), model.id))._tag).toBe("Success");
     const admin = await makeUser("admin");
@@ -228,7 +233,7 @@ describe("usage limits", () => {
     expect((await checked(person, opus.id))._tag).toBe("Success");
     await spend(person, opus.id);
     const refused = await checked(person, opus.id);
-    expect(JSON.stringify(refused)).toMatch(/today’s limit of 2 answers with Opus/);
+    expect(shown(refused)).toMatch(/today’s limit of 2 answers with Opus/);
     expect((await checked(person, other.id))._tag).toBe("Success");
     const standing = await limits((service) => service.standing(person));
     expect(standing).toEqual([
@@ -261,13 +266,11 @@ describe("usage limits", () => {
     expect(local(day!.resetsAt)).toMatch(/00:00$/);
     expect(local(week!.resetsAt)).toBe("Monday 00:00");
     expect(
-      JSON.stringify(
-        await limits((service) => service.setTimeZone("Mars/Olympus").pipe(Effect.result)),
-      ),
+      shown(await limits((service) => service.setTimeZone("Mars/Olympus").pipe(Effect.result))),
     ).toMatch(/unknown/);
     // An offset Intl takes reads the other way round in Postgres, so only names are taken.
     expect(
-      JSON.stringify(await limits((service) => service.setTimeZone("+05:30").pipe(Effect.result))),
+      shown(await limits((service) => service.setTimeZone("+05:30").pipe(Effect.result))),
     ).toMatch(/unknown/);
   });
 
@@ -338,7 +341,7 @@ describe("usage limits", () => {
     expect((await limits((service) => service.rules())).length).toBe(0);
     // A group's No limit lifts only a limit everyone has.
     expect(
-      JSON.stringify(
+      shown(
         await limits((service) =>
           service
             .saveRule({
@@ -362,7 +365,7 @@ describe("usage limits", () => {
     await rule({ period: "day", amount: 1 });
     await rule({ period: "month", amount: 1 });
     await spend(person, model.id, { cost: 5 });
-    expect(JSON.stringify(await checked(person, model.id))).toMatch(/this month’s limit/);
+    expect(shown(await checked(person, model.id))).toMatch(/this month’s limit/);
   });
 
   it("refuses an admin's rule that could not hold or would repeat another", async () => {
@@ -381,7 +384,7 @@ describe("usage limits", () => {
             ...input,
           })
           .pipe(Effect.result),
-      ).then((result) => JSON.stringify(result));
+      ).then((result) => shown(result));
     expect(await refusal({ amount: null })).toMatch(/need an amount/);
     expect(await refusal({ amount: 0 })).toMatch(/above zero/);
     expect(await refusal({ metric: "answers", amount: 1.5 })).toMatch(/whole number/);

@@ -3,7 +3,7 @@ import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { WordProcessor } from "~/modules/word/server/runtime.ts";
 import type { Localized } from "~/i18n/localized.ts";
 import type { Locale } from "~/paraglide/runtime.js";
-import { DocumentRejected, foreignReason } from "../schema.ts";
+import { DocumentRejected } from "../schema.ts";
 import { DocumentService, type DocumentWriteGuard } from "./document-service.ts";
 import { readWordDocument, titleFromFile } from "./word-import.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
@@ -38,7 +38,7 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
   const read = yield* readWordDocument(input.file, Option.getOrNull(word), userId, (image) =>
     (input.by === "user" ? storage.admit(userId, [image.bytes]) : Effect.void).pipe(
       // Its pictures are the uploader's files while it is read, like any they add.
-      Effect.tapError((refused) => Effect.sync(() => (full ??= foreignReason(refused.reason)))),
+      Effect.tapError((refused) => Effect.sync(() => (full ??= refused.reason))),
       Effect.andThen(
         attachments.upload({
           userId,

@@ -1,6 +1,7 @@
 import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";

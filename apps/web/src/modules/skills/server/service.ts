@@ -1,4 +1,5 @@
 import { Context, Duration, Effect, Layer, Schedule, Semaphore } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { BlobStore } from "~/modules/attachments/server/blob-store.ts";
@@ -280,7 +281,11 @@ export class SkillService extends Context.Service<
                   ...fresh(validated.files, current),
                   ...(baseline ? fresh(baseline.files, upstream) : []),
                 ])
-                .pipe(Effect.catchTag("StorageFull", (full) => Effect.fail(rejected(full.reason))));
+                .pipe(
+                  Effect.catchTag("StorageFull", (full) =>
+                    Effect.fail(rejected(english(full.reason))),
+                  ),
+                );
               const files = yield* storeFiles(validated.files, current);
               const baselineFiles = baseline ? yield* storeFiles(baseline.files, upstream) : [];
               const save: SaveRevision = {

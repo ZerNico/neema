@@ -36,6 +36,7 @@ import { fileForModel } from "../file-for-model.ts";
 import { ensureGenerationLive, lockGeneration } from "../generation-fence.ts";
 import { prepareConversationContext } from "../conversation-context.ts";
 import { Deferred, Effect, Option, Schema } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { prepareAskUserTool } from "~/modules/tools/server/ask-user.ts";
 import { prepareDesktopTools } from "~/modules/desktop/server/tools.ts";
 import { preparePlanTool } from "~/modules/tools/server/plan-tool.ts";
@@ -90,7 +91,6 @@ import type { AttemptContext, GenerationInput } from "./attempt-context.ts";
 import type { GenerationDeps } from "./deps.ts";
 import type { GenerationSink } from "./sink.ts";
 import type { DbTx } from "~/server/db.ts";
-import { english } from "~/i18n/localized.ts";
 
 /** Faces one answer's loaded skills may add to its previews. */
 const SKILL_FONT_FACES = 24;
@@ -792,7 +792,9 @@ export const prepareGenerationTools = (
             // A run spends on its own, so it is held to the limits an answer would be.
             admit: limits.check(input.userId, input.modelId).pipe(
               Effect.as(null),
-              Effect.catchTag("UsageLimitReached", (error) => Effect.succeed(error.reason)),
+              Effect.catchTag("UsageLimitReached", (error) =>
+                Effect.succeed(english(error.reason)),
+              ),
             ),
             rowFor: (providerCallId) =>
               Effect.suspend(() => Deferred.await(callRowReady(providerCallId))),

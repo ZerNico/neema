@@ -1,10 +1,11 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 /** An answer that would go past one of the person's limits; nothing was started. */
 export class UsageLimitReached extends Schema.TaggedError<UsageLimitReached>()(
   "UsageLimitReached",
   {
-    reason: Schema.String,
+    reason: Localized,
     /** When the limit that stopped it opens again, as an ISO time. */
     resetsAt: Schema.String,
   },
@@ -12,10 +13,10 @@ export class UsageLimitReached extends Schema.TaggedError<UsageLimitReached>()(
 
 /** A rule or setting an admin tried to save that cannot hold. */
 export class LimitRejected extends Schema.TaggedError<LimitRejected>()("LimitRejected", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 /** An upload that would take the person, or a project's owner, past their storage quota. */
 export class StorageFull extends Schema.TaggedError<StorageFull>()("StorageFull", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}
