@@ -31,6 +31,7 @@ import {
 } from "~/ui/primitives/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 const FORMATS = {
   markdown: {
@@ -129,13 +130,13 @@ function TableActions({
   return (
     <>
       <MenuButton
-        label={copied ? "Copied" : "Copy table"}
+        label={copied ? m.common_copied() : m.ui_table_copy()}
         icon={copied ? Tick02Icon : Copy01Icon}
         formats={["markdown", "csv", "tsv"]}
         onPick={copy}
       />
       <MenuButton
-        label="Download table"
+        label={m.ui_table_download()}
         icon={Download01Icon}
         formats={["csv", "markdown"]}
         onPick={download}
@@ -147,7 +148,7 @@ function TableActions({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Show full screen"
+                aria-label={m.ui_table_full_screen()}
                 onClick={onExpand}
                 className="text-muted-foreground"
               />
@@ -155,7 +156,7 @@ function TableActions({
           >
             <HugeiconsIcon icon={FullScreenIcon} strokeWidth={2} />
           </TooltipTrigger>
-          <TooltipContent>Show full screen</TooltipContent>
+          <TooltipContent>{m.ui_table_full_screen()}</TooltipContent>
         </Tooltip>
       ) : null}
     </>
@@ -206,7 +207,7 @@ export function MarkdownTable({
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <DialogContent className="sm:max-w-5xl">
           <div className="flex items-center justify-between gap-2 pr-10">
-            <DialogTitle>Table</DialogTitle>
+            <DialogTitle>{m.ui_table_title()}</DialogTitle>
             <div className="flex gap-0.5">
               <TableActions table={wide} />
             </div>

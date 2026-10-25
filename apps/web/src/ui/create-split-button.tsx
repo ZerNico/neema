@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { m } from "~/paraglide/messages.js";
 
 // Buttons clip their fill inside a transparent border. ButtonGroup drops the
 // second half's left border; dropping the first half's right one too leaves
@@ -71,7 +72,7 @@ export function CreateSplitButton({
       <DropdownMenu>
         <DropdownMenuTrigger
           disabled={disabled}
-          render={<Button size="icon-sm" aria-label={`More ways to create: ${label}`} />}
+          render={<Button size="icon-sm" aria-label={m.ui_create_more({ label })} />}
         >
           <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
         </DropdownMenuTrigger>

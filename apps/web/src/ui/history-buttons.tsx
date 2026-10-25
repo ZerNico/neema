@@ -6,6 +6,7 @@ import { useDesktopChromePlatform } from "./desktop-chrome-context.ts";
 import { Button } from "./primitives/button";
 import { Kbd } from "./primitives/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./primitives/tooltip";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * The browser exposes no forward length, so the furthest entry is tracked here:
@@ -65,14 +66,14 @@ function DesktopHistoryButtons({ mac }: { mac: boolean }) {
   return (
     <div className="flex items-center">
       <HistoryButton
-        label="Back"
+        label={m.common_back()}
         icon={ArrowLeft01Icon}
         shortcut={mac ? "⌘[" : "Alt ←"}
         disabled={!canGoBack}
         onClick={() => history.back()}
       />
       <HistoryButton
-        label="Forward"
+        label={m.common_forward()}
         icon={ArrowRight01Icon}
         shortcut={mac ? "⌘]" : "Alt →"}
         disabled={!canGoForward}

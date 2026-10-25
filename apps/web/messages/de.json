@@ -51,8 +51,13 @@
   "attachments_word_picture": "Bild",
   "attachments_word_pictures_hidden": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Ein Bild wird hier nicht angezeigt.",
         "countPlural=other": "{count} Bilder werden hier nicht angezeigt."
@@ -121,8 +126,13 @@
   "groups_error_name_taken": "Dieser Gruppenname ist schon vergeben",
   "images_activity_create_failed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Das Bild konnte nicht erstellt werden",
         "countPlural=other": "Die Bilder konnten nicht erstellt werden"
@@ -131,8 +141,13 @@
   ],
   "images_activity_creating": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Bild wird erstellt",
         "countPlural=other": "Bilder werden erstellt"
@@ -143,8 +158,13 @@
   "images_activity_declined_unnamed": "Das Bildmodell hat abgelehnt",
   "images_activity_edit_failed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Das Bild konnte nicht bearbeitet werden",
         "countPlural=other": "Die Bilder konnten nicht bearbeitet werden"
@@ -154,8 +174,13 @@
   "images_activity_edited_with": "Bearbeitet mit {model}",
   "images_activity_editing": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Bild wird bearbeitet",
         "countPlural=other": "Bilder werden bearbeitet"
@@ -271,8 +296,13 @@
   "spreadsheets_preview_chart_loading": "Diagramm wird geladen",
   "spreadsheets_preview_charts_hidden": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Ein Diagramm wird hier nicht angezeigt.",
         "countPlural=other": "{count} Diagramme werden hier nicht angezeigt."
@@ -288,5 +318,53 @@
   "spreadsheets_preview_sheet_failed": "Das Tabellenblatt konnte nicht geladen werden. Lade das Original herunter, um es anderswo zu öffnen.",
   "spreadsheets_preview_sheets": "Tabellenblatt",
   "spreadsheets_preview_truncated": "Angezeigt wird der Anfang des Tabellenblatts.",
-  "tools_error_web_search_unavailable": "Websuche nicht verfügbar: {reason}"
+  "tools_error_web_search_unavailable": "Websuche nicht verfügbar: {reason}",
+  "ui_color_hex": "Hex-Farbe",
+  "ui_color_hue": "Farbton",
+  "ui_color_saturation": "Sättigung und Helligkeit",
+  "ui_confirm_default": "Bestätigen",
+  "ui_create_more": "Weitere Möglichkeiten: {label}",
+  "ui_field_invalid": "Ungültig",
+  "ui_field_optional": "(optional)",
+  "ui_leave_confirm": "Link öffnen",
+  "ui_leave_description": "Er öffnet {host} in deinem Browser.",
+  "ui_leave_title": "Externen Link öffnen?",
+  "ui_name_too_long": "Höchstens {max} Zeichen.",
+  "ui_page_admin": "Verwaltung",
+  "ui_panel_close_tab": "{title} schließen",
+  "ui_panel_empty_description": "Dokumente, Entwürfe, Recherchen und Quellen, die du öffnest, erscheinen hier als Tabs.",
+  "ui_panel_empty_title": "Hier ist noch nichts geöffnet",
+  "ui_panel_exit_full_width": "Volle Breite beenden",
+  "ui_panel_full_width": "Volle Breite",
+  "ui_panel_hide": "Seitenbereich ausblenden",
+  "ui_panel_new_tab": "Neuer Tab",
+  "ui_panel_resize": "Breite des Seitenbereichs ändern",
+  "ui_panel_show": "Seitenbereich einblenden",
+  "ui_panel_show_tabs": "Seitenbereich einblenden ({count} Tabs)",
+  "ui_panel_tabs": "Tabs im Seitenbereich",
+  "ui_picker_selected": "{count} ausgewählt · bis zu {limit}",
+  "ui_route_back_to_chats": "Zurück zu den Chats",
+  "ui_route_error_title": "Diese Seite konnte nicht geladen werden",
+  "ui_route_not_found_description": "Diese Seite gibt es nicht, oder der Link ist nicht mehr gültig.",
+  "ui_route_not_found_title": "Seite nicht gefunden",
+  "ui_select_empty": "Keine Auswahl verfügbar",
+  "ui_select_placeholder": "Auswählen…",
+  "ui_select_search": "Suchen…",
+  "ui_sidebar_description": "Zeigt die mobile Seitenleiste.",
+  "ui_sidebar_title": "Seitenleiste",
+  "ui_sidebar_toggle": "Seitenleiste ein- oder ausblenden",
+  "ui_sortable_drag": "{label} verschieben",
+  "ui_sortable_move_down": "{label} nach unten verschieben",
+  "ui_sortable_move_up": "{label} nach oben verschieben",
+  "ui_table_copy": "Tabelle kopieren",
+  "ui_table_download": "Tabelle herunterladen",
+  "ui_table_full_screen": "Im Vollbild anzeigen",
+  "ui_table_title": "Tabelle",
+  "ui_theme_dark": "Dunkel",
+  "ui_theme_label": "Design",
+  "ui_theme_light": "Hell",
+  "ui_theme_system": "System",
+  "ui_undo": "Rückgängig",
+  "ui_view_label": "Ansicht",
+  "ui_view_preview": "Vorschau"
 }

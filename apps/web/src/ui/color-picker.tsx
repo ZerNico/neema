@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import { clamp, hexToHsv, hsvToHex, type Hsv } from "~/ui/color";
 import { Input } from "~/ui/primitives/input";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 /** Where a pointer is across an element, 0 to 1 each way. */
 const across = (event: PointerEvent<HTMLElement>) => {
@@ -60,7 +61,7 @@ export function ColorPicker({
       <div
         role="slider"
         tabIndex={0}
-        aria-label="Saturation and brightness"
+        aria-label={m.ui_color_saturation()}
         aria-valuetext={hex}
         aria-valuenow={Math.round(hsv.s * 100)}
         className="ring-offset-background relative h-28 cursor-crosshair touch-none rounded-md outline-none focus-visible:ring-2"
@@ -88,7 +89,7 @@ export function ColorPicker({
       <div
         role="slider"
         tabIndex={0}
-        aria-label="Hue"
+        aria-label={m.ui_color_hue()}
         aria-valuemin={0}
         aria-valuemax={360}
         aria-valuenow={Math.round(hsv.h)}
@@ -116,7 +117,7 @@ export function ColorPicker({
           style={{ backgroundColor: typedHsv ? hsvToHex(typedHsv) : hex }}
         />
         <Input
-          aria-label="Hex colour"
+          aria-label={m.ui_color_hex()}
           spellCheck={false}
           value={typed ?? hex}
           aria-invalid={typed !== null && !typedHsv}

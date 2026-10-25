@@ -10,6 +10,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "~/ui/primitives/combobox";
+import { m } from "~/paraglide/messages.js";
 
 export interface SearchableOption {
   readonly value: string;
@@ -39,10 +40,10 @@ export function SearchableSelect({
   options,
   value,
   onChange,
-  placeholder = "Choose…",
-  emptyPlaceholder = "Nothing to choose from",
-  searchPlaceholder = "Search…",
-  noMatches = "No matches",
+  placeholder = m.ui_select_placeholder(),
+  emptyPlaceholder = m.ui_select_empty(),
+  searchPlaceholder = m.ui_select_search(),
+  noMatches = m.common_no_matches(),
   disabled = false,
   id,
   "aria-label": ariaLabel,

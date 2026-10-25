@@ -14,6 +14,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { Field, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Naming or renaming something, the one way every page does it: the name is
@@ -25,7 +26,7 @@ export function NameDialog({
   onOpenChange,
   title,
   description,
-  label = "Name",
+  label = m.common_name(),
   initial = "",
   maxLength,
   placeholder,
@@ -67,7 +68,7 @@ export function NameDialog({
   // The field stops typing at the bound; a longer name set some other way is caught here.
   const tooLong = name.length > maxLength;
   const error = tooLong
-    ? `Keep it to ${maxLength} characters.`
+    ? m.ui_name_too_long({ max: maxLength })
     : save.isError
       ? (readServerError(save.error).reason ?? failure)
       : null;
@@ -115,7 +116,7 @@ export function NameDialog({
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!name || tooLong}>
               {submitLabel}

@@ -4,11 +4,12 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { cn } from "~/ui/utils";
 import { type Theme, setTheme, useTheme } from "./theme.tsx";
+import { m } from "~/paraglide/messages.js";
 
-const OPTIONS: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
-  { value: "light", label: "Light", icon: Sun03Icon },
-  { value: "system", label: "System", icon: ComputerIcon },
-  { value: "dark", label: "Dark", icon: Moon02Icon },
+const OPTIONS: Array<{ value: Theme; label: () => string; icon: IconSvgElement }> = [
+  { value: "light", label: m.ui_theme_light, icon: Sun03Icon },
+  { value: "system", label: m.ui_theme_system, icon: ComputerIcon },
+  { value: "dark", label: m.ui_theme_dark, icon: Moon02Icon },
 ];
 
 /**
@@ -21,7 +22,7 @@ export function ThemeSwitch({ className }: { className?: string }) {
 
   return (
     <SegmentedControl
-      aria-label="Theme"
+      aria-label={m.ui_theme_label()}
       value={[theme]}
       multiple={false}
       onValueChange={(value) => {
@@ -35,8 +36,8 @@ export function ThemeSwitch({ className }: { className?: string }) {
         <SegmentedControlItem
           key={option.value}
           value={option.value}
-          aria-label={option.label}
-          title={option.label}
+          aria-label={option.label()}
+          title={option.label()}
           className="min-w-7 flex-1 px-0"
         >
           <HugeiconsIcon icon={option.icon} strokeWidth={2} />

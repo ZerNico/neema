@@ -12,6 +12,7 @@ import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 // dnd-kit will not start a drag from a button inside the dragged element, and a
 // tab is mostly its button. Only the close button keeps a press to itself.
@@ -114,7 +115,7 @@ export function DetailPanelTabStrip({
           <div
             ref={strip}
             role="tablist"
-            aria-label="Panel tabs"
+            aria-label={m.ui_panel_tabs()}
             // The sidebar's soft edge, sideways: padding keeps the first and last tabs
             // clear of the fade when the strip is scrolled to either end.
             className="-ml-2 flex min-w-0 items-center gap-1 overflow-x-auto px-3 [mask-image:linear-gradient(to_right,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)] [scrollbar-width:none]"
@@ -149,14 +150,14 @@ export function DetailPanelTabStrip({
               variant="ghost"
               size="icon-sm"
               onClick={panel.newTab}
-              aria-label="New tab"
+              aria-label={m.ui_panel_new_tab()}
               className="text-muted-foreground"
             />
           }
         >
           <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
         </TooltipTrigger>
-        <TooltipContent>New tab</TooltipContent>
+        <TooltipContent>{m.ui_panel_new_tab()}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -236,7 +237,7 @@ function PanelTab({
         variant="ghost"
         size="icon-xs"
         onClick={() => panel.closeTab(tab.id)}
-        aria-label={`Close ${tab.title}`}
+        aria-label={m.ui_panel_close_tab({ title: tab.title })}
         data-tab-close=""
         className={cn(
           "text-muted-foreground",

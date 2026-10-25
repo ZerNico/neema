@@ -1,4 +1,5 @@
 import { NeemaGlyph } from "./brand";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Server-rendered before hydration, so the fade is pure CSS. The delay keeps a
@@ -9,7 +10,7 @@ export function StartupPending() {
     <div
       data-slot="startup-pending"
       role="status"
-      aria-label="Loading"
+      aria-label={m.common_loading()}
       className="text-muted-foreground flex h-svh max-h-full items-center justify-center"
     >
       <div className="animate-in fade-in fill-mode-both delay-300 duration-700">

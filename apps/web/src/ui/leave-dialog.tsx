@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/ui/primitives/dialog";
+import { m } from "~/paraglide/messages.js";
 
 const hostOf = (url: string) => {
   try {
@@ -45,16 +46,16 @@ export function LeaveDialog({ isOpen, onClose, onConfirm, url }: LinkSafetyModal
             <HugeiconsIcon icon={Globe02Icon} strokeWidth={2} className="size-5" />
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <DialogTitle>Open external link?</DialogTitle>
-            <DialogDescription>This opens {hostOf(url)} in your browser.</DialogDescription>
+            <DialogTitle>{m.ui_leave_title()}</DialogTitle>
+            <DialogDescription>{m.ui_leave_description({ host: hostOf(url) })}</DialogDescription>
           </div>
         </DialogHeader>
         <p className="bg-muted text-muted-foreground rounded-lg px-3 py-2 font-mono text-xs break-all">
           {url}
         </p>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-          <Button onClick={onConfirm}>Open link</Button>
+          <DialogClose render={<Button variant="outline" />}>{m.common_cancel()}</DialogClose>
+          <Button onClick={onConfirm}>{m.ui_leave_confirm()}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

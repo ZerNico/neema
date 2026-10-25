@@ -8,6 +8,7 @@ import {
   ComboboxItem,
   ComboboxList,
 } from "~/ui/primitives/combobox";
+import { m } from "~/paraglide/messages.js";
 
 export interface ResourcePickerItem {
   id: string;
@@ -94,7 +95,7 @@ export function ResourcePicker({
         </ComboboxList>
         <div className="flex items-center gap-2 border-t px-3 py-2">
           <span className="text-muted-foreground flex-1 text-xs">
-            {ids.length} selected · up to {limit}
+            {m.ui_picker_selected({ count: ids.length, limit })}
           </span>
           <Button
             size="sm"
@@ -104,7 +105,7 @@ export function ResourcePicker({
               onOpenChange(false);
             }}
           >
-            Add
+            {m.common_add()}
           </Button>
         </div>
       </ComboboxContent>

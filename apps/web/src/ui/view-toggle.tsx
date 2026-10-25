@@ -2,6 +2,7 @@ import { CodeIcon, EyeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
+import { m } from "~/paraglide/messages.js";
 
 export function ViewToggle({
   preview,
@@ -14,11 +15,11 @@ export function ViewToggle({
 }) {
   const options = [
     { value: "source", icon: CodeIcon, label: sourceLabel },
-    { value: "preview", icon: EyeIcon, label: "Preview" },
+    { value: "preview", icon: EyeIcon, label: m.ui_view_preview() },
   ] as const;
   return (
     <SegmentedControl
-      aria-label="View"
+      aria-label={m.ui_view_label()}
       value={[preview ? "preview" : "source"]}
       multiple={false}
       onValueChange={(value) => {

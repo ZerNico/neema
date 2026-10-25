@@ -2,6 +2,7 @@ import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode } from "react";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * A Save button's label that turns into "✓ Saved" for a moment after a save.
@@ -11,7 +12,7 @@ import { cn } from "~/ui/utils";
  */
 export function SaveLabel({
   justSaved,
-  savedLabel = "Saved",
+  savedLabel = m.common_saved(),
   children,
 }: {
   justSaved: boolean;
@@ -49,7 +50,7 @@ export function SaveLabel({
  */
 export function SaveStatus({
   justSaved,
-  savedLabel = "Saved",
+  savedLabel = m.common_saved(),
 }: {
   justSaved: boolean;
   savedLabel?: string;

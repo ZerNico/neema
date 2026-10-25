@@ -5,6 +5,7 @@ import { cn } from "cn";
 import { Button } from "~/ui/primitives/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { m } from "~/paraglide/messages.js";
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
@@ -73,7 +74,7 @@ function SheetContent({
             }
           >
             <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{m.common_close()}</span>
           </SheetPrimitive.Close>
         )}
       </SheetPrimitive.Popup>

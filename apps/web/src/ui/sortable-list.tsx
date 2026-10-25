@@ -8,6 +8,7 @@ import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 // Up and down only, and never past either end of the list.
 const MODIFIERS = [
@@ -87,7 +88,7 @@ export function SortableHandle({ label }: { label: string }) {
     <button
       ref={handleRef}
       type="button"
-      aria-label={`Drag ${label}`}
+      aria-label={m.ui_sortable_drag({ label })}
       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex size-7 shrink-0 cursor-grab items-center justify-center rounded-md outline-none focus-visible:ring-2 active:cursor-grabbing"
     >
       <HugeiconsIcon icon={DragDropVerticalIcon} strokeWidth={2} className="size-4" />
@@ -112,7 +113,7 @@ export function SortableMoveButtons({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label={`Move ${label} up`}
+        aria-label={m.ui_sortable_move_up({ label })}
         disabled={index === 0}
         onClick={() => onMove(index, index - 1)}
       >
@@ -121,7 +122,7 @@ export function SortableMoveButtons({
       <Button
         size="icon-sm"
         variant="ghost"
-        aria-label={`Move ${label} down`}
+        aria-label={m.ui_sortable_move_down({ label })}
         disabled={index === count - 1}
         onClick={() => onMove(index, index + 1)}
       >

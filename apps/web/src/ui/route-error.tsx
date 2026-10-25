@@ -3,6 +3,7 @@ import { Link, useRouter, type ErrorComponentProps } from "@tanstack/react-route
 import type { ReactNode } from "react";
 import { EmptyState, ErrorState } from "~/ui/page-shell.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 
 export function RouteStatusScreen({ children }: { children: ReactNode }) {
   return <div className="flex h-full min-h-svh items-center justify-center p-6">{children}</div>;
@@ -11,7 +12,7 @@ export function RouteStatusScreen({ children }: { children: ReactNode }) {
 function BackToChats() {
   return (
     <Link to="/chats" className={buttonVariants({ variant: "outline", size: "sm" })}>
-      Back to chats
+      {m.ui_route_back_to_chats()}
     </Link>
   );
 }
@@ -22,7 +23,7 @@ export function RouteError({ error }: ErrorComponentProps) {
   return (
     <RouteStatusScreen>
       <ErrorState
-        title="Could not load this page"
+        title={m.ui_route_error_title()}
         className="w-full max-w-lg"
         onRetry={() => {
           void router.invalidate();
@@ -38,8 +39,8 @@ export function RouteNotFound() {
     <RouteStatusScreen>
       <EmptyState
         icon={FileNotFoundIcon}
-        title="Page not found"
-        description="This page doesn’t exist, or the link is no longer available."
+        title={m.ui_route_not_found_title()}
+        description={m.ui_route_not_found_description()}
         className="w-full max-w-lg"
         action={<BackToChats />}
       />

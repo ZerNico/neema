@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from "~/ui/primitives/alert-dialog";
 import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "./confirm-context.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Promise-based confirmation dialog:
@@ -53,12 +54,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{options?.cancelLabel ?? "Cancel"}</AlertDialogCancel>
+            <AlertDialogCancel>{options?.cancelLabel ?? m.common_cancel()}</AlertDialogCancel>
             <AlertDialogAction
               variant={(options?.destructive ?? true) ? "destructive" : "default"}
               onClick={() => settle(true)}
             >
-              {options?.confirmLabel ?? "Confirm"}
+              {options?.confirmLabel ?? m.ui_confirm_default()}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -4,13 +4,14 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives
 import { Input } from "~/ui/primitives/input";
 import { Textarea } from "~/ui/primitives/textarea";
 import { useFieldContext, useFormContext } from "./form-contexts.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Marks an optional field inside its label, so it is part of the accessible name. Required
  * fields carry no mark: most fields are required, so marking the exceptions is quieter.
  */
 export function OptionalMark() {
-  return <span className="text-muted-foreground font-normal">(optional)</span>;
+  return <span className="text-muted-foreground font-normal">{m.ui_field_optional()}</span>;
 }
 
 export function TextField({
@@ -33,7 +34,7 @@ export function TextField({
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
   const errors = field.state.meta.errors
     .map((error) => ({
-      message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
+      message: typeof error === "string" ? error : (error?.message ?? m.ui_field_invalid()),
     }))
     .filter((error) => error.message);
   const descriptionId = description ? `${id}-help` : undefined;
@@ -88,7 +89,7 @@ export function TextareaField({
   const showError = field.state.meta.isTouched && !field.state.meta.isValid;
   const errors = field.state.meta.errors
     .map((error) => ({
-      message: typeof error === "string" ? error : (error?.message ?? "Invalid"),
+      message: typeof error === "string" ? error : (error?.message ?? m.ui_field_invalid()),
     }))
     .filter((error) => error.message);
   const descriptionId = description ? `${id}-help` : undefined;

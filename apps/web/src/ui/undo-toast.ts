@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { m } from "~/paraglide/messages.js";
 
 /** Long enough to read and reach for; hovering the toast pauses it. */
 const UNDO_TOAST_MS = 8_000;
@@ -54,7 +55,7 @@ export function undoToast(message: string, undo: () => void, kept?: () => void) 
   const id = toast(message, {
     duration: UNDO_TOAST_MS,
     action: {
-      label: "Undo",
+      label: m.ui_undo(),
       onClick: () => {
         if (settle(id)) undo();
       },

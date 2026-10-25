@@ -16,6 +16,7 @@ import {
 import { Skeleton } from "~/ui/primitives/skeleton";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
+import { m } from "~/paraglide/messages.js";
 
 export interface SectionNavItem {
   to: string;
@@ -107,7 +108,7 @@ export function Page({
   backLabel,
   onBack,
   rootPath = "/admin",
-  rootLabel = "Admin",
+  rootLabel = m.ui_page_admin(),
   actions,
   width = "default",
   children,
@@ -126,7 +127,7 @@ export function Page({
   children: ReactNode;
 }) {
   const back = backTo
-    ? { to: backTo, label: backLabel ?? "Back", mobileOnly: false }
+    ? { to: backTo, label: backLabel ?? m.common_back(), mobileOnly: false }
     : { to: rootPath, label: rootLabel, mobileOnly: true };
   const backClassName = cn(
     focusRingClassName,
@@ -144,7 +145,7 @@ export function Page({
           {onBack ? (
             <button type="button" className={backClassName} onClick={onBack}>
               <HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2} className="size-4" />
-              {backLabel ?? "Back"}
+              {backLabel ?? m.common_back()}
             </button>
           ) : (
             <Link to={back.to} className={cn(backClassName, back.mobileOnly && "md:hidden")}>
@@ -267,7 +268,7 @@ export function ListRow({
 export function ListSkeleton({
   rows = 3,
   media = "tile",
-  label = "Loading",
+  label = m.common_loading(),
 }: {
   rows?: number;
   /** Matches the row anatomy being stood in for: icon tile, avatar, or neither. */
@@ -326,7 +327,7 @@ export function EmptyState({
  * yet") so the two can't be confused, with a retry when one is available.
  */
 export function ErrorState({
-  title = "Something went wrong",
+  title = m.common_something_went_wrong(),
   description,
   onRetry,
   action,
@@ -353,7 +354,7 @@ export function ErrorState({
           <div className="flex flex-wrap items-center justify-center gap-2">
             {onRetry ? (
               <Button variant="outline" size="sm" onClick={onRetry}>
-                Try again
+                {m.common_retry()}
               </Button>
             ) : null}
             {action}

@@ -51,8 +51,13 @@
   "attachments_word_picture": "Picture",
   "attachments_word_pictures_hidden": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "A picture isn’t shown here.",
         "countPlural=other": "{count} pictures aren’t shown here."
@@ -121,8 +126,13 @@
   "groups_error_name_taken": "Group name already taken",
   "images_activity_create_failed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Couldn’t create the image",
         "countPlural=other": "Couldn’t create the images"
@@ -131,8 +141,13 @@
   ],
   "images_activity_creating": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Creating image",
         "countPlural=other": "Creating images"
@@ -143,8 +158,13 @@
   "images_activity_declined_unnamed": "The image model declined",
   "images_activity_edit_failed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Couldn’t edit the image",
         "countPlural=other": "Couldn’t edit the images"
@@ -154,8 +174,13 @@
   "images_activity_edited_with": "Edited with {model}",
   "images_activity_editing": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Editing image",
         "countPlural=other": "Editing images"
@@ -271,8 +296,13 @@
   "spreadsheets_preview_chart_loading": "Loading chart",
   "spreadsheets_preview_charts_hidden": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "A chart isn’t shown here.",
         "countPlural=other": "{count} charts aren’t shown here."
@@ -288,5 +318,53 @@
   "spreadsheets_preview_sheet_failed": "Could not load this sheet. Download the original to open it elsewhere.",
   "spreadsheets_preview_sheets": "Sheet",
   "spreadsheets_preview_truncated": "Showing the start of this sheet.",
-  "tools_error_web_search_unavailable": "Web search unavailable: {reason}"
+  "tools_error_web_search_unavailable": "Web search unavailable: {reason}",
+  "ui_color_hex": "Hex colour",
+  "ui_color_hue": "Hue",
+  "ui_color_saturation": "Saturation and brightness",
+  "ui_confirm_default": "Confirm",
+  "ui_create_more": "More ways to create: {label}",
+  "ui_field_invalid": "Invalid",
+  "ui_field_optional": "(optional)",
+  "ui_leave_confirm": "Open link",
+  "ui_leave_description": "This opens {host} in your browser.",
+  "ui_leave_title": "Open external link?",
+  "ui_name_too_long": "Keep it to {max} characters.",
+  "ui_page_admin": "Admin",
+  "ui_panel_close_tab": "Close {title}",
+  "ui_panel_empty_description": "Documents, drafts, research and sources you open show up as tabs.",
+  "ui_panel_empty_title": "Nothing open here yet",
+  "ui_panel_exit_full_width": "Exit full width",
+  "ui_panel_full_width": "Full width",
+  "ui_panel_hide": "Hide panel",
+  "ui_panel_new_tab": "New tab",
+  "ui_panel_resize": "Resize panel",
+  "ui_panel_show": "Show panel",
+  "ui_panel_show_tabs": "Show panel ({count} tabs)",
+  "ui_panel_tabs": "Panel tabs",
+  "ui_picker_selected": "{count} selected · up to {limit}",
+  "ui_route_back_to_chats": "Back to chats",
+  "ui_route_error_title": "Could not load this page",
+  "ui_route_not_found_description": "This page doesn’t exist, or the link is no longer available.",
+  "ui_route_not_found_title": "Page not found",
+  "ui_select_empty": "Nothing to choose from",
+  "ui_select_placeholder": "Choose…",
+  "ui_select_search": "Search…",
+  "ui_sidebar_description": "Displays the mobile sidebar.",
+  "ui_sidebar_title": "Sidebar",
+  "ui_sidebar_toggle": "Toggle Sidebar",
+  "ui_sortable_drag": "Drag {label}",
+  "ui_sortable_move_down": "Move {label} down",
+  "ui_sortable_move_up": "Move {label} up",
+  "ui_table_copy": "Copy table",
+  "ui_table_download": "Download table",
+  "ui_table_full_screen": "Show full screen",
+  "ui_table_title": "Table",
+  "ui_theme_dark": "Dark",
+  "ui_theme_label": "Theme",
+  "ui_theme_light": "Light",
+  "ui_theme_system": "System",
+  "ui_undo": "Undo",
+  "ui_view_label": "View",
+  "ui_view_preview": "Preview"
 }

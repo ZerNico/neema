@@ -8,7 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRouterState } from "@tanstack/react-router";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import {
   Fragment,
   useCallback,
@@ -68,6 +68,7 @@ import {
   DetailPanelAvailableContext,
   DetailPanelBeforeActionContext,
 } from "./detail-panel-context.ts";
+import { m } from "~/paraglide/messages.js";
 
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
@@ -90,8 +91,8 @@ export function PanelEmptyState() {
   return (
     <EmptyState
       icon={PanelRightIcon}
-      title="Nothing open here yet"
-      description="Documents, drafts, research and sources you open show up as tabs."
+      title={m.ui_panel_empty_title()}
+      description={m.ui_panel_empty_description()}
     />
   );
 }
@@ -105,7 +106,13 @@ export type NewTabContent = (tabId: string) => Pick<DetailPanelRequest, "actions
 // but this page could rebuild it.
 const newTabRequest = (content: NewTabContent | undefined): DetailPanelRequest => {
   const id = `new-tab:${crypto.randomUUID()}`;
-  return { id, title: "New tab", icon: PlusSignIcon, body: NEW_TAB_BODY, ...content?.(id) };
+  return {
+    id,
+    title: m.ui_panel_new_tab(),
+    icon: PlusSignIcon,
+    body: NEW_TAB_BODY,
+    ...content?.(id),
+  };
 };
 
 /**
@@ -266,10 +273,10 @@ export function DetailPanelToggle() {
   const available = useContext(DetailPanelAvailableContext);
   if (!available) return null;
   const label = visible
-    ? "Hide panel"
+    ? m.ui_panel_hide()
     : tabs.length > 1
-      ? `Show panel (${tabs.length} tabs)`
-      : "Show panel";
+      ? m.ui_panel_show_tabs({ count: tabs.length })
+      : m.ui_panel_show();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -429,7 +436,7 @@ function DetailPanelResizer({
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize panel"
+      aria-label={m.ui_panel_resize()}
       aria-valuenow={width}
       aria-valuemin={DETAIL_PANEL_MIN}
       aria-valuemax={expanded ? width : max}
@@ -495,7 +502,7 @@ function DetailPanelResizer({
 
 /** Takes the whole row for the rail, and gives the page back. */
 function PanelExpandButton({ expanded }: { expanded: boolean }) {
-  const label = expanded ? "Exit full width" : "Full width";
+  const label = expanded ? m.ui_panel_exit_full_width() : m.ui_panel_full_width();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -700,7 +707,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
       {layered && open ? (
         <div ref={setSpacer} aria-hidden className="shrink-0" style={{ width: kept }} />
       ) : null}
-      <m.aside
+      <motion.aside
         ref={root}
         // Things laid over the rail from outside it follow its animation by this.
         data-panel-rail=""
@@ -750,7 +757,7 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
         )}
         {/* Not keyed by tab: switching tabs swaps the content below at once, and
           only opening the panel runs this entrance. */}
-        <m.div
+        <motion.div
           // Full width or on its way there, the body follows the rail, so what it
           // centres glides with it; opening and closing slide it at its own width.
           style={{ width: overlay || layered ? "100%" : width }}
@@ -794,8 +801,8 @@ function PanelRail({ className, overlay }: { className: string | undefined; over
               )}
             </div>
           </Fragment>
-        </m.div>
-      </m.aside>
+        </motion.div>
+      </motion.aside>
     </>
   );
 }
