@@ -15,6 +15,7 @@ import {
 import type { ExternalOperation } from "~/modules/tools/server/external-completion.ts";
 import { isSensitive, type BrowserToolName } from "../tool-schema.ts";
 import { elementPhrase, keyPhrase, scrollPhrase } from "../wording.ts";
+import { baseLocale } from "~/paraglide/runtime.js";
 import { hostOf, pageTitle } from "./address.ts";
 import { browserTabs, type BrowserTab } from "./browser-store.ts";
 
@@ -766,7 +767,7 @@ const actionSummary = (action: BrowserAction, label: string | null, value?: stri
         ? `Filled in ${element ?? "a field"}, hidden`
         : `Typed into ${element ?? "a field"}`;
     case "press":
-      return `Pressed ${keyPhrase(action.key)}`;
+      return `Pressed ${keyPhrase(action.key, baseLocale)}`;
     case "scroll":
       return `Scrolled ${element ? `${element} ` : ""}${scrollPhrase(action.deltaX, action.deltaY, value)}`;
     case "select":

@@ -268,6 +268,104 @@
   "attachments_word_toc_empty": "No headings yet.",
   "attachments_word_toc_note": "Table of contents · Word adds page numbers when it opens the file",
   "attachments_word_truncated": "Showing the start of this document.",
+  "browser_activity_chosen_in": "{value}\nin {element}",
+  "browser_activity_typed_into": "{text}\ninto {element}",
+  "browser_ask_click": "Click on this page",
+  "browser_ask_evaluate": "Run this code on the page",
+  "browser_ask_navigate": "Move this browser tab",
+  "browser_ask_open": "Open this site in the browser",
+  "browser_ask_press": "Press a key on this page",
+  "browser_ask_read": "Read this page",
+  "browser_ask_save": "Save files from the web",
+  "browser_ask_select": "Choose an option on this page",
+  "browser_ask_tabs": "Look at the open tabs",
+  "browser_ask_type": "Type on this page",
+  "browser_chrome_address": "Address",
+  "browser_chrome_address_placeholder": "Search or enter an address",
+  "browser_chrome_open_external": "Open in browser",
+  "browser_chrome_stop_loading": "Stop",
+  "browser_driving_in_tab": "Working in this tab",
+  "browser_driving_on_host": "Working on {host}",
+  "browser_driving_stop": "Stop",
+  "browser_driving_stop_error": "Couldn’t stop the answer.",
+  "browser_element_named": "the “{name}” {role}",
+  "browser_element_unnamed": [
+    {
+      "declarations": [
+        "input role",
+        "input vowel"
+      ],
+      "selectors": [
+        "vowel"
+      ],
+      "match": {
+        "vowel=yes": "an {role}",
+        "vowel=*": "a {role}"
+      }
+    }
+  ],
+  "browser_key_ctrl": "Ctrl",
+  "browser_key_down": "Down arrow",
+  "browser_key_left": "Left arrow",
+  "browser_key_right": "Right arrow",
+  "browser_key_space": "Space",
+  "browser_key_up": "Up arrow",
+  "browser_role_button": "button",
+  "browser_role_checkbox": "checkbox",
+  "browser_role_field": "field",
+  "browser_role_heading": "heading",
+  "browser_role_image": "image",
+  "browser_role_item": "item",
+  "browser_role_link": "link",
+  "browser_role_list": "list",
+  "browser_role_menu_item": "menu item",
+  "browser_role_number_field": "number field",
+  "browser_role_option": "option",
+  "browser_role_search_field": "search field",
+  "browser_role_switch": "switch",
+  "browser_role_tab": "tab",
+  "browser_running_back": "Going back",
+  "browser_running_click": "Clicking",
+  "browser_running_evaluate": "Running code on the page",
+  "browser_running_forward": "Going forward",
+  "browser_running_go_to": "Going to {host}",
+  "browser_running_look": "Looking at the page",
+  "browser_running_open_host": "Opening {host}",
+  "browser_running_open_page": "Opening a page",
+  "browser_running_press": "Pressing a key",
+  "browser_running_press_key": "Pressing {key}",
+  "browser_running_read": "Reading the page",
+  "browser_running_reload": "Reloading the page",
+  "browser_running_save": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Saving a file",
+        "countPlural=other": "Saving {count} files"
+      }
+    }
+  ],
+  "browser_running_save_screenshot": "Saving a screenshot",
+  "browser_running_scroll": "Scrolling",
+  "browser_running_select": "Choosing an option",
+  "browser_running_share_screenshot": "Taking a screenshot for you",
+  "browser_running_tabs": "Looking at the open tabs",
+  "browser_running_type": "Typing",
+  "browser_running_wait": "Waiting for the page",
+  "browser_settings_engine_description": "Used when you type something that isn’t an address.",
+  "browser_settings_engine_label": "Search engine",
+  "browser_settings_links_description": "Hold ⌘ or Ctrl while clicking to use the other.",
+  "browser_settings_links_external": "In your browser",
+  "browser_settings_links_label": "Open links from chats",
+  "browser_settings_links_panel": "In the side panel",
+  "browser_settings_title": "Browser",
+  "browser_tab_new": "New tab",
   "chat_error_attachment_busy": "Stop the answer in that chat first.",
   "chat_error_attachment_gone": "An attachment is no longer available",
   "chat_error_conversation_busy": "A response is still generating",

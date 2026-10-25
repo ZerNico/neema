@@ -1,6 +1,7 @@
 import { Globe02Icon } from "@hugeicons/core-free-icons";
 import type { DetailPanelRequest, NewTabContent } from "~/ui/detail-panel.tsx";
 import { PanelEmptyState } from "~/ui/detail-panel.tsx";
+import { m } from "~/paraglide/messages.js";
 import { pageTitle } from "../client/address.ts";
 import { BrowserChrome, BrowserSlot, NewTabBar } from "./browser-page.tsx";
 
@@ -28,7 +29,7 @@ export function browserTabRequest(
 ): DetailPanelRequest {
   return {
     id: `${BROWSER_TAB_PREFIX}${tab.id}`,
-    title: pageTitle(tab.title, tab.url),
+    title: pageTitle(tab.title, tab.url, m.browser_tab_new()),
     icon: Globe02Icon,
     ...(tab.favicon ? { iconSrc: tab.favicon } : {}),
     busy,

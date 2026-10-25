@@ -9,6 +9,7 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import { stopGeneration } from "~/modules/chat/server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 import { toastError } from "~/ui/error-toast.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Spinner } from "~/ui/primitives/spinner";
@@ -146,16 +147,20 @@ function AddressBar({
         event.currentTarget.querySelector("input")?.blur();
       }}
     >
-      <ChromeButton label="Back" icon={ArrowLeft01Icon} onClick={onBack} />
-      <ChromeButton label="Forward" icon={ArrowRight01Icon} onClick={onForward} />
+      <ChromeButton label={m.common_back()} icon={ArrowLeft01Icon} onClick={onBack} />
+      <ChromeButton label={m.common_forward()} icon={ArrowRight01Icon} onClick={onForward} />
       {settledLoading ? (
-        <ChromeButton label="Stop" icon={Cancel01Icon} onClick={onStop} />
+        <ChromeButton
+          label={m.browser_chrome_stop_loading()}
+          icon={Cancel01Icon}
+          onClick={onStop}
+        />
       ) : (
-        <ChromeButton label="Reload" icon={RefreshIcon} onClick={onReload} />
+        <ChromeButton label={m.common_reload()} icon={RefreshIcon} onClick={onReload} />
       )}
       <Input
-        aria-label="Address"
-        placeholder="Search or enter an address"
+        aria-label={m.browser_chrome_address()}
+        placeholder={m.browser_chrome_address_placeholder()}
         value={draft ?? url}
         onChange={(event) => setDraft(event.target.value)}
         onFocus={(event) => event.currentTarget.select()}
@@ -165,7 +170,11 @@ function AddressBar({
         spellCheck={false}
         autoComplete="off"
       />
-      <ChromeButton label="Open in browser" icon={LinkSquare02Icon} onClick={onOpenExternal} />
+      <ChromeButton
+        label={m.browser_chrome_open_external()}
+        icon={LinkSquare02Icon}
+        onClick={onOpenExternal}
+      />
     </form>
   );
 }
@@ -186,13 +195,14 @@ function DrivingNote({
 }) {
   const stop = useMutation({
     mutationFn: () => stopGeneration({ data: { conversationId, ...driving } }),
-    onError: (error) => toastError("Couldn’t stop the answer.", error),
+    onError: (error) => toastError(m.browser_driving_stop_error(), error),
   });
+  const host = hostOf(url);
   return (
     <div className="text-muted-foreground flex h-8 items-center gap-2 px-2 text-sm" role="status">
       <Spinner aria-hidden className="size-3.5" />
       <span className="min-w-0 flex-1 truncate">
-        {hostOf(url) ? `Working on ${hostOf(url)}` : "Working in this tab"}
+        {host ? m.browser_driving_on_host({ host }) : m.browser_driving_in_tab()}
       </span>
       <PendingButton
         size="xs"
@@ -200,7 +210,7 @@ function DrivingNote({
         pending={stop.isPending}
         onClick={() => stop.mutate()}
       >
-        Stop
+        {m.browser_driving_stop()}
       </PendingButton>
     </div>
   );

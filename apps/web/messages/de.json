@@ -268,6 +268,103 @@
   "attachments_word_toc_empty": "Noch keine Überschriften.",
   "attachments_word_toc_note": "Inhaltsverzeichnis · Word ergänzt die Seitenzahlen beim Öffnen der Datei",
   "attachments_word_truncated": "Angezeigt wird der Anfang des Dokuments.",
+  "browser_activity_chosen_in": "{value}\nin {element}",
+  "browser_activity_typed_into": "{text}\nin {element}",
+  "browser_ask_click": "Auf dieser Seite klicken",
+  "browser_ask_evaluate": "Diesen Code auf der Seite ausführen",
+  "browser_ask_navigate": "In diesem Browser-Tab navigieren",
+  "browser_ask_open": "Diese Website im Browser öffnen",
+  "browser_ask_press": "Auf dieser Seite eine Taste drücken",
+  "browser_ask_read": "Diese Seite lesen",
+  "browser_ask_save": "Dateien aus dem Web speichern",
+  "browser_ask_select": "Auf dieser Seite eine Option wählen",
+  "browser_ask_tabs": "Offene Tabs ansehen",
+  "browser_ask_type": "Auf dieser Seite tippen",
+  "browser_chrome_address": "Adresse",
+  "browser_chrome_address_placeholder": "Suchen oder Adresse eingeben",
+  "browser_chrome_open_external": "Im Browser öffnen",
+  "browser_chrome_stop_loading": "Laden stoppen",
+  "browser_driving_in_tab": "Arbeitet in diesem Tab",
+  "browser_driving_on_host": "Arbeitet auf {host}",
+  "browser_driving_stop": "Stoppen",
+  "browser_driving_stop_error": "Die Antwort konnte nicht gestoppt werden.",
+  "browser_element_named": "{role} „{name}“",
+  "browser_element_unnamed": [
+    {
+      "declarations": [
+        "input role",
+        "input vowel"
+      ],
+      "selectors": [
+        "vowel"
+      ],
+      "match": {
+        "vowel=*": "{role}"
+      }
+    }
+  ],
+  "browser_key_ctrl": "Strg",
+  "browser_key_down": "Pfeil nach unten",
+  "browser_key_left": "Pfeil nach links",
+  "browser_key_right": "Pfeil nach rechts",
+  "browser_key_space": "Leertaste",
+  "browser_key_up": "Pfeil nach oben",
+  "browser_role_button": "Schaltfläche",
+  "browser_role_checkbox": "Kontrollkästchen",
+  "browser_role_field": "Feld",
+  "browser_role_heading": "Überschrift",
+  "browser_role_image": "Bild",
+  "browser_role_item": "Eintrag",
+  "browser_role_link": "Link",
+  "browser_role_list": "Liste",
+  "browser_role_menu_item": "Menüeintrag",
+  "browser_role_number_field": "Zahlenfeld",
+  "browser_role_option": "Option",
+  "browser_role_search_field": "Suchfeld",
+  "browser_role_switch": "Schalter",
+  "browser_role_tab": "Tab",
+  "browser_running_back": "Gehe zurück",
+  "browser_running_click": "Klicke",
+  "browser_running_evaluate": "Führe Code auf der Seite aus",
+  "browser_running_forward": "Gehe vorwärts",
+  "browser_running_go_to": "Gehe zu {host}",
+  "browser_running_look": "Sehe mir die Seite an",
+  "browser_running_open_host": "Öffne {host}",
+  "browser_running_open_page": "Öffne eine Seite",
+  "browser_running_press": "Drücke eine Taste",
+  "browser_running_press_key": "Drücke {key}",
+  "browser_running_read": "Lese die Seite",
+  "browser_running_reload": "Lade die Seite neu",
+  "browser_running_save": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Speichere eine Datei",
+        "countPlural=other": "Speichere {count} Dateien"
+      }
+    }
+  ],
+  "browser_running_save_screenshot": "Speichere einen Screenshot",
+  "browser_running_scroll": "Scrolle",
+  "browser_running_select": "Wähle eine Option",
+  "browser_running_share_screenshot": "Mache einen Screenshot für dich",
+  "browser_running_tabs": "Sehe mir die offenen Tabs an",
+  "browser_running_type": "Tippe",
+  "browser_running_wait": "Warte auf die Seite",
+  "browser_settings_engine_description": "Wird verwendet, wenn du etwas eingibst, das keine Adresse ist.",
+  "browser_settings_engine_label": "Suchmaschine",
+  "browser_settings_links_description": "Halte beim Klicken ⌘ oder Strg gedrückt, um die andere Option zu nutzen.",
+  "browser_settings_links_external": "In deinem Browser",
+  "browser_settings_links_label": "Links aus Chats öffnen",
+  "browser_settings_links_panel": "In der Seitenleiste",
+  "browser_settings_title": "Browser",
+  "browser_tab_new": "Neuer Tab",
   "chat_error_attachment_busy": "Stoppe zuerst die Antwort in diesem Chat.",
   "chat_error_attachment_gone": "Ein Anhang ist nicht mehr verfügbar",
   "chat_error_conversation_busy": "Eine Antwort wird noch erstellt",

@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { m } from "~/paraglide/messages.js";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import {
   Select,
@@ -17,9 +18,9 @@ import {
 import { useDesktopBrowser } from "../client/use-desktop-browser.ts";
 
 const engines = Object.entries(SEARCH_ENGINES).map(([value, { label }]) => ({ value, label }));
-const linkTargets: ReadonlyArray<{ value: LinkTarget; label: string }> = [
-  { value: "panel", label: "In the side panel" },
-  { value: "external", label: "In your browser" },
+const linkTargets: ReadonlyArray<{ value: LinkTarget; label: () => string }> = [
+  { value: "panel", label: m.browser_settings_links_panel },
+  { value: "external", label: m.browser_settings_links_external },
 ];
 
 /** One choice as a row of the card: what it is on the left, the choice on the right. */
@@ -75,18 +76,18 @@ export function BrowserSearchSetting() {
   const [linkTarget, setLinkTarget] = useLinkTarget();
   if (!browser) return null;
   return (
-    <Section title="Browser">
+    <Section title={m.browser_settings_title()}>
       <ListCard>
         <ChoiceRow<LinkTarget>
-          label="Open links from chats"
-          description="Hold ⌘ or Ctrl while clicking to use the other."
+          label={m.browser_settings_links_label()}
+          description={m.browser_settings_links_description()}
           value={linkTarget}
-          options={linkTargets}
+          options={linkTargets.map(({ value, label }) => ({ value, label: label() }))}
           onChange={setLinkTarget}
         />
         <ChoiceRow<SearchEngine>
-          label="Search engine"
-          description="Used when you type something that isn’t an address."
+          label={m.browser_settings_engine_label()}
+          description={m.browser_settings_engine_description()}
           value={engine}
           options={engines}
           onChange={setEngine}

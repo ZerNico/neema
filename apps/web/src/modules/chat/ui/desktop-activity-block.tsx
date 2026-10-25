@@ -252,7 +252,7 @@ const approvalTitle = (
   roots: ReadonlyArray<{ name: string; path: string }>,
 ) => {
   if (kind === "site") return "Open this site in the browser";
-  if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask;
+  if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask();
   switch (kind) {
     case "read":
       return activity.name === "list_folder"

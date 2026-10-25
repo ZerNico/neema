@@ -13,16 +13,19 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { stringArg as text } from "~/modules/desktop/tool-schema.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { hostOf } from "../client/address.ts";
 import { isSensitive, type BrowserToolName } from "../tool-schema.ts";
-import { elementPhrase, keyPhrase } from "../wording.ts";
+import { elementLabel, keyPhrase } from "../wording.ts";
 
 type Args = Readonly<Record<string, unknown>>;
 
 // The element a call acts on, when an approval card knows it (`target`, from
 // the tab's last outline). Its bare reference means nothing to a person.
-const element = (args: Args) => elementPhrase(text(args.target)) ?? "";
+const element = (args: Args) => elementLabel(text(args.target)) ?? "";
 const place = (url: string) => hostOf(url) ?? url;
+const key = (args: Args) => keyPhrase(text(args.key), getLocale());
 
 /**
  * How each browser tool reads in the transcript: its icon, the argument a
@@ -35,58 +38,61 @@ export const BROWSER_ACTIVITY: Record<
     readonly icon: IconSvgElement;
     readonly arg: (args: Args) => string;
     readonly running: (args: Args) => string;
-    readonly ask: string;
+    readonly ask: () => string;
   }
 > = {
   browser_tabs: {
     icon: Layers01Icon,
     arg: () => "",
-    running: () => "Looking at the open tabs",
-    ask: "Look at the open tabs",
+    running: () => m.browser_running_tabs(),
+    ask: m.browser_ask_tabs,
   },
   browser_open: {
     icon: Globe02Icon,
     arg: (args) => text(args.url),
-    running: (args) => (text(args.url) ? `Opening ${place(text(args.url))}` : "Opening a page"),
-    ask: "Open this site in the browser",
+    running: (args) =>
+      text(args.url)
+        ? m.browser_running_open_host({ host: place(text(args.url)) })
+        : m.browser_running_open_page(),
+    ask: m.browser_ask_open,
   },
   browser_navigate: {
     icon: Globe02Icon,
     arg: (args) => text(args.url),
     running: (args) =>
       text(args.url)
-        ? `Going to ${place(text(args.url))}`
+        ? m.browser_running_go_to({ host: place(text(args.url)) })
         : args.action === "back"
-          ? "Going back"
+          ? m.browser_running_back()
           : args.action === "forward"
-            ? "Going forward"
-            : "Reloading the page",
-    ask: "Move this browser tab",
+            ? m.browser_running_forward()
+            : m.browser_running_reload(),
+    ask: m.browser_ask_navigate,
   },
   browser_snapshot: {
     icon: ViewIcon,
     arg: () => "",
     running: (args) =>
       args.share === true
-        ? "Taking a screenshot for you"
+        ? m.browser_running_share_screenshot()
         : args.save === true
-          ? "Saving a screenshot"
+          ? m.browser_running_save_screenshot()
           : args.screenshot === true
-            ? "Looking at the page"
-            : "Reading the page",
-    ask: "Read this page",
+            ? m.browser_running_look()
+            : m.browser_running_read(),
+    ask: m.browser_ask_read,
   },
   browser_wait_for: {
     icon: Timer01Icon,
     arg: (args) => text(args.text),
-    running: () => "Waiting for the page",
-    ask: "Read this page",
+    running: () => m.browser_running_wait(),
+    ask: m.browser_ask_read,
   },
   browser_click: {
     icon: CursorPointer01Icon,
     arg: element,
-    running: () => "Clicking",
-    ask: "Click on this page",
+    running: () => m.browser_running_click(),
+    ask: m.browser_ask_click,
   },
   browser_type: {
     icon: TextIcon,
@@ -94,47 +100,49 @@ export const BROWSER_ACTIVITY: Record<
     // never shown, not even there.
     arg: (args) => {
       const typed = isSensitive(args) ? "••••••••" : text(args.text);
-      return element(args) ? `${typed}\ninto ${element(args)}` : typed;
+      return element(args)
+        ? m.browser_activity_typed_into({ text: typed, element: element(args) })
+        : typed;
     },
-    running: () => "Typing",
-    ask: "Type on this page",
+    running: () => m.browser_running_type(),
+    ask: m.browser_ask_type,
   },
   browser_press: {
     icon: KeyboardIcon,
-    arg: (args) => (text(args.key) ? keyPhrase(text(args.key)) : ""),
+    arg: (args) => (text(args.key) ? key(args) : ""),
     running: (args) =>
-      text(args.key) ? `Pressing ${keyPhrase(text(args.key))}` : "Pressing a key",
-    ask: "Press a key on this page",
+      text(args.key) ? m.browser_running_press_key({ key: key(args) }) : m.browser_running_press(),
+    ask: m.browser_ask_press,
   },
   browser_scroll: {
     icon: ArrowDataTransferVerticalIcon,
     arg: element,
-    running: () => "Scrolling",
-    ask: "Read this page",
+    running: () => m.browser_running_scroll(),
+    ask: m.browser_ask_read,
   },
   browser_select: {
     icon: ListViewIcon,
     arg: (args) =>
       text(args.value) && element(args)
-        ? `${text(args.value)}\nin ${element(args)}`
+        ? m.browser_activity_chosen_in({ value: text(args.value), element: element(args) })
         : text(args.value),
-    running: () => "Choosing an option",
-    ask: "Choose an option on this page",
+    running: () => m.browser_running_select(),
+    ask: m.browser_ask_select,
   },
   browser_save: {
     icon: Download04Icon,
     arg: (args) =>
       Array.isArray(args.urls) ? args.urls.filter((url) => typeof url === "string").join("\n") : "",
     running: (args) =>
-      Array.isArray(args.urls) && args.urls.length > 1
-        ? `Saving ${args.urls.length} files`
-        : "Saving a file",
-    ask: "Save files from the web",
+      m.browser_running_save({
+        count: Array.isArray(args.urls) && args.urls.length > 1 ? args.urls.length : 1,
+      }),
+    ask: m.browser_ask_save,
   },
   browser_evaluate: {
     icon: CodeIcon,
     arg: (args) => text(args.expression),
-    running: () => "Running code on the page",
-    ask: "Run this code on the page",
+    running: () => m.browser_running_evaluate(),
+    ask: m.browser_ask_evaluate,
   },
 };
