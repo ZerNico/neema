@@ -1042,25 +1042,6 @@ export class ChatRepo extends Context.Service<
       { claimed: false } | { claimed: true; generationId: string },
       ResolveError | ConversationBusy
     >;
-    createAssistantForEdit(
-      input: EditContent & {
-        expectedMessages: HistorySnapshot;
-        userId: string;
-        conversationId: string;
-        userMessageId: string;
-        expectedEditedAt: Date | null;
-        attachmentIds: ReadonlyArray<string>;
-        modelId: string;
-        deleteMessageIds: ReadonlyArray<string>;
-        /** See resetMessageForRetry. */
-        invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
-        /** The new answer is a new generation: it resolves against the conversation defaults. */
-        resolve: ResolveGeneration;
-      },
-    ): Effect.Effect<
-      { message: MessageRow; orphanedKeys: ReadonlyArray<string>; config: GenerationConfig } | null,
-      ResolveError | AttachmentNotAvailable | ConversationBusy
-    >;
     /**
      * Removes messages entirely (chunks/tool calls go via FK cascade).
      * Returns storage keys to delete after the commit.

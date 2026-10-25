@@ -568,7 +568,7 @@ describe("knowledge-backed generations", () => {
     ).toEqual({ n: 4 });
   });
 
-  it.each(["send", "retry", "edit", "edit-without-answer"] as const)(
+  it.each(["send", "retry", "edit"] as const)(
     "resolves current instructions and dependencies for %s, preserving standalone overlap and current versions",
     async (action) => {
       const owner = await createUser();
@@ -607,8 +607,6 @@ describe("knowledge-backed generations", () => {
             `select id from messages where conversation_id = '${first.conversationId}' and role = 'user'`,
           )
         ).rows[0]!;
-        if (action === "edit-without-answer")
-          await exec(`delete from messages where id = '${messageId}'`);
         const edited = await run(
           Effect.flatMap(ChatService, (chat) =>
             chat.editMessage({
@@ -631,19 +629,15 @@ describe("knowledge-backed generations", () => {
         resolved_agent: { configRevision: 2, instructions: "Private instructions revision 2." },
         plan_enabled: true,
         search_enabled: false,
-        collection_ids:
-          action === "edit-without-answer"
-            ? [added.collectionId]
-            : [added.collectionId, overlap.collectionId],
-        standalone_collection_ids: action === "edit-without-answer" ? [] : [overlap.collectionId],
+        collection_ids: [added.collectionId, overlap.collectionId],
+        standalone_collection_ids: [overlap.collectionId],
       });
       const versions = (
         await exec(
           `select version_id from message_knowledge_versions where message_id = '${messageId}'`,
         )
       ).rows;
-      if (action !== "edit-without-answer")
-        expect(versions).toContainEqual({ version_id: replacement.versionId });
+      expect(versions).toContainEqual({ version_id: replacement.versionId });
       expect(versions).not.toContainEqual({ version_id: old.documents[0]!.versionId });
       expect(promptText(requests.at(-1)!.prompt)).toContain("Private instructions revision 2.");
       if (action === "send") expect(await configRow(first.assistantMessageId)).toEqual(previous);

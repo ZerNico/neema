@@ -1228,102 +1228,55 @@ function makeChatService() {
       ) {
         return yield* new InvalidMessage({ reason: "message is empty" });
       }
-      const { model, researchEnabled } = yield* validateGenerationOptions(input);
-      const searchAvailable = yield* searchToolEnabled;
+      const { researchEnabled } = yield* validateGenerationOptions(input);
       const edit: EditContent = input.questionResponse
         ? { questionResponse: input.questionResponse }
         : { content: input.content };
 
-      if (assistant) {
-        // Preserve original standalone inputs, but resolve the current agent
-        // and current document versions atomically before rewinding.
-
-        const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
-        const restarted = yield* restartAssistant({
-          desktop: input.desktop,
-          deviceSessionId: input.deviceSessionId,
-          expectedMessages: all,
-          userId: input.userId,
-          conversationId: input.conversationId,
-          assistantMessageId: assistant.id,
-          modelId: input.modelId,
-          imageModelId: input.imageModelId,
-          timeZone: input.timeZone,
-          openDocument: input.openDocument,
-          deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
-          // From the edited user message onward, its text changes while the
-          // row survives, so any summary covering it is stale.
-          invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
-          edit: {
-            messageId: message.id,
-            ...edit,
-            attachmentIds: input.attachmentIds,
-            searchEnabled: input.searchEnabled,
-            researchEnabled,
-            reasoningEffort: input.reasoningEffort,
-            ...(input.skillIds ? { skillIds: input.skillIds } : {}),
-            ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
-          },
+      // A question and its answer are created together, so an edit always has
+      // an answer to regenerate.
+      if (!assistant)
+        return yield* new EditNotAllowed({
+          messageId: input.messageId,
+          reason: "this message has no answer to regenerate",
         });
-        if (!restarted) {
-          return yield* new EditNotAllowed({
-            messageId: input.messageId,
-            reason: "response is already generating",
-          });
-        }
-        return restarted;
-      }
+      // Preserve original standalone inputs, but resolve the current agent
+      // and current document versions atomically before rewinding.
 
-      const created = yield* repo.createAssistantForEdit({
+      const assistantIndex = all.findIndex((candidate) => candidate.id === assistant.id);
+      const restarted = yield* restartAssistant({
+        desktop: input.desktop,
+        deviceSessionId: input.deviceSessionId,
         expectedMessages: all,
         userId: input.userId,
         conversationId: input.conversationId,
-        userMessageId: message.id,
-        expectedEditedAt: message.editedAt,
-        ...edit,
-        attachmentIds: input.attachmentIds,
+        assistantMessageId: assistant.id,
         modelId: input.modelId,
-        deleteMessageIds: after.map((candidate) => candidate.id),
+        imageModelId: input.imageModelId,
+        timeZone: input.timeZone,
+        openDocument: input.openDocument,
+        deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
+        // From the edited user message onward, its text changes while the
+        // row survives, so any summary covering it is stale.
         invalidateCheckpointThroughMessageIds: all.slice(index).map((candidate) => candidate.id),
-        resolve: resolver({
-          attempt: "edit",
-          userId: input.userId,
-          imageModelId: input.imageModelId,
+        edit: {
+          messageId: message.id,
+          ...edit,
+          attachmentIds: input.attachmentIds,
           searchEnabled: input.searchEnabled,
           researchEnabled,
           reasoningEffort: input.reasoningEffort,
-          desktop: input.desktop,
-          model,
-          searchAvailable,
           ...(input.skillIds ? { skillIds: input.skillIds } : {}),
           ...(input.collectionIds ? { collectionIds: input.collectionIds } : {}),
-        }),
+        },
       });
-      if (!created) {
+      if (!restarted) {
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "message changed while it was being edited",
+          reason: "response is already generating",
         });
       }
-      yield* attachmentService.deleteBlobs(created.orphanedKeys);
-      yield* sync.publish(input.userId, {
-        type: "message.created",
-        conversationId: input.conversationId,
-        messageId: created.message.id,
-      });
-      yield* startAttempt({
-        desktop: input.desktop,
-        deviceSessionId: input.deviceSessionId,
-        userId: input.userId,
-        conversationId: input.conversationId,
-        messageId: created.message.id,
-        generationId: created.message.generationId,
-        modelId: input.modelId,
-        timeZone: input.timeZone,
-        openDocument: input.openDocument,
-      });
-
-      return { assistantMessageId: created.message.id };
+      return restarted;
     });
 
     const sweepInterval = yield* QueueSweepInterval;

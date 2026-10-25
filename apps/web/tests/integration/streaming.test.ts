@@ -3329,89 +3329,85 @@ describe("conversation documents", () => {
 });
 
 describe("structured answer persistence and edits", () => {
-  it.each(["existing assistant", "missing assistant"])(
-    "edits answers through the %s path",
-    async (path) => {
-      const result = await runtime.runPromise(
-        Effect.gen(function* () {
-          const repo = yield* ChatRepo;
-          const service = yield* ChatService;
-          const engine = yield* StreamEngine;
-          const seed = yield* setupQuestion;
-          const turn = yield* repo.createTurn(answerInput(seed));
-          yield* repo.finalizeMessage({
-            messageId: turn.assistant.id,
-            status: "complete",
-            content: "Old answer",
-          });
-          if (path === "missing assistant") yield* repo.deleteMessages([turn.assistant.id]);
-          const originalCalls = yield* repo.listToolCalls([seed.assistant.id]);
-          const input = {
-            userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId: turn.userMessage.id,
-            modelId: textModelId,
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-          };
-          const ordinary = yield* service
-            .editMessage({ ...input, content: "unrelated text" })
-            .pipe(Effect.flip);
-          const invalid = yield* service
-            .editMessage({
-              ...input,
-              questionResponse: { kind: "answers", answers: [{ selected: [3], custom: "" }] },
-            })
-            .pipe(Effect.flip);
-          const response = {
-            kind: "answers" as const,
-            answers: [{ selected: [], custom: "My own style" }],
-          };
-          const edited = yield* service.editMessage({ ...input, questionResponse: response });
-          yield* engine.subscribe(edited.assistantMessageId, 0).pipe(Stream.runCollect);
-          const answer = yield* repo.getMessage(turn.userMessage.id);
-          const branch = yield* repo.cloneConversationPrefix({
-            userId: seed.userId,
-            sourceConversationId: seed.conversation.id,
-            throughMessageId: edited.assistantMessageId,
-          });
-          const branchMessages = yield* repo.listMessages(branch.id);
-          const calls = yield* repo.listToolCalls(branchMessages.map((message) => message.id));
-          return {
-            ordinary,
-            invalid,
-            response,
-            answer,
-            originalCalls,
-            afterCalls: yield* repo.listToolCalls([seed.assistant.id]),
-            branchMessages,
-            calls,
-            chunks: yield* repo.chunksAfter(branchMessages.at(-1)!.id, 0),
-          };
-        }),
-      );
-      expect(result.ordinary).toMatchObject({ _tag: "InvalidMessage" });
-      expect(result.invalid).toMatchObject({ _tag: "InvalidMessage" });
-      expect(result.answer).toMatchObject({
-        content: "Q1: My own style",
-        questionResponse: { v: 1, callId: result.originalCalls[0]!.id, response: result.response },
-      });
-      expect(result.afterCalls).toEqual(result.originalCalls);
-      expect(result.branchMessages[2]).toMatchObject({
-        content: result.answer!.content,
-        // The copy names the branch's own copy of the question.
-        questionResponse: {
-          v: 1,
-          callId: result.calls[0]!.id,
-          response: result.response,
-        },
-      });
-      expect(result.calls[0]).toMatchObject({ textOffset: 0 });
-      expect(result.calls[0]!.id).not.toBe(result.originalCalls[0]!.id);
-      expect(result.chunks).toEqual([]);
-    },
-  );
+  it("edits answers by regenerating their answer", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ChatRepo;
+        const service = yield* ChatService;
+        const engine = yield* StreamEngine;
+        const seed = yield* setupQuestion;
+        const turn = yield* repo.createTurn(answerInput(seed));
+        yield* repo.finalizeMessage({
+          messageId: turn.assistant.id,
+          status: "complete",
+          content: "Old answer",
+        });
+        const originalCalls = yield* repo.listToolCalls([seed.assistant.id]);
+        const input = {
+          userId: seed.userId,
+          conversationId: seed.conversation.id,
+          messageId: turn.userMessage.id,
+          modelId: textModelId,
+          searchEnabled: false,
+          researchEnabled: false,
+          attachmentIds: [],
+        };
+        const ordinary = yield* service
+          .editMessage({ ...input, content: "unrelated text" })
+          .pipe(Effect.flip);
+        const invalid = yield* service
+          .editMessage({
+            ...input,
+            questionResponse: { kind: "answers", answers: [{ selected: [3], custom: "" }] },
+          })
+          .pipe(Effect.flip);
+        const response = {
+          kind: "answers" as const,
+          answers: [{ selected: [], custom: "My own style" }],
+        };
+        const edited = yield* service.editMessage({ ...input, questionResponse: response });
+        yield* engine.subscribe(edited.assistantMessageId, 0).pipe(Stream.runCollect);
+        const answer = yield* repo.getMessage(turn.userMessage.id);
+        const branch = yield* repo.cloneConversationPrefix({
+          userId: seed.userId,
+          sourceConversationId: seed.conversation.id,
+          throughMessageId: edited.assistantMessageId,
+        });
+        const branchMessages = yield* repo.listMessages(branch.id);
+        const calls = yield* repo.listToolCalls(branchMessages.map((message) => message.id));
+        return {
+          ordinary,
+          invalid,
+          response,
+          answer,
+          originalCalls,
+          afterCalls: yield* repo.listToolCalls([seed.assistant.id]),
+          branchMessages,
+          calls,
+          chunks: yield* repo.chunksAfter(branchMessages.at(-1)!.id, 0),
+        };
+      }),
+    );
+    expect(result.ordinary).toMatchObject({ _tag: "InvalidMessage" });
+    expect(result.invalid).toMatchObject({ _tag: "InvalidMessage" });
+    expect(result.answer).toMatchObject({
+      content: "Q1: My own style",
+      questionResponse: { v: 1, callId: result.originalCalls[0]!.id, response: result.response },
+    });
+    expect(result.afterCalls).toEqual(result.originalCalls);
+    expect(result.branchMessages[2]).toMatchObject({
+      content: result.answer!.content,
+      // The copy names the branch's own copy of the question.
+      questionResponse: {
+        v: 1,
+        callId: result.calls[0]!.id,
+        response: result.response,
+      },
+    });
+    expect(result.calls[0]).toMatchObject({ textOffset: 0 });
+    expect(result.calls[0]!.id).not.toBe(result.originalCalls[0]!.id);
+    expect(result.chunks).toEqual([]);
+  });
 
   it("rejects a stale history snapshot even when changed answer metadata has identical text", async () => {
     const result = await runtime.runPromise(
@@ -3579,6 +3575,39 @@ describe("atomic question answers", () => {
     },
   );
 
+  it("refuses to edit a question that has no answer to regenerate", async () => {
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const chat = yield* ChatService;
+        const repo = yield* ChatRepo;
+        const { userId, conversation } = yield* setupConversation;
+        const question = yield* repo.insertMessage({
+          conversationId: conversation.id,
+          role: "user",
+          content: "left without an answer",
+        });
+        const failure = yield* chat
+          .editMessage({
+            userId,
+            conversationId: conversation.id,
+            messageId: question.id,
+            modelId: textModelId,
+            content: "edited",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          })
+          .pipe(Effect.flip);
+        return { failure, question: yield* repo.getMessage(question.id) };
+      }),
+    );
+    expect(result.failure).toMatchObject({
+      _tag: "EditNotAllowed",
+      reason: "this message has no answer to regenerate",
+    });
+    expect(result.question?.content).toBe("left without an answer");
+  });
+
   it("rejects a stale rewind snapshot even after a new answer has finished", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -3591,24 +3620,10 @@ describe("atomic question answers", () => {
           content: "new answer",
         });
         const rewind = yield* repo.resetMessageForRetry(retryInput(seed));
-        const edit = yield* repo.createAssistantForEdit({
-          resolve: plainResolve,
-          userId: seed.userId,
-          conversationId: seed.conversation.id,
-          userMessageId: seed.userMessage.id,
-          expectedEditedAt: null,
-          expectedMessages: seed.expectedMessages,
-          content: "stale edit",
-          attachmentIds: [],
-          modelId: textModelId,
-          deleteMessageIds: [seed.assistant.id],
-          invalidateCheckpointThroughMessageIds: [],
-        });
-        return { rewind, edit, messages: yield* repo.listMessages(seed.conversation.id) };
+        return { rewind, messages: yield* repo.listMessages(seed.conversation.id) };
       }),
     );
     expect(result.rewind.claimed).toBe(false);
-    expect(result.edit).toBeNull();
     expect(result.messages.map((message) => message.content)).toEqual([
       "hi",
       "",
@@ -6325,57 +6340,6 @@ describe("resumable streaming pipeline", () => {
     expect(result.assistant).toMatchObject({ status: "streaming", content: "" });
     expect(result.later).toBeNull();
     expect(result.chunks).toEqual([]);
-  });
-
-  it("atomically edits and creates a missing assistant response", async () => {
-    const result = await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const { userId, conversation, userMessage, assistant } = yield* setupConversation;
-        yield* repo.deleteMessages([assistant.id]);
-        const later = yield* repo.insertMessage({
-          conversationId: conversation.id,
-          role: "user",
-          content: "later turn",
-        });
-
-        const edit = {
-          resolve: plainResolve,
-          expectedMessages: yield* repo.listMessages(conversation.id),
-          userId,
-          conversationId: conversation.id,
-          userMessageId: userMessage.id,
-          expectedEditedAt: userMessage.editedAt,
-          content: "edited prompt",
-          attachmentIds: [],
-          modelId: null as never,
-          deleteMessageIds: [later.id],
-          invalidateCheckpointThroughMessageIds: [],
-        };
-        const created = yield* repo.createAssistantForEdit(edit);
-        const secondClaim = yield* repo.createAssistantForEdit(edit);
-
-        return {
-          created,
-          secondClaim,
-          originalCreatedAt: userMessage.createdAt,
-          user: yield* repo.getMessage(userMessage.id),
-          later: yield* repo.getMessage(later.id),
-          messages: yield* repo.listMessages(conversation.id),
-        };
-      }),
-    );
-
-    expect(result.created?.message).toMatchObject({ role: "assistant", status: "streaming" });
-    expect(result.secondClaim).toBeNull();
-    expect(result.user?.content).toBe("edited prompt");
-    expect(result.user?.editedAt).toBeInstanceOf(Date);
-    expect(result.user?.createdAt).toEqual(result.originalCreatedAt);
-    expect(result.later).toBeNull();
-    expect(result.messages.map((message) => message.id)).toEqual([
-      result.user?.id,
-      result.created?.message.id,
-    ]);
   });
 
   it("fans out sync events across the bus (LISTEN/NOTIFY roundtrip)", async () => {
@@ -9379,85 +9343,80 @@ describe("local tools on the user's machine", () => {
   // dropped are both observable. The tail is only ever in the prompt.
   const fileBody = `${"MACHINE_FILE_BODY ".repeat(200)}FILE_TAIL_MARKER`;
 
-  it.each(["existing assistant", "missing assistant"])(
-    "preserves current Work authority for structured answers and %s edits",
-    async (path) => {
-      authoringScript = () =>
-        Stream.make(
-          AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
-          authoringFinish(),
-        );
-      try {
-        await runtime.runPromise(
-          Effect.gen(function* () {
-            const seed = yield* setupQuestion;
-            const repo = yield* ChatRepo;
-            const service = yield* ChatService;
-            const engine = yield* StreamEngine;
-            yield* (yield* Db)
-              .update(conversations)
-              .set({ mode: "work" })
-              .where(eq(conversations.id, seed.conversation.id));
-            const sent = yield* service.sendMessage({
-              ...answerInput(seed),
-              searchEnabled: false,
-              researchEnabled: false,
-              desktop: {
-                executorId: "answer-session",
-                folders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
-                commands: false,
-                browser: false,
-              },
-            });
-            yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
-            expect(
-              (yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolders,
-            ).toEqual(["answer-folder"]);
-            const rows = yield* repo.listMessages(seed.conversation.id);
-            const answer = rows.find((row) => row.questionResponse)!;
-            if (path === "missing assistant") yield* repo.deleteMessages([sent.assistantMessageId]);
-            const edited = yield* service.editMessage({
-              userId: seed.userId,
-              conversationId: seed.conversation.id,
-              messageId: answer.id,
-              modelId: textModelId,
-              attachmentIds: [],
-              searchEnabled: false,
-              researchEnabled: false,
-              questionResponse: {
-                kind: "answers",
-                answers: [{ selected: [], custom: "Current choice" }],
-              },
-              desktop: {
-                executorId: "edit-answer-session",
-                folders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
-                commands: true,
-                browser: false,
-              },
-            });
-            yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
-            const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
-            expect(config?.desktopFolders).toEqual(["edited-folder"]);
-            expect(config?.desktopCommands).toBe(true);
-            yield* repo.updateConversation(seed.conversation.id, { permissionLevel: "skip" });
-            const branch = yield* repo.cloneConversationPrefix({
-              userId: seed.userId,
-              sourceConversationId: seed.conversation.id,
-              throughMessageId: edited.assistantMessageId,
-            });
-            expect(branch.mode).toBe("work");
-            expect(branch.permissionLevel).toBe("skip");
-            expect(
-              (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session"))
-                .calls,
-            ).toEqual([]);
-          }),
-        );
-      } finally {
-        authoringScript = null;
-      }
-    },
-  );
+  it("preserves current Work authority for structured answers and their edits", async () => {
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const seed = yield* setupQuestion;
+          const repo = yield* ChatRepo;
+          const service = yield* ChatService;
+          const engine = yield* StreamEngine;
+          yield* (yield* Db)
+            .update(conversations)
+            .set({ mode: "work" })
+            .where(eq(conversations.id, seed.conversation.id));
+          const sent = yield* service.sendMessage({
+            ...answerInput(seed),
+            searchEnabled: false,
+            researchEnabled: false,
+            desktop: {
+              executorId: "answer-session",
+              folders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
+              commands: false,
+              browser: false,
+            },
+          });
+          yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
+          expect(
+            (yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolders,
+          ).toEqual(["answer-folder"]);
+          const rows = yield* repo.listMessages(seed.conversation.id);
+          const answer = rows.find((row) => row.questionResponse)!;
+          const edited = yield* service.editMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: answer.id,
+            modelId: textModelId,
+            attachmentIds: [],
+            searchEnabled: false,
+            researchEnabled: false,
+            questionResponse: {
+              kind: "answers",
+              answers: [{ selected: [], custom: "Current choice" }],
+            },
+            desktop: {
+              executorId: "edit-answer-session",
+              folders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
+              commands: true,
+              browser: false,
+            },
+          });
+          yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
+          const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
+          expect(config?.desktopFolders).toEqual(["edited-folder"]);
+          expect(config?.desktopCommands).toBe(true);
+          yield* repo.updateConversation(seed.conversation.id, { permissionLevel: "skip" });
+          const branch = yield* repo.cloneConversationPrefix({
+            userId: seed.userId,
+            sourceConversationId: seed.conversation.id,
+            throughMessageId: edited.assistantMessageId,
+          });
+          expect(branch.mode).toBe("work");
+          expect(branch.permissionLevel).toBe("skip");
+          expect(
+            (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session")).calls,
+          ).toEqual([]);
+        }),
+      );
+    } finally {
+      authoringScript = null;
+    }
+  });
 
   it("uses current desktop capabilities for retries and edits, refusing browser retries before reset", async () => {
     const seed = await runtime.runPromise(desktopChat);
