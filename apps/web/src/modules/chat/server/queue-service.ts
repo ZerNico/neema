@@ -248,7 +248,7 @@ export const makeQueueService = (deps: {
           ...(input.force ? { force: true } : {}),
           resolve: (entry) =>
             resolver({
-              attempt: "send",
+              attempt: "queued",
               userId: input.userId,
               model,
               searchAvailable,
@@ -256,7 +256,6 @@ export const makeQueueService = (deps: {
               searchEnabled: entry.input.searchEnabled,
               researchEnabled,
               reasoningEffort: entry.input.reasoningEffort,
-              allowStaleReasoningEffort: true,
               collectionIds: entry.input.collectionIds,
               skillIds: entry.input.skillIds,
               // Taken from the dispatching app now, never from queue time.

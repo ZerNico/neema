@@ -721,7 +721,7 @@ function makeChatService() {
           ...(target.kind === "new" ? { scheduleId: input.scheduleId } : {}),
           ...(input.scheduleRunId ? { scheduleRunId: input.scheduleRunId } : {}),
           resolve: resolver({
-            attempt: "send",
+            attempt: "scheduled",
             userId: input.userId,
             searchEnabled: input.searchEnabled,
             researchEnabled,
@@ -1066,8 +1066,7 @@ function makeChatService() {
           userId: input.userId,
           model,
           searchAvailable: yield* searchToolEnabled,
-          attempt: "retry",
-          resume: true,
+          attempt: "resume",
           desktop: input.desktop,
         }),
       });

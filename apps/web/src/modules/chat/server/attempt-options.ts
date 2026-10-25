@@ -27,6 +27,41 @@ import {
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 
+/** What a person submits with a message: retry and resume reuse the saved ones. */
+type SubmittedChoices = {
+  searchEnabled: boolean;
+  researchEnabled: boolean;
+  reasoningEffort?: ReasoningEffort | null | undefined;
+};
+
+/** Which kind of attempt this is, with what that kind alone carries. */
+type Attempt =
+  /** Regenerates the answer from its saved choices. */
+  | { attempt: "retry" }
+  /** Continues the answer from its saved choices, and keeps the image model it drew with. */
+  | { attempt: "resume" }
+  | ({
+      /**
+       * A queued message was valid when it was queued, so a reasoning effort
+       * policy has since withdrawn is dropped, not refused.
+       */
+      attempt: "send" | "edit" | "queued";
+    } & SubmittedChoices)
+  | ({
+      attempt: "scheduled";
+      /**
+       * The schedule's up-front consent. Every other attempt, a retry of a
+       * fired answer included, has a person present and carries none.
+       */
+      integrationGrants: ReadonlyArray<IntegrationGrant>;
+    } & SubmittedChoices);
+
+const submittedChoices = (attempt: Attempt): SubmittedChoices | null =>
+  attempt.attempt === "retry" || attempt.attempt === "resume" ? null : attempt;
+
+const integrationGrantsOf = (attempt: Attempt) =>
+  attempt.attempt === "scheduled" ? attempt.integrationGrants : null;
+
 /**
  * What every attempt is checked against before anything is written, and the
  * resolver that settles its configuration inside the attempt's transaction.
@@ -200,31 +235,9 @@ export const makeAttemptOptions = Effect.gen(function* () {
         desktop?: DesktopSubmission | undefined;
         /** Files this send copied into the workspace; only a send carries them. */
         workspaceFiles?: ReadonlyArray<string> | undefined;
-        /** A queued choice was valid when submitted, but policy may have changed. */
-        allowStaleReasoningEffort?: boolean;
-        /**
-         * A schedule fire's up-front consent. Every other attempt, a retry of
-         * a fired answer included, has a person present and passes none.
-         */
-        integrationGrants?: ReadonlyArray<IntegrationGrant>;
         /** The image model this submission picked; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
-        /** Continues the same answer, so it keeps the image model it drew with. */
-        resume?: boolean;
-      } & (
-        | {
-            attempt: "retry";
-            searchEnabled?: never;
-            researchEnabled?: never;
-            reasoningEffort?: never;
-          }
-        | {
-            attempt: "send" | "edit";
-            searchEnabled: boolean;
-            researchEnabled: boolean;
-            reasoningEffort?: ReasoningEffort | null | undefined;
-          }
-      ),
+      } & Attempt,
     ): ResolveGeneration =>
     (tx, defaults: ConversationDefaults, continuation) =>
       Effect.gen(function* () {
@@ -238,7 +251,9 @@ export const makeAttemptOptions = Effect.gen(function* () {
           lockId: defaults.imageModelId,
           explicitId: input.imageModelId,
           agentId: defaults.agent?.agentId,
-          ...(input.resume ? { resumedId: continuation?.imageModel?.id ?? null } : {}),
+          ...(input.attempt === "resume"
+            ? { resumedId: continuation?.imageModel?.id ?? null }
+            : {}),
         });
         // Read here like an agent, so retry and edit meet the project as it is
         // now, and a person who lost access cannot keep working in it.
@@ -256,29 +271,28 @@ export const makeAttemptOptions = Effect.gen(function* () {
           : null;
         const allowedSearch = yield* policy.can(input.userId, "webSearch", tx);
         const allowedResearch = yield* policy.can(input.userId, "deepResearch", tx);
-        const searchEnabled =
-          input.attempt === "retry"
-            ? continuation
-              ? continuation.searchEnabled && input.searchAvailable
-              : yield* Effect.die("Retry requires a saved generation configuration")
-            : input.attempt === "edit"
-              ? input.searchEnabled && input.searchAvailable
-              : (continuation?.searchEnabled ?? input.searchEnabled);
+        const submitted = submittedChoices(input);
+        const searchEnabled = !submitted
+          ? continuation
+            ? continuation.searchEnabled && input.searchAvailable
+            : yield* Effect.die("Retry requires a saved generation configuration")
+          : input.attempt === "edit"
+            ? submitted.searchEnabled && input.searchAvailable
+            : (continuation?.searchEnabled ?? submitted.searchEnabled);
         // Same three cases as search. The third matters most here: the tool
         // cannot ask anything itself, so a clarification round would
         // otherwise answer into a turn that can no longer research.
-        const researchEnabled =
-          input.attempt === "retry"
-            ? (continuation?.researchEnabled ?? false)
-            : input.attempt === "edit"
-              ? input.researchEnabled
-              : (continuation?.researchEnabled ?? input.researchEnabled);
+        const researchEnabled = !submitted
+          ? (continuation?.researchEnabled ?? false)
+          : input.attempt === "edit"
+            ? submitted.researchEnabled
+            : (continuation?.researchEnabled ?? submitted.researchEnabled);
         const savedEffort = continuation?.reasoningEffort ?? null;
-        const submittedEffort = input.attempt === "retry" ? undefined : input.reasoningEffort;
+        const submittedEffort = submitted?.reasoningEffort;
         const chosenEffort = submittedEffort !== undefined ? submittedEffort : savedEffort;
         const supportedEffort =
           chosenEffort === null || (yield* supportsReasoningEffort(input.model, chosenEffort));
-        if (!supportedEffort && submittedEffort != null && !input.allowStaleReasoningEffort)
+        if (!supportedEffort && submittedEffort != null && input.attempt !== "queued")
           return yield* new InvalidMessage({
             reason: "This model does not support the selected reasoning effort.",
           });
@@ -323,7 +337,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
             ...desktopGenerationConfig(desktop),
             // Only a fresh send adds files; retry and edit replay the list.
             workspaceFiles: input.workspaceFiles ?? continuation.workspaceFiles ?? [],
-            integrationGrants: input.integrationGrants ?? null,
+            integrationGrants: integrationGrantsOf(input),
             resolvedProject,
             imageModel,
           };
@@ -358,7 +372,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
         });
         return {
           ...resolved,
-          integrationGrants: input.integrationGrants ?? null,
+          integrationGrants: integrationGrantsOf(input),
           resolvedProject,
           imageModel,
         };
