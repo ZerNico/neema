@@ -1,3 +1,5 @@
+// First: registers the locale strategy before any module renders a message.
+import "~/i18n/choice.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { getGlobalStartContext } from "@tanstack/react-start";

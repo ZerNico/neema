@@ -47,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm --filter @chat/web routes:generate
+      - run: pnpm --filter @chat/web generate
       - run: pnpm typecheck
 
   test:
@@ -58,7 +58,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm --filter @chat/web routes:generate
+      - run: pnpm --filter @chat/web generate
       - name: Web unit and UI tests
         run: pnpm --filter @chat/web exec vitest run --project unit --project ui
       - name: Model client tests
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: pnpm --filter @chat/web routes:generate
+      - run: pnpm --filter @chat/web generate
       # Testcontainers starts the pinned pgvector image on the runner's Docker.
       - run: pnpm --filter @chat/web exec vitest run --project integration
 

@@ -5,6 +5,7 @@ import viteReact, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig, type Plugin } from "vite";
 import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
+import { paraglide } from "./paraglide.ts";
 
 // Dev only. Nitro's Vite middleware guesses static-vs-app from `sec-fetch-dest`:
 // neither `empty` nor document dest reaches Vite's static layer, so
@@ -49,6 +50,7 @@ export default defineConfig({
   worker: { format: "es" },
   plugins: [
     apiRoutesAreNeverAssets(),
+    paraglide(),
     customToolRuntimeWorker(),
     tanstackStart({ spa: { enabled: true } }),
     nitro({

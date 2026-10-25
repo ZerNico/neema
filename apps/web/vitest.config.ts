@@ -3,12 +3,14 @@ import babel from "@rolldown/plugin-babel";
 import { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import { customToolRuntimeWorker } from "./custom-tool-runtime-worker-plugin.ts";
+import { paraglide } from "./paraglide.ts";
 
 export default defineConfig({
   // Components are tested as the app builds them, memoized by React Compiler. The tests
   // themselves are not: their harnesses rerender with fakes that read mutable state.
   plugins: [
     customToolRuntimeWorker(),
+    paraglide(),
     babel({
       presets: [reactCompilerPreset()],
       exclude: [/[/\\]node_modules[/\\]/, /\.test\.tsx?$/],

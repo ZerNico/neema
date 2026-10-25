@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { m } from "~/paraglide/messages.js";
 import { readServerError } from "~/server-error.ts";
 
 const asSentence = (text: string) => {
@@ -37,11 +38,11 @@ export function toastError(title: string, error: unknown) {
   const { reason, reference, raw } = readServerError(error);
   if (reference) {
     toast.error(title, {
-      description: `Something went wrong on our side. Reference ${reference}.`,
+      description: m.common_unexpected_failure({ reference }),
       // Long enough to reach for the button before it goes.
       duration: 15_000,
       action: {
-        label: "Copy details",
+        label: m.common_copy_details(),
         onClick: () =>
           void navigator.clipboard.writeText(
             errorReport({ title, reference, raw, at: new Date(), page: location.href }),
