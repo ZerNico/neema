@@ -17,9 +17,13 @@ import { toastError } from "~/ui/error-toast.ts";
 import { describeSession } from "./describe-session.ts";
 import { install, useInstallWay, type InstallWay } from "~/ui/install-prompt.ts";
 import { Button } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-const when = (value: Date | string) => dateFormat.format(new Date(value));
+const when = (value: Date | string) =>
+  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
+    new Date(value),
+  );
 
 export function DevicesPage() {
   const queryClient = useQueryClient();
@@ -30,15 +34,15 @@ export function DevicesPage() {
   const revoke = useMutation({
     mutationFn: (session: DesktopSession) => revokeDesktopDevice({ id: session.id }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not sign out the device.", error),
+    onError: (error) => toastError(m.settings_devices_error_revoke(), error),
   });
   const revokeOthers = useMutation({
     mutationFn: async () => {
       const { error } = await authClient.revokeOtherSessions();
-      if (error) throw new Error(error.message ?? "Could not sign out other devices.");
+      if (error) throw new Error(error.message ?? m.settings_devices_error_revoke_others());
     },
     onSuccess: refresh,
-    onError: (error) => toastError("Could not sign out other devices.", error),
+    onError: (error) => toastError(m.settings_devices_error_revoke_others(), error),
   });
   const mint = useMutation({ mutationFn: () => createDesktopTicket() });
 
@@ -50,9 +54,9 @@ export function DevicesPage() {
   const others = sessions.filter((session) => !session.current);
 
   return (
-    <Page title="Devices" rootPath="/settings" rootLabel="Settings">
+    <Page title={m.settings_section_devices()} rootPath="/settings" rootLabel={m.common_settings()}>
       <Section
-        title="Signed in"
+        title={m.settings_devices_signed_in()}
         actions={
           others.length > 0 ? (
             <PendingButton
@@ -62,16 +66,15 @@ export function DevicesPage() {
               onClick={async () => {
                 if (
                   await confirm({
-                    title: "Sign out other devices?",
-                    description:
-                      "Every device except this one will have to sign in again, including neema Desktop.",
-                    confirmLabel: "Sign out others",
+                    title: m.settings_devices_revoke_others_title(),
+                    description: m.settings_devices_revoke_others_description(),
+                    confirmLabel: m.settings_devices_revoke_others_confirm(),
                   })
                 )
                   revokeOthers.mutate();
               }}
             >
-              Sign out other devices
+              {m.settings_devices_revoke_others()}
             </PendingButton>
           ) : null
         }
@@ -90,10 +93,15 @@ export function DevicesPage() {
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
-                    {current ? <Badge variant="secondary">This device</Badge> : null}
+                    {current ? (
+                      <Badge variant="secondary">{m.settings_devices_this_device()}</Badge>
+                    ) : null}
                   </div>
                   <span className="text-muted-foreground text-xs">
-                    Signed in {when(session.createdAt)} · Last active {when(session.updatedAt)}
+                    {m.settings_devices_session_times({
+                      signedIn: when(session.createdAt),
+                      active: when(session.updatedAt),
+                    })}
                   </span>
                 </div>
                 {current ? null : (
@@ -104,15 +112,15 @@ export function DevicesPage() {
                     onClick={async () => {
                       if (
                         await confirm({
-                          title: `Sign out ${label}?`,
-                          description: "That device will have to sign in again.",
-                          confirmLabel: "Sign out",
+                          title: m.settings_devices_revoke_title({ name: label }),
+                          description: m.settings_devices_revoke_description(),
+                          confirmLabel: m.settings_devices_revoke_confirm(),
                         })
                       )
                         revoke.mutate(session);
                     }}
                   >
-                    Revoke
+                    {m.settings_devices_revoke()}
                   </PendingButton>
                 )}
               </ListRow>
@@ -122,8 +130,8 @@ export function DevicesPage() {
       </Section>
       <InstallSection />
       <Section
-        title="Add a desktop"
-        description="Generate a code and paste it into neema Desktop’s sign-in screen. It works once and only for a few minutes."
+        title={m.settings_devices_add_desktop_title()}
+        description={m.settings_devices_add_desktop_description()}
       >
         {mint.data ? (
           <TicketCode
@@ -140,11 +148,11 @@ export function DevicesPage() {
               pending={mint.isPending}
               onClick={() =>
                 mint.mutate(undefined, {
-                  onError: (error) => toastError("Could not generate a code.", error),
+                  onError: (error) => toastError(m.settings_devices_error_code(), error),
                 })
               }
             >
-              Generate a code
+              {m.settings_devices_generate_code()}
             </PendingButton>
           </FormActions>
         )}
@@ -154,9 +162,9 @@ export function DevicesPage() {
 }
 
 /** Safari has no install prompt, so it gets the steps instead. */
-const STEPS: Record<Exclude<InstallWay, "prompt" | null>, string> = {
-  ios: "In Safari, tap Share, then Add to Home Screen.",
-  "mac-safari": "In Safari, choose File, then Add to Dock.",
+const STEPS: Record<Exclude<InstallWay, "prompt" | null>, () => string> = {
+  ios: m.settings_devices_install_ios,
+  "mac-safari": m.settings_devices_install_mac_safari,
 };
 
 /** Only where this browser can install it now; gone once it is installed. */
@@ -165,15 +173,13 @@ function InstallSection() {
   if (!way) return null;
   return (
     <Section
-      title="Install on this device"
-      description={
-        way === "prompt" ? "Opens in its own window, from your dock or home screen." : STEPS[way]
-      }
+      title={m.settings_devices_install_title()}
+      description={way === "prompt" ? m.settings_devices_install_description() : STEPS[way]()}
     >
       {way === "prompt" ? (
         <FormActions>
           <Button variant="outline" onClick={() => void install()}>
-            Install
+            {m.settings_devices_install()}
           </Button>
         </FormActions>
       ) : null}

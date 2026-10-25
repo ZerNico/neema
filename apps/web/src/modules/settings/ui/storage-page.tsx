@@ -36,39 +36,52 @@ import { attachmentUrl } from "~/modules/attachments/client/use-attachment-uploa
 import { documentImagePath } from "~/modules/documents/schema.ts";
 import { cardSurfaceClassName } from "~/ui/card-surface.ts";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
 type Filter = "all" | LibraryPlace["kind"];
 
-const FILTERS: ReadonlyArray<{ value: Filter; label: string }> = [
-  { value: "all", label: "All files" },
-  { value: "chat", label: "Chats" },
-  { value: "upload", label: "Not sent" },
-  { value: "document", label: "Documents" },
-  { value: "project", label: "Projects" },
-  { value: "knowledge", label: "Knowledge" },
-  { value: "skill", label: "Skills" },
+// Functions, so the labels are read in the locale of the page.
+const filterOptions = (): ReadonlyArray<{ value: Filter; label: string }> => [
+  { value: "all", label: m.settings_storage_filter_all() },
+  { value: "chat", label: m.settings_storage_filter_chats() },
+  { value: "upload", label: m.settings_storage_filter_not_sent() },
+  { value: "document", label: m.settings_storage_filter_documents() },
+  { value: "project", label: m.settings_storage_filter_projects() },
+  { value: "knowledge", label: m.settings_storage_filter_knowledge() },
+  { value: "skill", label: m.settings_storage_filter_skills() },
 ];
 
-const SORTS = [
-  { value: "size", label: "Largest first" },
-  { value: "date", label: "Newest first" },
-] as const;
+type Sort = "size" | "date";
+
+const sortOptions = (): ReadonlyArray<{ value: Sort; label: string }> => [
+  { value: "size", label: m.settings_storage_sort_size() },
+  { value: "date", label: m.settings_storage_sort_date() },
+];
 
 /** Where one place is, in a few words. */
 const placeText = (place: LibraryPlace) => {
   switch (place.kind) {
     case "chat":
-      return place.deleted ? "In a deleted chat" : `In “${place.title ?? "Untitled chat"}”`;
+      return place.deleted
+        ? m.settings_storage_place_deleted_chat()
+        : place.title
+          ? m.settings_storage_place_chat({ title: place.title })
+          : m.settings_storage_place_untitled_chat();
     case "upload":
-      return "Not sent yet";
+      return m.settings_storage_place_upload();
     case "document":
-      return `In the document “${place.title}”`;
+      return m.settings_storage_place_document({ title: place.title });
     case "project":
-      return `Project “${place.projectName}”${place.versions > 1 ? ` · ${place.versions} versions` : ""}`;
+      return place.versions > 1
+        ? m.settings_storage_place_project_versions({
+            name: place.projectName,
+            count: place.versions,
+          })
+        : m.settings_storage_place_project({ name: place.projectName });
     case "knowledge":
-      return `Collection “${place.collectionName}”`;
+      return m.settings_storage_place_collection({ name: place.collectionName });
     case "skill":
-      return `Skill “${place.skillName}”`;
+      return m.settings_storage_place_skill({ name: place.skillName });
   }
 };
 
@@ -87,7 +100,9 @@ export function StoragePage() {
   const confirm = useConfirm();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [sort, setSort] = useState<(typeof SORTS)[number]["value"]>("size");
+  const [sort, setSort] = useState<Sort>("size");
+  const FILTERS = filterOptions();
+  const SORTS = sortOptions();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["my-storage"] });
 
   const remove = useMutation({
@@ -100,13 +115,16 @@ export function StoragePage() {
       }
     },
     onSettled: refresh,
-    onError: (error) => toastError("Could not delete the file.", error),
+    onError: (error) => toastError(m.settings_storage_error_delete(), error),
   });
 
   const label =
     standing.quota === null
-      ? `${formatBytes(standing.used)} used`
-      : `${formatBytes(standing.used)} of ${formatBytes(standing.quota)} used`;
+      ? m.settings_storage_used({ used: formatBytes(standing.used) })
+      : m.settings_storage_used_of({
+          used: formatBytes(standing.used),
+          quota: formatBytes(standing.quota),
+        });
   const needle = query.trim().toLowerCase();
   const files = (library?.files ?? [])
     .filter((file) => filter === "all" || file.places.some((place) => place.kind === filter))
@@ -118,8 +136,11 @@ export function StoragePage() {
     );
 
   return (
-    <Page title="Storage" rootPath="/settings" rootLabel="Settings">
-      <Section title="Used" description="A file used in several places counts once.">
+    <Page title={m.settings_section_storage()} rootPath="/settings" rootLabel={m.common_settings()}>
+      <Section
+        title={m.settings_storage_used_title()}
+        description={m.settings_storage_used_description()}
+      >
         <ListCard>
           <ListRow className="flex-col items-stretch gap-2">
             <span className="text-sm font-medium">{label}</span>
@@ -132,11 +153,11 @@ export function StoragePage() {
           </ListRow>
         </ListCard>
       </Section>
-      <Section title="Files">
+      <Section title={m.settings_storage_files()}>
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput
-            aria-label="Search files"
-            placeholder="Search"
+            aria-label={m.settings_storage_search()}
+            placeholder={m.common_search()}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="min-w-48 flex-1"
@@ -146,7 +167,7 @@ export function StoragePage() {
             items={FILTERS}
             onValueChange={(value) => setFilter(value as Filter)}
           >
-            <SelectTrigger aria-label="Where" className="w-36">
+            <SelectTrigger aria-label={m.settings_storage_filter_label()} className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -157,12 +178,8 @@ export function StoragePage() {
               ))}
             </SelectContent>
           </Select>
-          <Select
-            value={sort}
-            items={SORTS}
-            onValueChange={(value) => setSort(value as (typeof SORTS)[number]["value"])}
-          >
-            <SelectTrigger aria-label="Order" className="w-36">
+          <Select value={sort} items={SORTS} onValueChange={(value) => setSort(value as Sort)}>
+            <SelectTrigger aria-label={m.settings_storage_sort_label()} className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -176,17 +193,21 @@ export function StoragePage() {
         </div>
         {library && library.files.length >= LIBRARY_LISTED ? (
           <p className="text-muted-foreground text-sm">
-            Showing your {LIBRARY_LISTED} largest files.
+            {m.settings_storage_showing_largest({ count: LIBRARY_LISTED })}
           </p>
         ) : null}
         {!library ? null : files.length === 0 ? (
           <EmptyState
             icon={HardDriveIcon}
-            title={library.files.length === 0 ? "No files yet" : "Nothing matches"}
+            title={
+              library.files.length === 0
+                ? m.settings_storage_empty_title()
+                : m.settings_storage_no_match_title()
+            }
             description={
               library.files.length === 0
-                ? "Files you add to chats, projects and collections show up here."
-                : "Try another search or place."
+                ? m.settings_storage_empty_description()
+                : m.settings_storage_no_match_description()
             }
           />
         ) : (
@@ -200,12 +221,14 @@ export function StoragePage() {
                   const chats = file.places.filter((place) => place.kind === "chat").length;
                   if (
                     await confirm({
-                      title: `Delete “${file.places[0]?.name ?? "this file"}”?`,
+                      title: file.places[0]
+                        ? m.settings_storage_delete_title({ name: file.places[0].name })
+                        : m.settings_storage_delete_title_unnamed(),
                       description:
                         chats > 0
-                          ? "It is taken out of the messages it was sent with, and chats no longer read it."
-                          : "It was never sent, so nothing else changes.",
-                      confirmLabel: "Delete",
+                          ? m.settings_storage_delete_description_sent()
+                          : m.settings_storage_delete_description_unsent(),
+                      confirmLabel: m.common_delete(),
                     })
                   )
                     remove.mutate(file);
@@ -272,8 +295,10 @@ function FileTile({
         (place.kind === "document" && (place.projectId || place.conversationId)),
     ) ?? file.places.find((place) => place.kind === "chat" && !place.deleted);
   const where = first
-    ? `${placeText(first)}${more > 0 ? ` and ${more === 1 ? "1 more place" : `${more} more places`}` : ""}`
-    : "Not in use";
+    ? more > 0
+      ? m.settings_storage_where_more({ place: placeText(first), count: more })
+      : placeText(first)
+    : m.settings_storage_not_in_use();
   const image = imageOf(file);
   const [broken, setBroken] = useState(false);
   return (
@@ -294,7 +319,7 @@ function FileTile({
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 pt-2.5">
         <span className="truncate text-sm font-medium" title={first?.name}>
-          {first?.name ?? "Untitled file"}
+          {first?.name ?? m.settings_storage_untitled_file()}
         </span>
         <span className="text-muted-foreground line-clamp-2 text-xs">
           {formatBytes(file.size)} · {where}
@@ -303,11 +328,11 @@ function FileTile({
       <div className="flex justify-end px-1.5 pb-1.5">
         {removable(file) ? (
           <PendingButton size="sm" variant="ghost" pending={pending} onClick={onDelete}>
-            Delete
+            {m.common_delete()}
           </PendingButton>
         ) : managed ? (
           <PlaceLink place={managed} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-            Open
+            {m.common_open()}
           </PlaceLink>
         ) : null}
       </div>

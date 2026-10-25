@@ -13,7 +13,9 @@ import {
   useTheme,
 } from "~/ui/theme.tsx";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 
+// Scheme names are names, the same in every language.
 const SCHEME_LABELS: Record<ColorScheme, string> = {
   iris: "Iris",
   stone: "Stone",
@@ -27,10 +29,10 @@ const SCHEME_LABELS: Record<ColorScheme, string> = {
   classic: "Classic",
 };
 
-const MODES: Array<{ value: Theme; label: string; icon: IconSvgElement }> = [
-  { value: "light", label: "Light", icon: Sun03Icon },
-  { value: "system", label: "System", icon: ComputerIcon },
-  { value: "dark", label: "Dark", icon: Moon02Icon },
+const MODES: Array<{ value: Theme; label: () => string; icon: IconSvgElement }> = [
+  { value: "light", label: m.settings_appearance_light, icon: Sun03Icon },
+  { value: "system", label: m.settings_appearance_system, icon: ComputerIcon },
+  { value: "dark", label: m.settings_appearance_dark, icon: Moon02Icon },
 ];
 
 const GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3";
@@ -40,9 +42,13 @@ export function AppearancePage() {
   const scheme = useColorScheme();
   const mode = useTheme();
   return (
-    <Page title="Appearance" rootPath="/settings" rootLabel="Settings">
-      <Section title="Theme">
-        <div role="radiogroup" aria-label="Theme" className={GRID}>
+    <Page
+      title={m.settings_section_appearance()}
+      rootPath="/settings"
+      rootLabel={m.common_settings()}
+    >
+      <Section title={m.settings_appearance_theme()}>
+        <div role="radiogroup" aria-label={m.settings_appearance_theme()} className={GRID}>
           {COLOR_SCHEMES.map((option) => (
             <OptionCard
               key={option}
@@ -57,12 +63,12 @@ export function AppearancePage() {
           ))}
         </div>
       </Section>
-      <Section title="Mode">
-        <div role="radiogroup" aria-label="Mode" className={GRID}>
+      <Section title={m.settings_appearance_mode()}>
+        <div role="radiogroup" aria-label={m.settings_appearance_mode()} className={GRID}>
           {MODES.map((option) => (
             <OptionCard
               key={option.value}
-              label={option.label}
+              label={option.label()}
               icon={option.icon}
               selected={option.value === mode}
               onSelect={() => setTheme(option.value)}

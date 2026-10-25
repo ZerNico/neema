@@ -9,6 +9,7 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { m } from "~/paraglide/messages.js";
 
 export function ArchivedChatsPage() {
   const queryClient = useQueryClient();
@@ -20,24 +21,28 @@ export function ArchivedChatsPage() {
     onSuccess: async (count) => {
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast(
-        count === 0 ? "No chats to archive" : `Archived ${count} chat${count === 1 ? "" : "s"}`,
+        count === 0 ? m.settings_archived_none_to_archive() : m.settings_archived_done({ count }),
       );
     },
-    onError: (error) => toastError("Could not archive the chats.", error),
+    onError: (error) => toastError(m.settings_archived_error(), error),
   });
 
   return (
-    <Page title="Archived chats" rootPath="/settings" rootLabel="Settings">
+    <Page
+      title={m.settings_section_archived()}
+      rootPath="/settings"
+      rootLabel={m.common_settings()}
+    >
       <ListCard>
         {/* The list itself lives on the Chats page, beside the chats it came from. */}
         <ListRow interactive className="p-0">
           <Link to="/chats/archived" className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3">
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-sm font-medium">Archived chats</span>
+              <span className="text-sm font-medium">{m.settings_section_archived()}</span>
               <span className="text-muted-foreground text-xs">
                 {archived.length === 0
-                  ? "None yet"
-                  : `${archived.length} chat${archived.length === 1 ? "" : "s"}`}
+                  ? m.settings_archived_none_yet()
+                  : m.settings_archived_count({ count: archived.length })}
               </span>
             </span>
             <HugeiconsIcon
@@ -49,9 +54,9 @@ export function ArchivedChatsPage() {
         </ListRow>
         <ListRow>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-sm font-medium">Archive all chats</span>
+            <span className="text-sm font-medium">{m.settings_archived_all_title()}</span>
             <span className="text-muted-foreground text-xs">
-              Move every chat out of your sidebar.
+              {m.settings_archived_all_description()}
             </span>
           </span>
           <PendingButton
@@ -61,16 +66,16 @@ export function ArchivedChatsPage() {
             onClick={async () => {
               if (
                 await confirm({
-                  title: "Archive all chats?",
-                  description: "You can unarchive them any time from Archived chats.",
-                  confirmLabel: "Archive all",
+                  title: m.settings_archived_confirm_title(),
+                  description: m.settings_archived_confirm_description(),
+                  confirmLabel: m.settings_archived_all(),
                 })
               )
                 archiveAll.mutate();
             }}
           >
             <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} />
-            Archive all
+            {m.settings_archived_all()}
           </PendingButton>
         </ListRow>
       </ListCard>

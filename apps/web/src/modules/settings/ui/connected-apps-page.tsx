@@ -12,9 +12,14 @@ import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.ts
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+import { RichText } from "~/ui/rich-text.tsx";
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-const when = (value: Date | string) => dateFormat.format(new Date(value));
+const when = (value: Date | string) =>
+  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
+    new Date(value),
+  );
 
 export function ConnectedAppsPage() {
   const queryClient = useQueryClient();
@@ -23,32 +28,32 @@ export function ConnectedAppsPage() {
   const revoke = useMutation({
     mutationFn: (clientId: string) => revokeConnectedApp({ data: { clientId } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: connectedAppsQuery.queryKey }),
-    onError: (error) => toastError("Could not disconnect the app.", error),
+    onError: (error) => toastError(m.settings_apps_error_revoke(), error),
   });
 
   return (
-    <Page title="Connected apps" rootPath="/settings" rootLabel="Settings">
+    <Page
+      title={m.settings_section_connected_apps()}
+      rootPath="/settings"
+      rootLabel={m.common_settings()}
+    >
       <Section
-        title="Server address"
-        description="Add this as an MCP server in Claude, Cursor or another app."
+        title={m.settings_apps_server_title()}
+        description={m.settings_apps_server_description()}
       >
         {data.serverUrl ? (
           <ServerAddress url={data.serverUrl} />
         ) : (
-          <p className="text-muted-foreground text-sm">
-            Apps can connect once PUBLIC_URL is an https address.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.settings_apps_needs_https()}</p>
         )}
         {data.allowed ? null : (
-          <p className="text-muted-foreground text-sm">
-            Your account isn’t allowed to connect apps. Ask an admin.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.settings_apps_not_allowed()}</p>
         )}
       </Section>
       {data.serverUrl ? <Setup url={data.serverUrl} /> : null}
-      <Section title="Connected">
+      <Section title={m.settings_apps_connected()}>
         {data.apps.length === 0 ? (
-          <EmptyState icon={McpServerIcon} title="No apps connected" />
+          <EmptyState icon={McpServerIcon} title={m.settings_apps_empty()} />
         ) : (
           <ListCard>
             {data.apps.map((app) => (
@@ -71,8 +76,8 @@ export function ConnectedAppsPage() {
                   <span className="text-muted-foreground text-xs">
                     {accessSummary(app.scopes)} ·{" "}
                     {app.lastActiveAt
-                      ? `Last active ${when(app.lastActiveAt)}`
-                      : `Connected ${when(app.connectedAt)}`}
+                      ? m.settings_apps_last_active({ date: when(app.lastActiveAt) })
+                      : m.settings_apps_connected_at({ date: when(app.connectedAt) })}
                   </span>
                 </div>
                 <PendingButton
@@ -82,15 +87,15 @@ export function ConnectedAppsPage() {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: `Disconnect ${app.name}?`,
-                        description: "It loses access at once and has to be connected again.",
-                        confirmLabel: "Disconnect",
+                        title: m.settings_apps_revoke_title({ name: app.name }),
+                        description: m.settings_apps_revoke_description(),
+                        confirmLabel: m.settings_apps_revoke(),
                       })
                     )
                       revoke.mutate(app.clientId);
                   }}
                 >
-                  Disconnect
+                  {m.settings_apps_revoke()}
                 </PendingButton>
               </ListRow>
             ))}
@@ -120,7 +125,7 @@ function ServerAddress({ url }: { url: string }) {
         }}
       >
         <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} strokeWidth={2} />
-        {copied ? "Copied" : "Copy"}
+        {copied ? m.common_copied() : m.common_copy()}
       </Button>
     </div>
   );
@@ -131,18 +136,18 @@ const setups = (url: string) => [
   {
     id: "claude-code",
     label: "Claude Code",
-    note: "Run this, then /mcp to sign in.",
+    note: m.settings_apps_setup_claude_code(),
     code: `claude mcp add --transport http neema ${url}`,
   },
   {
     id: "config",
-    label: "Cursor and others",
-    note: "Add this to the app’s MCP settings. It asks you to sign in on first use.",
+    label: m.settings_apps_setup_config_label(),
+    note: m.settings_apps_setup_config(),
     code: JSON.stringify({ mcpServers: { neema: { url } } }, null, 2),
   },
   {
     id: "key",
-    label: "With an API key",
+    label: m.settings_apps_setup_key_label(),
     note: null,
     code: JSON.stringify(
       { mcpServers: { neema: { url, headers: { Authorization: "Bearer nma_…" } } } },
@@ -154,7 +159,7 @@ const setups = (url: string) => [
 
 function Setup({ url }: { url: string }) {
   return (
-    <Section title="Setup">
+    <Section title={m.settings_apps_setup()}>
       <Tabs defaultValue="claude-code">
         <TabsList>
           {setups(url).map((setup) => (
@@ -168,13 +173,16 @@ function Setup({ url }: { url: string }) {
             <div className="flex flex-col gap-2">
               <p className="text-muted-foreground text-sm">
                 {setup.note ?? (
-                  <>
-                    For scripts and services that can’t sign in. Make a key in{" "}
-                    <Link to="/settings/api-keys" className="text-foreground underline">
-                      API keys
-                    </Link>{" "}
-                    and send it in the Authorization header.
-                  </>
+                  <RichText
+                    parts={m.settings_apps_setup_key.parts()}
+                    tags={{
+                      link: (children) => (
+                        <Link to="/settings/api-keys" className="text-foreground underline">
+                          {children}
+                        </Link>
+                      ),
+                    }}
+                  />
                 )}
               </p>
               <pre className="bg-muted overflow-x-auto rounded-2xl px-4 py-3 font-mono text-sm">

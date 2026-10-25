@@ -13,88 +13,91 @@ import {
   UserCircleIcon,
 } from "@hugeicons/core-free-icons";
 import type { SectionNavItem } from "~/ui/page-shell.tsx";
+import { m } from "~/paraglide/messages.js";
 
 /** Settings pages, shared by the section nav and search, in a browser. */
-const SETTINGS_SECTIONS: SectionNavItem[] = [
+// Functions, so the labels are read in the locale of the page.
+const settingsSectionList = (): SectionNavItem[] => [
   {
     to: "/settings/profile",
-    label: "Profile",
+    label: m.settings_section_profile(),
     icon: UserCircleIcon,
     matchPrefix: "/settings/profile",
   },
   {
     to: "/settings/appearance",
-    label: "Appearance",
+    label: m.settings_section_appearance(),
     icon: PaintBoardIcon,
     matchPrefix: "/settings/appearance",
   },
   {
     to: "/settings/memory",
-    label: "Memory",
+    label: m.settings_section_memory(),
     icon: Brain02Icon,
     matchPrefix: "/settings/memory",
   },
   {
     to: "/settings/notifications",
-    label: "Notifications",
+    label: m.settings_section_notifications(),
     icon: Notification03Icon,
     matchPrefix: "/settings/notifications",
   },
   {
     to: "/settings/integrations",
-    label: "Integrations",
+    label: m.settings_section_integrations(),
     icon: PlugSocketIcon,
     matchPrefix: "/settings/integrations",
   },
   {
     to: "/settings/devices",
-    label: "Devices",
+    label: m.settings_section_devices(),
     icon: LaptopPhoneSyncIcon,
     matchPrefix: "/settings/devices",
   },
   {
     to: "/settings/connected-apps",
-    label: "Connected apps",
+    label: m.settings_section_connected_apps(),
     icon: McpServerIcon,
     matchPrefix: "/settings/connected-apps",
   },
   {
     to: "/settings/api-keys",
-    label: "API keys",
+    label: m.settings_section_api_keys(),
     icon: Key01Icon,
     matchPrefix: "/settings/api-keys",
   },
   {
     to: "/settings/storage",
-    label: "Storage",
+    label: m.settings_section_storage(),
     icon: HardDriveIcon,
     matchPrefix: "/settings/storage",
   },
   {
     to: "/settings/archived",
-    label: "Archived chats",
+    label: m.settings_section_archived(),
     icon: Archive02Icon,
     matchPrefix: "/settings/archived",
   },
   {
     to: "/settings/usage",
-    label: "Usage",
+    label: m.settings_section_usage(),
     icon: Analytics01Icon,
     matchPrefix: "/settings/usage",
   },
 ];
 
 /** What Work may do on this machine, which only the desktop app can set. */
-const COMPUTER_SECTION: SectionNavItem = {
+const computerSection = (): SectionNavItem => ({
   to: "/settings/computer",
-  label: "This computer",
+  label: m.settings_section_computer(),
   icon: ComputerIcon,
   matchPrefix: "/settings/computer",
-};
+});
 
 /** The pages for this app: a browser has no computer to set, so it is left out there. */
 export const settingsSections = (desktop: boolean): SectionNavItem[] => {
-  if (!desktop) return SETTINGS_SECTIONS;
-  const at = SETTINGS_SECTIONS.findIndex((section) => section.to === "/settings/archived");
-  return SETTINGS_SECTIONS.toSpliced(at, 0, COMPUTER_SECTION);
+  const sections = settingsSectionList();
+  if (!desktop) return sections;
+  const at = sections.findIndex((section) => section.to === "/settings/archived");
+  return sections.toSpliced(at, 0, computerSection());
 };

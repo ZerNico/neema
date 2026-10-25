@@ -18,6 +18,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
+import { m } from "~/paraglide/messages.js";
 
 const preferenceChanges = {
   mutationKey: ["notifications", "preferences", "update"],
@@ -25,9 +26,12 @@ const preferenceChanges = {
 };
 
 const channelsLabel = (preferences: NotificationPreferences) =>
-  [preferences.push && "Push", preferences.email && preferences.emailAvailable && "Email"]
+  [
+    preferences.push && m.settings_notifications_push(),
+    preferences.email && preferences.emailAvailable && m.settings_notifications_email(),
+  ]
     .filter(Boolean)
-    .join(", ") || "Off";
+    .join(", ") || m.settings_notifications_off();
 
 /** What reaches you, and where. Each schedule still decides when it notifies. */
 export function NotificationsPage() {
@@ -52,7 +56,7 @@ export function NotificationsPage() {
     onError: (error, _changes, context) => {
       if (context?.previous)
         queryClient.setQueryData(notificationPreferencesQuery.queryKey, context.previous);
-      toastError("Could not change notifications.", error);
+      toastError(m.settings_notifications_error_save(), error);
     },
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: notificationPreferencesQuery.queryKey }),
@@ -64,27 +68,31 @@ export function NotificationsPage() {
   };
 
   return (
-    <Page title="Notifications" rootPath="/settings" rootLabel="Settings">
+    <Page
+      title={m.settings_section_notifications()}
+      rootPath="/settings"
+      rootLabel={m.common_settings()}
+    >
       {preferences?.push ? <ThisBrowser /> : null}
-      <Section title="Notify me about">
+      <Section title={m.settings_notifications_about()}>
         {!preferences ? (
           preferencesQuery.isError && !preferencesQuery.isFetching ? (
             <ErrorState
-              title="Could not load notifications."
+              title={m.settings_notifications_error_load()}
               onRetry={() => void preferencesQuery.refetch()}
             />
           ) : (
-            <ListSkeleton rows={1} media="none" label="Loading notifications" />
+            <ListSkeleton rows={1} media="none" label={m.settings_notifications_loading()} />
           )
         ) : (
           <ListCard>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Schedules</span>
+                <span className="text-sm font-medium">{m.settings_notifications_schedules()}</span>
                 <span className="text-muted-foreground text-xs">
-                  When a run finishes, or its answer finds something worth telling you.{" "}
+                  {m.settings_notifications_schedules_description()}{" "}
                   <Link to="/schedules" className="underline underline-offset-2">
-                    Manage schedules
+                    {m.settings_notifications_manage_schedules()}
                   </Link>
                 </span>
               </div>
@@ -94,7 +102,7 @@ export function NotificationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      aria-label="Schedule notifications"
+                      aria-label={m.settings_notifications_schedules_label()}
                       disabled={changing}
                       aria-busy={changing || undefined}
                     />
@@ -109,7 +117,7 @@ export function NotificationsPage() {
                     disabled={changing}
                     onCheckedChange={(push) => change({ push })}
                   >
-                    Push
+                    {m.settings_notifications_push()}
                   </DropdownMenuCheckboxItem>
                   {/* Offered once an admin sets up a mail server. */}
                   {preferences.emailAvailable ? (
@@ -118,7 +126,7 @@ export function NotificationsPage() {
                       disabled={changing}
                       onCheckedChange={(email) => change({ email })}
                     >
-                      Email
+                      {m.settings_notifications_email()}
                     </DropdownMenuCheckboxItem>
                   ) : null}
                 </DropdownMenuContent>
@@ -145,12 +153,14 @@ function ThisBrowser() {
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-sm font-medium">{missing}</span>
           {permission === "denied" ? (
-            <span className="text-muted-foreground text-xs">Allow them in its site settings.</span>
+            <span className="text-muted-foreground text-xs">
+              {m.settings_notifications_denied_hint()}
+            </span>
           ) : null}
         </div>
         {permission === "default" ? (
           <Button size="sm" onClick={() => void request()}>
-            Turn on
+            {m.settings_notifications_turn_on()}
           </Button>
         ) : null}
       </ListRow>

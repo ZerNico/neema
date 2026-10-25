@@ -17,6 +17,7 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Switch } from "~/ui/primitives/switch";
 import { SshAgentSetting } from "./ssh-agent-setting.tsx";
+import { m } from "~/paraglide/messages.js";
 
 const subscribeToNothing = () => () => {};
 
@@ -58,16 +59,16 @@ function AllowedList<T>({
   const removal = useMutation({
     mutationFn: remove,
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
-    onError: (error) => toastError("Couldn’t remove it.", error),
+    onError: (error) => toastError(m.settings_computer_error_remove(), error),
   });
   return (
     <ListCard>
       {items.isPending ? (
-        <ListRow className="text-muted-foreground text-sm">Loading…</ListRow>
+        <ListRow className="text-muted-foreground text-sm">{m.settings_computer_loading()}</ListRow>
       ) : items.isError ? (
         <ListRow className="text-muted-foreground text-sm">
           <span role="alert" className="flex-1">
-            Couldn’t load this list.
+            {m.settings_computer_error_load()}
           </span>
           <PendingButton
             variant="ghost"
@@ -75,7 +76,7 @@ function AllowedList<T>({
             pending={items.isFetching}
             onClick={() => void items.refetch()}
           >
-            Try again
+            {m.common_retry()}
           </PendingButton>
         </ListRow>
       ) : items.data.length === 0 ? (
@@ -97,11 +98,11 @@ function AllowedList<T>({
               size="sm"
               pending={removal.isPending && removal.variables === item}
               onClick={async () => {
-                if (await confirm({ ...confirmRemove(item), confirmLabel: "Remove" }))
+                if (await confirm({ ...confirmRemove(item), confirmLabel: m.common_remove() }))
                   removal.mutate(item);
               }}
             >
-              Remove
+              {m.common_remove()}
             </PendingButton>
           </ListRow>
         ))
@@ -119,45 +120,55 @@ export function ComputerPage() {
   const network = useSyncExternalStore(subscribeToNothing, readDesktopNetwork, () => null);
   const agent = useDesktopBrowser()?.agent;
   return (
-    <Page title="This computer" rootPath="/settings" rootLabel="Settings">
+    <Page
+      title={m.settings_section_computer()}
+      rootPath="/settings"
+      rootLabel={m.common_settings()}
+    >
       {!network && !agent ? (
         <EmptyState
           icon={ComputerIcon}
-          title="Only in neema Desktop"
-          description="What Work may do on a computer is set in neema Desktop on that computer."
+          title={m.settings_computer_desktop_only_title()}
+          description={m.settings_computer_desktop_only_description()}
         />
       ) : null}
       <BrowserSearchSetting />
       {agent ? (
-        <Section title="Websites" description="Work opens these in the browser without asking.">
+        <Section
+          title={m.settings_computer_sites_title()}
+          description={m.settings_computer_sites_description()}
+        >
           <AllowedList
             queryKey={["desktop-browser-sites"]}
             load={() => agent.allowedSites()}
             remove={(site) => agent.revokeSite(site)}
             label={(site) => site}
             icon={Globe02Icon}
-            empty="Nothing yet."
+            empty={m.settings_computer_empty()}
             confirmRemove={(site) => ({
-              title: `Remove ${site}?`,
-              description: "Work chats will ask before opening it again.",
+              title: m.settings_computer_remove_title({ name: site }),
+              description: m.settings_computer_site_remove_description(),
             })}
           />
         </Section>
       ) : null}
       {network ? (
-        <Section title="Internet access" description="Commands reach these without asking.">
+        <Section
+          title={m.settings_computer_network_title()}
+          description={m.settings_computer_network_description()}
+        >
           <AllowedList
             queryKey={["desktop-network-grants"]}
             load={() => network.list()}
             remove={(grant) => network.revoke(grant)}
             label={destinationLabel}
             itemKey={({ host, port, privateNetwork }) => `${host}:${port}:${privateNetwork}`}
-            badge={(grant) => (grant.privateNetwork ? "Your network" : null)}
+            badge={(grant) => (grant.privateNetwork ? m.settings_computer_private_network() : null)}
             icon={InternetIcon}
-            empty="Nothing yet."
+            empty={m.settings_computer_empty()}
             confirmRemove={(grant) => ({
-              title: `Remove ${destinationLabel(grant)}?`,
-              description: "Work will ask before connecting to it again.",
+              title: m.settings_computer_remove_title({ name: destinationLabel(grant) }),
+              description: m.settings_computer_network_remove_description(),
             })}
           />
         </Section>
@@ -165,17 +176,20 @@ export function ComputerPage() {
       {network ? <LocalServicesSetting network={network} /> : null}
       {network ? <SshAgentSetting network={network} /> : null}
       {network ? (
-        <Section title="Files and folders" description="Commands can read these in every chat.">
+        <Section
+          title={m.settings_computer_paths_title()}
+          description={m.settings_computer_paths_description()}
+        >
           <AllowedList
             queryKey={["desktop-path-grants"]}
             load={() => network.listPaths()}
             remove={(path) => network.revokePath(path)}
             label={(path) => path}
             icon={FolderShared01Icon}
-            empty="Nothing yet."
+            empty={m.settings_computer_empty()}
             confirmRemove={(path) => ({
-              title: `Remove ${path}?`,
-              description: "Work will ask before reading it again.",
+              title: m.settings_computer_remove_title({ name: path }),
+              description: m.settings_computer_path_remove_description(),
             })}
           />
         </Section>
@@ -206,31 +220,30 @@ function LocalServicesSetting({ network }: { network: DesktopNetwork }) {
       else await network.revokeLocal();
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: LOCAL_KEY }),
-    onError: (error) => toastError("Couldn’t change it.", error),
+    onError: (error) => toastError(m.settings_computer_error_change(), error),
   });
   if (state.data === "unavailable") return null;
   return (
-    <Section title="Services on this computer">
+    <Section title={m.settings_computer_local_title()}>
       <ListCard>
         <ListRow>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-sm font-medium">Allow in every chat</span>
+            <span className="text-sm font-medium">{m.settings_computer_local_allow()}</span>
             <span className="text-muted-foreground text-xs">
-              Some build tools like Gradle need this.
+              {m.settings_computer_local_hint()}
             </span>
           </div>
           <Switch
-            aria-label="Allow services on this computer in every chat"
+            aria-label={m.settings_computer_local_switch()}
             checked={state.data === "allowed"}
             disabled={!state.data || change.isPending}
             onCheckedChange={async (checked) => {
               if (
                 checked &&
                 !(await confirm({
-                  title: "Allow services on this computer?",
-                  description:
-                    "Commands in every Work chat could use them, and a server a command starts could be reached from your network.",
-                  confirmLabel: "Allow",
+                  title: m.settings_computer_local_confirm_title(),
+                  description: m.settings_computer_local_confirm_description(),
+                  confirmLabel: m.settings_computer_local_confirm(),
                 }))
               )
                 return;

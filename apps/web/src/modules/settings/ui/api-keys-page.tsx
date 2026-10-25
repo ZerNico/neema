@@ -34,26 +34,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/ui/primitives/select";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-const when = (value: Date | string) => dateFormat.format(new Date(value));
+const when = (value: Date | string) =>
+  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" }).format(new Date(value));
 
-const LIFETIMES: ReadonlyArray<{ value: string; label: string; days: ApiKeyLifetime }> = [
+// A function, so the labels are read in the locale of the page.
+const lifetimes = (): ReadonlyArray<{ value: string; label: string; days: ApiKeyLifetime }> => [
   ...API_KEY_DAYS.map((days) => ({
     value: String(days),
-    label: days === 365 ? "1 year" : `${days} days`,
+    label:
+      days === 365
+        ? m.settings_api_keys_lifetime_year()
+        : m.settings_api_keys_lifetime_days({ count: days }),
     days,
   })),
-  { value: "never", label: "Never expires", days: null },
+  { value: "never", label: m.settings_api_keys_never_expires(), days: null },
 ];
 
 const READ_SCOPES = MCP_SCOPES.filter((scope) => !scope.endsWith(":write"));
 
 const lifeLine = (key: ApiKeySummary) => {
-  if (!key.expiresAt) return "Never expires";
+  if (!key.expiresAt) return m.settings_api_keys_never_expires();
   return new Date(key.expiresAt) <= new Date()
-    ? `Expired ${when(key.expiresAt)}`
-    : `Expires ${when(key.expiresAt)}`;
+    ? m.settings_api_keys_expired({ date: when(key.expiresAt) })
+    : m.settings_api_keys_expires({ date: when(key.expiresAt) });
 };
 
 export function ApiKeysPage() {
@@ -65,34 +71,32 @@ export function ApiKeysPage() {
   const revoke = useMutation({
     mutationFn: (id: string) => revokeApiKey({ data: { id } }),
     onSuccess: refresh,
-    onError: (error) => toastError("Could not revoke the key.", error),
+    onError: (error) => toastError(m.settings_api_keys_error_revoke(), error),
   });
 
   return (
     <Page
-      title="API keys"
-      description="For scripts and services that can’t sign in through a browser. A key acts as you, with what you let it do."
+      title={m.settings_section_api_keys()}
+      description={m.settings_api_keys_description()}
       rootPath="/settings"
-      rootLabel="Settings"
+      rootLabel={m.common_settings()}
     >
       <Section
-        title="Keys"
+        title={m.settings_api_keys_keys()}
         actions={
           data.allowed && data.serverUrl ? (
             <Button variant="outline" onClick={() => setCreating(true)}>
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-              New key
+              {m.settings_api_keys_new()}
             </Button>
           ) : null
         }
       >
         {data.allowed ? null : (
-          <p className="text-muted-foreground text-sm">
-            Your account can’t make API keys. Ask an admin.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.settings_api_keys_not_allowed()}</p>
         )}
         {data.keys.length === 0 ? (
-          <EmptyState icon={Key01Icon} title="No API keys" />
+          <EmptyState icon={Key01Icon} title={m.settings_api_keys_empty()} />
         ) : (
           <ListCard>
             {data.keys.map((key) => (
@@ -112,7 +116,9 @@ export function ApiKeysPage() {
                   </span>
                   <span className="text-muted-foreground text-xs">
                     {accessSummary(key.scopes)} · {lifeLine(key)} ·{" "}
-                    {key.lastUsedAt ? `Last used ${when(key.lastUsedAt)}` : "Never used"}
+                    {key.lastUsedAt
+                      ? m.settings_api_keys_last_used({ date: when(key.lastUsedAt) })
+                      : m.settings_api_keys_never_used()}
                   </span>
                 </div>
                 <PendingButton
@@ -122,15 +128,15 @@ export function ApiKeysPage() {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: `Revoke ${key.name}?`,
-                        description: "Anything using it loses access at once.",
-                        confirmLabel: "Revoke",
+                        title: m.settings_api_keys_revoke_title({ name: key.name }),
+                        description: m.settings_api_keys_revoke_description(),
+                        confirmLabel: m.settings_api_keys_revoke(),
                       })
                     )
                       revoke.mutate(key.id);
                   }}
                 >
-                  Revoke
+                  {m.settings_api_keys_revoke()}
                 </PendingButton>
               </ListRow>
             ))}
@@ -150,6 +156,7 @@ function CreateKey({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<ReadonlyArray<McpScope>>(READ_SCOPES);
   const [lifetime, setLifetime] = useState("90");
+  const LIFETIMES = lifetimes();
   const create = useMutation({
     // Not kept once the dialog closes: the secret is shown once.
     gcTime: 0,
@@ -162,7 +169,7 @@ function CreateKey({ onCreated }: { onCreated: () => void }) {
         },
       }),
     onSuccess: onCreated,
-    onError: (error) => toastError("Could not make the key.", error),
+    onError: (error) => toastError(m.settings_api_keys_error_create(), error),
   });
 
   if (create.data) return <Reveal secret={create.data.secret} />;
@@ -175,16 +182,16 @@ function CreateKey({ onCreated }: { onCreated: () => void }) {
       }}
     >
       <DialogHeader>
-        <DialogTitle>New API key</DialogTitle>
-        <DialogDescription>It can do only what you tick here.</DialogDescription>
+        <DialogTitle>{m.settings_api_keys_create_title()}</DialogTitle>
+        <DialogDescription>{m.settings_api_keys_create_description()}</DialogDescription>
       </DialogHeader>
       <Field>
-        <FieldLabel htmlFor="api-key-name">Name</FieldLabel>
+        <FieldLabel htmlFor="api-key-name">{m.common_name()}</FieldLabel>
         <Input
           id="api-key-name"
           value={name}
           maxLength={60}
-          placeholder="For example: n8n"
+          placeholder={m.settings_api_keys_name_placeholder()}
           onChange={(event) => setName(event.target.value)}
         />
       </Field>
@@ -196,7 +203,7 @@ function CreateKey({ onCreated }: { onCreated: () => void }) {
         disabled={create.isPending}
       />
       <Field>
-        <FieldLabel htmlFor="api-key-lifetime">Expires</FieldLabel>
+        <FieldLabel htmlFor="api-key-lifetime">{m.settings_api_keys_lifetime()}</FieldLabel>
         <Select
           value={lifetime}
           onValueChange={(value) => value && setLifetime(value)}
@@ -216,14 +223,14 @@ function CreateKey({ onCreated }: { onCreated: () => void }) {
       </Field>
       <DialogFooter>
         <DialogClose render={<Button variant="outline" disabled={create.isPending} />}>
-          Cancel
+          {m.common_cancel()}
         </DialogClose>
         <PendingButton
           type="submit"
           pending={create.isPending}
           disabled={!name.trim() || scopes.length === 0}
         >
-          Make key
+          {m.settings_api_keys_create()}
         </PendingButton>
       </DialogFooter>
     </form>
@@ -236,10 +243,8 @@ function Reveal({ secret }: { secret: string }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Copy your key</DialogTitle>
-        <DialogDescription>
-          You won’t see it again. Send it as a bearer token in the Authorization header.
-        </DialogDescription>
+        <DialogTitle>{m.settings_api_keys_reveal_title()}</DialogTitle>
+        <DialogDescription>{m.settings_api_keys_reveal_description()}</DialogDescription>
       </DialogHeader>
       {/* Wrapped whole rather than cut: every character of it is needed. */}
       <code className="bg-muted rounded-2xl px-4 py-3 font-mono text-sm break-all select-all">
@@ -257,9 +262,9 @@ function Reveal({ secret }: { secret: string }) {
           }}
         >
           <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} strokeWidth={2} />
-          {copied ? "Copied" : "Copy key"}
+          {copied ? m.common_copied() : m.settings_api_keys_copy()}
         </Button>
-        <DialogClose render={<Button />}>Done</DialogClose>
+        <DialogClose render={<Button />}>{m.common_done()}</DialogClose>
       </DialogFooter>
     </>
   );

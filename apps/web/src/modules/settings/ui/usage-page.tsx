@@ -6,6 +6,7 @@ import { DEFAULT_USAGE_RANGE, type UsageRangeEncoded } from "~/modules/analytics
 import { UsageOverview, UsageRangePicker } from "~/modules/analytics/ui/usage-dashboard.tsx";
 import { MyLimitsSection } from "~/modules/limits/ui/my-limits-section.tsx";
 import { EmptyState, Page } from "~/ui/page-shell.tsx";
+import { m } from "~/paraglide/messages.js";
 
 export function UsagePage() {
   const [range, setRange] = useState<UsageRangeEncoded>(DEFAULT_USAGE_RANGE);
@@ -17,9 +18,9 @@ export function UsagePage() {
 
   return (
     <Page
-      title="Usage"
+      title={m.settings_section_usage()}
       rootPath="/settings"
-      rootLabel="Settings"
+      rootLabel={m.common_settings()}
       width="wide"
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
@@ -27,8 +28,8 @@ export function UsagePage() {
       {data.daily.length === 0 ? (
         <EmptyState
           icon={Analytics01Icon}
-          title="No usage in this range"
-          description="Your usage will appear here as you chat."
+          title={m.settings_usage_empty_title()}
+          description={m.settings_usage_empty_description()}
         />
       ) : (
         <UsageOverview

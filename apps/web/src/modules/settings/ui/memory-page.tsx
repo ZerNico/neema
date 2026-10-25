@@ -42,36 +42,39 @@ import {
 } from "~/ui/primitives/dialog";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
-const MemoryFormSchema = Schema.Struct({
-  content: Schema.String.check(
-    Schema.isMinLength(1, { message: "Enter something to remember." }),
-    Schema.isMaxLength(MAX_MEMORY_CONTENT_LENGTH, {
-      message: `Keep memories to ${MAX_MEMORY_CONTENT_LENGTH} characters or fewer.`,
-    }),
-  ),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const memoryFormSchema = () =>
+  Schema.Struct({
+    content: Schema.String.check(
+      Schema.isMinLength(1, { message: m.settings_memory_error_empty() }),
+      Schema.isMaxLength(MAX_MEMORY_CONTENT_LENGTH, {
+        message: m.settings_memory_error_too_long({ max: MAX_MEMORY_CONTENT_LENGTH }),
+      }),
+    ),
+  });
 
 const rejectionMessage = (outcome: MemoryWriteOutcome): string => {
   switch (outcome.outcome) {
     case "limit_reached":
-      return `Memory is full. Remove an item before adding another.`;
+      return m.settings_memory_error_full();
     case "protected":
-      return "This memory can only be changed by you.";
+      return m.settings_memory_error_protected();
     case "not_found":
-      return "That memory no longer exists.";
+      return m.settings_memory_error_not_found();
     case "disabled":
-      return "Automatic memory saving is disabled.";
+      return m.settings_memory_error_disabled();
     case "source_changed":
-      return "The source message changed before the memory could be saved.";
+      return m.settings_memory_error_source_changed();
     case "rejected":
       return outcome.reason === "sensitive"
-        ? "That looks like a secret or credential and cannot be stored."
+        ? m.settings_memory_error_sensitive()
         : outcome.reason === "too_long"
-          ? `Keep memories to ${MAX_MEMORY_CONTENT_LENGTH} characters or fewer.`
-          : "Enter something to remember.";
+          ? m.settings_memory_error_too_long({ max: MAX_MEMORY_CONTENT_LENGTH })
+          : m.settings_memory_error_empty();
     default:
-      return "Could not save the memory.";
+      return m.settings_memory_error_save();
   }
 };
 
@@ -85,7 +88,7 @@ export function MemoryPage() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["memory"] });
   const form = useAppForm({
     defaultValues: { content: editing !== null && editing !== "new" ? editing.content : "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(MemoryFormSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(memoryFormSchema()) },
     onSubmit: async ({ value }) => {
       if (editing === null) return;
       const content = value.content.trim();
@@ -99,14 +102,14 @@ export function MemoryPage() {
           outcome.outcome === "updated" ||
           outcome.outcome === "duplicate"
         ) {
-          if (outcome.outcome === "duplicate") toast.info("That memory is already saved.");
+          if (outcome.outcome === "duplicate") toast.info(m.settings_memory_duplicate());
           await invalidate();
           setEditing(null);
           return;
         }
         toast.error(rejectionMessage(outcome));
       } catch {
-        toast.error("Could not save the memory.");
+        toast.error(m.settings_memory_error_save());
       }
     },
   });
@@ -120,17 +123,17 @@ export function MemoryPage() {
     onSuccess: (next) => {
       queryClient.setQueryData(memorySettingsQuery.queryKey, next);
     },
-    onError: (error) => toastError("Could not update memory settings.", error),
+    onError: (error) => toastError(m.settings_memory_error_settings(), error),
   });
   const remove = useMutation({
     mutationFn: (memoryId: string) => deleteMemory({ data: { memoryId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not delete the memory.", error),
+    onError: (error) => toastError(m.settings_memory_error_delete(), error),
   });
   const clear = useMutation({
     mutationFn: () => clearMemories(),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not clear saved memories.", error),
+    onError: (error) => toastError(m.settings_memory_error_clear(), error),
   });
 
   const updateSetting = (key: keyof UpdateMemorySettingsInput, value: boolean) => {
@@ -141,55 +144,54 @@ export function MemoryPage() {
   const rows = memories.data ?? [];
 
   return (
-    <Page title="Memory" rootPath="/settings" rootLabel="Settings">
-      <Section title="Controls">
+    <Page title={m.settings_section_memory()} rootPath="/settings" rootLabel={m.common_settings()}>
+      <Section title={m.settings_memory_controls()}>
         {settings.data ? (
           <ListCard>
             {!settings.data.globalEnabled ? (
               <ListRow>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium">Memory is paused by an administrator</span>
+                  <span className="text-sm font-medium">{m.settings_memory_paused_title()}</span>
                   <span className="text-muted-foreground text-xs">
-                    Models won’t use or add to your memories for now. You can still add, edit and
-                    delete them, and your settings are kept.
+                    {m.settings_memory_paused_description()}
                   </span>
                 </div>
               </ListRow>
             ) : null}
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Use saved memories</span>
+                <span className="text-sm font-medium">{m.settings_memory_use()}</span>
               </div>
               <Switch
                 checked={settings.data.referenceEnabled}
                 onCheckedChange={(checked) => updateSetting("referenceEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
-                aria-label="Use saved memories"
+                aria-label={m.settings_memory_use()}
               />
             </ListRow>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Save memories automatically</span>
+                <span className="text-sm font-medium">{m.settings_memory_auto_save()}</span>
               </div>
               <Switch
                 checked={settings.data.autoSaveEnabled}
                 onCheckedChange={(checked) => updateSetting("autoSaveEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
-                aria-label="Save memories automatically"
+                aria-label={m.settings_memory_auto_save()}
               />
             </ListRow>
             <ListRow>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="text-sm font-medium">Search past chats</span>
+                <span className="text-sm font-medium">{m.settings_memory_past_chats()}</span>
                 <span className="text-muted-foreground text-xs">
-                  Models can look up your other chats when they’re relevant
+                  {m.settings_memory_past_chats_description()}
                 </span>
               </div>
               <Switch
                 checked={settings.data.pastChatsEnabled}
                 onCheckedChange={(checked) => updateSetting("pastChatsEnabled", checked)}
                 disabled={settingsMutation.isPending || !settings.data.globalEnabled}
-                aria-label="Search past chats"
+                aria-label={m.settings_memory_past_chats()}
               />
             </ListRow>
           </ListCard>
@@ -197,8 +199,8 @@ export function MemoryPage() {
       </Section>
 
       <Section
-        title="Saved memories"
-        description={`${rows.length} of ${MAX_MEMORIES_PER_USER}`}
+        title={m.settings_memory_saved()}
+        description={m.settings_memory_count({ count: rows.length, max: MAX_MEMORIES_PER_USER })}
         actions={
           <>
             {rows.length > 0 ? (
@@ -208,16 +210,15 @@ export function MemoryPage() {
                 disabled={clear.isPending}
                 onClick={() => {
                   void confirm({
-                    title: "Clear all saved memories?",
-                    description:
-                      "This permanently removes every saved memory. Your memory settings will stay the same.",
-                    confirmLabel: "Clear all",
+                    title: m.settings_memory_clear_title(),
+                    description: m.settings_memory_clear_description(),
+                    confirmLabel: m.settings_memory_clear(),
                   }).then((confirmed) => {
                     if (confirmed) clear.mutate();
                   });
                 }}
               >
-                Clear all
+                {m.settings_memory_clear()}
               </Button>
             ) : null}
             <Button
@@ -226,14 +227,14 @@ export function MemoryPage() {
               disabled={rows.length >= MAX_MEMORIES_PER_USER}
             >
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              Add memory
+              {m.settings_memory_add()}
             </Button>
           </>
         }
       >
         {failed ? (
           <ErrorState
-            title="Could not load memory"
+            title={m.settings_memory_error_load()}
             onRetry={() => {
               void Promise.all([settings.refetch(), memories.refetch()]);
             }}
@@ -242,12 +243,12 @@ export function MemoryPage() {
           0 ? (
           <EmptyState
             icon={Brain02Icon}
-            title="Nothing saved yet"
-            description="Add one yourself, or let them be saved automatically."
+            title={m.settings_memory_empty_title()}
+            description={m.settings_memory_empty_description()}
             action={
               <Button size="sm" onClick={() => openEditor("new")}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                Add memory
+                {m.settings_memory_add()}
               </Button>
             }
           />
@@ -261,9 +262,9 @@ export function MemoryPage() {
                 onEdit={() => openEditor(memory)}
                 onDelete={() => {
                   void confirm({
-                    title: "Delete this memory?",
-                    description: "This permanently removes it from future conversations.",
-                    confirmLabel: "Delete memory",
+                    title: m.settings_memory_delete_title(),
+                    description: m.settings_memory_delete_description(),
+                    confirmLabel: m.settings_memory_delete(),
                   }).then((confirmed) => {
                     if (confirmed) remove.mutate(memory.id);
                   });
@@ -284,8 +285,10 @@ export function MemoryPage() {
           {editing !== null ? (
             <>
               <DialogHeader>
-                <DialogTitle>{editing === "new" ? "Add memory" : "Edit memory"}</DialogTitle>
-                <DialogDescription>Don’t store passwords or other secrets.</DialogDescription>
+                <DialogTitle>
+                  {editing === "new" ? m.settings_memory_add() : m.settings_memory_edit()}
+                </DialogTitle>
+                <DialogDescription>{m.settings_memory_dialog_description()}</DialogDescription>
               </DialogHeader>
               <form
                 className="flex flex-col gap-6"
@@ -297,9 +300,11 @@ export function MemoryPage() {
                 <form.AppField name="content">
                   {(field) => (
                     <field.TextareaField
-                      label="Memory"
-                      description={`Up to ${MAX_MEMORY_CONTENT_LENGTH} characters.`}
-                      placeholder="For example: I prefer concise answers with code examples."
+                      label={m.settings_memory_field()}
+                      description={m.settings_memory_field_description({
+                        max: MAX_MEMORY_CONTENT_LENGTH,
+                      })}
+                      placeholder={m.settings_memory_field_placeholder()}
                     />
                   )}
                 </form.AppField>
@@ -308,12 +313,12 @@ export function MemoryPage() {
                     <form.Subscribe selector={(state) => state.isSubmitting}>
                       {(isSubmitting) => (
                         <DialogClose render={<Button variant="outline" disabled={isSubmitting} />}>
-                          Cancel
+                          {m.common_cancel()}
                         </DialogClose>
                       )}
                     </form.Subscribe>
                     <form.SubmitButton>
-                      {editing === "new" ? "Add memory" : "Save changes"}
+                      {editing === "new" ? m.settings_memory_add() : m.common_save_changes()}
                     </form.SubmitButton>
                   </DialogFooter>
                 </form.AppForm>
@@ -339,10 +344,10 @@ function MemoryRow({
 }) {
   const userEdited = memory.editedAt !== null;
   const badge = userEdited
-    ? "Edited by you"
+    ? m.settings_memory_badge_edited()
     : memory.origin === "manual"
-      ? "Added by you"
-      : "Saved in chat";
+      ? m.settings_memory_badge_added()
+      : m.settings_memory_badge_saved_in_chat();
   const updated = new Date(memory.updatedAt);
 
   return (
@@ -355,26 +360,31 @@ function MemoryRow({
           <Badge variant="outline">{badge}</Badge>
           {!Number.isNaN(updated.getTime()) ? (
             <time dateTime={memory.updatedAt} title={absoluteLabel(updated)}>
-              Updated {relativeAgeLabel(updated)}
+              {m.settings_memory_updated({ age: relativeAgeLabel(updated) })}
             </time>
           ) : null}
           {memory.sourceMessageEdited ? (
-            <span className="text-warning">Source message edited</span>
+            <span className="text-warning">{m.settings_memory_source_edited()}</span>
           ) : memory.sourceConversationId ? (
             <Link
               to="/chat/$conversationId"
               params={{ conversationId: memory.sourceConversationId }}
               className="min-w-0 wrap-anywhere hover:text-foreground underline underline-offset-3"
             >
-              {memory.sourceConversationTitle ?? "Source chat"}
+              {memory.sourceConversationTitle ?? m.settings_memory_source_chat()}
             </Link>
           ) : memory.origin === "model" ? (
-            <span>Source chat deleted</span>
+            <span>{m.settings_memory_source_deleted()}</span>
           ) : null}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button variant="ghost" size="icon-sm" onClick={onEdit} aria-label="Edit memory">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onEdit}
+          aria-label={m.settings_memory_edit()}
+        >
           <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
         </Button>
         <Button
@@ -382,7 +392,7 @@ function MemoryRow({
           size="icon-sm"
           onClick={onDelete}
           disabled={deleting}
-          aria-label="Delete memory"
+          aria-label={m.settings_memory_delete()}
         >
           <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
         </Button>

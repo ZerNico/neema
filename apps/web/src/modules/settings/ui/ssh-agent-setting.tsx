@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { Input } from "~/ui/primitives/input";
+import { m } from "~/paraglide/messages.js";
 
 const QUERY_KEY = ["desktop-ssh-agent"] as const;
 
@@ -48,24 +49,22 @@ export function SshAgentSetting({ network }: { network: DesktopNetwork }) {
 const agentLabel = (current: NonNullable<AgentSetting["current"]>) =>
   current.name ??
   (current.source === "windows"
-    ? "Windows’ agent"
+    ? m.settings_ssh_windows_agent()
     : current.source === "environment"
-      ? "System agent"
+      ? m.settings_ssh_system_agent()
       : current.socket);
 
 /** Whether it can sign anyone in: not running, empty, or how many keys it holds. */
 const agentNote = (current: NonNullable<AgentSetting["current"]>, added: readonly string[]) =>
   !current.running
-    ? "Not running"
+    ? m.settings_ssh_not_running()
     : current.keys === 0
       ? current.source === "environment" && added.length > 0
-        ? `${added.join(", ")} ${added.length === 1 ? "is" : "are"} added when a chat signs in`
-        : "No keys. Add yours with ssh-add."
+        ? m.settings_ssh_added_on_sign_in({ names: added.join(", "), count: added.length })
+        : m.settings_ssh_no_keys()
       : current.keys === null
         ? null
-        : current.keys === 1
-          ? "1 key"
-          : `${current.keys} keys`;
+        : m.settings_ssh_key_count({ count: current.keys });
 
 function AgentChoice({
   load,
@@ -90,19 +89,19 @@ function AgentChoice({
       setNaming(false);
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
     },
-    onError: (error) => toastError("Couldn’t change the agent.", error),
+    onError: (error) => toastError(m.settings_ssh_error_change(), error),
   });
   const stopAdding = useMutation({
     mutationFn: forget,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
-    onError: (error) => toastError("Couldn’t change the agent.", error),
+    onError: (error) => toastError(m.settings_ssh_error_change(), error),
   });
   const added = setting.data?.added ?? [];
   const current = setting.data?.current ?? null;
   const others = (setting.data?.found ?? []).filter((agent) => agent.socket !== current?.socket);
   const chosen = current?.source === "chosen";
   return (
-    <Section title="SSH keys" description="Used when you let a chat sign in with SSH.">
+    <Section title={m.settings_ssh_title()} description={m.settings_ssh_description()}>
       <ListCard>
         <ListRow>
           <HugeiconsIcon
@@ -113,12 +112,12 @@ function AgentChoice({
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="wrap-anywhere text-sm font-medium">
               {setting.isPending
-                ? "Loading…"
+                ? m.settings_computer_loading()
                 : setting.isError
-                  ? "Couldn’t load the agent."
+                  ? m.settings_ssh_error_load()
                   : current
                     ? agentLabel(current)
-                    : "No agent found"}
+                    : m.settings_ssh_none()}
             </span>
             {current && agentNote(current, added) ? (
               <span className="text-muted-foreground text-xs">{agentNote(current, added)}</span>
@@ -135,7 +134,7 @@ function AgentChoice({
                   />
                 }
               >
-                Change
+                {m.settings_ssh_change()}
                 <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} data-icon="inline-end" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -146,16 +145,18 @@ function AgentChoice({
                 ))}
                 {chosen ? (
                   <DropdownMenuItem onClick={() => change.mutate(null)}>
-                    System agent
+                    {m.settings_ssh_system_agent()}
                   </DropdownMenuItem>
                 ) : null}
                 {others.length > 0 || chosen ? <DropdownMenuSeparator /> : null}
-                <DropdownMenuItem onClick={() => setNaming(true)}>Other agent…</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setNaming(true)}>
+                  {m.settings_ssh_other()}
+                </DropdownMenuItem>
                 {added.length > 0 ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => stopAdding.mutate()}>
-                      Stop adding {added.join(", ")}
+                      {m.settings_ssh_stop_adding({ names: added.join(", ") })}
                     </DropdownMenuItem>
                   </>
                 ) : null}
@@ -190,8 +191,8 @@ function OtherAgentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Use another agent</DialogTitle>
-          <DialogDescription>Paste the path of its socket.</DialogDescription>
+          <DialogTitle>{m.settings_ssh_other_title()}</DialogTitle>
+          <DialogDescription>{m.settings_ssh_other_description()}</DialogDescription>
         </DialogHeader>
         {/* Mounted while open, so each opening starts empty. */}
         {open ? <OtherAgentForm pending={pending} onSubmit={onSubmit} /> : null}
@@ -218,20 +219,23 @@ function OtherAgentForm({
       }}
     >
       <label htmlFor={id} className="sr-only">
-        Agent socket
+        {m.settings_ssh_socket()}
       </label>
       <Input
         id={id}
         value={socket}
         onChange={(event) => setSocket(event.target.value)}
+        // oxlint-disable-next-line i18n/no-literal-text -- a path, the same in every language
         placeholder="/path/to/agent.sock"
         spellCheck={false}
         autoComplete="off"
       />
       <DialogFooter>
-        <DialogClose render={<Button variant="outline" disabled={pending} />}>Cancel</DialogClose>
+        <DialogClose render={<Button variant="outline" disabled={pending} />}>
+          {m.common_cancel()}
+        </DialogClose>
         <PendingButton type="submit" disabled={!socket.trim()} pending={pending}>
-          Use
+          {m.settings_ssh_use()}
         </PendingButton>
       </DialogFooter>
     </form>

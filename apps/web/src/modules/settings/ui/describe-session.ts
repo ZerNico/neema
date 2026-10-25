@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 /**
  * Coarse and forgiving: a wrong guess here costs a label, not access. Whether
  * it is the desktop app is the session's own mark, set when a ticket was redeemed.
@@ -15,7 +16,7 @@ export function describeSession(userAgent: string | null | undefined, desktop: b
           : /Linux|X11/.test(ua)
             ? "Linux"
             : null;
-  if (desktop) return os ? `neema Desktop on ${os}` : "neema Desktop";
+  if (desktop) return os ? m.settings_devices_desktop_on({ os }) : "neema Desktop";
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /OPR\//.test(ua)
@@ -27,6 +28,9 @@ export function describeSession(userAgent: string | null | undefined, desktop: b
           : /Safari\//.test(ua)
             ? "Safari"
             : null;
-  if (browser && os) return `${browser} on ${os}`;
-  return browser ?? (os ? `Browser on ${os}` : "Browser");
+  if (browser && os) return m.settings_devices_browser_on({ browser, os });
+  return (
+    browser ??
+    (os ? m.settings_devices_unknown_browser_on({ os }) : m.settings_devices_unknown_browser())
+  );
 }

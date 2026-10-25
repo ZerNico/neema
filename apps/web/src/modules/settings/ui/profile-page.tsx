@@ -14,19 +14,25 @@ import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
+import { m } from "~/paraglide/messages.js";
 
-const NameSchema = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1, { message: "Enter a display name." })),
-});
+// A function, so the messages read in the locale of the page that shows them.
+const nameSchema = () =>
+  Schema.Struct({
+    name: Schema.String.check(
+      Schema.isMinLength(1, { message: m.settings_profile_name_required() }),
+    ),
+  });
 
-const PasswordSchema = Schema.Struct({
-  currentPassword: Schema.String.check(
-    Schema.isMinLength(1, { message: "Enter your current password." }),
-  ),
-  newPassword: Schema.String.check(
-    Schema.isMinLength(8, { message: "New password must be at least 8 characters." }),
-  ),
-});
+const passwordSchema = () =>
+  Schema.Struct({
+    currentPassword: Schema.String.check(
+      Schema.isMinLength(1, { message: m.settings_profile_current_password_required() }),
+    ),
+    newPassword: Schema.String.check(
+      Schema.isMinLength(8, { message: m.settings_profile_new_password_too_short() }),
+    ),
+  });
 
 type PasswordStatus = { kind: "error"; message: string };
 
@@ -60,12 +66,12 @@ function ProfileForms({
   const { justSaved: passwordJustSaved, markSaved: markPasswordSaved } = useSaveStatus();
   const nameForm = useAppForm({
     defaultValues: { name: user.name },
-    validators: { onSubmit: Schema.toStandardSchemaV1(NameSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(nameSchema()) },
     onSubmit: async ({ value }) => {
       const name = value.name.trim();
       const { error } = await authClient.updateUser({ name });
       if (error) {
-        toast.error("Could not save the profile.");
+        toast.error(m.settings_profile_error_save());
         return;
       }
       // Confirm before the reset: resetting ends the submit, and in between the
@@ -88,7 +94,7 @@ function ProfileForms({
 
   const passwordForm = useAppForm({
     defaultValues: { currentPassword: "", newPassword: "" },
-    validators: { onSubmit: Schema.toStandardSchemaV1(PasswordSchema) },
+    validators: { onSubmit: Schema.toStandardSchemaV1(passwordSchema()) },
     onSubmit: async ({ value }) => {
       setPasswordStatus(null);
       const { error } = await authClient.changePassword({
@@ -99,7 +105,7 @@ function ProfileForms({
       if (error) {
         setPasswordStatus({
           kind: "error",
-          message: error.message ?? "Could not update the password.",
+          message: error.message ?? m.settings_profile_error_password(),
         });
         return;
       }
@@ -109,8 +115,8 @@ function ProfileForms({
   });
 
   return (
-    <Page title="Profile" rootPath="/settings" rootLabel="Settings">
-      <Section title="Account">
+    <Page title={m.settings_section_profile()} rootPath="/settings" rootLabel={m.common_settings()}>
+      <Section title={m.settings_profile_account()}>
         <ListCard>
           <ListRow>
             <Avatar className="size-10">
@@ -123,7 +129,9 @@ function ProfileForms({
               <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>
             {!user.emailVerified && options.mail ? <VerifyEmail email={user.email} /> : null}
-            {user.role === "admin" ? <Badge variant="outline">Admin</Badge> : null}
+            {user.role === "admin" ? (
+              <Badge variant="outline">{m.settings_profile_admin()}</Badge>
+            ) : null}
           </ListRow>
           <ListRow className="flex-col items-stretch gap-3">
             <form
@@ -134,7 +142,9 @@ function ProfileForms({
               }}
             >
               <nameForm.AppField name="name">
-                {(field) => <field.TextField label="Display name" autoComplete="name" />}
+                {(field) => (
+                  <field.TextField label={m.settings_profile_display_name()} autoComplete="name" />
+                )}
               </nameForm.AppField>
               <nameForm.AppForm>
                 <FormActions>
@@ -142,7 +152,7 @@ function ProfileForms({
                     {(unchanged) => (
                       <>
                         <nameForm.SubmitButton size="sm" disabled={unchanged}>
-                          <SaveLabel justSaved={nameJustSaved}>Save</SaveLabel>
+                          <SaveLabel justSaved={nameJustSaved}>{m.common_save()}</SaveLabel>
                         </nameForm.SubmitButton>
                         <SaveStatus justSaved={nameJustSaved} />
                       </>
@@ -158,7 +168,7 @@ function ProfileForms({
       <ConnectedAccounts error={linkError} />
 
       {options.passwordLogin && !exclusive ? (
-        <Section title="Password">
+        <Section title={m.app_auth_password()}>
           <ListCard>
             <ListRow className="flex-col items-stretch gap-3">
               <form
@@ -171,7 +181,7 @@ function ProfileForms({
                 <passwordForm.AppField name="currentPassword">
                   {(field) => (
                     <field.TextField
-                      label="Current password"
+                      label={m.settings_profile_current_password()}
                       type="password"
                       autoComplete="current-password"
                     />
@@ -180,8 +190,8 @@ function ProfileForms({
                 <passwordForm.AppField name="newPassword">
                   {(field) => (
                     <field.TextField
-                      label="New password"
-                      description="Changing it signs you out on your other devices."
+                      label={m.app_reset_new_password()}
+                      description={m.settings_profile_new_password_description()}
                       type="password"
                       autoComplete="new-password"
                     />
@@ -193,11 +203,17 @@ function ProfileForms({
                 <passwordForm.AppForm>
                   <FormActions>
                     <passwordForm.SubmitButton size="sm">
-                      <SaveLabel justSaved={passwordJustSaved} savedLabel="Password updated">
-                        Update password
+                      <SaveLabel
+                        justSaved={passwordJustSaved}
+                        savedLabel={m.settings_profile_password_updated()}
+                      >
+                        {m.settings_profile_update_password()}
                       </SaveLabel>
                     </passwordForm.SubmitButton>
-                    <SaveStatus justSaved={passwordJustSaved} savedLabel="Password updated" />
+                    <SaveStatus
+                      justSaved={passwordJustSaved}
+                      savedLabel={m.settings_profile_password_updated()}
+                    />
                   </FormActions>
                 </passwordForm.AppForm>
               </form>
@@ -213,7 +229,8 @@ function ProfileForms({
 function VerifyEmail({ email }: { email: string }) {
   const [sent, setSent] = useState(false);
   const [pending, setPending] = useState(false);
-  if (sent) return <span className="text-muted-foreground text-xs">Link sent</span>;
+  if (sent)
+    return <span className="text-muted-foreground text-xs">{m.settings_profile_link_sent()}</span>;
   return (
     <PendingButton
       size="sm"
@@ -226,11 +243,11 @@ function VerifyEmail({ email }: { email: string }) {
           callbackURL: "/settings/profile",
         });
         setPending(false);
-        if (error) toast.error(error.message ?? "Could not send the link.");
+        if (error) toast.error(error.message ?? m.app_forgot_error());
         else setSent(true);
       }}
     >
-      Verify email
+      {m.settings_profile_verify_email()}
     </PendingButton>
   );
 }
