@@ -1222,6 +1222,42 @@ describe("knowledge-backed generations", () => {
     },
   );
 
+  it("retries without research once an admin turns search off", async () => {
+    const owner = await createUser();
+    const researched = async (messageId: string) =>
+      (
+        await exec(
+          `select research_enabled from message_generation_config where message_id = '${messageId}'`,
+        )
+      ).rows[0]!.research_enabled;
+    script = (input) => {
+      expect(input.toolkit?.tools["deep_research"]).toBeDefined();
+      return Stream.make(text("first"), finish());
+    };
+    const sent = await send({ userId: owner, modelId: researchModelId, researchEnabled: true });
+    expect(await settle(sent.assistantMessageId)).toMatchObject({ status: "complete" });
+    expect(await researched(sent.assistantMessageId)).toBe(true);
+    await run(
+      ToolsRepo.use((tools) => tools.updateTool("web_search", { enabled: false, config: {} })),
+    );
+    try {
+      script = (input) => {
+        expect(input.toolkit?.tools["deep_research"]).toBeUndefined();
+        return Stream.make(text("retried"), finish());
+      };
+      await run(retry(owner, sent.conversationId, sent.assistantMessageId));
+      expect(await settle(sent.assistantMessageId)).toMatchObject({
+        status: "complete",
+        content: "retried",
+      });
+      expect(await researched(sent.assistantMessageId)).toBe(false);
+    } finally {
+      await run(
+        ToolsRepo.use((tools) => tools.updateTool("web_search", { enabled: true, config: {} })),
+      );
+    }
+  });
+
   it.each(
     [false, true].flatMap((withAgent) =>
       [false, true].map((searchEnabled) => ({ withAgent, searchEnabled })),

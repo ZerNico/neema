@@ -18,6 +18,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { resolveImageModel } from "~/modules/images/server/resolve.ts";
 import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { researchAvailable } from "./research/tool.ts";
 import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
@@ -90,6 +91,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
     const search = yield* webSearch.availability();
     return search.configured && search.enabled;
   });
+  const researchToolEnabled = researchAvailable(webSearch, Option.getOrUndefined(urlReaderOption));
 
   const supportsReasoningEffort = Effect.fn("ChatService.supportsReasoningEffort")(function* (
     model: {
@@ -146,15 +148,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
       // The research toggle only offers the tool, so an instance without
       // search or a reader degrades to not offering it. Refusing the whole
       // message would make an unrelated admin setting reject ordinary chat.
-      const reader =
-        input.researchEnabled && Option.isSome(urlReaderOption)
-          ? yield* urlReaderOption.value.availability()
-          : null;
-      const researchEnabled =
-        !!input.researchEnabled &&
-        !!reader?.configured &&
-        reader.enabled &&
-        (yield* searchToolEnabled);
+      const researchEnabled = !!input.researchEnabled && (yield* researchToolEnabled);
       if (input.searchEnabled && !(yield* searchToolEnabled)) {
         return yield* new ToolUnavailable({ tool: "web_search", reason: "not enabled" });
       }
@@ -289,16 +283,17 @@ export const makeAttemptOptions = Effect.gen(function* () {
         // Retry, resume and an answer keep the saved choices; an answer's are
         // the asking attempt's, which matters most for research: the tool
         // cannot ask anything itself, so the reply must still be able to use it.
+        // Research is capped by availability on every path, like search.
         const { searchEnabled, researchEnabled } = submitted
           ? {
               searchEnabled:
                 submitted.searchEnabled && (input.attempt !== "edit" || input.searchAvailable),
-              researchEnabled: submitted.researchEnabled,
+              researchEnabled: submitted.researchEnabled && (yield* researchToolEnabled),
             }
           : continuation
             ? {
                 searchEnabled: continuation.searchEnabled && input.searchAvailable,
-                researchEnabled: continuation.researchEnabled,
+                researchEnabled: continuation.researchEnabled && (yield* researchToolEnabled),
               }
             : yield* Effect.die("An attempt that keeps saved choices needs a saved configuration");
         const savedEffort = continuation?.reasoningEffort ?? null;

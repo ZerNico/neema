@@ -4,7 +4,11 @@ import { prepareDocumentTools } from "~/modules/documents/server/document-tools.
 import { ProjectFileToolName } from "~/modules/projects/file-tool-schema.ts";
 import { projectCan } from "~/modules/projects/schema.ts";
 import { prepareProjectFileTools } from "~/modules/projects/server/file-tools.ts";
-import { prepareResearchTool, type ToolCallRowRef } from "../research/tool.ts";
+import {
+  prepareResearchTool,
+  researchAvailable,
+  type ToolCallRowRef,
+} from "../research/tool.ts";
 
 import { DocumentToolName } from "~/modules/documents/tool-schema.ts";
 import { prepareAgentDraftTools } from "~/modules/agents/server/authoring-tools.ts";
@@ -797,7 +801,8 @@ export const prepareGenerationTools = (
       permissions.webSearch &&
       config.researchEnabled &&
       repo.research &&
-      fence
+      fence &&
+      (yield* researchAvailable(webSearch, urlReader))
         ? prepareResearchTool({
             store: repo.research,
             gateway,

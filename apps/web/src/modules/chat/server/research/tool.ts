@@ -16,6 +16,22 @@ import type { ResearchStore } from "./repo.ts";
 import { runResearch } from "./runner.ts";
 
 /**
+ * Whether research can run: its workers need both web tools, so it is offered
+ * only while search and the reader are both configured and on. Sends, retries
+ * and the generation itself all ask this, so an offer never outlives them.
+ */
+export const researchAvailable = (
+  webSearch: WebSearchExecutor["Service"],
+  urlReader: UrlReaderExecutor["Service"] | undefined,
+) =>
+  Effect.gen(function* () {
+    if (!urlReader) return false;
+    const search = yield* webSearch.availability();
+    const reader = yield* urlReader.availability();
+    return search.configured && search.enabled && reader.configured && reader.enabled;
+  });
+
+/**
  * Bounded enough to persist beside any other tool row: the manifest and its
  * sources, never task reports or page text.
  */
@@ -192,6 +208,8 @@ export const prepareResearchTool = (input: {
         emit: input.emit,
         emitCompaction: input.emitCompaction,
       });
+      // Search or the reader went away after the offer was made.
+      if (!execution) return { outcome: "unavailable" } as const;
       const language =
         typeof raw === "object" && raw !== null
           ? (raw as { language?: unknown }).language
@@ -232,6 +250,12 @@ export const prepareResearchTool = (input: {
         outcome: "failed" as const,
         runId: fence.runId,
         message: "Research ran past its deadline before reaching a conclusion.",
+      } satisfies ResearchToolResult;
+    if (result.outcome === "unavailable")
+      return {
+        outcome: "unavailable" as const,
+        runId: fence.runId,
+        message: "Web search is not available right now, so research cannot run.",
       } satisfies ResearchToolResult;
     if (result.outcome === "no_evidence")
       return {

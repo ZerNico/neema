@@ -261,8 +261,9 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
       observeSearch: (ok) => budget.observeSearch(ok),
     },
   });
-  if (!web?.tools.search || !web.tools.reader)
-    return yield* Effect.die(new Error("Deep research requires enabled search and reader tools."));
+  // The offer checks both tools, so this is an admin switching one off
+  // mid-answer: the caller ends the run and tells the model.
+  if (!web?.tools.search || !web.tools.reader) return null;
   // Knowledge tools share one budget, permit pool and citation sequence across
   // every worker; they are separate from the web allowance on purpose.
   const knowledgeTools = deps.knowledge
@@ -854,4 +855,6 @@ export const makeResearchExecution = Effect.fn("research.execution")(function* (
   };
 });
 
-export type InvestigationExecution = Effect.Success<ReturnType<typeof makeResearchExecution>>;
+export type InvestigationExecution = NonNullable<
+  Effect.Success<ReturnType<typeof makeResearchExecution>>
+>;
