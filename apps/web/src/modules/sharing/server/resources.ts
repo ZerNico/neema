@@ -68,7 +68,8 @@ export const sharingResources = {
     userResourceId: integrationUserGrants.integrationId,
     groupGrants: integrationGroupGrants,
     groupResourceId: integrationGroupGrants.integrationId,
-    available: sql`true`,
+    // A person's own MCP server is theirs alone; grants on it would mean nothing.
+    available: sql`${integrationConfigs.ownerUserId} is null`,
     managedBy: (userId: string) =>
       sql`exists(select 1 from ${user} where ${user.id} = ${userId} and ${user.role} = 'admin')`,
   },

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { models, user } from "~/db/schema/index.ts";
+import { integrationConfigs, models, user } from "~/db/schema/index.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { EMPTY_AGENT_DRAFT } from "~/modules/agents/draft-schema.ts";
@@ -281,6 +281,34 @@ describe("custom tool modules across attempts", () => {
     expect(result.stored).toMatchObject({ createdBy: null, compiled: "compiled one" });
     expect(result.resolved).toMatchObject([{ compiled: "compiled one" }]);
     expect(result.deletedAuthorAccess).toEqual([]);
+  });
+});
+
+describe("sharing a person's own MCP server", () => {
+  it("is out of reach even for an admin, since grants on it mean nothing", async () => {
+    const failure = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const sharing = yield* SharingService;
+        const admin = yield* makeUser("admin");
+        const owner = yield* makeUser();
+        const integrationId = uuidv7();
+        yield* db.insert(integrationConfigs).values({
+          id: integrationId,
+          kind: "mcp",
+          name: integrationId,
+          ownerUserId: owner,
+        });
+        return yield* sharing
+          .change(
+            admin,
+            { kind: "integration", id: integrationId },
+            { action: "publish", audience: "instance" },
+          )
+          .pipe(Effect.flip);
+      }),
+    );
+    expect(failure._tag).toBe("KnowledgeNotAvailable");
   });
 });
 
