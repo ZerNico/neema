@@ -109,7 +109,8 @@ export function UsersPage() {
           <ListCard>
             {users.data?.map((user) => {
               const isSelf = user.id === identity?.userId;
-              const isAdmin = user.role?.split(",").includes("admin") ?? false;
+              // The server compares the whole role, so a comma list here would disagree with it.
+              const isAdmin = user.role === "admin";
               const groupNames = (memberships.data ?? [])
                 .filter((membership) => membership.userId === user.id)
                 .map((membership) => membership.groupName);
