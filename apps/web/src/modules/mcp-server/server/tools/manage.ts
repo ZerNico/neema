@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { english } from "~/i18n/localized.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { ConversationTitle } from "~/modules/chat/schema.ts";
@@ -9,6 +10,7 @@ import {
   DEFAULT_WAIT_SECONDS,
   WaitSeconds,
   explainRefusal,
+  reasonText,
   followTurn,
   ownedMessage,
   resumeTurn,
@@ -37,7 +39,7 @@ const retryRefusal = (
 ) => {
   switch (error._tag) {
     case "RetryNotAllowed":
-      return `This answer can't be retried: ${String(error.reason)}.`;
+      return `This answer can't be retried: ${reasonText(error.reason)}.`;
     case "ModelNotFound":
       return named
         ? "That model isn't available. Call list_models."
@@ -206,7 +208,7 @@ export const branchChat = defineTool({
           Effect.fail(
             refused(
               error._tag === "BranchNotAllowed"
-                ? `Can't branch there: ${error.reason}.`
+                ? `Can't branch there: ${english(error.reason)}.`
                 : error._tag === "MessageNotFound"
                   ? "That message isn't in this chat."
                   : error._tag === "ConversationBusy"

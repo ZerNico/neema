@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import {
@@ -91,7 +93,7 @@ export const questionContent = (
   return content === null || Option.isNone(decoded)
     ? Effect.fail(
         new InvalidMessage({
-          reason: "Answer every question with valid selections or custom text.",
+          reason: localized(m.chat_error_answer_every_question),
         }),
       )
     : Effect.succeed({ content, questionResponse: stored(batch.call.id, decoded.value) });

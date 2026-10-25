@@ -1,3 +1,4 @@
+import { english, type Localized } from "~/i18n/localized.ts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { plainResolve, setAttemptSearch } from "./plain-resolve.ts";
 import { createHash } from "node:crypto";
@@ -3713,10 +3714,10 @@ describe("atomic question answers", () => {
         return { failure, question: yield* repo.getMessage(question.id) };
       }),
     );
-    expect(result.failure).toMatchObject({
-      _tag: "EditNotAllowed",
-      reason: "this message has no answer to regenerate",
-    });
+    expect(result.failure).toMatchObject({ _tag: "EditNotAllowed" });
+    expect(english((result.failure as { reason: Localized }).reason)).toBe(
+      "this message has no answer to regenerate",
+    );
     expect(result.question?.content).toBe("left without an answer");
   });
 
@@ -6772,7 +6773,9 @@ describe("scheduled turns into a work chat", () => {
           .pipe(Effect.flip);
       }),
     );
-    expect(result).toMatchObject({ reason: "a work chat cannot run a schedule" });
+    expect(english((result as { reason: Localized }).reason)).toBe(
+      "a work chat cannot run a schedule",
+    );
   }, 60_000);
 });
 
@@ -6799,7 +6802,9 @@ describe("temporary chats", () => {
         return { error, rows };
       }),
     );
-    expect(result.error).toMatchObject({ reason: "a work chat cannot be temporary" });
+    expect(english((result.error as { reason: Localized }).reason)).toBe(
+      "a work chat cannot be temporary",
+    );
     expect(result.rows).toEqual([]);
   }, 60_000);
 });
@@ -11164,7 +11169,7 @@ describe("resuming an interrupted answer", () => {
             .pipe(
               Effect.flip,
               Effect.map((error) =>
-                error._tag === "ResumeNotAllowed" ? error.reason : error._tag,
+                error._tag === "ResumeNotAllowed" ? english(error.reason) : error._tag,
               ),
             );
         // Its host turns are used up; the next would enter research's space.

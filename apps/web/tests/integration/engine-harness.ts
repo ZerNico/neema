@@ -23,6 +23,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import type { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { SkillRepo } from "~/modules/skills/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -61,6 +62,7 @@ const baseLayer = (url: string, maxConnections: number) =>
     KnowledgeRepo.layer,
     SkillRepo.layer,
     ScheduleRepo.layer,
+    LanguageRepo.layer,
     SyncBus.layer,
   ).pipe(
     Layer.provideMerge(AttachmentRepo.layer),

@@ -170,6 +170,7 @@ const harness = (
       getUtilityModelId: () => Effect.succeed(options.utility?.id ?? null),
     },
     analytics: { record },
+    language: { localeOf: () => Effect.succeed("en") },
   } as TitleDeps;
   return { deps, generateText, setTitleIfPending, publish, record };
 };

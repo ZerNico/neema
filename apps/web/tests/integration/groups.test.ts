@@ -1,3 +1,4 @@
+import { english, type Localized } from "~/i18n/localized.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, ManagedRuntime, Stream } from "effect";
@@ -582,10 +583,8 @@ describe("generation-time enforcement", () => {
         return { denied, entries: yield* repo.listQueue(conversation.id) };
       }),
     );
-    expect(result.denied).toMatchObject({
-      _tag: "InvalidMessage",
-      reason: "Work is not permitted",
-    });
+    expect(result.denied).toMatchObject({ _tag: "InvalidMessage" });
+    expect(english((result.denied as { reason: Localized }).reason)).toBe("Work is not permitted");
     expect(result.entries).toEqual([]);
   });
 
@@ -614,10 +613,8 @@ describe("generation-time enforcement", () => {
         return { denied, rows };
       }),
     );
-    expect(result.denied).toMatchObject({
-      _tag: "InvalidMessage",
-      reason: "Work is not permitted",
-    });
+    expect(result.denied).toMatchObject({ _tag: "InvalidMessage" });
+    expect(english((result.denied as { reason: Localized }).reason)).toBe("Work is not permitted");
     expect(result.rows).toEqual([]);
   });
 

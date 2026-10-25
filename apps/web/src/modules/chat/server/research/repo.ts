@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { leaseFor } from "~/server/sql.ts";
 import { notifyOnCommit } from "~/modules/sync/server/signals.ts";
 import { liveModelId } from "~/modules/analytics/server/repo.ts";
@@ -71,7 +73,7 @@ const queueResearch = Effect.fn("research.queue")(function* (
     .pipe(Effect.orDie);
   if (active.length)
     return yield* new InvalidMessage({
-      reason: "You already have an active deep research request. Stop it or wait for it to finish.",
+      reason: localized(m.chat_error_research_already_active),
     });
   const id = uuidv7();
   // Nothing is written to the message: a run is a unit of work owned by its

@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import type { UiImages } from "../../assistant-output.ts";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
@@ -124,7 +126,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
             if (target.role !== "assistant") {
               return yield* new BranchNotAllowed({
                 messageId: input.throughMessageId,
-                reason: "only assistant messages can be branched from",
+                reason: localized(m.chat_error_branch_only_answers),
               });
             }
             // A steer sorts just after the answer it went into, so the
@@ -136,7 +138,7 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
             if (prefix.some((m) => m.status === "streaming")) {
               return yield* new BranchNotAllowed({
                 messageId: input.throughMessageId,
-                reason: "message is still generating",
+                reason: localized(m.chat_error_message_still_generating),
               });
             }
 

@@ -1,3 +1,4 @@
+import { english, type Localized } from "~/i18n/localized.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { plainResolve } from "./plain-resolve.ts";
 import { eq } from "drizzle-orm";
@@ -911,10 +912,10 @@ describe("branching a conversation", () => {
           }),
         );
         return {
-          onUser: { tag: onUser._tag, reason: (onUser as { reason?: string }).reason },
+          onUser: { tag: onUser._tag, reason: english((onUser as { reason: Localized }).reason) },
           onStreaming: {
             tag: onStreaming._tag,
-            reason: (onStreaming as { reason?: string }).reason,
+            reason: english((onStreaming as { reason: Localized }).reason),
           },
           conversations: (yield* conversationIds(userId)).length,
         };

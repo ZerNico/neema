@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { conversations, messages, workTurnReservations } from "~/db/schema/index.ts";
@@ -54,7 +56,7 @@ export const workTurnMethods = ({ db }: RepoContext) =>
             if (input.conversation.kind === "new") {
               if (input.conversation.mode !== "work")
                 return yield* new InvalidMessage({
-                  reason: "workspace files require a work chat",
+                  reason: localized(m.chat_error_workspace_files_require_work_chat),
                 });
               const existing = yield* tx
                 .select({ id: conversations.id })
@@ -64,7 +66,7 @@ export const workTurnMethods = ({ db }: RepoContext) =>
                 .pipe(Effect.orDie);
               if (existing.length > 0)
                 return yield* new InvalidMessage({
-                  reason: "the proposed conversation id already exists",
+                  reason: localized(m.chat_error_conversation_id_taken),
                 });
             } else {
               const existing = yield* tx
@@ -80,7 +82,7 @@ export const workTurnMethods = ({ db }: RepoContext) =>
                 });
               if (conversation.mode !== "work")
                 return yield* new InvalidMessage({
-                  reason: "workspace files require a work chat",
+                  reason: localized(m.chat_error_workspace_files_require_work_chat),
                 });
               const streaming = yield* tx
                 .select({ id: messages.id })

@@ -1,3 +1,4 @@
+import { english } from "~/i18n/localized.ts";
 import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";

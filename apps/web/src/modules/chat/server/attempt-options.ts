@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { requireEligibleAccount } from "~/modules/auth/server/account-eligibility.ts";
 import type { DesktopSubmission } from "../schema.ts";
 import { Effect, Option } from "effect";
@@ -121,7 +123,9 @@ export const makeAttemptOptions = Effect.gen(function* () {
     }) {
       if (input.attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
         return yield* new InvalidMessage({
-          reason: `at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message`,
+          reason: localized(m.chat_error_too_many_attachments, {
+            max: MAX_ATTACHMENTS_PER_MESSAGE,
+          }),
         });
       }
 
@@ -134,7 +138,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
         !(yield* supportsReasoningEffort(model, input.reasoningEffort))
       )
         return yield* new InvalidMessage({
-          reason: "This model does not support the selected reasoning effort.",
+          reason: localized(m.chat_error_reasoning_effort_unsupported),
         });
 
       if (input.searchEnabled && !(yield* policy.can(input.userId, "webSearch")))
@@ -273,8 +277,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
               Effect.catchTag("ProjectNotAvailable", () =>
                 Effect.fail(
                   new InvalidMessage({
-                    reason:
-                      "This chat’s project is no longer available to you. Remove the chat from the project to continue.",
+                    reason: localized(m.chat_error_project_unavailable),
                   }),
                 ),
               ),
@@ -306,17 +309,23 @@ export const makeAttemptOptions = Effect.gen(function* () {
           chosenEffort === null || (yield* supportsReasoningEffort(input.model, chosenEffort));
         if (!supportedEffort && effort != null && input.attempt !== "queued")
           return yield* new InvalidMessage({
-            reason: "This model does not support the selected reasoning effort.",
+            reason: localized(m.chat_error_reasoning_effort_unsupported),
           });
         const reasoningEffort = supportedEffort ? chosenEffort : null;
         if (searchEnabled && !allowedSearch)
-          return yield* new InvalidMessage({ reason: "web search is not permitted" });
+          return yield* new InvalidMessage({
+            reason: localized(m.chat_error_web_search_not_permitted),
+          });
         if (researchEnabled && (!allowedResearch || !allowedSearch))
-          return yield* new InvalidMessage({ reason: "deep research is not permitted" });
+          return yield* new InvalidMessage({
+            reason: localized(m.chat_error_research_not_permitted),
+          });
         if (defaults.mode === "work" && !(yield* policy.can(input.userId, "work", tx)))
-          return yield* new InvalidMessage({ reason: "Work is not permitted" });
+          return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
         if ((input.workspaceFiles?.length ?? 0) > 0 && defaults.mode !== "work")
-          return yield* new InvalidMessage({ reason: "workspace files require Work" });
+          return yield* new InvalidMessage({
+            reason: localized(m.chat_error_workspace_files_require_work),
+          });
         // Kept for Work alone, and re-stamped on every attempt, retry included:
         // the stream learns from it whether a machine tool is offered, and the
         // banner must name the machine the chat actually last worked on.

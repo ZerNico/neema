@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import { baseLocale, type Locale } from "~/paraglide/runtime.js";
+import type { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { Cause, Duration, Effect } from "effect";
 import { extractReferences } from "../references.ts";
 import { tagWords } from "../tags.ts";
@@ -19,6 +22,8 @@ export interface TitleDeps {
   readonly sync: Pick<SyncBus["Service"], "publish">;
   readonly providers: Pick<ProviderRepo["Service"], "getModel" | "getUtilityModelId">;
   readonly analytics: Pick<AnalyticsRepo["Service"], "record">;
+  /** The owner's language, for the one fallback title made of words. */
+  readonly language: Pick<LanguageRepo["Service"], "localeOf">;
 }
 
 export interface TitleInput {
@@ -105,11 +110,14 @@ export const sanitizeTitle = (raw: string): string | null => {
  * What the title becomes when the model fails, times out, or answers junk.
  * A pending placeholder must never be permanent.
  */
-export const fallbackTitle = (input: {
-  content: string;
-  attachmentFileNames: ReadonlyArray<string>;
-  workspaceFileNames?: ReadonlyArray<string>;
-}): string => {
+export const fallbackTitle = (
+  input: {
+    content: string;
+    attachmentFileNames: ReadonlyArray<string>;
+    workspaceFileNames?: ReadonlyArray<string>;
+  },
+  locale: Locale = baseLocale,
+): string => {
   const content = collapse(readableText(input.content));
   if (/\p{L}|\p{N}/u.test(content)) {
     return capLength(content.split(" ").slice(0, TITLE_WORDS).join(" "));
@@ -117,7 +125,7 @@ export const fallbackTitle = (input: {
   const file = [...input.attachmentFileNames, ...(input.workspaceFileNames ?? [])]
     .map(collapse)
     .find((name) => name.length > 0);
-  return file ? capLength(file) : "New chat";
+  return file ? capLength(file) : m.chat_title_new_chat({}, { locale });
 };
 
 /**
@@ -198,7 +206,7 @@ const resolveTitle = Effect.fn("chat.resolveTitle")(function* (deps: TitleDeps, 
     if (generated) break;
   }
 
-  const title = generated ?? fallbackTitle(input);
+  const title = generated ?? fallbackTitle(input, yield* deps.language.localeOf(input.userId));
 
   // False when the user renamed the chat first, or deleted it. Either way
   // there is nothing to announce.

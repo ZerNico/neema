@@ -382,6 +382,7 @@ describe("usage ledger capture", () => {
           sync: { publish: () => Effect.void } as TitleDeps["sync"],
           providers,
           analytics,
+          language: { localeOf: () => Effect.succeed("en") },
         };
         yield* generateConversationTitle(deps, {
           userId,

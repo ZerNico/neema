@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
-import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import { refuse, type RefusalOverrides } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
@@ -171,7 +171,7 @@ export const reserveWorkTurn = createServerFn({ method: "POST" })
       ),
       {
         // Not the message's fault: the reservation no longer fits this chat.
-        InvalidMessage: (error) => ({ status: 409, body: verbatim(error.reason) }),
+        InvalidMessage: (error) => ({ status: 409, body: error.reason }),
       },
     ),
   );

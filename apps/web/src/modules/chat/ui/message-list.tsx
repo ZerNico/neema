@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { agentUnavailableLines, type AgentUnavailable } from "./agent-unavailable.ts";
 import { findTags, tagWords } from "../tags.ts";
@@ -1007,33 +1009,33 @@ const RATE_LIMIT = /rate limit|too many requests|(?:http|status(?: code)?)\s*:?\
 function retryDelay(error: string): string | null {
   const match = RETRY_AFTER.exec(error);
   if (!match) return null;
-
-  const amount = match[1]!;
-  const value = Number(amount);
+  const count = Number(match[1]!);
+  const amount = count.toLocaleString(getLocale());
   const unit = match[2]!.toLowerCase();
   if (unit === "ms" || unit.startsWith("millisecond")) {
-    return `${amount} millisecond${value === 1 ? "" : "s"}`;
+    return m.chat_failure_retry_in_milliseconds({ count, amount });
   }
   if (unit === "m" || unit.startsWith("min")) {
-    return `${amount} minute${value === 1 ? "" : "s"}`;
+    return m.chat_failure_retry_in_minutes({ count, amount });
   }
-  return `${amount} second${value === 1 ? "" : "s"}`;
+  return m.chat_failure_retry_in_seconds({ count, amount });
 }
 
 function generationFailureCopy(error: string | null | undefined) {
   const terminalFailure = responseFailureCopy(error);
-  if (terminalFailure) return terminalFailure;
+  if (terminalFailure) {
+    return { title: terminalFailure.title(), description: terminalFailure.description() };
+  }
   if (error && RATE_LIMIT.test(error)) {
-    const delay = retryDelay(error);
     return {
-      title: "This model is busy",
-      description: delay ? `Try again in ${delay}.` : "Try again in a moment.",
+      title: m.chat_failure_busy_title(),
+      description: retryDelay(error) ?? m.chat_failure_retry_moment(),
     };
   }
 
   return {
-    title: "Couldn’t generate a response",
-    description: "Try again, or choose another model if the problem continues.",
+    title: m.chat_failure_error_title(),
+    description: m.chat_failure_generic_description(),
   };
 }
 
@@ -1088,7 +1090,7 @@ function GenerationFailure({
                     )}
                     aria-hidden
                   />
-                  Technical details
+                  {m.chat_failure_technical_details()}
                 </DisclosureTrigger>
                 <DisclosureContent>
                   <p className="text-muted-foreground mt-1.5 [overflow-wrap:anywhere] font-mono text-2xs leading-relaxed">
@@ -1110,7 +1112,7 @@ function GenerationFailure({
                   data-icon="inline-start"
                   aria-hidden
                 />
-                Try again
+                {m.common_retry()}
               </Button>
             ) : null}
           </div>

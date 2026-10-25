@@ -2425,8 +2425,8 @@ for (const [code, copy] of Object.entries(RESPONSE_FAILURES)) {
       />,
     );
     const alert = screen.getByRole("alert");
-    expect(within(alert).getByText(copy.title)).toBeInTheDocument();
-    expect(within(alert).getByText(copy.description)).toBeInTheDocument();
+    expect(within(alert).getByText(copy.title())).toBeInTheDocument();
+    expect(within(alert).getByText(copy.description())).toBeInTheDocument();
     expect(within(alert).queryByText("Technical details")).toBeNull();
     expect(screen.queryByText("Thinking")).toBeNull();
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));

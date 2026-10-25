@@ -1,20 +1,23 @@
+import { m } from "~/paraglide/messages.js";
+import { baseLocale } from "~/paraglide/runtime.js";
+
 /** Application-owned terminal failure copy; never render raw provider diagnostics here. */
 export const RESPONSE_FAILURES = {
   ResponseFiltered: {
-    title: "The model declined this request",
-    description: "Try rephrasing it, or choose another model.",
+    title: m.chat_failure_filtered_title,
+    description: m.chat_failure_filtered_description,
   },
   ResponseError: {
-    title: "Couldn’t generate a response",
-    description: "Try again, or choose another model.",
+    title: m.chat_failure_error_title,
+    description: m.chat_failure_try_again_description,
   },
   ResponseIncomplete: {
-    title: "The response stopped partway",
-    description: "Try again, or choose another model.",
+    title: m.chat_failure_incomplete_title,
+    description: m.chat_failure_try_again_description,
   },
   ResponseEmpty: {
-    title: "The model returned nothing",
-    description: "Try again, or choose another model.",
+    title: m.chat_failure_empty_title,
+    description: m.chat_failure_try_again_description,
   },
 } as const;
 
@@ -41,9 +44,15 @@ export function generationFailureDetails(error: string): string {
   return details || error;
 }
 
-/** Why an answer failed, in the words the chat shows: the app's own copy, else the provider's reason. */
+/**
+ * Why an answer failed, in English for an outside client's model: the app's
+ * own copy, else the provider's reason.
+ */
 export const generationFailureReason = (error: string | null | undefined) => {
   if (!error) return null;
   const copy = responseFailureCopy(error);
-  return copy ? `${copy.title}. ${copy.description}` : generationFailureDetails(error);
+  const english = { locale: baseLocale } as const;
+  return copy
+    ? `${copy.title({}, english)}. ${copy.description({}, english)}`
+    : generationFailureDetails(error);
 };

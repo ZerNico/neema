@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { Duration, Effect, Schedule } from "effect";
 import { InvalidMessage, MessageNotFound } from "~/modules/chat/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -114,7 +116,9 @@ export const makeConversationLifecycle = Effect.gen(function* () {
   }) {
     const conversation = yield* repo.getConversation(input.userId, input.conversationId);
     if (conversation.mode !== "work")
-      return yield* new InvalidMessage({ reason: "only a work chat has work settings" });
+      return yield* new InvalidMessage({
+        reason: localized(m.chat_error_work_settings_only_work_chat),
+      });
     yield* repo.updateConversation(input.conversationId, {
       permissionLevel: input.permissionLevel,
     });

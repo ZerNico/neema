@@ -119,6 +119,7 @@ const depsWith = (repo: ChatRepo["Service"], generated: string) => {
       getUtilityModelId: () => Effect.succeed(null),
     },
     analytics: { record: () => Effect.void },
+    language: { localeOf: () => Effect.succeed("en") },
   };
   return { deps, publish };
 };

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Localized } from "~/i18n/localized.ts";
 
 export class ConversationNotFound extends Schema.TaggedError<ConversationNotFound>()(
   "ConversationNotFound",
@@ -22,22 +23,22 @@ export class ModelNotFound extends Schema.TaggedError<ModelNotFound>()("ModelNot
 
 export class RetryNotAllowed extends Schema.TaggedError<RetryNotAllowed>()("RetryNotAllowed", {
   messageId: Schema.String,
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 export class ResumeNotAllowed extends Schema.TaggedError<ResumeNotAllowed>()("ResumeNotAllowed", {
   messageId: Schema.String,
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 export class BranchNotAllowed extends Schema.TaggedError<BranchNotAllowed>()("BranchNotAllowed", {
   messageId: Schema.String,
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 export class EditNotAllowed extends Schema.TaggedError<EditNotAllowed>()("EditNotAllowed", {
   messageId: Schema.String,
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
@@ -49,7 +50,7 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
  * A turn that carries neither text nor attachments has nothing to send.
  */
 export class InvalidMessage extends Schema.TaggedError<InvalidMessage>()("InvalidMessage", {
-  reason: Schema.String,
+  reason: Localized,
 }) {}
 
 /**

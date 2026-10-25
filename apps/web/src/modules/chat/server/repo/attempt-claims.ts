@@ -1,3 +1,5 @@
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
@@ -109,20 +111,22 @@ const editedContent = Effect.fn("ChatRepo.editedContent")(function* (
 ) {
   const target = current.find((message) => message.id === messageId);
   if (target?.role !== "user" || target.status !== "complete")
-    return yield* new InvalidMessage({ reason: "Only completed user messages can be edited." });
+    return yield* new InvalidMessage({
+      reason: localized(m.chat_error_edit_only_completed_sentence),
+    });
   // An answer stays one while the call it names can still be answered.
   const answered = readQuestionResponse(target.questionResponse);
   const batch = answered ? yield* questionByCall(tx, answered.callId) : null;
   if (input.questionResponse) {
     if (!batch || input.attachmentIds.length > 0)
       return yield* new InvalidMessage({
-        reason: "These answers can no longer be edited as a question response.",
+        reason: localized(m.chat_error_answers_not_editable),
       });
     return yield* questionContent(batch, input.questionResponse);
   }
   if (batch)
     return yield* new InvalidMessage({
-      reason: "Use Edit answers to change a structured question response.",
+      reason: localized(m.chat_error_use_edit_answers),
     });
   return { content: input.content, questionResponse: null };
 });
@@ -147,7 +151,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 .pipe(Effect.orDie);
               if (!pending || pending.userId !== input.userId)
                 return yield* new InvalidMessage({
-                  reason: "the scheduled fire is no longer pending",
+                  reason: localized(m.chat_error_scheduled_fire_not_pending),
                 });
             }
             yield* lockWorkTurn(tx, conversationId);
@@ -169,7 +173,9 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               if (!reservation || reservation.conversationId !== conversationId)
                 return yield* new ConversationNotFound({ conversationId });
               if (reservation.intent !== input.conversation.kind)
-                return yield* new InvalidMessage({ reason: "the reservation intent changed" });
+                return yield* new InvalidMessage({
+                  reason: localized(m.chat_error_reservation_changed),
+                });
               if (reservation.status === "activated" && reservation.assistantMessageId) {
                 const conversationRows = yield* tx
                   .select()
@@ -251,7 +257,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 .pipe(Effect.orDie);
               if (existing.length > 0)
                 return yield* new InvalidMessage({
-                  reason: "the proposed conversation id already exists",
+                  reason: localized(m.chat_error_conversation_id_taken),
                 });
               const rows = yield* tx
                 .insert(conversations)
@@ -318,7 +324,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
 
             if (input.associateAgentId && !conversationCreated)
               return yield* new InvalidMessage({
-                reason: "the agent cannot change after chat creation",
+                reason: localized(m.chat_error_agent_fixed_after_creation),
               });
             const association = input.associateAgentId ? { agentId: input.associateAgentId } : null;
             const fresh = {

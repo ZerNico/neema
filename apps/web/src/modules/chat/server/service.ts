@@ -1,3 +1,6 @@
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
+import { m } from "~/paraglide/messages.js";
+import { localized } from "~/i18n/localized.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
 import type { DesktopSubmission, OpenDocument } from "../schema.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
@@ -479,7 +482,8 @@ function makeChatService() {
     const integrations = yield* IntegrationRepo;
     const gateway = yield* AiGateway;
     const analytics = yield* AnalyticsRepo;
-    const titleDeps: TitleDeps = { gateway, repo, sync, providers, analytics };
+    const language = yield* LanguageRepo;
+    const titleDeps: TitleDeps = { gateway, repo, sync, providers, analytics, language };
 
     const options = yield* makeAttemptOptions;
     const { searchToolEnabled, validateGenerationOptions, validateAttachments, resolver } = options;
@@ -497,7 +501,7 @@ function makeChatService() {
       conversation: TurnFields["conversation"];
     }) {
       if (!(yield* policy.can(input.userId, "work")))
-        return yield* new InvalidMessage({ reason: "Work is not permitted" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
       const row = yield* repo.reserveWorkTurn(input);
       return { reservationId: row.id, conversationId: row.conversationId };
     });
@@ -528,7 +532,7 @@ function makeChatService() {
         input.attachmentIds.length === 0 &&
         workspaceFiles.length === 0
       ) {
-        return yield* new InvalidMessage({ reason: "message is empty" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
       }
       // The server stays authoritative even when the composer hides the toggle.
       yield* repo.research?.reap() ?? Effect.void;
@@ -545,13 +549,17 @@ function makeChatService() {
         input.conversation.temporary &&
         input.conversation.mode === "work"
       )
-        return yield* new InvalidMessage({ reason: "a work chat cannot be temporary" });
+        return yield* new InvalidMessage({
+          reason: localized(m.chat_error_work_chat_not_temporary),
+        });
       if (
         input.conversation.kind === "new" &&
         input.conversation.temporary &&
         input.conversation.projectId
       )
-        return yield* new InvalidMessage({ reason: "a temporary chat cannot join a project" });
+        return yield* new InvalidMessage({
+          reason: localized(m.chat_error_temporary_chat_no_project),
+        });
 
       // The association is fixed at creation; its configuration is live for
       // every subsequent attempt. Swapping or removal is not a chat setting.
@@ -561,7 +569,7 @@ function makeChatService() {
         !input.questionResponse
       )
         return yield* new InvalidMessage({
-          reason: "the agent is chosen when a chat starts and cannot change afterwards",
+          reason: localized(m.chat_error_agent_fixed_at_start),
         });
       const agentId = input.questionResponse ? null : input.agentId;
 
@@ -712,7 +720,7 @@ function makeChatService() {
       onSettled: Effect.Effect<void>;
     }) {
       if (input.prompt.trim() === "")
-        return yield* new InvalidMessage({ reason: "message is empty" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
       // A saved model that vanished is not a reason to skip the fire: fall back
       // to the user's default chat model, the same one the composer preselects.
       const modelId = yield* resolveScheduleModel(input.userId, input.modelId);
@@ -734,7 +742,7 @@ function makeChatService() {
         target.kind === "existing" &&
         (yield* repo.getConversationDefaults(target.conversationId)).mode === "work"
       )
-        return yield* new InvalidMessage({ reason: "a work chat cannot run a schedule" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_chat_no_schedule) });
       const fire = (agentId: string | undefined) =>
         repo.createTurn({
           userId: input.userId,
@@ -909,13 +917,13 @@ function makeChatService() {
       if (message.role !== "assistant") {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "only assistant messages can be retried",
+          reason: localized(m.chat_error_retry_only_answers),
         });
       }
       if (message.status === "streaming") {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "message is still generating",
+          reason: localized(m.chat_error_message_still_generating),
         });
       }
       // Retrying rewinds the conversation to this response: everything after
@@ -928,7 +936,7 @@ function makeChatService() {
       if (after.some((m) => m.status === "streaming")) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "a later message is still generating",
+          reason: localized(m.chat_error_later_message_generating),
         });
       }
 
@@ -939,7 +947,7 @@ function makeChatService() {
       if (!modelId) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "original model is no longer known",
+          reason: localized(m.chat_error_original_model_unknown),
         });
       }
       // Checked on the resolved id: "Retry same" must also stop working once
@@ -982,7 +990,7 @@ function makeChatService() {
       if (!restarted) {
         return yield* new RetryNotAllowed({
           messageId: input.messageId,
-          reason: "message is already generating",
+          reason: localized(m.chat_error_message_already_generating),
         });
       }
       return restarted;
@@ -1015,7 +1023,7 @@ function makeChatService() {
       ) {
         return yield* new ResumeNotAllowed({
           messageId: input.messageId,
-          reason: "only a failed or stopped answer can be resumed",
+          reason: localized(m.chat_error_resume_only_failed),
         });
       }
       const switching = input.modelId !== undefined && input.modelId !== message.modelId;
@@ -1023,7 +1031,7 @@ function makeChatService() {
       if (!modelId) {
         return yield* new ResumeNotAllowed({
           messageId: input.messageId,
-          reason: "original model is no longer known",
+          reason: localized(m.chat_error_original_model_unknown),
         });
       }
       const model = yield* providers.usableModel(input.userId, modelId, "chat");
@@ -1043,7 +1051,7 @@ function makeChatService() {
       if (nextTurn >= RESEARCH_TURN_BASE) {
         return yield* new ResumeNotAllowed({
           messageId: input.messageId,
-          reason: "this answer has reached its continuation limit; start a new message instead",
+          reason: localized(m.chat_error_resume_limit),
         });
       }
       // The answer goes on from its question and the steers it took in, so
@@ -1080,7 +1088,7 @@ function makeChatService() {
       if (!claim.claimed) {
         return yield* new ResumeNotAllowed({
           messageId: input.messageId,
-          reason: "only the last answer can be resumed, and not while another is generating",
+          reason: localized(m.chat_error_resume_only_last),
         });
       }
 
@@ -1121,13 +1129,13 @@ function makeChatService() {
       if (message.role !== "assistant") {
         return yield* new BranchNotAllowed({
           messageId: input.messageId,
-          reason: "only assistant messages can be branched from",
+          reason: localized(m.chat_error_branch_only_answers),
         });
       }
       if (message.status === "streaming") {
         return yield* new BranchNotAllowed({
           messageId: input.messageId,
-          reason: "message is still generating",
+          reason: localized(m.chat_error_message_still_generating),
         });
       }
 
@@ -1169,7 +1177,12 @@ function makeChatService() {
               ...titleInput,
             }),
           );
-        } else if (yield* repo.setTitleIfPending(branch.id, fallbackTitle(titleInput))) {
+        } else if (
+          yield* repo.setTitleIfPending(
+            branch.id,
+            fallbackTitle(titleInput, yield* language.localeOf(input.userId)),
+          )
+        ) {
           // That model row is gone (deleted provider), so there is nothing to
           // ask. Settle on the fallback rather than stay pending.
           yield* sync.publish(input.userId, {
@@ -1207,7 +1220,7 @@ function makeChatService() {
       if (message.role !== "user" || message.status !== "complete") {
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "only completed user messages can be edited",
+          reason: localized(m.chat_error_edit_only_completed),
         });
       }
       // A steer is part of the answer it went into; editing it would restart
@@ -1215,7 +1228,7 @@ function makeChatService() {
       if (message.steeredIntoMessageId) {
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "a message sent into a response cannot be edited",
+          reason: localized(m.chat_error_edit_steered),
         });
       }
 
@@ -1225,7 +1238,7 @@ function makeChatService() {
       if (after.some((candidate) => candidate.status === "streaming")) {
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "a later message is still generating",
+          reason: localized(m.chat_error_later_message_generating),
         });
       }
 
@@ -1235,7 +1248,7 @@ function makeChatService() {
         input.content.trim() === "" &&
         input.attachmentIds.length === 0
       ) {
-        return yield* new InvalidMessage({ reason: "message is empty" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
       }
       const { researchEnabled } = yield* validateGenerationOptions(input);
       // A question and its answer are created together, so an edit always has
@@ -1243,7 +1256,7 @@ function makeChatService() {
       if (!assistant)
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "this message has no answer to regenerate",
+          reason: localized(m.chat_error_edit_no_answer),
         });
       // Preserve original standalone inputs, but resolve the current agent
       // and current document versions atomically before rewinding.
@@ -1282,7 +1295,7 @@ function makeChatService() {
       if (!restarted) {
         return yield* new EditNotAllowed({
           messageId: input.messageId,
-          reason: "response is already generating",
+          reason: localized(m.chat_error_response_already_generating),
         });
       }
       return restarted;

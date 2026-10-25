@@ -1,3 +1,7 @@
+import { m } from "~/paraglide/messages.js";
+import { type Localized, localized } from "~/i18n/localized.ts";
+import type { Locale } from "~/paraglide/runtime.js";
+import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
 import { Duration, Effect } from "effect";
 import {
@@ -38,22 +42,27 @@ export type QueueSubmissionError =
   | AttachmentUnsupported
   | AttachmentNotAvailable;
 
-/** What the queue strip says when a queued message could not start. */
-const queueFailure = (error: { readonly _tag: string }) => {
+/**
+ * What the queue strip says when a queued message could not start. It is
+ * stored, so it is worded once, in the owner's language.
+ */
+const queueFailure = (error: { readonly _tag: string }, locale: Locale) => {
   switch (error._tag) {
     case "AttachmentUnsupported":
     case "AttachmentNotAvailable":
-      return "A file in this message can’t be read by its model anymore. Edit it or remove it.";
+      return m.chat_queue_failure_files({}, { locale });
     case "AccountIneligible":
-      return "This account can’t start messages. Try Send now after access is restored.";
+      return m.chat_queue_failure_account({}, { locale });
     case "ModelNotFound":
-      return "This message’s model is no longer available. Edit it to pick another.";
-    case "UsageLimitReached":
-      return "reason" in error && typeof error.reason === "string"
-        ? error.reason
-        : "You’ve reached a usage limit.";
+      return m.chat_queue_failure_model({}, { locale });
+    case "UsageLimitReached": {
+      // The limits module words its own reason, as a string or as Localized.
+      const reason: unknown = "reason" in error ? error.reason : undefined;
+      if (typeof reason === "function") return (reason as Localized)(locale);
+      return typeof reason === "string" ? reason : m.chat_queue_failure_limit({}, { locale });
+    }
     default:
-      return "This message could not be started. Its model or collections may no longer be available.";
+      return m.chat_queue_failure_other({}, { locale });
   }
 };
 
@@ -77,6 +86,7 @@ export const makeQueueService = (deps: {
     const sync = yield* SyncBus;
     const attachmentService = yield* AttachmentService;
     const policy = yield* FeaturePolicy;
+    const language = yield* LanguageRepo;
     const { validateGenerationOptions, validateAttachments, searchToolEnabled, resolver } =
       deps.options;
     const { stopGeneration, announceStarted } = deps;
@@ -108,10 +118,10 @@ export const makeQueueService = (deps: {
       input: QueueSubmission,
     ) {
       if (input.content.trim() === "" && input.attachmentIds.length === 0)
-        return yield* new InvalidMessage({ reason: "message is empty" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
       const conversation = yield* repo.getConversation(input.userId, input.conversationId);
       if (conversation.mode === "work" && !(yield* policy.can(input.userId, "work")))
-        return yield* new InvalidMessage({ reason: "Work is not permitted" });
+        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
       // Queued Work runs on a machine, so it can only be handed over from one.
       if (conversation.mode === "work" && !input.desktop) return yield* new WorkDesktopRequired();
       yield* validateGenerationOptions({
@@ -281,7 +291,8 @@ export const makeQueueService = (deps: {
       }).pipe(
         Effect.tapError((error) =>
           Effect.gen(function* () {
-            yield* repo.setQueueEntryError(head.id, head.revision, queueFailure(error));
+            const locale = yield* language.localeOf(input.userId);
+            yield* repo.setQueueEntryError(head.id, head.revision, queueFailure(error, locale));
             yield* queueChanged(input.userId, input.conversationId);
           }),
         ),

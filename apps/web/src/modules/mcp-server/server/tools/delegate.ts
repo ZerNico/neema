@@ -4,6 +4,7 @@ import {
   isInputRequiredResult,
 } from "@modelcontextprotocol/server";
 import { Duration, Effect, Schema } from "effect";
+import { english, type Localized } from "~/i18n/localized.ts";
 import { uuidv7 } from "uuidv7";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
@@ -327,6 +328,14 @@ export const resumeTurn = (state: TurnRequestState, context: McpToolContext) =>
   });
 
 /** Why a send was refused, in words the calling model can act on. */
+/** A refusal's reason in English, for the client's model, whether worded yet or not. */
+export const reasonText = (reason: unknown) =>
+  typeof reason === "function"
+    ? english(reason as Localized)
+    : typeof reason === "string"
+      ? reason
+      : null;
+
 export const explainRefusal = (error: { readonly _tag: string }) => {
   switch (error._tag) {
     case "ModelNotFound":
@@ -356,10 +365,10 @@ export const explainRefusal = (error: { readonly _tag: string }) => {
         : "A file was refused.";
     case "AttachmentUnsupported":
       return "This chat's model can't read one of these files. Pick another model with modelId.";
-    default:
-      return "reason" in error && typeof error.reason === "string"
-        ? `This message can't be sent: ${error.reason}.`
-        : "This message can't be sent.";
+    default: {
+      const reason = "reason" in error ? reasonText(error.reason) : null;
+      return reason ? `This message can't be sent: ${reason}.` : "This message can't be sent.";
+    }
   }
 };
 

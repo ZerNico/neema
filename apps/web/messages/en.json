@@ -291,8 +291,13 @@
   "browser_element_named": "the “{name}” {role}",
   "browser_element_unnamed": [
     {
-      "declarations": ["input role", "input vowel"],
-      "selectors": ["vowel"],
+      "declarations": [
+        "input role",
+        "input vowel"
+      ],
+      "selectors": [
+        "vowel"
+      ],
       "match": {
         "vowel=yes": "an {role}",
         "vowel=*": "a {role}"
@@ -333,8 +338,13 @@
   "browser_running_reload": "Reloading the page",
   "browser_running_save": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Saving a file",
         "countPlural=other": "Saving {count} files"
@@ -356,26 +366,128 @@
   "browser_settings_links_panel": "In the side panel",
   "browser_settings_title": "Browser",
   "browser_tab_new": "New tab",
+  "chat_error_agent_fixed_after_creation": "the agent cannot change after chat creation",
+  "chat_error_agent_fixed_at_start": "the agent is chosen when a chat starts and cannot change afterwards",
+  "chat_error_answer_every_question": "Answer every question with valid selections or custom text.",
+  "chat_error_answers_not_editable": "These answers can no longer be edited as a question response.",
   "chat_error_attachment_busy": "Stop the answer in that chat first.",
   "chat_error_attachment_gone": "An attachment is no longer available",
+  "chat_error_branch_only_answers": "only assistant messages can be branched from",
   "chat_error_conversation_busy": "A response is still generating",
+  "chat_error_conversation_id_taken": "the proposed conversation id already exists",
+  "chat_error_edit_no_answer": "this message has no answer to regenerate",
+  "chat_error_edit_only_completed": "only completed user messages can be edited",
+  "chat_error_edit_only_completed_sentence": "Only completed user messages can be edited.",
+  "chat_error_edit_steered": "a message sent into a response cannot be edited",
+  "chat_error_later_message_generating": "a later message is still generating",
+  "chat_error_message_already_generating": "message is already generating",
+  "chat_error_message_empty": "message is empty",
+  "chat_error_message_still_generating": "message is still generating",
+  "chat_error_model_cannot_read_images": "this model cannot read images",
+  "chat_error_model_cannot_read_pdfs": "this model cannot read PDFs and document parsing is disabled. Enable it in admin settings or pick a model that accepts files",
   "chat_error_model_not_found": "Unknown model",
   "chat_error_no_active_generation": "That response already finished",
   "chat_error_not_started": "This message could not be started",
+  "chat_error_original_model_unknown": "original model is no longer known",
+  "chat_error_project_unavailable": "This chat’s project is no longer available to you. Remove the chat from the project to continue.",
   "chat_error_question_unavailable": "These questions are no longer available. Refresh the conversation.",
   "chat_error_queue_entry_not_found": "This queued message already started or was removed",
   "chat_error_queue_full": "Too many messages are queued",
   "chat_error_queued_message_gone": "Queued message no longer exists",
+  "chat_error_reasoning_effort_unsupported": "This model does not support the selected reasoning effort.",
+  "chat_error_research_already_active": "You already have an active deep research request. Stop it or wait for it to finish.",
+  "chat_error_research_not_permitted": "deep research is not permitted",
+  "chat_error_reservation_changed": "the reservation intent changed",
+  "chat_error_response_already_generating": "response is already generating",
+  "chat_error_resume_limit": "this answer has reached its continuation limit; start a new message instead",
+  "chat_error_resume_only_failed": "only a failed or stopped answer can be resumed",
+  "chat_error_resume_only_last": "only the last answer can be resumed, and not while another is generating",
+  "chat_error_retry_only_answers": "only assistant messages can be retried",
+  "chat_error_scheduled_fire_not_pending": "the scheduled fire is no longer pending",
   "chat_error_selected_agent_unavailable": "The selected agent is not available",
   "chat_error_selected_collection_unavailable": "A selected collection is not available",
   "chat_error_selected_integration_unavailable": "A selected integration is not available",
   "chat_error_selected_skill_unavailable": "A selected skill is not available",
   "chat_error_steer_file_unreadable": "The running answer can’t read {fileName}: {reason}",
+  "chat_error_temporary_chat_no_project": "a temporary chat cannot join a project",
+  "chat_error_too_many_attachments": "at most {max} attachments per message",
+  "chat_error_use_edit_answers": "Use Edit answers to change a structured question response.",
   "chat_error_used_agent_gone": "This chat’s agent is no longer available",
   "chat_error_used_integration_gone": "An integration this answer used is no longer available",
   "chat_error_used_knowledge_gone": "Knowledge this answer used is no longer available",
   "chat_error_used_skill_gone": "A skill this answer used is no longer available",
+  "chat_error_web_search_not_permitted": "web search is not permitted",
+  "chat_error_work_chat_no_schedule": "a work chat cannot run a schedule",
+  "chat_error_work_chat_not_temporary": "a work chat cannot be temporary",
   "chat_error_work_desktop_required": "This is a work chat. Continue it from the desktop app",
+  "chat_error_work_not_permitted": "Work is not permitted",
+  "chat_error_work_settings_only_work_chat": "only a work chat has work settings",
+  "chat_error_workspace_files_require_work": "workspace files require Work",
+  "chat_error_workspace_files_require_work_chat": "workspace files require a work chat",
+  "chat_failure_busy_title": "This model is busy",
+  "chat_failure_empty_title": "The model returned nothing",
+  "chat_failure_error_title": "Couldn’t generate a response",
+  "chat_failure_filtered_description": "Try rephrasing it, or choose another model.",
+  "chat_failure_filtered_title": "The model declined this request",
+  "chat_failure_generic_description": "Try again, or choose another model if the problem continues.",
+  "chat_failure_incomplete_title": "The response stopped partway",
+  "chat_failure_retry_in_milliseconds": [
+    {
+      "declarations": [
+        "input count",
+        "input amount",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Try again in {amount} millisecond.",
+        "countPlural=other": "Try again in {amount} milliseconds."
+      }
+    }
+  ],
+  "chat_failure_retry_in_minutes": [
+    {
+      "declarations": [
+        "input count",
+        "input amount",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Try again in {amount} minute.",
+        "countPlural=other": "Try again in {amount} minutes."
+      }
+    }
+  ],
+  "chat_failure_retry_in_seconds": [
+    {
+      "declarations": [
+        "input count",
+        "input amount",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "Try again in {amount} second.",
+        "countPlural=other": "Try again in {amount} seconds."
+      }
+    }
+  ],
+  "chat_failure_retry_moment": "Try again in a moment.",
+  "chat_failure_technical_details": "Technical details",
+  "chat_failure_try_again_description": "Try again, or choose another model.",
+  "chat_queue_failure_account": "This account can’t start messages. Try Send now after access is restored.",
+  "chat_queue_failure_files": "A file in this message can’t be read by its model anymore. Edit it or remove it.",
+  "chat_queue_failure_limit": "You’ve reached a usage limit.",
+  "chat_queue_failure_model": "This message’s model is no longer available. Edit it to pick another.",
+  "chat_queue_failure_other": "This message could not be started. Its model or collections may no longer be available.",
+  "chat_title_new_chat": "New chat",
   "common_add": "Add",
   "common_back": "Back",
   "common_cancel": "Cancel",
@@ -1273,8 +1385,13 @@
   "integrations_activity_refused": "{label}: not done",
   "integrations_activity_results": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} result",
         "countPlural=other": "{count} results"
@@ -1307,8 +1424,13 @@
   "integrations_admin_delete_description": "Chats, agents and schedules stop using it. Past answers keep what it found.",
   "integrations_admin_delete_description_people": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} person loses their connection, and chats, agents and schedules stop using it. Past answers keep what it found.",
         "countPlural=other": "{count} people lose their connections, and chats, agents and schedules stop using it. Past answers keep what it found."
@@ -1325,8 +1447,14 @@
   "integrations_admin_enabled_label": "{name} on",
   "integrations_admin_failing": [
     {
-      "declarations": ["input count", "input error", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input error",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} account could not list its tools: {error}",
         "countPlural=other": "{count} accounts could not list its tools: {error}"
@@ -1339,8 +1467,13 @@
   "integrations_admin_on": "On",
   "integrations_admin_people_connected": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} person connected",
         "countPlural=other": "{count} people connected"
@@ -1367,8 +1500,14 @@
   "integrations_approval_change_account": "This will change with your {service} account “{account}”.",
   "integrations_approval_contact": [
     {
-      "declarations": ["input service", "input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input service",
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account.",
         "countPlural=other": "This will contact these {count} people from your {service} account."
@@ -1383,7 +1522,9 @@
         "input count",
         "local countPlural = count: plural"
       ],
-      "selectors": ["countPlural"],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account “{account}”.",
         "countPlural=other": "This will contact these {count} people from your {service} account “{account}”."
@@ -1442,8 +1583,13 @@
   "integrations_connect_ready_no_tools": "It lists no tools to your account yet.",
   "integrations_connect_ready_tools": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} tool. Reads run, changes ask first.",
         "countPlural=other": "{count} tools. Reads run, changes ask first."
@@ -1459,8 +1605,13 @@
   "integrations_connect_use_key_instead": "Use {noun} instead",
   "integrations_count_schedules": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} schedule",
         "countPlural=other": "{count} schedules"
@@ -1469,8 +1620,13 @@
   ],
   "integrations_count_sources": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} knowledge source",
         "countPlural=other": "{count} knowledge sources"
@@ -1496,8 +1652,14 @@
   "integrations_disconnect": "Disconnect",
   "integrations_disconnect_affected": [
     {
-      "declarations": ["input count", "input things", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input things",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay.",
         "countPlural=other": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay."
@@ -1587,8 +1749,13 @@
   "integrations_error_source_stale": "This source is no longer current.",
   "integrations_error_sources_mirror": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} knowledge source mirrors it. Remove it first.",
         "countPlural=other": "{count} knowledge sources mirror it. Remove them first."
@@ -1795,8 +1962,13 @@
   "integrations_server_setup_title": "Set up {name}",
   "integrations_server_tool_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} tool",
         "countPlural=other": "{count} tools"
@@ -1827,8 +1999,13 @@
   "integrations_sources_edit_label": "Edit what is synced from {title}",
   "integrations_sources_elsewhere": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} page already synced by another source",
         "countPlural=other": "{count} pages already synced by another source"
@@ -1852,8 +2029,13 @@
   "integrations_sources_over_limit": "{count} over the collection limit",
   "integrations_sources_pages": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} page",
         "countPlural=other": "{count} pages"
@@ -1864,8 +2046,13 @@
   "integrations_sources_paused_owner": "Paused: the owner’s {name} account is disconnected. Pages already synced stay searchable.",
   "integrations_sources_picked": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} page picked",
         "countPlural=other": "{count} pages picked"
@@ -1874,8 +2061,14 @@
   ],
   "integrations_sources_picked_excluded": [
     {
-      "declarations": ["input count", "input excluded", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input excluded",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} page picked, {excluded} left out",
         "countPlural=other": "{count} pages picked, {excluded} left out"
@@ -1891,8 +2084,13 @@
   "integrations_sources_retry_nothing": "Nothing needed preparing again.",
   "integrations_sources_retry_started": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Preparing search again for {count} page.",
         "countPlural=other": "Preparing search again for {count} pages."
@@ -1920,8 +2118,13 @@
   "integrations_sources_where_label": "Where to sync from",
   "integrations_status_accounts": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} account",
         "countPlural=other": "{count} accounts"
@@ -1933,8 +2136,13 @@
   "integrations_status_signed_out": "Signed out",
   "integrations_status_signed_out_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} signed out",
         "countPlural=other": "{count} signed out"
@@ -1946,8 +2154,14 @@
   "integrations_sync_error_owner": "The collection’s owner can no longer sync it.",
   "integrations_sync_gone": [
     {
-      "declarations": ["input count", "input titles", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input titles",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "“{titles}” can no longer be found or opened, so its pages were removed. Edit the selection to drop it.",
         "countPlural=other": "“{titles}” can no longer be found or opened, so their pages were removed. Edit the selection to drop them."
@@ -1959,8 +2173,13 @@
   "integrations_synced_failed": "Couldn’t prepare",
   "integrations_synced_filter": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Filter {count} page…",
         "countPlural=other": "Filter {count} pages…"
