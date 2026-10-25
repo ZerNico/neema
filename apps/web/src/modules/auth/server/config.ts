@@ -11,7 +11,7 @@ import { cimd } from "@better-auth/cimd";
 import { mcp as mcpProvider } from "@better-auth/mcp";
 import type { ClientMetadataResourceFetch } from "@better-auth/oauth-provider";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { and, count, eq, ne, sql } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import type { Db } from "~/db/client.ts";
@@ -472,14 +472,7 @@ export function createAppAuth({
         ).impersonatedBy;
         // Restoration stays usable after suspension, but grants no new authority.
         if (ctx.path !== stopPath) {
-          const actorId = impersonatedBy ?? session.user.id;
-          const [actor] = await db
-            .select({
-              activeBan: sql<boolean>`${schema.user.banned} and (${schema.user.banExpires} is null or ${schema.user.banExpires} > clock_timestamp())`,
-            })
-            .from(schema.user)
-            .where(eq(schema.user.id, actorId));
-          if (!actor || actor.activeBan || !(await signup.approved(actorId))) {
+          if (!(await signup.approved(impersonatedBy ?? session.user.id))) {
             throw new APIError("FORBIDDEN", {
               message: "This account cannot administer the instance.",
             });

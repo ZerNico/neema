@@ -1,10 +1,14 @@
+import { PgClient } from "@effect/sql-pg";
+import { Layer, ManagedRuntime, Redacted } from "effect";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { relations } from "~/db/relations.ts";
 import { session, signupBootstrap, user, userApprovals } from "~/db/schema/index.ts";
+import { accountEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { createAppAuth, type ImpersonationEvent } from "~/modules/auth/server/config.ts";
+import { Db } from "~/server/db.ts";
 import { projectSessionIdentity } from "~/modules/auth/identity.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
@@ -13,6 +17,7 @@ let database: TestDatabase;
 let pool: Pool;
 let db: ReturnType<typeof drizzle<typeof relations>>;
 let auth: ReturnType<typeof createAppAuth>;
+let runtime: ManagedRuntime.ManagedRuntime<Db, unknown>;
 const logs: ImpersonationEvent[] = [];
 const logger = vi.fn(async (event: ImpersonationEvent) => {
   logs.push(event);
@@ -70,6 +75,11 @@ beforeAll(async () => {
   const url = database.url;
   pool = new Pool({ connectionString: url });
   db = drizzle({ client: pool, relations });
+  runtime = ManagedRuntime.make(
+    Db.layer.pipe(
+      Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 3 })),
+    ),
+  );
   auth = createAppAuth({
     db,
     baseURL: origin,
@@ -82,15 +92,14 @@ beforeAll(async () => {
       record: async ({ userId }) => {
         await db.insert(userApprovals).values({ userId, status: "approved" });
       },
-      approved: async (userId) => {
-        const [row] = await db.select().from(userApprovals).where(eq(userApprovals.userId, userId));
-        return row?.status === "approved";
-      },
+      // The production predicate, so bans and approvals are judged as they are live.
+      approved: (userId) => runtime.runPromise(accountEligible(userId)),
     },
     log: logger,
   });
 }, 120_000);
 afterAll(async () => {
+  await runtime?.dispose();
   await pool?.end();
   await database?.drop();
 });

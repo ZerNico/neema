@@ -325,6 +325,18 @@ describe("redeeming a ticket", () => {
     ).toBe(200);
   });
 
+  it("leaves bans to the eligibility predicate, so a lapsed one redeems", async () => {
+    const { body } = await browser.ticket();
+    await db
+      .update(user)
+      .set({ banned: true, banExpires: new Date(Date.now() - DAY) })
+      .where(eq(user.id, userId));
+    expect((await desktop.redeem(body.ticket)).status).toBe(200);
+    const next = (await browser.ticket()).body;
+    pending.add(userId);
+    expect((await new Client(DESKTOP_UA, browser.ip).redeem(next.ticket)).status).toBe(400);
+  });
+
   it("lets a paste-only ticket ignore any verifier", async () => {
     const { body } = await browser.ticket();
     expect((await desktop.redeem(body.ticket, createVerifier())).status).toBe(200);

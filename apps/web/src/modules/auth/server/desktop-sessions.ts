@@ -69,7 +69,7 @@ export const desktopSessions = ({
   approved,
   onRedeemed,
 }: {
-  /** Same rule `sessionFromHeaders` applies: a pending account mints nothing. */
+  /** Same rule `sessionFromHeaders` applies: a pending or banned account mints nothing. */
   approved: (userId: string) => Promise<boolean>;
   /** Told after the desktop holds its cookie; a failure here is logged, never surfaced. */
   onRedeemed: (userId: string, ticketId: string) => Promise<void>;
@@ -133,8 +133,7 @@ export const desktopSessions = ({
             if (!verifier || !sameHash(await challengeOf(verifier), challenge)) throw invalid();
           }
           const user = await ctx.context.internalAdapter.findUserById(userId);
-          if (!user || (user as { banned?: boolean | null }).banned || !(await approved(userId)))
-            throw invalid();
+          if (!user || !(await approved(userId))) throw invalid();
           // `overrideAll` applies the override after the adapter's own 7-day
           // default; without it the longer expiry is silently replaced.
           const session = await ctx.context.internalAdapter.createSession(

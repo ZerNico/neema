@@ -117,16 +117,22 @@ export const accountEligible = Effect.fn("auth.accountEligible")(function* (user
     );
 });
 
-/** Like `accountEligible`, and the account still holds the admin role. */
-export const eligibleAdmin = Effect.fn("auth.eligibleAdmin")(function* (userId: string) {
-  const db = yield* Db;
-  return yield* db
-    .transaction((tx) => requireEligibleAccount(tx, userId).pipe(Effect.map(({ admin }) => admin)))
+/** The session still exists for this person and has not expired, by the database clock. */
+const sessionLive = (db: DbClient, sessionId: string, userId: string) =>
+  db
+    .select({ id: session.id })
+    .from(session)
+    .where(
+      and(
+        eq(session.id, sessionId),
+        eq(session.userId, userId),
+        sql`${session.expiresAt} > clock_timestamp()`,
+      ),
+    )
     .pipe(
-      Effect.catchTag("AccountIneligible", () => Effect.succeed(false)),
       Effect.orDie,
+      Effect.map((rows) => rows.length > 0),
     );
-});
 
 /** Another session for this person cannot keep a revoked device's feed alive. */
 export const originatingSessionEligible = Effect.fn("auth.originatingSessionEligible")(function* (
@@ -139,18 +145,7 @@ export const originatingSessionEligible = Effect.fn("auth.originatingSessionElig
     Effect.catchTag("AccountIneligible", () => Effect.succeed(false)),
   );
   if (!eligible) return false;
-  const [found] = yield* db
-    .select({ id: session.id })
-    .from(session)
-    .where(
-      and(
-        eq(session.id, sessionId),
-        eq(session.userId, userId),
-        sql`${session.expiresAt} > clock_timestamp()`,
-      ),
-    )
-    .pipe(Effect.orDie);
-  return Boolean(found);
+  return yield* sessionLive(db, sessionId, userId);
 });
 
 const SESSION_RECHECK = Duration.seconds(30);
@@ -167,18 +162,7 @@ export const sessionEnded = Effect.fn("auth.sessionEnded")(function* (
   const db = yield* Db;
   const holds = Effect.gen(function* () {
     if (!(yield* accountEligible(userId).pipe(Effect.provideService(Db, db)))) return false;
-    const [found] = yield* db
-      .select({ id: session.id })
-      .from(session)
-      .where(
-        and(
-          eq(session.id, sessionId),
-          eq(session.userId, userId),
-          sql`${session.expiresAt} > clock_timestamp()`,
-        ),
-      )
-      .pipe(Effect.orDie);
-    return Boolean(found);
+    return yield* sessionLive(db, sessionId, userId);
   });
   return Effect.gen(function* () {
     while (true) {
