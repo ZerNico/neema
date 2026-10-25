@@ -7,7 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence } from "motion/react";
-import * as m from "motion/react-m";
+import * as motion from "motion/react-m";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
@@ -27,6 +27,7 @@ import { sidebarPinsQuery, useTogglePin } from "../client/queries.ts";
 import { DEFAULT_PINS, type DestinationId } from "../schema.ts";
 import { useRailTooltip } from "./use-rail-tooltip.ts";
 import { availableDestinations, pinnedDestinations, type Destination } from "./destinations.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * The sidebar's first column: the toggle, a new chat, the pages the person
@@ -46,14 +47,17 @@ export function SidebarNavRail({ account }: { account: ReactNode }) {
   const pinMotion = collapseMotion(useAppReducedMotion());
 
   return (
-    <nav aria-label="Main" className="flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 p-2">
+    <nav
+      aria-label={m.navigation_main()}
+      className="flex w-(--sidebar-width-icon) shrink-0 flex-col gap-2 p-2"
+    >
       <SidebarMenu>
         <RailToggle />
         <SidebarMenuItem>
           <SidebarMenuButton
             size="icon"
-            aria-label="New chat"
-            tooltip={tooltip("New chat")}
+            aria-label={m.navigation_new_chat()}
+            tooltip={tooltip(m.navigation_new_chat())}
             render={<Link to="/" />}
           >
             <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
@@ -65,7 +69,7 @@ export function SidebarNavRail({ account }: { account: ReactNode }) {
         <AnimatePresence initial={false}>
           {onRail.map((destination) => (
             <SidebarMenuItem key={destination.id} className="-mt-0.5">
-              <m.div {...pinMotion}>
+              <motion.div {...pinMotion}>
                 <div className="pt-0.5">
                   <SidebarMenuButton
                     size="icon"
@@ -77,7 +81,7 @@ export function SidebarNavRail({ account }: { account: ReactNode }) {
                     <HugeiconsIcon icon={destination.icon} strokeWidth={2} />
                   </SidebarMenuButton>
                 </div>
-              </m.div>
+              </motion.div>
             </SidebarMenuItem>
           ))}
         </AnimatePresence>
@@ -102,7 +106,7 @@ function RailToggle() {
   const { open, isMobile, toggleSidebar } = useSidebar();
   const tooltip = useRailTooltip();
   const closes = isMobile || open;
-  const label = closes ? "Close sidebar" : "Open sidebar";
+  const label = closes ? m.navigation_close_sidebar() : m.navigation_open_sidebar();
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -155,8 +159,8 @@ function MoreDestinations({
           render={
             <SidebarMenuButton
               size="icon"
-              aria-label="More"
-              tooltip={tooltip("More")}
+              aria-label={m.navigation_more()}
+              tooltip={tooltip(m.navigation_more())}
               isActive={holdsActive}
             />
           }
@@ -188,7 +192,11 @@ function MoreDestinations({
                   <SidebarMenuAction
                     showOnHover={!isPinned}
                     aria-pressed={isPinned}
-                    aria-label={`${isPinned ? "Unpin" : "Pin"} ${destination.label}`}
+                    aria-label={
+                      isPinned
+                        ? m.navigation_unpin({ page: destination.label })
+                        : m.navigation_pin({ page: destination.label })
+                    }
                     className={cn(!isPinned && "text-muted-foreground")}
                     onClick={() => toggle.mutate(destination.id)}
                   >

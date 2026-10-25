@@ -8,34 +8,53 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { Capability } from "~/modules/groups/policy.ts";
 import { DESTINATION_IDS, type DestinationId } from "../schema.ts";
+import { m } from "~/paraglide/messages.js";
 
 type Capabilities = Partial<Record<Capability, boolean>>;
 
 const DESTINATIONS = {
-  projects: { to: "/projects", label: "Projects", icon: Folder01Icon, gate: "projectsUse" },
-  agents: { to: "/agents", label: "Agents", icon: Robot01Icon, gate: "agentsUse" },
+  projects: {
+    to: "/projects",
+    label: m.navigation_projects,
+    icon: Folder01Icon,
+    gate: "projectsUse",
+  },
+  agents: { to: "/agents", label: m.navigation_agents, icon: Robot01Icon, gate: "agentsUse" },
   knowledge: {
     to: "/knowledge",
-    label: "Knowledge",
+    label: m.navigation_knowledge,
     icon: FolderLibraryIcon,
     gate: "knowledgeUse",
   },
-  schedules: { to: "/schedules", label: "Schedules", icon: Calendar03Icon, gate: "schedules" },
-  skills: { to: "/skills", label: "Skills", icon: Book02Icon, gate: "skillsUse" },
-  chats: { to: "/chats", label: "Chats", icon: BubbleChatIcon, gate: null },
+  schedules: {
+    to: "/schedules",
+    label: m.navigation_schedules,
+    icon: Calendar03Icon,
+    gate: "schedules",
+  },
+  skills: { to: "/skills", label: m.navigation_skills, icon: Book02Icon, gate: "skillsUse" },
+  chats: { to: "/chats", label: m.navigation_chats, icon: BubbleChatIcon, gate: null },
 } as const satisfies Record<
   DestinationId,
-  { to: string; label: string; icon: unknown; gate: Capability | null }
+  { to: string; label: () => string; icon: unknown; gate: Capability | null }
 >;
 
-export type Destination = (typeof DESTINATIONS)[DestinationId] & { id: DestinationId };
+export type Destination = Omit<(typeof DESTINATIONS)[DestinationId], "label"> & {
+  id: DestinationId;
+  label: string;
+};
 
 const allowed = (id: DestinationId, capabilities: Capabilities | undefined) => {
   const gate = DESTINATIONS[id].gate;
   return gate === null || !!capabilities?.[gate];
 };
 
-const toDestination = (id: DestinationId): Destination => ({ id, ...DESTINATIONS[id] });
+// The label is read here, so it is in the locale of the page that shows it.
+const toDestination = (id: DestinationId): Destination => ({
+  id,
+  ...DESTINATIONS[id],
+  label: DESTINATIONS[id].label(),
+});
 
 /** Every page this person may open, in the "…" menu's order. */
 export const availableDestinations = (capabilities: Capabilities | undefined) =>

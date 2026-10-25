@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query
 import { toastError } from "~/ui/error-toast.ts";
 import { DEFAULT_PINS, normalizePins, type DestinationId, type SidebarPins } from "../schema.ts";
 import { getSidebarPins, updateSidebarPins } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 export const sidebarPinsQuery = queryOptions({
   queryKey: ["sidebar", "pins"],
@@ -34,7 +35,7 @@ export function useTogglePin() {
     },
     onError: (error, id) => {
       flip(id);
-      toastError("Could not update the sidebar.", error);
+      toastError(m.navigation_error_pins(), error);
     },
     // A refetch between two queued saves would briefly undo the second one.
     onSettled: () =>
