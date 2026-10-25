@@ -9,6 +9,7 @@ import {
 } from "~/modules/attachments/constants.ts";
 import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { desktopClient } from "./bridge.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** One composer file held outside the model-visible workspace until send. */
 export interface WorkspaceImport {
@@ -136,7 +137,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
       const room = MAX_ATTACHMENTS_PER_MESSAGE - itemsRef.current.length;
       const accepted = incoming.slice(0, Math.max(room, 0));
       if (accepted.length < incoming.length)
-        setNotice(`You can add at most ${MAX_ATTACHMENTS_PER_MESSAGE} files per message.`);
+        setNotice(m.desktop_import_too_many({ max: MAX_ATTACHMENTS_PER_MESSAGE }));
       if (accepted.length === 0) return;
 
       const waitForBatch = pendingBatch.current?.promise;
@@ -150,7 +151,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
           status: oversized ? "error" : "importing",
           storedName: null,
           error: oversized
-            ? `Too large. The limit is ${formatFileSize(LIMITS.importPathBytes)}.`
+            ? m.desktop_import_too_large({ limit: formatFileSize(LIMITS.importPathBytes) })
             : null,
         };
       });
@@ -173,7 +174,9 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
           );
           if (receipt) return receipt;
           if (file.size > LIMITS.importBytes)
-            throw new Error(`Too large. The limit is ${formatFileSize(LIMITS.importBytes)}.`);
+            throw new Error(
+              m.desktop_import_too_large({ limit: formatFileSize(LIMITS.importBytes) }),
+            );
           return Effect.runPromise(
             client.stageFile({
               conversationId,
@@ -197,7 +200,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
             if (cancelled.current.delete(item.localId)) return;
             patch(item.localId, {
               status: "error",
-              error: error instanceof Error ? error.message : "Could not add that file.",
+              error: error instanceof Error ? error.message : m.desktop_import_failed(),
             });
             drainQueue();
           },
@@ -270,7 +273,7 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
     promote: useCallback(
       async (reservationId: string) => {
         const client = desktopClient();
-        if (!client) throw new Error("The desktop workspace is unavailable.");
+        if (!client) throw new Error(m.desktop_workspace_unavailable());
         const receipt = await Effect.runPromise(
           client.promoteSubmission({ conversationId, submissionId, reservationId }),
         );

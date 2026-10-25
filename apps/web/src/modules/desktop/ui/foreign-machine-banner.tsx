@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { desktopClient, folderQueryKey } from "../client/bridge.ts";
 import { settled } from "./foreign-machine-stamp.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Shown in a work chat whose latest attempt was sent from another machine. The
@@ -42,9 +43,12 @@ export function ForeignMachineBanner({
       settle();
     } catch {
       setBusy(false);
-      toast.error("Could not take over this chat.");
+      toast.error(m.desktop_foreign_error_take_over());
     }
   };
+  // The machine is bold wherever the sentence puts it.
+  const mark = "\u0000";
+  const [before = "", after = ""] = m.desktop_foreign_notice({ machine: mark }).split(mark);
   return (
     <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 pb-2 text-xs">
       <div
@@ -53,9 +57,11 @@ export function ForeignMachineBanner({
       >
         <HugeiconsIcon icon={ComputerIcon} strokeWidth={2} className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate">
-          This chat last worked on{" "}
-          <strong className="text-foreground">{stamp.name ?? "another computer"}</strong>
-          {"; its workspace and attached folders live there."}
+          {before}
+          <strong className="text-foreground">
+            {stamp.name ?? m.desktop_foreign_another_computer()}
+          </strong>
+          {after}
         </span>
         <button
           type="button"
@@ -63,11 +69,11 @@ export function ForeignMachineBanner({
           disabled={busy}
           onClick={() => void takeOver()}
         >
-          Take over on this Mac
+          {m.desktop_foreign_take_over()}
         </button>
         <button
           type="button"
-          aria-label="Dismiss"
+          aria-label={m.desktop_foreign_dismiss()}
           className="hover:text-foreground shrink-0 rounded-md p-1"
           onClick={settle}
         >

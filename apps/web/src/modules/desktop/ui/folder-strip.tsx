@@ -28,6 +28,7 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
+import { m } from "~/paraglide/messages.js";
 import { PERMISSION_LEVELS } from "../client/approvals.ts";
 import type { ChatAccess, FolderState } from "../client/bridge.ts";
 
@@ -62,11 +63,13 @@ export function FolderStrip({
     return (
       <div className="bg-muted/60 text-muted-foreground mx-3 -mt-3 flex items-center gap-2 rounded-b-composer border border-t-0 px-3 pt-4 pb-1.5 text-xs">
         <span role="status" className="flex min-h-6 items-center">
-          {folder.readiness === "loading" ? "Checking folders…" : "Could not check folders."}
+          {folder.readiness === "loading"
+            ? m.desktop_folders_checking()
+            : m.desktop_folders_check_failed()}
         </span>
         {folder.readiness === "error" ? (
           <Button size="xs" variant="ghost" onClick={folder.refresh} disabled={folder.busy}>
-            Retry folder check
+            {m.desktop_folders_retry()}
           </Button>
         ) : null}
       </div>
@@ -100,7 +103,7 @@ export function FolderStrip({
                     "min-w-0",
                     item.alive && "text-muted-foreground hover:text-foreground",
                   )}
-                  title={item.alive ? undefined : "This folder is no longer where it was."}
+                  title={item.alive ? undefined : m.desktop_folder_lost()}
                 />
               }
             >
@@ -114,11 +117,11 @@ export function FolderStrip({
             <DropdownMenuContent align="start">
               {item.alive ? null : (
                 <DropdownMenuItem onClick={() => folder.choose(item.name)}>
-                  Choose it again
+                  {m.desktop_folder_choose_again()}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem variant="destructive" onClick={() => folder.detach(item.name)}>
-                Detach {item.name}
+                {m.desktop_folder_detach({ name: item.name })}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -131,7 +134,9 @@ export function FolderStrip({
           onClick={() => folder.choose()}
         >
           <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} className="size-3.5" />
-          {status.folders.length === 0 ? "Add a folder from this computer" : "Add another"}
+          {status.folders.length === 0
+            ? m.desktop_folder_add_first()
+            : m.desktop_folder_add_another()}
         </Button>
         {refusal ? (
           <span role="status" className="min-w-0 truncate">
@@ -172,7 +177,7 @@ function SandboxNotice({
   if (state.kind === "setup-needed") {
     return (
       <Button size="xs" variant="ghost" className="ml-auto" disabled={busy} onClick={onSetUp}>
-        Commands need a one-time setup
+        {m.desktop_sandbox_setup()}
       </Button>
     );
   }
@@ -181,7 +186,9 @@ function SandboxNotice({
       className="ml-auto truncate"
       title={state.kind === "missing-deps" ? state.hint : state.reason}
     >
-      {state.kind === "missing-deps" ? "Commands unavailable" : "Commands not supported here"}
+      {state.kind === "missing-deps"
+        ? m.desktop_sandbox_missing()
+        : m.desktop_sandbox_unsupported()}
     </span>
   );
 }
@@ -210,12 +217,12 @@ function PermissionPicker({
             variant="ghost"
             size="xs"
             className="text-muted-foreground hover:text-foreground ml-auto min-w-0"
-            aria-label={`Permissions: ${current.label}`}
+            aria-label={m.desktop_permissions_label({ level: current.label() })}
           />
         }
       >
         <HugeiconsIcon icon={Shield01Icon} strokeWidth={2} className="size-3.5" />
-        <span className="truncate">{current.label}</span>
+        <span className="truncate">{current.label()}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         <DropdownMenuRadioGroup
@@ -228,25 +235,22 @@ function PermissionPicker({
             <DropdownMenuRadioItem
               key={option.value}
               value={option.value}
-              aria-label={option.label}
+              aria-label={option.label()}
               aria-describedby={`permission-${option.value}-description`}
             >
               <span className="flex min-w-0 flex-col gap-1">
-                <span>{option.label}</span>
+                <span>{option.label()}</span>
                 <span
                   id={`permission-${option.value}-description`}
                   className="text-muted-foreground text-xs font-normal"
                 >
-                  {option.description}
+                  {option.description()}
                 </span>
               </span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        <p className="text-muted-foreground px-3 py-2 text-xs">
-          The delete tool always asks, once for the whole list. An allowed command can still delete
-          files. Network access and reading other paths always ask separately.
-        </p>
+        <p className="text-muted-foreground px-3 py-2 text-xs">{m.desktop_permissions_note()}</p>
         {open ? <ChatAccessList access={access} /> : null}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -257,10 +261,12 @@ const permissionLabel = (permission: ChatPermission) =>
   permission.kind === "path"
     ? permission.path
     : permission.kind === "local"
-      ? "Services on this computer"
+      ? m.desktop_grant_local()
       : permission.kind === "ssh-agent"
-        ? "Signing in with your SSH keys"
-        : `${permission.host}:${permission.port}${permission.privateNetwork ? " (your network)" : ""}`;
+        ? m.desktop_grant_ssh_agent()
+        : permission.privateNetwork
+          ? m.desktop_grant_private_network({ address: `${permission.host}:${permission.port}` })
+          : `${permission.host}:${permission.port}`;
 
 /**
  * What commands in this chat may reach beyond the defaults. Loaded when the
@@ -273,7 +279,7 @@ function ChatAccessList({ access }: { access: ChatAccess }) {
   const removal = useMutation({
     mutationFn: (permission: ChatPermission) => access.revoke(permission),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: access.queryKey }),
-    onError: (error) => toastError("Couldn’t remove it.", error),
+    onError: (error) => toastError(m.desktop_grant_error_remove(), error),
   });
   if (!listed.data) return null;
   const { chat, always } = listed.data;
@@ -283,14 +289,14 @@ function ChatAccessList({ access }: { access: ChatAccess }) {
       <DropdownMenuSeparator />
       {chat.length > 0 ? (
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Allowed in this chat</DropdownMenuLabel>
+          <DropdownMenuLabel>{m.desktop_grants_chat()}</DropdownMenuLabel>
           {chat.map((permission) => (
             <DropdownMenuItem
               key={permissionLabel(permission)}
               closeOnClick={false}
               disabled={removal.isPending}
               onClick={() => removal.mutate(permission)}
-              aria-label={`Remove ${permissionLabel(permission)}`}
+              aria-label={m.desktop_grant_remove({ name: permissionLabel(permission) })}
             >
               <HugeiconsIcon
                 icon={
@@ -312,8 +318,7 @@ function ChatAccessList({ access }: { access: ChatAccess }) {
       ) : null}
       {always.length > 0 ? (
         <p className="text-muted-foreground px-3 py-2 text-xs">
-          Every chat may also reach {always.length === 1 ? "one more" : `${always.length} more`},
-          listed in Settings › This computer.
+          {m.desktop_grants_always({ count: always.length })}
         </p>
       ) : null}
     </>

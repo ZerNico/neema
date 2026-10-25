@@ -5,7 +5,7 @@ import {
   folderUsable,
   requireWorkFolder,
   useFolder,
-  WORK_FOLDER_UNAVAILABLE,
+  workFolderUnavailable,
 } from "./bridge.ts";
 
 /**
@@ -22,7 +22,7 @@ export function useWorkGate(conversationId: string, working: boolean) {
   const readOnly = working && !folderUsable(folder);
   const check = (nowWorking = working) => {
     if (nowWorking && !folderUsable(folder)) {
-      toast.error(WORK_FOLDER_UNAVAILABLE);
+      toast.error(workFolderUnavailable());
       throw new AlreadyTold("Work folder status unavailable");
     }
   };

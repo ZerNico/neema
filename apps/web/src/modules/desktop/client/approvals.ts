@@ -1,4 +1,5 @@
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
+import { m } from "~/paraglide/messages.js";
 import type { ApprovalKind } from "../tool-schema.ts";
 
 export { approvalKind, type ApprovalKind } from "../tool-schema.ts";
@@ -43,23 +44,22 @@ export const firstDecision = (
 
 export const PERMISSION_LEVELS: ReadonlyArray<{
   value: PermissionLevel;
-  label: string;
-  description: string;
+  label: () => string;
+  description: () => string;
 }> = [
   {
     value: "manual",
-    label: "Approve each action",
-    description: "Ask before reads, changes, and commands unless already allowed for this chat.",
+    label: m.desktop_permission_manual,
+    description: m.desktop_permission_manual_description,
   },
   {
     value: "auto",
-    label: "Auto-approve reads",
-    description: "Allow reading, listing, and searching. Ask before changes and commands.",
+    label: m.desktop_permission_auto,
+    description: m.desktop_permission_auto_description,
   },
   {
     value: "skip",
-    label: "Auto-approve reads and changes",
-    description:
-      "Allow reading, editing, moving files, and running commands without asking. Network access still needs separate approval.",
+    label: m.desktop_permission_skip,
+    description: m.desktop_permission_skip_description,
   },
 ];

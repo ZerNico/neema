@@ -12,6 +12,7 @@ import { fileExtension } from "~/modules/attachments/constants.ts";
 import { PreviewAction } from "~/modules/attachments/ui/preview-action.tsx";
 import { LocalFileConversationContext } from "./local-file-context.ts";
 import { reveal } from "./local-file-read.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * The file a Work row points at, shown in the preview dialog the rest of the
@@ -62,7 +63,7 @@ export function LocalFileActions({
     // The header row has no room for a sentence, and the desktop's refusals
     // are already written as ones the reader can act on.
     onError: (error) =>
-      toast.error(error instanceof DesktopError ? error.message : "That could not be opened."),
+      toast.error(error instanceof DesktopError ? error.message : m.desktop_file_error_open()),
   });
   // A button that can only ever refuse is worse than no button. The desktop
   // still checks, and still refuses a file marked executable, which no
@@ -72,14 +73,14 @@ export function LocalFileActions({
     <>
       <PreviewAction
         icon={FolderOpenIcon}
-        label="Show in folder"
+        label={m.desktop_file_show_in_folder()}
         pending={act.isPending && act.variables === "reveal"}
         onClick={() => act.mutate("reveal")}
       />
       {openable ? (
         <PreviewAction
           icon={LinkSquare02Icon}
-          label="Open"
+          label={m.common_open()}
           pending={act.isPending && act.variables === "open"}
           onClick={() => act.mutate("open")}
         />

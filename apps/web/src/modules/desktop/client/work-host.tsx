@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { Alert02Icon, NoInternetIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { toast } from "sonner";
+import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -345,7 +346,7 @@ export function WorkConnectionNotice() {
         className="text-warning size-4 shrink-0"
         aria-hidden
       />
-      Can’t reach the server, so work on this computer is paused until the connection is back.
+      {m.desktop_work_paused()}
     </div>
   );
 }
@@ -386,13 +387,13 @@ export function WorkAttention() {
       const calls = new Set(controller!.pending(id).keys());
       // Dismissal and snapshot refreshes must not announce the same calls again.
       if (previous && [...calls].every((callId) => previous.calls.has(callId))) continue;
-      const toastId = toast.warning("Work needs your approval", {
+      const toastId = toast.warning(m.desktop_approval_needed(), {
         ...(previous ? { id: previous.toastId } : {}),
-        description: item.title || "Work chat",
+        description: item.title || m.desktop_work_chat_untitled(),
         closeButton: true,
         duration: 8000,
         action: {
-          label: "Review",
+          label: m.desktop_approval_review(),
           onClick: () => {
             void navigate({ to: "/chat/$conversationId", params: { conversationId: id } });
           },
@@ -407,10 +408,10 @@ export function WorkAttention() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="sm" className="ml-auto" />}
-        aria-label={`Review work approvals (${count})`}
+        aria-label={m.desktop_approvals_label({ count })}
       >
         <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="size-4" aria-hidden />
-        Approvals
+        {m.desktop_approvals()}
         <span className="text-muted-foreground tabular-nums">{count}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -424,7 +425,9 @@ export function WorkAttention() {
               });
             }}
           >
-            <span className="min-w-0 flex-1 truncate">{item.title || "Work chat"}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {item.title || m.desktop_work_chat_untitled()}
+            </span>
             <span className="text-muted-foreground tabular-nums">{item.pending}</span>
           </DropdownMenuItem>
         ))}

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { DesktopSubmission } from "~/modules/chat/schema.ts";
 import { useSyncExternalStore } from "react";
+import { m } from "~/paraglide/messages.js";
 import {
   CancelledError,
   isCancelledError,
@@ -300,8 +301,7 @@ export const sendFieldsFor = (status: FolderStatus): DesktopSendFields => {
 };
 
 /** Shown when a work chat tries to act before the machine has answered about folders. */
-export const WORK_FOLDER_UNAVAILABLE =
-  "Wait for the folder check before continuing this work chat.";
+export const workFolderUnavailable = () => m.desktop_work_folder_unavailable();
 
 /**
  * How a branch keeps the source chat's local state on this machine: the
@@ -332,7 +332,7 @@ export const discardWorkspace = (conversationId: string): void => {
 
 export const requireWorkFolder = (working: boolean, folder: FolderState | null) => {
   const fields = working ? desktopSendFields(folder) : null;
-  if (working && !fields) throw new Error(WORK_FOLDER_UNAVAILABLE);
+  if (working && !fields) throw new Error(workFolderUnavailable());
   return fields;
 };
 

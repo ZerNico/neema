@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
+import { m } from "~/paraglide/messages.js";
 import { FolderStrip } from "./folder-strip.tsx";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -202,4 +203,11 @@ it("lists what this chat may reach and removes one from the menu", async () => {
     ).not.toBeInTheDocument(),
   );
   expect(screen.getByRole("menuitem", { name: "Remove /opt/specs" })).toBeInTheDocument();
+});
+
+it("counts every-chat grants in German", () => {
+  expect(m.desktop_grants_always({ count: 1 }, { locale: "de" })).toContain(
+    "eine weitere Freigabe",
+  );
+  expect(m.desktop_grants_always({ count: 3 }, { locale: "de" })).toContain("3 weitere Freigaben");
 });

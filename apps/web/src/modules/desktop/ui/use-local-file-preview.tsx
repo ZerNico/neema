@@ -8,6 +8,7 @@ import { useDesktop } from "../client/bridge.ts";
 import { LocalFileConversationContext } from "./local-file-context.ts";
 import { LocalFileActions } from "./local-file-preview.tsx";
 import { parentOf, readLocalFile, refusalCopy, reveal } from "./local-file-read.ts";
+import { m } from "~/paraglide/messages.js";
 
 export interface LocalFilePreview {
   /** Reads the file and opens the dialog. Nothing touches disk before this. */
@@ -52,13 +53,13 @@ export function useLocalFilePreview(path: string | null): LocalFilePreview | nul
     onError: (error) => {
       const folder = path === null ? null : parentOf(path);
       toast.error(
-        error instanceof DesktopError ? refusalCopy(error.reason) : "This file couldn’t be read.",
+        error instanceof DesktopError ? refusalCopy(error.reason) : m.desktop_file_unreadable(),
         folder === null || client === null || conversationId === null
           ? undefined
           : {
               // A file that is gone cannot be shown, but its folder can.
               action: {
-                label: "Show in folder",
+                label: m.desktop_file_show_in_folder(),
                 onClick: () => {
                   void reveal(client, conversationId, folder, "reveal").catch(() => {});
                 },

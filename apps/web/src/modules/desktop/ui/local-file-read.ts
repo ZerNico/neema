@@ -1,3 +1,4 @@
+import { m } from "~/paraglide/messages.js";
 import { Effect } from "effect";
 import { DesktopError, type DesktopClient, type RevealMode } from "@chat/desktop-rpc";
 import { fileExtension } from "~/modules/attachments/constants.ts";
@@ -101,19 +102,19 @@ export const readLocalFile = async (
 export const refusalCopy = (reason: DesktopError["reason"]) => {
   switch (reason) {
     case "not-found":
-      return "This file isn’t there anymore.";
+      return m.desktop_file_gone();
     case "not-a-file":
-      return "This is a folder, not a file.";
+      return m.desktop_file_is_folder();
     case "no-folder":
     case "outside-folder":
-      return "This chat can’t reach that folder on this computer anymore.";
+      return m.desktop_file_folder_unreachable();
     case "not-text":
     case "not-binary":
-      return "There’s no preview for this kind of file.";
+      return m.desktop_file_no_preview();
     case "too-large":
-      return "This file is too large to show here.";
+      return m.desktop_file_too_large();
     default:
-      return "This file couldn’t be read.";
+      return m.desktop_file_unreadable();
   }
 };
 
