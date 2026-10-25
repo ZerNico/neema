@@ -325,9 +325,6 @@ export const observePart = (
       fileDelivery,
       publishFileTool,
       createFileTool,
-      customToolNames,
-      customToolOwners,
-      customToolDisplayName,
       integrationTools,
       knowledgeTools,
       temporary,
@@ -654,7 +651,7 @@ export const observePart = (
           yield* start({
             family,
             name: part.name,
-            displayName: customToolDisplayName(part.name),
+            displayName: customTools!.tools.get(part.name)!.displayName,
           });
           return;
         }
@@ -1445,7 +1442,8 @@ export const observePart = (
           return;
         }
 
-        if (customToolNames.has(part.name)) {
+        const custom = customTools?.tools.get(part.name);
+        if (custom) {
           if (isPreliminary) return;
           const workingOutputs: Array<{
             id: string;
@@ -1454,7 +1452,7 @@ export const observePart = (
           }> = [];
           const outcomes: Array<Record<string, unknown>> = [];
           const errors: string[] = [];
-          const owner = customToolOwners.get(part.name)!;
+          const { owner } = custom;
           for (const item of customTools?.takeFiles(part.id) ?? []) {
             if (item.delivery === "working") {
               const committed = yield* Effect.try({
@@ -1530,7 +1528,7 @@ export const observePart = (
           }
           const activity = projectCustomToolResult({
             name: part.name,
-            displayName: customToolDisplayName(part.name),
+            displayName: custom.displayName,
             raw: part.result,
             isFailure: part.isFailure,
             workingFiles: workingOutputs,

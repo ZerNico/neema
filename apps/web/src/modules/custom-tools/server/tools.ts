@@ -5,8 +5,20 @@ import { CUSTOM_TOOL_LIMITS, type CustomToolManifest } from "../schema.ts";
 import type { ToolFile, ToolFileSource } from "~/modules/chat/server/tool-files.ts";
 import type { CustomToolRunFile, CustomToolRuntime } from "./runtime.ts";
 
+/** One offered function: what its rows show and which module owns its drafts. */
+export interface OfferedCustomTool {
+  readonly displayName: string;
+  readonly owner: `custom:${string}`;
+}
+
 export interface PreparedCustomTools {
   readonly group: ToolGroup;
+  /**
+   * Offered functions by model-facing name. This map, not the `custom_`
+   * prefix, decides what is a custom call: a model can invent a `custom_…`
+   * name, and the SDK still forwards that part.
+   */
+  readonly tools: ReadonlyMap<string, OfferedCustomTool>;
   /**
    * Files a call returned, keyed by the provider call id, waiting for the
    * engine to store them under the generation fence. The model's result part
@@ -17,9 +29,9 @@ export interface PreparedCustomTools {
 }
 
 /**
- * Expands pinned module revisions into independently callable model tools. The
- * runtime is captured before toolkit merge so handlers do not depend on later
- * Effect context provision.
+ * Expands the modules an attempt resolved into independently callable model
+ * tools. The runtime is captured before toolkit merge so handlers do not
+ * depend on later Effect context provision.
  */
 export function prepareCustomTools(
   modules: ReadonlyArray<CustomToolManifest>,
@@ -100,6 +112,12 @@ export function prepareCustomTools(
 
   return {
     group: { toolkit: Toolkit.make(...definitions) as ToolGroup["toolkit"], handlers },
+    tools: new Map(
+      functions.map(({ module, fn }) => [
+        fn.modelName,
+        { displayName: fn.name, owner: `custom:${module.toolId}` as const },
+      ]),
+    ),
     takeFiles: (callId) => {
       const files = pendingFiles.get(callId) ?? [];
       pendingFiles.delete(callId);

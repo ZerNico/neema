@@ -68,7 +68,6 @@ import {
   ASSISTANT_FILE_LIMITS as ANSWER_FILE_LIMITS,
   isGeneratedImage,
 } from "../../assistant-output.ts";
-import { customToolName } from "~/modules/custom-tools/schema.ts";
 import { prepareIntegrationTools } from "~/modules/integrations/server/tools.ts";
 import { prepareCustomTools } from "~/modules/custom-tools/server/tools.ts";
 import { createSourceIndexer } from "~/modules/tools/server/source-indexer.ts";
@@ -409,14 +408,16 @@ export const prepareGenerationTools = (
     // Admin-authored tools are resolved once as this generation starts,
     // then held stable for its remaining tool rounds. An edit or deletion
     // mid-flight changes nothing here. A module revises only its own drafts.
-    const customToolOwners = new Map(
-      customToolManifests.flatMap((tool) =>
-        tool.functions.map(
-          (fn) => [customToolName(tool.slug, fn.key), `custom:${tool.toolId}` as const] as const,
-        ),
-      ),
+    // Files resolve once the attempt's resolver exists, below.
+    const customTools = prepareCustomTools(
+      customToolManifests,
+      customToolRuntime,
+      Option.isSome(database) ? (reference) => toolFiles!.resolve(reference) : undefined,
     );
-    const offeredOwners = new Set<string>([...officeEditors, ...customToolOwners.values()]);
+    const offeredOwners = new Set<string>([
+      ...officeEditors,
+      ...[...(customTools?.tools.values() ?? [])].map((tool) => tool.owner),
+    ]);
     // Drafts earlier answers left, for the editors this answer is offered.
     const kept = keptFiles
       ? (yield* keptFiles.list(input.conversationId)).filter((file) =>
@@ -591,9 +592,6 @@ export const prepareGenerationTools = (
       const family = officeFamilyOfTool(name);
       return family && offeredOffice.has(family) ? { family, ...OFFICE_FAMILIES[family] } : null;
     };
-    const customTools = customToolManifests.length
-      ? prepareCustomTools(customToolManifests, customToolRuntime, toolFiles?.resolve)
-      : undefined;
     // Loaded once, before the toolkit, and held for every round: an admin
     // edit mid-answer applies to the next answer. Checked again here, so
     // a model that became unusable since resolution offers nothing.
@@ -683,19 +681,6 @@ export const prepareGenerationTools = (
             },
           ]
         : [];
-    // Display names by model-facing tool name. This map, not the
-    // `custom_` prefix, decides what is a custom tool call: a model can
-    // invent a `custom_…` name, and the SDK still forwards that part.
-    const customToolNames = new Map(
-      customToolManifests.flatMap((tool) =>
-        tool.functions.map((fn) => [customToolName(tool.slug, fn.key), fn.name] as const),
-      ),
-    );
-    const customToolDisplayName = (name: string) => {
-      const displayName = customToolNames.get(name);
-      if (!displayName) throw new Error(`Missing pinned custom tool manifest for ${name}`);
-      return displayName;
-    };
     const integrationTools = integrationOffer.length
       ? prepareIntegrationTools({
           offered: integrationOffer,
@@ -1013,7 +998,7 @@ export const prepareGenerationTools = (
                                             ? "web"
                                             : name === IMAGE_TOOL && imageTool
                                               ? "image"
-                                              : customToolNames.has(name)
+                                              : customTools?.tools.has(name)
                                                 ? "custom"
                                                 : integrationTools?.names.has(name)
                                                   ? "integration"
@@ -1089,9 +1074,6 @@ export const prepareGenerationTools = (
       publishFileTool,
       createFileTool,
       keptNotice,
-      customToolNames,
-      customToolOwners,
-      customToolDisplayName,
       integrationTools,
       knowledgeTools,
       temporary,

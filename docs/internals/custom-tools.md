@@ -166,13 +166,16 @@ correctly, each carrying its own display name and result, but "which module ran
 this" has no answer once the module is renamed or deleted. That is the same
 trade every other tool family makes, and history is what the reader needs.
 
-Attempt resolution reads the enabled, usable modules inside the same
-transaction that creates or resets the assistant attempt and holds them in the
-in-memory `GenerationConfig` for the life of that generation. A running generation
-is therefore unaffected by an edit or deletion mid-flight; the next retry, edit or
-new turn resolves the modules again as they are then. Reload and branch carry
-nothing here, since a tool-call row is self-describing. Deleting the creating
-admin does not delete modules.
+Modules are not part of the frozen generation config. The generation reads the
+enabled modules the sender may use when it is dispatched
+(`generation/attempt-context.ts`), outside the attempt transaction, and holds that
+list in memory for its life: one map from model-facing name to display name and
+owning module serves the offer, the rows and draft ownership. A running generation
+is therefore unaffected by an edit or deletion mid-flight, and a module that became
+unusable before dispatch drops out of the offer instead of failing the attempt; the
+next retry, edit or new turn resolves the modules again as they are then. Reload and
+branch carry nothing here, since a tool-call row is self-describing. Deleting the
+creating admin does not delete modules.
 
 Tool page bodies and source are never persisted in tool-call rows. The continuation
 transcript receives the normalized result, while durable activity stores only a

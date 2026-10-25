@@ -91,7 +91,7 @@ const clamp = (value: string, max: number) =>
 /**
  * The only tool-result persistence/wire projection. Custom tool names are
  * runtime data, so this takes the raw name rather than a literal union; the
- * prefix check already ran at dispatch.
+ * caller already found it among the functions this attempt offered.
  */
 export function projectCustomToolResult(input: {
   name: string;

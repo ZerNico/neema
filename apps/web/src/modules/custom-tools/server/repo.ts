@@ -8,7 +8,7 @@ import {
   groupMembers,
   user,
 } from "~/db/schema/index.ts";
-import { Db, type DbTx } from "~/server/db.ts";
+import { Db } from "~/server/db.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { isUniqueViolation } from "~/server/sql.ts";
 import type {
@@ -89,7 +89,6 @@ export class CustomToolRepo extends Context.Service<
       userId: string,
       /** Explicit ids from an agent; `"all"` is plain chat, every usable module. */
       selection: ReadonlyArray<string> | "all",
-      tx?: DbTx,
     ): Effect.Effect<ReadonlyArray<CustomToolManifest>>;
     create(input: {
       slug: string;
@@ -148,10 +147,9 @@ export class CustomToolRepo extends Context.Service<
         }),
 
         resolveForAttempt: Effect.fn("CustomToolRepo.resolveForAttempt")(
-          function* (userId, selection, tx) {
+          function* (userId, selection) {
             if (selection !== "all" && selection.length === 0) return [];
-            const client = tx ?? db;
-            const rows = yield* client
+            const rows = yield* db
               .select()
               .from(customTools)
               .where(
