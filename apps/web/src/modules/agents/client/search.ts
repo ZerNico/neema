@@ -1,9 +1,13 @@
 import { Robot01Icon } from "@hugeicons/core-free-icons";
 import { listSource } from "~/modules/search/registry.ts";
+import { m } from "~/paraglide/messages.js";
 import { agentsQuery } from "./queries.ts";
 
 export const useAgentSearch = listSource({
-  heading: "Agents",
+  // A getter, so the heading is read in the page's language when shown.
+  get heading() {
+    return m.agents_title();
+  },
   icon: Robot01Icon,
   query: agentsQuery,
   allowed: (capabilities) => capabilities.agentsUse,

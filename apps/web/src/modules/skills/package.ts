@@ -45,11 +45,42 @@ export const isBinarySkillFile = (file: SkillFile): file is SkillBinaryFile => "
 /** A file as it may cross to the browser: a binary keeps its description, not its bytes. */
 export const withoutBytes = (file: SkillFile): SkillFile =>
   isBinarySkillFile(file) ? { path: file.path, binary: { ...file.binary } } : file;
+/**
+ * What a finding is about, so a page can word it in its own language
+ * (`finding-text.ts`). Absent on findings stored before codes existed, and on
+ * words from elsewhere (the YAML parser, the ZIP reader), which show as written.
+ */
+export type SkillFindingCode =
+  | "path"
+  | "not_text"
+  | "file_count"
+  | "duplicate_path"
+  | "root_binary"
+  | "too_large"
+  | "surrogate"
+  | "parent_collides"
+  | "expanded_too_large"
+  | "no_frontmatter"
+  | "yaml_aliases"
+  | "not_mapping"
+  | "name"
+  | "description"
+  | "manual_flag"
+  | "unknown_key"
+  | "shell"
+  | "unreadable"
+  | "archive_files"
+  | "archive_root"
+  | "export_missing";
 export interface SkillFinding {
   severity: "error" | "warning";
   path: string;
+  /** The English wording, for logs, the model and findings without a code. */
   message: string;
   line?: number;
+  code?: SkillFindingCode;
+  /** The finding's one variable part: a frontmatter key. */
+  detail?: string;
 }
 export interface SkillMetadata {
   name: string;
@@ -93,7 +124,12 @@ export function validateSkillPath(path: string): string {
     path.split("/").length > SKILL_LIMITS.depth
   ) {
     throw new SkillPackageError([
-      { severity: "error", path, message: "Use a safe relative file path (maximum depth 10)." },
+      {
+        severity: "error",
+        path,
+        code: "path",
+        message: "Use a safe relative file path (maximum depth 10).",
+      },
     ]);
   }
   return path;
@@ -109,6 +145,7 @@ export function decodeSkillText(bytes: Uint8Array, path: string): string {
       {
         severity: "error",
         path,
+        code: "not_text",
         message: "This file must be UTF-8 text without control characters.",
       },
     ]);
@@ -136,10 +173,16 @@ export function classifySkillFile(path: string, bytes: Uint8Array): SkillFile {
 
 export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkillPackage {
   const findings: SkillFinding[] = [];
-  const error = (path: string, message: string, line?: number) =>
-    findings.push({ severity: "error", path, message, ...(line ? { line } : {}) });
+  const error = (path: string, code: SkillFindingCode | null, message: string, line?: number) =>
+    findings.push({
+      severity: "error",
+      path,
+      message,
+      ...(code ? { code } : {}),
+      ...(line ? { line } : {}),
+    });
   if (input.length === 0 || input.length > SKILL_LIMITS.files)
-    error("SKILL.md", "A package must contain 1–100 files.");
+    error("SKILL.md", "file_count", "A package must contain 1–100 files.");
   const seen = new Set<string>();
   let total = 0;
   for (const file of input) {
@@ -150,19 +193,20 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
       else throw cause;
     }
     const key = file.path.normalize("NFC").toLowerCase();
-    if (seen.has(key)) error(file.path, "Duplicate or normalized colliding file path.");
+    if (seen.has(key))
+      error(file.path, "duplicate_path", "Duplicate or normalized colliding file path.");
     seen.add(key);
     if (isBinarySkillFile(file)) {
       total += file.binary.size;
-      if (file.path === "SKILL.md") error(file.path, "SKILL.md must be text.");
+      if (file.path === "SKILL.md") error(file.path, "root_binary", "SKILL.md must be text.");
       else if (file.binary.size < 1 || file.binary.size > SKILL_LIMITS.binaryFileBytes)
-        error(file.path, "File exceeds the supported size limit.");
+        error(file.path, "too_large", "File exceeds the supported size limit.");
       continue;
     }
     const bytes = new TextEncoder().encode(file.content);
     total += bytes.length;
     if (bytes.length > (file.path === "SKILL.md" ? SKILL_LIMITS.rootBytes : SKILL_LIMITS.fileBytes))
-      error(file.path, "File exceeds the supported size limit.");
+      error(file.path, "too_large", "File exceeds the supported size limit.");
     try {
       decodeSkillText(bytes, file.path);
     } catch (cause) {
@@ -170,20 +214,22 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
       else throw cause;
     }
     if (/[\ud800-\udfff]/u.test(file.content.replace(/[\ud800-\udbff][\udc00-\udfff]/gu, "")))
-      error(file.path, "Unpaired Unicode surrogate.");
+      error(file.path, "surrogate", "Unpaired Unicode surrogate.");
   }
   for (const file of input) {
     const parts = file.path.toLowerCase().split("/");
     for (let i = 1; i < parts.length; i++)
       if (seen.has(parts.slice(0, i).join("/")))
-        error(file.path, "A parent folder collides with a file.");
+        error(file.path, "parent_collides", "A parent folder collides with a file.");
   }
-  if (total > SKILL_LIMITS.expandedBytes) error("SKILL.md", "Expanded package exceeds 50 MiB.");
+  if (total > SKILL_LIMITS.expandedBytes)
+    error("SKILL.md", "expanded_too_large", "Expanded package exceeds 50 MiB.");
   const found = input.find((file) => file.path === "SKILL.md");
   const root = found && !isBinarySkillFile(found) ? found : undefined;
   const match = root?.content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
   let metadata: SkillMetadata = { name: "", description: "", manualOnly: false };
-  if (!match) error("SKILL.md", "Root SKILL.md must begin with YAML frontmatter.", 1);
+  if (!match)
+    error("SKILL.md", "no_frontmatter", "Root SKILL.md must begin with YAML frontmatter.", 1);
   else {
     const document = parseDocument(match[1]!, {
       uniqueKeys: true,
@@ -192,15 +238,15 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
       version: "1.2",
     });
     for (const problem of [...document.errors, ...document.warnings])
-      error("SKILL.md", problem.message, (problem.linePos?.[0]?.line ?? 1) + 1);
+      error("SKILL.md", null, problem.message, (problem.linePos?.[0]?.line ?? 1) + 1);
     let value: unknown;
     try {
       value = document.toJS({ maxAliasCount: 0 });
     } catch {
-      error("SKILL.md", "YAML aliases are not supported.");
+      error("SKILL.md", "yaml_aliases", "YAML aliases are not supported.");
     }
     if (!value || typeof value !== "object" || Array.isArray(value))
-      error("SKILL.md", "Frontmatter must be a mapping.");
+      error("SKILL.md", "not_mapping", "Frontmatter must be a mapping.");
     else {
       const fields = value as Record<string, unknown>;
       if (
@@ -208,18 +254,22 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
         !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(fields.name) ||
         fields.name.length > 64
       )
-        error("SKILL.md", "name must be 1–64 lowercase letters, digits and single hyphens.");
+        error(
+          "SKILL.md",
+          "name",
+          "name must be 1–64 lowercase letters, digits and single hyphens.",
+        );
       if (
         typeof fields.description !== "string" ||
         !fields.description.trim() ||
         fields.description.length > 1024
       )
-        error("SKILL.md", "description must be 1–1024 characters.");
+        error("SKILL.md", "description", "description must be 1–1024 characters.");
       if (
         fields["disable-model-invocation"] !== undefined &&
         typeof fields["disable-model-invocation"] !== "boolean"
       )
-        error("SKILL.md", "disable-model-invocation must be a boolean.");
+        error("SKILL.md", "manual_flag", "disable-model-invocation must be a boolean.");
       metadata = {
         name: typeof fields.name === "string" ? fields.name : "",
         description: typeof fields.description === "string" ? fields.description : "",
@@ -239,6 +289,8 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
           findings.push({
             severity: "warning",
             path: "SKILL.md",
+            code: "unknown_key",
+            detail: key,
             message: `${key} is preserved but does not change execution, tools or permissions.`,
           });
       }
@@ -247,6 +299,7 @@ export function validateSkillPackage(input: readonly SkillFile[]): ValidatedSkil
       findings.push({
         severity: "warning",
         path: "SKILL.md",
+        code: "shell",
         message: "Shell substitutions are literal text and will not execute.",
       });
   }

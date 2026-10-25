@@ -1,6 +1,8 @@
 import { Effect, Result, Schema, Semaphore } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/ai";
 import { SkillNotAvailable, SkillRejected } from "../errors.ts";
+import { localized, verbatim } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { SKILL_LIMITS, validateSkillPath } from "../package.ts";
 import { SkillToolResult } from "../tool-schema.ts";
 import type { SkillManifestEntry } from "../schema.ts";
@@ -99,7 +101,7 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   const catalogue = input.manifest.slice(0, SKILL_LIMITS.catalogue);
   const required = input.manifest.filter((entry) => !entry.ambient).map((entry) => entry.skillId);
   if (input.manifest.filter((entry) => !entry.ambient).length > SKILL_LIMITS.catalogue)
-    return yield* new SkillRejected({ reason: "Skill catalogue exceeds twenty entries." });
+    return yield* new SkillRejected({ reason: localized(m.skills_error_catalogue_limit) });
   const authorize = () =>
     Effect.suspend(() =>
       accessFailure
@@ -191,7 +193,10 @@ export const prepareSkillTools = Effect.fn("skills.prepareTools")(function* (inp
   for (const entry of input.manifest.filter((skill) => skill.explicit)) {
     const root = yield* load(entry.skillId, true);
     if (!root.ok)
-      return yield* new SkillRejected({ reason: root.error ?? "Could not load selected skill." });
+      return yield* new SkillRejected({
+        // The loader's own words are English; only the fallback is a message.
+        reason: root.error ? verbatim(root.error) : localized(m.skills_error_load_failed),
+      });
   }
   // A malformed call is answered with what was wrong, so the model can retry;
   // a strict tool schema would fail the whole answer.

@@ -8,6 +8,8 @@ import { ErrorState, ListCard, ListRow } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
 import { FieldError } from "~/ui/primitives/field";
 
+import { m } from "~/paraglide/messages.js";
+
 /** The skills a saved configuration installs, with any the reader can no longer use. */
 export function SkillsField({
   value,
@@ -34,7 +36,7 @@ export function SkillsField({
               <ListRow key={id}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
-                    {skill?.name ?? "Unavailable skill"}
+                    {skill?.name ?? m.skills_field_unavailable()}
                   </p>
                   <p className="text-muted-foreground truncate text-xs">
                     {skill?.description ?? unavailableHint}
@@ -44,7 +46,11 @@ export function SkillsField({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Remove ${skill?.name ?? "unavailable skill"}`}
+                  aria-label={
+                    skill
+                      ? m.skills_field_remove({ name: skill.name })
+                      : m.skills_field_remove_unavailable()
+                  }
                   onClick={() => onChange(value.filter((current) => current !== id))}
                 >
                   <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
@@ -55,7 +61,7 @@ export function SkillsField({
         </ListCard>
       ) : null}
       {skills.isError ? (
-        <ErrorState title="Could not load skills" onRetry={() => void skills.refetch()} />
+        <ErrorState title={m.skills_list_load_failed()} onRetry={() => void skills.refetch()} />
       ) : (
         <Button
           ref={setAnchor}
@@ -65,7 +71,7 @@ export function SkillsField({
           onClick={() => setPickerOpen(true)}
         >
           <HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" strokeWidth={2} />
-          Add skills
+          {m.skills_field_add()}
         </Button>
       )}
       <SkillPicker

@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { refuse } from "~/server/refusal.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { SaveSkillInput, SkillIdInput } from "../schema.ts";
 import { SkillService } from "./service.ts";
@@ -75,7 +77,7 @@ export const uploadSkillAsset = createServerFn({ method: "POST" })
     return runServerFn(
       Effect.gen(function* () {
         if (!(yield* FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate"))))
-          return yield* refuse(403, "Skill authoring is unavailable");
+          return yield* refuse(403, localized(m.skills_error_authoring_unavailable));
         yield* StorageQuota.use((quota) => quota.admit(userId, [bytes]));
         const attachment = yield* AttachmentService.use((service) =>
           service.upload({ userId, fileName: file.name, declaredMediaType: file.type, bytes }),

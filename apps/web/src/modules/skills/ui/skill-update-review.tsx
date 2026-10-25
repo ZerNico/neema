@@ -14,6 +14,7 @@ import {
 } from "../package.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { PackageWorkspace } from "./package-workspace.tsx";
+import { m } from "~/paraglide/messages.js";
 
 type Review = Awaited<ReturnType<typeof reviewSkillUpdate>>;
 export function SkillUpdateReview({
@@ -44,15 +45,15 @@ export function SkillUpdateReview({
       />
     );
   return (
-    <Page title="Check for updates" onBack={onBack} backLabel="Editor">
+    <Page title={m.skills_update_title()} onBack={onBack} backLabel={m.skills_update_back()}>
       {review.isError ? (
         <ErrorState
-          title="Could not check for updates"
-          description="Nothing was changed. The source may be unavailable, or too many requests were made just now."
+          title={m.skills_update_failed()}
+          description={m.skills_update_failed_description()}
           onRetry={() => void review.refetch()}
         />
       ) : (
-        <ListSkeleton rows={2} media="none" label="Reading the latest version" />
+        <ListSkeleton rows={2} media="none" label={m.skills_update_reading()} />
       )}
     </Page>
   );
@@ -94,19 +95,16 @@ function ReviewFiles({
         },
       }),
     onSuccess: (result) => onApplied(result.files, result.revision),
-    onError: () =>
-      toast.error(
-        "Could not update the skill. Your choices are kept, but if it changed somewhere else in the meantime, go back and check again.",
-      ),
+    onError: () => toast.error(m.skills_update_apply_failed()),
   });
   const changed = changes.filter(
     (change) => change.local !== change.upstream || change.baseline !== change.upstream,
   );
   return (
     <Page
-      title="Review skill update"
+      title={m.skills_update_review_title()}
       onBack={onBack}
-      backLabel="Editor"
+      backLabel={m.skills_update_back()}
       actions={
         <PendingButton
           size="sm"
@@ -114,28 +112,29 @@ function ReviewFiles({
           disabled={!valid}
           onClick={() => apply.mutate()}
         >
-          Update skill
+          {m.skills_update_apply()}
         </PendingButton>
       }
     >
       <p className="text-muted-foreground text-xs break-all">
-        From {review.source.repository}/{review.source.path || ""} ·{" "}
-        {review.source.commit.slice(0, 7)}
+        {m.skills_update_from({
+          source: `${review.source.repository}/${review.source.path || ""}`,
+          commit: review.source.commit.slice(0, 7),
+        })}
       </p>
       <Section
-        title="What changed"
-        description="Your version is kept unless you pick the new one. Whole files are swapped; the two are never mixed together."
+        title={m.skills_update_changes()}
+        description={m.skills_update_changes_description()}
       >
         {changed.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            Nothing to update, your files match the latest version.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.skills_update_nothing()}</p>
         ) : (
           changed.map((change) => (
             <details key={change.path} className="border-border rounded-3xl border p-4">
               <summary className="cursor-pointer break-all text-sm font-medium">
-                {change.path}
-                {change.conflict ? " · changed on both sides" : ""}
+                {change.conflict
+                  ? m.skills_update_changed_both({ path: change.path })
+                  : change.path}
               </summary>
               <div className="mt-3 grid min-w-0 gap-3 md:grid-cols-2">
                 {(["local", "upstream"] as const).map((side) => (
@@ -153,7 +152,9 @@ function ReviewFiles({
                         )
                       }
                     >
-                      {side === "local" ? "Keep mine" : "Use theirs"}
+                      {side === "local"
+                        ? m.skills_update_keep_mine()
+                        : m.skills_update_use_theirs()}
                     </Button>
                     <pre className="text-muted-foreground max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-muted p-3 text-xs">
                       {describeSide(change[side])}
@@ -165,10 +166,7 @@ function ReviewFiles({
           ))
         )}
       </Section>
-      <Section
-        title="The skill after updating"
-        description="Check it over before applying. Files you keep won’t be raised again until they change again."
-      >
+      <Section title={m.skills_update_after()} description={m.skills_update_after_description()}>
         <PackageWorkspace files={files} findings={findings} />
       </Section>
     </Page>
@@ -177,7 +175,10 @@ function ReviewFiles({
 
 /** A binary side is named by type and size; its bytes never reach the browser. */
 function describeSide(file: SkillFile | null) {
-  if (!file) return "File deleted";
+  if (!file) return m.skills_update_file_deleted();
   if (!isBinarySkillFile(file)) return file.content;
-  return `Binary file · ${file.binary.mediaType} · ${formatFileSize(file.binary.size)}`;
+  return m.skills_update_binary({
+    type: file.binary.mediaType,
+    size: formatFileSize(file.binary.size),
+  });
 }

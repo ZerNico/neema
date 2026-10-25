@@ -6,6 +6,10 @@ import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { SkillSource } from "~/db/schema/skills.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
+import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { findingsText } from "../finding-text.ts";
+import { SkillPackageError } from "../package.ts";
+import { m } from "~/paraglide/messages.js";
 import { isBinarySkillFile, validateSkillPackage, type SkillFile } from "../package.ts";
 import { decodeStoredFile, skillContentHash, verifyStoredFile } from "./content-hash.ts";
 import type { SkillDetail, SkillSaveResult, SkillSummary } from "../schema.ts";
@@ -20,12 +24,19 @@ export type SkillSaveInput = {
   upstreamBaseline?: readonly SkillFile[];
 };
 
-const rejected = (reason: string) => new SkillRejected({ reason });
-const validate = (files: readonly SkillFile[], reason?: string) =>
+const rejected = (reason: Localized | string) =>
+  new SkillRejected({ reason: typeof reason === "string" ? verbatim(reason) : reason });
+// The findings are worded when read, in whichever language reads them.
+const validate = (files: readonly SkillFile[], reason?: Localized) =>
   Effect.try({
     try: () => validateSkillPackage(files),
     catch: (error) =>
-      rejected(reason ?? (error instanceof Error ? error.message : "Invalid skill package.")),
+      rejected(
+        reason ??
+          (error instanceof SkillPackageError
+            ? (locale) => findingsText(error.findings, locale)
+            : localized(m.skills_error_invalid_package)),
+      ),
   });
 /** What a file adds to stored bytes, by the hash that identifies them. */
 const measured = (file: SkillFile) => {
@@ -178,7 +189,10 @@ export class SkillService extends Context.Service<
                   const uploadId = file.binary.uploadId;
                   if (uploadId) {
                     const [row] = yield* registry.listWithBlobsByIds(userId, [uploadId]);
-                    if (!row) return yield* rejected(`${file.path}: upload it again.`);
+                    if (!row)
+                      return yield* rejected(
+                        localized(m.skills_error_upload_again, { path: file.path }),
+                      );
                     uploads.push(uploadId);
                     const next = {
                       path: file.path,
@@ -199,7 +213,10 @@ export class SkillService extends Context.Service<
                     (candidate) =>
                       candidate.mediaType !== null && candidate.sha256 === file.binary.sha256,
                   );
-                  if (!known?.mediaType) return yield* rejected(`${file.path}: upload it again.`);
+                  if (!known?.mediaType)
+                    return yield* rejected(
+                      localized(m.skills_error_upload_again, { path: file.path }),
+                    );
                   const next = {
                     path: file.path,
                     binary: { size: known.size, mediaType: known.mediaType, sha256: known.sha256 },
@@ -215,7 +232,7 @@ export class SkillService extends Context.Service<
               const baseline = input.upstreamBaseline
                 ? yield* validate(
                     yield* resolve(input.upstreamBaseline, upstream),
-                    "Invalid upstream baseline.",
+                    localized(m.skills_error_invalid_baseline),
                   )
                 : null;
               yield* repo.admitSave(userId, {

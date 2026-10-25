@@ -45,7 +45,7 @@ describe("refusing", () => {
   it("answers a known failure with its status and body", async () => {
     expect(
       await refusalFrom(
-        refusing(Effect.fail(new SkillRejected({ reason: "Name is taken" })), "en"),
+        refusing(Effect.fail(new SkillRejected({ reason: verbatim("Name is taken") })), "en"),
       ),
     ).toEqual({ status: 400, body: "Name is taken", retryAfter: null });
     expect(await refusalFrom(refusing(Effect.fail(new SharingRateLimited()), "en"))).toMatchObject({
@@ -115,7 +115,7 @@ describe("refusing", () => {
       void run(Effect.fail(new Error("boom")));
       // @ts-expect-error An error channel typed any would otherwise meet the constraint.
       void run(Effect.fail(JSON.parse("{}")));
-      void run(Effect.fail(new SkillRejected({ reason: "ok" })));
+      void run(Effect.fail(new SkillRejected({ reason: verbatim("ok") })));
       // @ts-expect-error The pure transform carries the same constraint.
       void refusing(Effect.fail(new Unmapped()));
     };

@@ -13,14 +13,13 @@ import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { Textarea } from "~/ui/primitives/textarea";
 
-const findingFor = (findings: readonly SkillFinding[], key: string) =>
+import { m } from "~/paraglide/messages.js";
+
+const findingFor = (findings: readonly SkillFinding[], key: "name" | "description") =>
   findings
-    .filter((finding) => finding.severity === "error" && finding.message.startsWith(key))
+    .filter((finding) => finding.severity === "error" && finding.code === key)
     .map(() => ({
-      message:
-        key === "name"
-          ? "Use lowercase words joined by hyphens, up to 64 characters."
-          : "Say when to use this skill, in up to 1,024 characters.",
+      message: key === "name" ? m.skills_form_name_hint() : m.skills_form_description_hint(),
     }));
 
 /**
@@ -57,12 +56,13 @@ export function SkillSimpleForm({
   return (
     <div className="flex flex-col gap-5">
       <Field>
-        <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+        <FieldLabel htmlFor={`${id}-name`}>{m.common_name()}</FieldLabel>
         <Input
           id={`${id}-name`}
           value={document.name}
           disabled={locked}
           autoFocus={autoFocus}
+          // oxlint-disable-next-line i18n/no-literal-text -- a skill name is a slug, the same in every language
           placeholder="contract-review"
           onChange={(event) => update({ name: toSkillName(event.target.value) })}
           onBlur={() => update({ name: document.name.replace(/^-+|-+$/gu, "") })}
@@ -70,23 +70,21 @@ export function SkillSimpleForm({
         <FieldError errors={findingFor(findings, "name")} />
       </Field>
       <Field>
-        <FieldLabel htmlFor={`${id}-description`}>When to use it</FieldLabel>
+        <FieldLabel htmlFor={`${id}-description`}>{m.skills_form_when()}</FieldLabel>
         <Textarea
           id={`${id}-description`}
           value={document.description}
           disabled={locked}
           rows={2}
-          placeholder="When someone asks to review a contract or spot risky clauses."
+          placeholder={m.skills_form_when_placeholder()}
           onChange={(event) => update({ description: event.target.value })}
         />
         <FieldError errors={findingFor(findings, "description")} />
       </Field>
       <Field orientation="horizontal">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <FieldLabel htmlFor={`${id}-automatic`}>Use it automatically</FieldLabel>
-          <FieldDescription>
-            When off, it’s only used when someone picks it in a chat.
-          </FieldDescription>
+          <FieldLabel htmlFor={`${id}-automatic`}>{m.skills_form_automatic()}</FieldLabel>
+          <FieldDescription>{m.skills_form_automatic_description()}</FieldDescription>
         </div>
         <Switch
           id={`${id}-automatic`}
@@ -96,7 +94,7 @@ export function SkillSimpleForm({
         />
       </Field>
       <Field>
-        <FieldLabel htmlFor={`${id}-body`}>Instructions</FieldLabel>
+        <FieldLabel htmlFor={`${id}-body`}>{m.skills_form_instructions()}</FieldLabel>
         <Textarea
           id={`${id}-body`}
           value={document.body}
@@ -105,11 +103,7 @@ export function SkillSimpleForm({
           onChange={(event) => update({ body: event.target.value })}
         />
         {others > 0 ? (
-          <FieldDescription>
-            {others === 1
-              ? "This skill includes 1 more file, such as a template or image. Switch to Advanced to see it."
-              : `This skill includes ${others} more files, such as templates or images. Switch to Advanced to see them.`}
-          </FieldDescription>
+          <FieldDescription>{m.skills_form_more_files({ count: others })}</FieldDescription>
         ) : null}
       </Field>
     </div>

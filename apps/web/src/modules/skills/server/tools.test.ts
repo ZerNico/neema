@@ -6,6 +6,8 @@ import { projectSkillToolResult, SkillActivity, SKILL_ACTIVITY_LIMITS } from "..
 import { SKILL_LIMITS } from "../package.ts";
 import { earlierSkillMessage, prepareSkillTools } from "./tools.ts";
 import { SkillReader } from "./reader.ts";
+import { english } from "~/i18n/localized.ts";
+import type { SkillRejected } from "../errors.ts";
 const entry: SkillManifestEntry = {
   skillId: "one",
   revisionId: "revision-one",
@@ -123,10 +125,14 @@ describe("private skill execution", () => {
     ).toMatchObject({ ok: true });
   });
   it("rejects explicit roots rather than truncating required guidance", async () => {
-    await expect(setup([entry], 2).prepare).rejects.toMatchObject({
-      _tag: "SkillRejected",
-      reason: "Required instructions do not fit the reserved model context; nothing was truncated.",
-    });
+    const refused = await setup([entry], 2).prepare.then(
+      () => null,
+      (error: SkillRejected) => error,
+    );
+    expect(refused).toMatchObject({ _tag: "SkillRejected" });
+    expect(english(refused!.reason)).toBe(
+      "Required instructions do not fit the reserved model context; nothing was truncated.",
+    );
   });
   it("returns exact UTF-16 continuation boundaries", async () => {
     const session = await setup().prepare;

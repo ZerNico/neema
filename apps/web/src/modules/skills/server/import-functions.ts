@@ -4,6 +4,8 @@ import { Effect, Schema } from "effect";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { refusal } from "~/server/refusal.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { withoutBytes } from "../package.ts";
 import { changesWithoutBytes, compareSkillUpdate, resolveSkillUpdate } from "../update.ts";
@@ -34,7 +36,7 @@ const requireSkillAuthoring = createMiddleware()
   .server(async ({ context, next }) => {
     const userId = context.session.user.id;
     if (!(await runServerFn(FeaturePolicy.use((policy) => policy.can(userId, "skillsCreate")))))
-      throw refusal(403, "Skill authoring is unavailable");
+      throw refusal(403, localized(m.skills_error_authoring_unavailable));
     return next();
   });
 
@@ -48,14 +50,13 @@ const reReview = async (
     source.path,
     getRequest().signal,
   );
-  if (!review.selected)
-    throw refusal(409, "The package is no longer available at its reviewed path.");
+  if (!review.selected) throw refusal(409, localized(m.skills_error_review_gone));
   // The commit is immutable, so a different hash means a different package.
   if (
     review.selected.source.contentHash !== source.contentHash ||
     review.selected.source.commit !== source.commit
   )
-    throw refusal(409, "The package changed since you reviewed it. Review it again.");
+    throw refusal(409, localized(m.skills_error_review_changed));
   return review.selected;
 };
 
@@ -127,7 +128,7 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
     const local = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.detail(userId, data.skillId)),
     );
-    if (!local.source) throw refusal(400, "This skill has no upstream source.");
+    if (!local.source) throw refusal(400, localized(m.skills_error_no_source));
     const baseline = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.baseline(userId, data.skillId)),
     );
@@ -137,8 +138,7 @@ export const reviewSkillUpdate = createServerFn({ method: "POST" })
       local.source.path,
       getRequest().signal,
     );
-    if (!remote.selected)
-      throw refusal(409, "The upstream package is no longer available at its original path.");
+    if (!remote.selected) throw refusal(409, localized(m.skills_error_upstream_gone));
     return {
       changes: changesWithoutBytes(
         compareSkillUpdate(baseline, local.files, remote.selected.package.files),
@@ -172,7 +172,7 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
     );
     // The draft the choices were made against, not whatever it is now.
     if (local.revision !== data.expectedRevision)
-      throw refusal(409, "This skill changed while you were reviewing. Check for updates again.");
+      throw refusal(409, localized(m.skills_error_changed_while_reviewing));
     const baseline = await runServerFn(
       Effect.flatMap(SkillService, (service) => service.baseline(userId, data.skillId)),
     );
@@ -182,7 +182,7 @@ export const applySkillUpdate = createServerFn({ method: "POST" })
       data.choices.length !== changes.length ||
       data.choices.some((choice) => !changes.some((change) => change.path === choice.path))
     )
-      throw refusal(400, "Invalid file choices.");
+      throw refusal(400, localized(m.skills_error_invalid_choices));
     const files = resolveSkillUpdate(
       changes.map((change) => ({
         ...change,

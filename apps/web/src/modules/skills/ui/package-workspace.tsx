@@ -35,6 +35,7 @@ import {
   classifySkillFile,
   isBinarySkillFile,
   SKILL_LIMITS,
+  SkillPackageError,
   validateSkillPath,
   type SkillBinaryFile,
   type SkillFile,
@@ -42,6 +43,9 @@ import {
 } from "../package.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { LINK_SAFETY } from "~/ui/link-safety.tsx";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+import { findingText, findingsText } from "../finding-text.ts";
 
 const TextEditor = lazy(() => import("./text-editor.tsx"));
 const noFindings: SkillFinding[] = [];
@@ -52,7 +56,11 @@ delete previewPlugins.mermaid;
 const previewComponents = {
   ...markdownTableComponents,
   img: ({ alt }: { alt?: string | undefined }) => (
-    <span className="text-muted-foreground">[Image{alt ? `: ${alt}` : ""}, not loaded]</span>
+    <span className="text-muted-foreground">
+      {alt
+        ? m.skills_workspace_image_not_loaded_named({ alt })
+        : m.skills_workspace_image_not_loaded()}
+    </span>
   ),
 };
 export function SkillPreview({ content }: { content: string }) {
@@ -341,13 +349,13 @@ function BinaryFileView({
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
             <HugeiconsIcon icon={Download01Icon} strokeWidth={2} data-icon="inline-start" />
-            Download
+            {m.skills_workspace_download()}
           </a>
         ) : null}
         {onReplace ? (
           <PendingButton size="sm" variant="outline" pending={pending} onClick={onReplace}>
             <HugeiconsIcon icon={Upload01Icon} strokeWidth={2} data-icon="inline-start" />
-            Replace
+            {m.skills_workspace_replace()}
           </PendingButton>
         ) : null}
       </div>
@@ -432,9 +440,9 @@ export function PackageWorkspace({
             (existing) => existing.toLowerCase() === path.toLowerCase(),
           )
         )
-          throw new Error("A file or folder already uses this name.");
+          throw new Error(m.skills_workspace_name_taken());
         if (files.some((entry) => path.toLowerCase().startsWith(`${entry.path.toLowerCase()}/`)))
-          throw new Error("A parent path is already a file.");
+          throw new Error(m.skills_workspace_parent_is_file());
       }
       if (draft.kind === "folder") {
         setDraftFolders((current) => [...current, path]);
@@ -449,7 +457,7 @@ export function PackageWorkspace({
         setPreview(false);
       } else {
         const target = draft.target!;
-        if (target === "SKILL.md") throw new Error("Root SKILL.md cannot be renamed.");
+        if (target === "SKILL.md") throw new Error(m.skills_workspace_root_rename());
         const targetIsFolder = folders.has(target);
         const renamed = new Map(
           files
@@ -465,7 +473,7 @@ export function PackageWorkspace({
           path: renamed.get(entry.path) ?? entry.path,
         }));
         if (new Set(nextFiles.map((entry) => entry.path.toLowerCase())).size !== nextFiles.length)
-          throw new Error("Renaming would replace another file.");
+          throw new Error(m.skills_workspace_rename_replaces());
         setIdentities((current) =>
           Object.fromEntries(
             Object.entries(current).map(([old, identity]) => [renamed.get(old) ?? old, identity]),
@@ -486,7 +494,13 @@ export function PackageWorkspace({
       setName("");
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Invalid file name.");
+      setError(
+        cause instanceof SkillPackageError
+          ? findingsText(cause.findings, getLocale())
+          : cause instanceof Error
+            ? cause.message
+            : m.skills_workspace_invalid_name(),
+      );
     }
   };
   const cancel = () => {
@@ -517,17 +531,18 @@ export function PackageWorkspace({
     const path = target ?? (parent ? `${parent}/${picked.name}` : picked.name);
     try {
       validateSkillPath(path);
-      if (path === "SKILL.md") throw new Error("Root SKILL.md cannot be replaced by an upload.");
+      if (path === "SKILL.md") throw new Error(m.skills_workspace_root_upload());
       if (picked.size > SKILL_LIMITS.binaryFileBytes)
-        throw new Error(`Files can be at most ${formatFileSize(SKILL_LIMITS.binaryFileBytes)}.`);
+        throw new Error(
+          m.skills_workspace_file_too_large({ size: formatFileSize(SKILL_LIMITS.binaryFileBytes) }),
+        );
       if (
         !target &&
         files.some((entry) => entry.path.toLowerCase() === path.toLowerCase()) &&
         !(await confirm({
-          title: `Replace “${path}”?`,
-          description:
-            "The uploaded file takes its place in your draft. Save to publish the change.",
-          confirmLabel: "Replace",
+          title: m.skills_workspace_replace_title({ path }),
+          description: m.skills_workspace_replace_description(),
+          confirmLabel: m.skills_workspace_replace(),
         }))
       )
         return;
@@ -542,7 +557,12 @@ export function PackageWorkspace({
       select(path);
       setPreview(false);
     } catch (cause) {
-      toastError("Could not add the file.", cause);
+      toastError(
+        m.skills_workspace_add_failed(),
+        cause instanceof SkillPackageError
+          ? new Error(findingsText(cause.findings, getLocale()))
+          : cause,
+      );
     } finally {
       setUploading(false);
     }
@@ -556,9 +576,9 @@ export function PackageWorkspace({
     if (
       affected.some((entry) => isBinarySkillFile(entry) || entry.content.length > 0) &&
       !(await confirm({
-        title: `Delete “${selected}”?`,
-        description: "This removes the selected files from your draft. Save to publish the change.",
-        confirmLabel: "Delete",
+        title: m.skills_workspace_delete_title({ path: selected }),
+        description: m.skills_workspace_delete_description(),
+        confirmLabel: m.common_delete(),
       }))
     )
       return;
@@ -575,10 +595,10 @@ export function PackageWorkspace({
       {...(renamingFolder ? { chevron: !collapsed.includes(draft!.target!) } : {})}
       label={
         draft?.kind === "folder"
-          ? "New folder name"
+          ? m.skills_workspace_new_folder_name()
           : draft?.kind === "file"
-            ? "New file name"
-            : "New name"
+            ? m.skills_workspace_new_file_name()
+            : m.skills_workspace_new_name()
       }
       value={name}
       error={error}
@@ -589,17 +609,20 @@ export function PackageWorkspace({
   );
   const expanded = new Set([...folders].filter((path) => !collapsed.includes(path)));
   const navigation = (
-    <nav aria-label="Skill files" className="flex flex-col gap-1 overflow-x-auto p-2">
+    <nav
+      aria-label={m.skills_workspace_files_nav()}
+      className="flex flex-col gap-1 overflow-x-auto p-2"
+    >
       <div className="flex h-7 items-center gap-1 pl-1.5">
         <span className="text-muted-foreground flex-1 text-2xs font-medium tracking-wide uppercase">
-          Files
+          {m.skills_workspace_files()}
         </span>
         {!readOnly ? (
           <>
             <Button
               size="icon-sm"
               variant="ghost"
-              aria-label="New file"
+              aria-label={m.skills_workspace_new_file()}
               onClick={() => create("file")}
             >
               <HugeiconsIcon icon={FileAddIcon} strokeWidth={2} />
@@ -607,7 +630,7 @@ export function PackageWorkspace({
             <Button
               size="icon-sm"
               variant="ghost"
-              aria-label="New folder"
+              aria-label={m.skills_workspace_new_folder()}
               onClick={() => create("folder")}
             >
               <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
@@ -616,7 +639,7 @@ export function PackageWorkspace({
               <PendingButton
                 size="icon-sm"
                 variant="ghost"
-                aria-label="Upload file"
+                aria-label={m.skills_workspace_upload_file()}
                 pending={uploading}
                 onClick={picker.open}
               >
@@ -669,7 +692,9 @@ export function PackageWorkspace({
                 strokeWidth={2}
                 className={cn(chevronClassName, "size-4", filesOpen && "rotate-90")}
               />
-              <span className="min-w-0 flex-1 truncate">Files · {selected}</span>
+              <span className="min-w-0 flex-1 truncate">
+                {m.skills_workspace_files_selected({ path: selected })}
+              </span>
             </button>
             {filesOpen ? navigation : null}
           </div>
@@ -684,18 +709,26 @@ export function PackageWorkspace({
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <Button size="icon-sm" variant="ghost" aria-label={`Rename ${selected}`} />
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label={m.skills_workspace_rename_named({ path: selected })}
+                        />
                       }
                       onClick={() => rename()}
                     >
                       <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
                     </TooltipTrigger>
-                    <TooltipContent>Rename (or double-click in the tree)</TooltipContent>
+                    <TooltipContent>{m.skills_workspace_rename_tooltip()}</TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <Button size="icon-sm" variant="ghost" aria-label={`Delete ${selected}`} />
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label={m.skills_workspace_delete_named({ path: selected })}
+                        />
                       }
                       onClick={() => {
                         void remove();
@@ -703,14 +736,14 @@ export function PackageWorkspace({
                     >
                       <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
                     </TooltipTrigger>
-                    <TooltipContent>Delete</TooltipContent>
+                    <TooltipContent>{m.common_delete()}</TooltipContent>
                   </Tooltip>
                 </>
               ) : null}
               {isFolder || binary ? null : (
                 <ViewToggle
                   preview={preview}
-                  sourceLabel={readOnly ? "Source" : "Edit"}
+                  sourceLabel={readOnly ? m.skills_workspace_source() : m.common_edit()}
                   onChange={setPreview}
                 />
               )}
@@ -719,13 +752,13 @@ export function PackageWorkspace({
               <div className="flex flex-col items-start gap-3 p-5">
                 <p className="text-muted-foreground text-sm">
                   {files.some((entry) => entry.path.startsWith(`${selected}/`))
-                    ? "Choose a file in this folder to edit it."
-                    : "This folder is empty. A skill stores files, so it is saved once it holds one."}
+                    ? m.skills_workspace_folder_choose()
+                    : m.skills_workspace_folder_empty()}
                 </p>
                 {readOnly ? null : (
                   <Button size="sm" variant="outline" onClick={() => create("file")}>
                     <HugeiconsIcon icon={FileAddIcon} strokeWidth={2} data-icon="inline-start" />
-                    Add file
+                    {m.skills_workspace_add_file()}
                   </Button>
                 )}
               </div>
@@ -741,7 +774,11 @@ export function PackageWorkspace({
               <SkillPreview content={file.content} />
             ) : null}
             <Suspense
-              fallback={<p className="text-muted-foreground p-5 text-sm">Loading editor…</p>}
+              fallback={
+                <p className="text-muted-foreground p-5 text-sm">
+                  {m.skills_workspace_loading_editor()}
+                </p>
+              }
             >
               {files
                 .filter((entry) => visited.includes(entry.path))
@@ -754,7 +791,7 @@ export function PackageWorkspace({
                     <TextEditor
                       value={entry.content}
                       path={entry.path}
-                      label={`Edit ${entry.path}`}
+                      label={m.skills_workspace_edit_named({ path: entry.path })}
                       readOnly={readOnly}
                       autoFocus={autoFocus && entry.path === "SKILL.md"}
                       focusRequest={focusRequest?.path === entry.path ? focusRequest : undefined}
@@ -799,7 +836,7 @@ export function PackageWorkspace({
                 {finding.path}
                 {finding.line ? `:${finding.line}` : ""}
               </button>{" "}
-              · {finding.message}
+              · {findingText(finding, getLocale())}
             </li>
           ))}
         </ul>

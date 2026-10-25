@@ -24,6 +24,8 @@ import { skillsQuery } from "../client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import type { SkillSummary } from "../schema.ts";
 
+import { m } from "~/paraglide/messages.js";
+
 export function SkillsPage() {
   const query = useQuery(skillsQuery);
   const { data: capabilities } = useQuery(capabilitiesQuery);
@@ -35,10 +37,18 @@ export function SkillsPage() {
   );
   const create = (
     <CreateSplitButton
-      label="New skill"
+      label={m.skills_list_new()}
       options={[
-        { label: "Write it yourself", icon: PencilEdit02Icon, link: <Link to="/skills/new" /> },
-        { label: "Import a skill", icon: FileImportIcon, link: <Link to="/skills/import" /> },
+        {
+          label: m.skills_list_write(),
+          icon: PencilEdit02Icon,
+          link: <Link to="/skills/new" />,
+        },
+        {
+          label: m.skills_list_import(),
+          icon: FileImportIcon,
+          link: <Link to="/skills/import" />,
+        },
       ]}
     />
   );
@@ -70,37 +80,35 @@ export function SkillsPage() {
   );
   return (
     <Page
-      title="Skills"
+      title={m.skills_title()}
       rootPath="/"
-      rootLabel="Chat"
+      rootLabel={m.skills_list_root_label()}
       actions={capabilities?.skillsCreate ? create : null}
     >
       {/* Searching an empty library is noise; the empty state says more. */}
       {query.data?.length ? (
         <SearchInput
-          aria-label="Search your skills"
-          placeholder="Search your skills…"
+          aria-label={m.skills_list_search()}
+          placeholder={m.skills_list_search_placeholder()}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
       ) : null}
       {query.isError ? (
         <ErrorState
-          title="Could not load skills"
+          title={m.skills_list_load_failed()}
           onRetry={() => {
             void query.refetch();
           }}
         />
       ) : null}
-      {query.isPending ? <ListSkeleton label="Loading skills" /> : null}
+      {query.isPending ? <ListSkeleton label={m.skills_list_loading()} /> : null}
       {query.data?.length === 0 ? (
         <EmptyState
           icon={Book02Icon}
-          title="No skills yet"
+          title={m.skills_list_empty_title()}
           description={
-            capabilities?.skillsCreate
-              ? "Create a skill or import an editable copy."
-              : "No skills are shared with you yet."
+            capabilities?.skillsCreate ? m.skills_list_empty_create() : m.skills_list_empty_shared()
           }
           action={capabilities?.skillsCreate ? create : null}
         />
@@ -108,20 +116,24 @@ export function SkillsPage() {
       {query.data?.length && rows.length === 0 ? (
         <EmptyState
           icon={Book02Icon}
-          title="No matching skills"
-          description="Try another name or description."
+          title={m.skills_list_no_matches()}
+          description={m.skills_list_no_matches_description()}
           action={
             <Button variant="ghost" onClick={() => setSearch("")}>
-              Clear search
+              {m.skills_list_clear_search()}
             </Button>
           }
         />
       ) : null}
       {rows.some((skill) => skill.canEdit) ? (
-        <Section title="Your skills">{list(rows.filter((skill) => skill.canEdit))}</Section>
+        <Section title={m.skills_list_yours()}>
+          {list(rows.filter((skill) => skill.canEdit))}
+        </Section>
       ) : null}
       {rows.some((skill) => !skill.canEdit) ? (
-        <Section title="Shared with you">{list(rows.filter((skill) => !skill.canEdit))}</Section>
+        <Section title={m.skills_list_shared_with_you()}>
+          {list(rows.filter((skill) => !skill.canEdit))}
+        </Section>
       ) : null}
     </Page>
   );

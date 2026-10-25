@@ -17,6 +17,8 @@ import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import type { Capability } from "~/modules/groups/policy.ts";
 import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 import { SKILL_LIMITS, type ValidatedSkillPackage } from "../package.ts";
 import type { SkillManifestEntry, SkillSummary } from "../schema.ts";
 
@@ -39,7 +41,7 @@ export interface StoredSkillFile {
 
 /** Retained bytes, each stored file counted once however many revisions share it. */
 const QUOTA_BYTES = 250 * 1024 * 1024;
-const QUOTA_REASON = "Skill library quota reached (200 skills or 250 MiB of stored files).";
+const QUOTA_REASON = localized(m.skills_error_quota);
 
 const storedBytes = (
   tx: Pick<DbTx, "select">,
@@ -101,7 +103,7 @@ export const resolveSkillManifest = (
     const ids = [...new Set([...standaloneIds, ...agentIds])];
     if (ids.length > SKILL_LIMITS.catalogue || new Set(standaloneIds).size > SKILL_LIMITS.loaded)
       return yield* new SkillRejected({
-        reason: "Select at most five explicit skills and twenty total available skills.",
+        reason: localized(m.skills_error_selection_limit),
       });
     const result: SkillManifestEntry[] = [];
     // Stable row-lock order across concurrent attempts and editor saves.
@@ -361,7 +363,9 @@ export class SkillRepo extends Context.Service<
             .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
             .pipe(Effect.orDie);
           if (!allowed)
-            return yield* new SkillRejected({ reason: "skill creation is unavailable" });
+            return yield* new SkillRejected({
+              reason: localized(m.skills_error_creation_unavailable),
+            });
           if (input.skillId) {
             const [current] = yield* db
               .select()
@@ -399,7 +403,9 @@ export class SkillRepo extends Context.Service<
                   .where(and(eq(user.id, userId), capabilityAllowedSql(userId, "skillsCreate")))
                   .for("update");
                 if (!allowed)
-                  return yield* new SkillRejected({ reason: "skill creation is unavailable" });
+                  return yield* new SkillRejected({
+                    reason: localized(m.skills_error_creation_unavailable),
+                  });
                 const skillId = input.skillId ?? uuidv7();
                 let revision = 1;
                 let previous: Revision | undefined;
@@ -517,8 +523,8 @@ export class SkillRepo extends Context.Service<
                   if (!blob)
                     return yield* new SkillRejected({
                       reason: file.existing
-                        ? `${file.path} is no longer stored; upload it again.`
-                        : "Could not register skill file.",
+                        ? localized(m.skills_error_no_longer_stored, { path: file.path })
+                        : localized(m.skills_error_register_failed),
                     });
                   if (!file.existing && blob.storageKey !== file.storageKey)
                     unusedKeys.push(file.storageKey);

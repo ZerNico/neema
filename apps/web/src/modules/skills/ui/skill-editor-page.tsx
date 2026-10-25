@@ -46,6 +46,7 @@ import { SkillSimpleForm } from "./skill-simple-form.tsx";
 import { canEditSimply } from "./can-edit-simply.ts";
 import { SegmentedControl, SegmentedControlItem } from "~/ui/segmented-control.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 /** A just-uploaded file reads back through its upload; a saved one through the skill. */
 const binaryHref = (skillId: string | undefined, file: SkillBinaryFile) =>
@@ -96,15 +97,15 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
   if (!skillId && capabilities?.skillsCreate) return <OwnerEditor />;
   if (!skillId)
     return (
-      <Page title="New skill" backTo="/skills" backLabel="Skills">
-        <p className="text-muted-foreground text-sm">You can use skills, but cannot create them.</p>
+      <Page title={m.skills_editor_new()} backTo="/skills" backLabel={m.skills_title()}>
+        <p className="text-muted-foreground text-sm">{m.skills_editor_cannot_create()}</p>
       </Page>
     );
   if ((metadata.isError && !metadata.data) || (detail.isError && !detail.data))
     return (
-      <Page title="Skill" backTo="/skills" backLabel="Skills">
+      <Page title={m.skills_editor_title()} backTo="/skills" backLabel={m.skills_title()}>
         <ErrorState
-          title="Could not load this skill"
+          title={m.skills_editor_load_failed()}
           onRetry={() => {
             void metadata.refetch();
             if (metadata.data?.canEdit && capabilities?.skillsCreate) void detail.refetch();
@@ -114,28 +115,29 @@ export function SkillEditorPage({ skillId }: { skillId?: string }) {
     );
   if (!metadata.data)
     return (
-      <Page title="Skill" backTo="/skills" backLabel="Skills">
-        <ListSkeleton rows={1} media="none" label="Loading skill" />
+      <Page title={m.skills_editor_title()} backTo="/skills" backLabel={m.skills_title()}>
+        <ListSkeleton rows={1} media="none" label={m.skills_editor_loading()} />
       </Page>
     );
   if (!metadata.data.canEdit || !capabilities?.skillsCreate)
     return (
-      <Page title={metadata.data.name} backTo="/skills" backLabel="Skills">
+      <Page title={metadata.data.name} backTo="/skills" backLabel={m.skills_title()}>
         <p className="text-muted-foreground text-sm">{metadata.data.description}</p>
         <p className="text-muted-foreground text-xs">
-          {metadata.data.ownerName ? `Shared by ${metadata.data.ownerName}. ` : ""}You can use this
-          skill, but cannot edit its files.
+          {metadata.data.ownerName
+            ? m.skills_editor_shared_by({ name: metadata.data.ownerName })
+            : m.skills_editor_read_only()}
         </p>
         <Link to="/" search={{ skill: skillId }} className={buttonVariants({ size: "sm" })}>
-          Use in chat
+          {m.skills_editor_use_in_chat()}
         </Link>
       </Page>
     );
   return detail.data ? (
     <OwnerEditor key={skillId} initial={detail.data} />
   ) : (
-    <Page title={metadata.data.name} backTo="/skills" backLabel="Skills">
-      <ListSkeleton rows={3} media="none" label="Loading files" />
+    <Page title={metadata.data.name} backTo="/skills" backLabel={m.skills_title()}>
+      <ListSkeleton rows={3} media="none" label={m.skills_editor_loading_files()} />
     </Page>
   );
 }
@@ -163,9 +165,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
     shouldBlockFn: async () =>
       dirty &&
       !(await confirm({
-        title: "Discard unsaved changes?",
-        description: "Your skill draft has not been saved.",
-        confirmLabel: "Discard changes",
+        title: m.common_discard_title(),
+        description: m.skills_editor_unsaved_description(),
+        confirmLabel: m.common_discard_changes(),
       })),
     enableBeforeUnload: dirty,
   });
@@ -179,7 +181,12 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           error instanceof SkillPackageError
             ? error
             : new SkillPackageError([
-                { severity: "error", path: "SKILL.md", message: "This skill can’t be read." },
+                {
+                  severity: "error",
+                  path: "SKILL.md",
+                  code: "unreadable",
+                  message: "This skill can’t be read.",
+                },
               ]),
       };
     }
@@ -220,10 +227,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
           ignoreBlocker: true,
         });
     },
-    onError: () =>
-      toast.error(
-        "Could not save your changes. They’re still here; someone else may have changed this skill in the meantime.",
-      ),
+    onError: () => toast.error(m.skills_editor_save_failed()),
   });
   const remove = useMutation({
     mutationFn: () => deleteSkill({ data: { skillId: initial!.id } }),
@@ -231,7 +235,7 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       await navigate({ to: "/skills", ignoreBlocker: true });
     },
-    onError: (error) => toastError("Could not delete the skill.", error),
+    onError: (error) => toastError(m.skills_editor_delete_failed(), error),
   });
   if (updating && initial)
     return (
@@ -250,21 +254,23 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
     );
   return (
     <Page
-      title={validation.value?.metadata.name ?? initial?.name ?? "New skill"}
+      title={validation.value?.metadata.name ?? initial?.name ?? m.skills_editor_new()}
       backTo="/skills"
-      backLabel="Skills"
+      backLabel={m.skills_title()}
       actions={
         <>
           <SaveStatus justSaved={justSaved} />
           {initial ? (
             <Button size="sm" variant="outline" onClick={() => setAccess(true)}>
               <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} data-icon="inline-start" />
-              Access
+              {m.skills_editor_access()}
             </Button>
           ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<Button size="icon-sm" variant="ghost" aria-label="Skill actions" />}
+              render={
+                <Button size="icon-sm" variant="ghost" aria-label={m.skills_editor_actions()} />
+              }
             >
               <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </DropdownMenuTrigger>
@@ -275,7 +281,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                   onClick={() => setUpdating(true)}
                 >
                   <HugeiconsIcon icon={RefreshIcon} strokeWidth={2} />
-                  Check for updates{dirty ? " (save first)" : ""}
+                  {dirty
+                    ? m.skills_editor_check_updates_save_first()
+                    : m.skills_editor_check_updates()}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem
@@ -287,7 +295,8 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                         if (!isBinarySkillFile(file)) return file;
                         const href = binaryHref(initial?.id, file);
                         const response = href ? await fetch(href) : null;
-                        if (!response?.ok) throw new Error(`${file.path} could not be loaded.`);
+                        if (!response?.ok)
+                          throw new Error(m.skills_editor_file_not_loaded({ path: file.path }));
                         return { ...file, bytes: new Uint8Array(await response.arrayBuffer()) };
                       }),
                     );
@@ -297,12 +306,12 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                       "application/zip",
                     );
                   } catch (error) {
-                    toastError("Could not export the skill.", error);
+                    toastError(m.skills_editor_export_failed(), error);
                   }
                 }}
               >
                 <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
-                Export ZIP
+                {m.skills_editor_export_zip()}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
@@ -313,13 +322,11 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                     ),
                     "text/markdown",
                   );
-                  toast.info(
-                    "The download has the main instructions only, not the skill’s other files.",
-                  );
+                  toast.info(m.skills_editor_markdown_only());
                 }}
               >
                 <HugeiconsIcon icon={File02Icon} strokeWidth={2} />
-                Export Markdown
+                {m.skills_editor_export_markdown()}
               </DropdownMenuItem>
               {initial ? (
                 <DropdownMenuItem
@@ -328,17 +335,16 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: initial ? `Delete “${initial.name}”?` : "Delete this skill?",
-                        description:
-                          "Chats that used it stay readable, but it can no longer be used or selected.",
-                        confirmLabel: "Delete skill",
+                        title: m.skills_editor_delete_title({ name: initial.name }),
+                        description: m.skills_editor_delete_description(),
+                        confirmLabel: m.skills_editor_delete(),
                       })
                     )
                       remove.mutate();
                   }}
                 >
                   <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                  Delete skill
+                  {m.skills_editor_delete()}
                 </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -349,13 +355,15 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
             disabled={!validation.value || (!!initial && !dirty)}
             onClick={() => save.mutate(files.map((file) => ({ ...file })))}
           >
-            <SaveLabel justSaved={justSaved}>{initial ? "Save changes" : "Create skill"}</SaveLabel>
+            <SaveLabel justSaved={justSaved}>
+              {initial ? m.common_save_changes() : m.skills_editor_create()}
+            </SaveLabel>
           </PendingButton>
         </>
       }
     >
       <SegmentedControl
-        aria-label="Editor mode"
+        aria-label={m.skills_editor_mode()}
         value={[view === "form" && formAvailable ? "form" : "files"]}
         multiple={false}
         onValueChange={(value) => {
@@ -364,9 +372,9 @@ function OwnerEditor({ initial }: { initial?: SkillDetail }) {
         className="self-start"
       >
         <SegmentedControlItem value="form" disabled={!formAvailable}>
-          Simple
+          {m.skills_editor_simple()}
         </SegmentedControlItem>
-        <SegmentedControlItem value="files">Advanced</SegmentedControlItem>
+        <SegmentedControlItem value="files">{m.skills_editor_advanced()}</SegmentedControlItem>
       </SegmentedControl>
       {view === "form" && formAvailable ? (
         <SkillSimpleForm

@@ -1,6 +1,8 @@
 import { ResourcePicker } from "~/ui/resource-picker.tsx";
 import type { SkillSummary } from "../schema.ts";
 
+import { m } from "~/paraglide/messages.js";
+
 export function SkillPicker({
   items,
   selectedIds,
@@ -30,8 +32,8 @@ export function SkillPicker({
       anchor={anchor}
       {...(side ? { side } : {})}
       limit={limit}
-      placeholder="Search your skills…"
-      empty="No matching local skills."
+      placeholder={m.skills_list_search_placeholder()}
+      empty={m.skills_picker_empty()}
       detail={(skill) => (skill as SkillSummary).ownerName}
     />
   );

@@ -8,10 +8,11 @@ import {
   validateSkillPackage,
   validateSkillPath,
   type SkillFile,
+  type SkillFindingCode,
 } from "./package.ts";
 
-const reject = (message: string, path = "archive.zip"): never => {
-  throw new SkillPackageError([{ severity: "error", path, message }]);
+const reject = (message: string, path = "archive.zip", code?: SkillFindingCode): never => {
+  throw new SkillPackageError([{ severity: "error", path, message, ...(code ? { code } : {}) }]);
 };
 
 export function readSkillArchive(bytes: Uint8Array): SkillFile[] {
@@ -24,13 +25,13 @@ export function readSkillArchive(bytes: Uint8Array): SkillFile[] {
       expandedBytes: SKILL_LIMITS.expandedBytes,
       expansionRatio: SKILL_LIMITS.expansionRatio,
     },
-    fail: reject,
+    fail: (message, name) => reject(message, name),
     checkName: validateSkillPath,
     // Small compressed chunks also bound the decompressor's transient output allocation.
     chunkBytes: 256,
     accept: (name, content) => {
       if (files.length >= SKILL_LIMITS.files)
-        reject(`Package exceeds ${SKILL_LIMITS.files} files.`);
+        reject(`Package exceeds ${SKILL_LIMITS.files} files.`, undefined, "archive_files");
       files.push(classifySkillFile(name, content));
     },
   });
@@ -45,7 +46,7 @@ export function skillPackageRoots(files: readonly SkillFile[]): string[] {
 
 export function selectSkillPackage(files: readonly SkillFile[], root: string) {
   if (!skillPackageRoots(files).includes(root))
-    return reject("Select an existing SKILL.md package root.");
+    return reject("Select an existing SKILL.md package root.", undefined, "archive_root");
   return validateSkillPackage(
     files
       .filter((file) => file.path.startsWith(root))
@@ -60,7 +61,7 @@ export function exportSkillArchive(files: readonly SkillFile[]): Uint8Array {
   for (const file of validated.files) {
     if (!isBinarySkillFile(file)) entries[file.path] = new TextEncoder().encode(file.content);
     else if (file.bytes) entries[file.path] = file.bytes;
-    else reject(`${file.path} was not loaded for export.`, file.path);
+    else reject(`${file.path} was not loaded for export.`, file.path, "export_missing");
   }
   return zipSync(entries, { level: 6 });
 }

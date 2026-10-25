@@ -13,11 +13,15 @@ import { Skeleton } from "~/ui/primitives/skeleton";
 import { Spinner } from "~/ui/primitives/spinner";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
+import { findingsText } from "../finding-text.ts";
 import { readSkillArchive, selectSkillPackage, skillPackageRoots } from "../archive.ts";
 import {
   decodeSkillText,
   isBinarySkillFile,
   SKILL_LIMITS,
+  SkillPackageError,
   validateSkillPackage,
   type SkillFile,
   type ValidatedSkillPackage,
@@ -50,12 +54,16 @@ const isSkillLink = (value: string) =>
   /^(https?:\/\/|(www\.)?(github\.com|skills\.sh)\/)/iu.test(value.trim());
 
 const message = (cause: unknown, fallback: string) =>
-  cause instanceof Error ? cause.message : fallback;
+  cause instanceof SkillPackageError
+    ? findingsText(cause.findings, getLocale())
+    : cause instanceof Error
+      ? cause.message
+      : fallback;
 
 /** Nothing is trusted as an id to navigate to until it is one. */
 const importedId = async (result: unknown): Promise<string> => {
   if (typeof result === "string" && result.length > 0) return result;
-  throw new Error("The server did not return the imported skill.");
+  throw new Error(m.skills_import_no_id());
 };
 
 /**
@@ -129,12 +137,14 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     setReading(true);
     try {
       if (file.size > SKILL_LIMITS.archiveBytes)
-        throw new Error(`Files can be at most ${formatFileSize(SKILL_LIMITS.archiveBytes)}.`);
+        throw new Error(
+          m.skills_import_file_too_large({ size: formatFileSize(SKILL_LIMITS.archiveBytes) }),
+        );
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (/\.zip$/iu.test(file.name)) {
         const files = readSkillArchive(bytes);
         const roots = skillPackageRoots(files);
-        if (!roots.length) throw new Error("This .zip doesn’t contain a skill.");
+        if (!roots.length) throw new Error(m.skills_import_zip_empty());
         setArchive(files);
         setUploaded(roots.length === 1 ? selectSkillPackage(files, roots[0]!) : null);
       } else if (/\.md$/iu.test(file.name)) {
@@ -142,9 +152,9 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         setUploaded(
           validateSkillPackage([{ path: "SKILL.md", content: decodeSkillText(bytes, file.name) }]),
         );
-      } else throw new Error("Upload a skill file (.md) or a .zip.");
+      } else throw new Error(m.skills_import_wrong_type());
     } catch (cause) {
-      setError(message(cause, "Could not read this skill."));
+      setError(message(cause, m.skills_import_read_failed()));
     } finally {
       setReading(false);
     }
@@ -170,10 +180,10 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
           : (await saveSkill({ data: { files: await uploadBinaries(review.files) } })).id,
       );
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
-      toast.success(`Imported “${review.metadata.name}”.`);
+      toast.success(m.skills_import_imported({ name: review.metadata.name }));
       await navigate({ to: "/skills" });
     } catch (cause) {
-      setError(message(cause, "Could not import the skill. Your review is preserved."));
+      setError(message(cause, m.skills_import_failed()));
     } finally {
       setImporting(false);
     }
@@ -183,21 +193,21 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     : undefined;
   const waiting = remote.isFetching || reading;
   const failure =
-    error ?? (remote.error ? message(remote.error, "Could not read this skill.") : null);
+    error ?? (remote.error ? message(remote.error, m.skills_import_read_failed()) : null);
   return (
     <Page
-      title={review ? review.metadata.name : (opened?.name ?? "Import skill")}
+      title={review ? review.metadata.name : (opened?.name ?? m.skills_import_title())}
       {...(source || archive
-        ? { onBack: back, backLabel: "Import" }
-        : { backTo: "/skills", backLabel: "Skills" })}
+        ? { onBack: back, backLabel: m.skills_import_back() }
+        : { backTo: "/skills", backLabel: m.skills_title() })}
       description={
         review
           ? selected
             ? `${remote.data!.repository}/${selected.source.path} · ${remote.data!.commit}`
-            : "Uploaded skill"
+            : m.skills_import_uploaded()
           : waiting
-            ? (opened?.source ?? "Reading the skill…")
-            : "Search the skills directory, paste a GitHub link, or upload a skill file."
+            ? (opened?.source ?? m.skills_import_reading())
+            : m.skills_import_description()
       }
       actions={
         review ? (
@@ -208,7 +218,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
               void importSkill();
             }}
           >
-            Import skill
+            {m.skills_import_submit()}
           </PendingButton>
         ) : null
       }
@@ -217,7 +227,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
       {waiting ? (
         <div
           role="status"
-          aria-label="Reading the skill"
+          aria-label={m.skills_import_reading_label()}
           className={cn(cardSurfaceClassName, "grid min-w-0 md:grid-cols-[13rem_minmax(0,1fr)]")}
         >
           <div className="flex flex-col gap-2 border-b p-3 md:border-r md:border-b-0">
@@ -227,7 +237,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
           </div>
           <div className="text-muted-foreground flex min-h-64 items-center justify-center gap-2 text-sm">
             <Spinner aria-hidden />
-            Reading the skill…
+            {m.skills_import_reading()}
           </div>
         </div>
       ) : review ? (
@@ -236,7 +246,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
         <>
           {/* One source can hold several packages; choose before reviewing. */}
           {remote.data?.choices.length ? (
-            <Section title="Choose a skill">
+            <Section title={m.skills_import_choose()}>
               <ListCard>
                 {remote.data.choices.map((choice) => (
                   <button
@@ -249,7 +259,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium">{choice.name}</p>
                         <p className="text-muted-foreground text-xs">
-                          {choice.path || "Repository root"}
+                          {choice.path || m.skills_import_repository_root()}
                         </p>
                       </div>
                       <HugeiconsIcon
@@ -265,7 +275,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
             </Section>
           ) : null}
           {archive ? (
-            <Section title="Choose a skill">
+            <Section title={m.skills_import_choose()}>
               <ListCard>
                 {skillPackageRoots(archive).map((root) => (
                   <button
@@ -276,11 +286,11 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                       try {
                         setUploaded(selectSkillPackage(archive, root));
                       } catch (cause) {
-                        setError(message(cause, "This isn’t a skill that can be imported."));
+                        setError(message(cause, m.skills_import_not_importable()));
                       }
                     }}
                   >
-                    <ListRow interactive>{root || "Main folder"}</ListRow>
+                    <ListRow interactive>{root || m.skills_import_main_folder()}</ListRow>
                   </button>
                 ))}
               </ListCard>
@@ -297,22 +307,22 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
               >
                 <SearchInput
                   className="min-w-56 flex-1"
-                  aria-label="Search skills or paste a link"
-                  placeholder="Search skills, or paste a GitHub link"
+                  aria-label={m.skills_import_search()}
+                  placeholder={m.skills_import_search_placeholder()}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
-                {link ? <Button type="submit">Review skill</Button> : null}
+                {link ? <Button type="submit">{m.skills_import_review()}</Button> : null}
                 <Button variant="outline" onClick={() => upload.current?.click()}>
                   <HugeiconsIcon icon={Upload04Icon} strokeWidth={2} data-icon="inline-start" />
-                  Upload
+                  {m.skills_import_upload()}
                 </Button>
                 <input
                   ref={upload}
                   type="file"
                   accept=".md,.zip"
                   className="sr-only"
-                  aria-label="Upload a skill file"
+                  aria-label={m.skills_import_upload_label()}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) void readFile(file);
@@ -322,18 +332,20 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
               </form>
               {discovery.isError && searchable ? (
                 <ErrorState
-                  title="Discovery is unavailable"
-                  description="You can still paste a GitHub link or upload a skill file."
+                  title={m.skills_import_discovery_failed()}
+                  description={m.skills_import_discovery_failed_description()}
                   onRetry={() => {
                     void discovery.refetch();
                   }}
                 />
               ) : null}
               {searchable && discovery.isPending ? (
-                <ListSkeleton rows={4} media="none" label="Searching skills.sh" />
+                <ListSkeleton rows={4} media="none" label={m.skills_import_searching()} />
               ) : null}
               {searchable && !discovery.isPending && discovery.data?.skills.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No skills match “{search}”.</p>
+                <p className="text-muted-foreground text-sm">
+                  {m.skills_import_no_results({ query: search })}
+                </p>
               ) : null}
               {searchable && discovery.data?.skills.length ? (
                 <ListCard>
@@ -348,7 +360,11 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{skill.name}</p>
                           <p className="text-muted-foreground truncate text-xs">
-                            {skill.source} · {skill.installs.toLocaleString("en")} installs
+                            {m.skills_import_installs({
+                              source: skill.source,
+                              count: skill.installs,
+                              installs: skill.installs.toLocaleString(getLocale()),
+                            })}
                           </p>
                         </div>
                         <HugeiconsIcon
@@ -385,7 +401,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                     size="sm"
                     onClick={() => setLimit((current) => Math.min(current * 3, DISCOVERY_MAX))}
                   >
-                    Show more
+                    {m.skills_import_show_more()}
                   </Button>
                 </div>
               ) : null}
