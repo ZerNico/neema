@@ -111,19 +111,12 @@ export const validateScheduleSettings = Effect.fn("schedules.validateSettings")(
   if (settings.modelId) {
     // A usable chat model, as a send requires: a fire would otherwise fall
     // back to the default without saying, and the page would name the wrong one.
-    const model = yield* deps.providers.getModel(settings.modelId);
-    if (
-      !model?.enabled ||
-      model.type !== "chat" ||
-      !(yield* deps.providers.isModelAccessible(userId, settings.modelId))
-    )
+    if (!(yield* deps.providers.usableModel(userId, settings.modelId, "chat")))
       return yield* new ScheduleRejected({ reason: "selected model is unavailable" });
   }
   if (
     settings.imageModelId &&
-    !(yield* deps.providers.listImageModelsFor(userId)).some(
-      (model) => model.id === settings.imageModelId,
-    )
+    !(yield* deps.providers.usableModel(userId, settings.imageModelId, "image"))
   )
     return yield* new ScheduleRejected({ reason: "selected image model is unavailable" });
   if (settings.searchEnabled && !(yield* deps.policy.can(userId, "webSearch")))

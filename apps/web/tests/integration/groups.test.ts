@@ -439,10 +439,20 @@ describe("model visibility", () => {
         yield* groupRepo.addMember(group.id, member);
         const dark = yield* makeModel({ access: "groups", enabled: false });
         yield* providerRepo.updateModelAccess(dark, "groups", [group.id]);
-        return { dark, sees: yield* visibleIds(member) };
+        const lit = yield* makeModel();
+        return {
+          dark,
+          sees: yield* visibleIds(member),
+          // Checking agrees with listing: disabled is unusable, and a chat
+          // model is not an image model.
+          darkUsable: (yield* providerRepo.usableModel(member, dark, "chat")) !== null,
+          litAsChat: (yield* providerRepo.usableModel(member, lit, "chat")) !== null,
+          litAsImage: (yield* providerRepo.usableModel(member, lit, "image")) !== null,
+        };
       }),
     );
     expect(result.sees).not.toContain(result.dark);
+    expect(result).toMatchObject({ darkUsable: false, litAsChat: true, litAsImage: false });
   });
 
   it("hides every model of a disabled provider, even from admins, until it is re-enabled", async () => {
@@ -457,13 +467,13 @@ describe("model visibility", () => {
         const whileOff = {
           userSees: (yield* visibleIds(userId)).includes(model),
           adminSees: (yield* visibleIds(admin)).includes(model),
-          userMayUse: yield* providerRepo.isModelAccessible(userId, model),
-          adminMayUse: yield* providerRepo.isModelAccessible(admin, model),
+          userMayUse: (yield* providerRepo.usableModel(userId, model, "chat")) !== null,
+          adminMayUse: (yield* providerRepo.usableModel(admin, model, "chat")) !== null,
         };
         yield* providerRepo.updateProvider(offProvider, { enabled: true });
         const afterOn = {
           userSees: (yield* visibleIds(userId)).includes(model),
-          userMayUse: yield* providerRepo.isModelAccessible(userId, model),
+          userMayUse: (yield* providerRepo.usableModel(userId, model, "chat")) !== null,
         };
         return { whileOff, afterOn };
       }),
@@ -477,7 +487,7 @@ describe("model visibility", () => {
     expect(result.afterOn).toEqual({ userSees: true, userMayUse: true });
   });
 
-  it("agrees with isModelAccessible across the whole matrix", async () => {
+  it("agrees with usableModel across the whole matrix", async () => {
     const result = await run(
       Effect.gen(function* () {
         const groupRepo = yield* GroupRepo;
@@ -492,11 +502,12 @@ describe("model visibility", () => {
         yield* providerRepo.updateModelAccess(privateModel, "groups", [group.id]);
 
         return {
-          memberPublic: yield* providerRepo.isModelAccessible(member, publicModel),
-          memberPrivate: yield* providerRepo.isModelAccessible(member, privateModel),
-          outsiderPrivate: yield* providerRepo.isModelAccessible(outsider, privateModel),
-          adminPrivate: yield* providerRepo.isModelAccessible(admin, privateModel),
-          missing: yield* providerRepo.isModelAccessible(member, uuidv7()),
+          memberPublic: (yield* providerRepo.usableModel(member, publicModel, "chat")) !== null,
+          memberPrivate: (yield* providerRepo.usableModel(member, privateModel, "chat")) !== null,
+          outsiderPrivate:
+            (yield* providerRepo.usableModel(outsider, privateModel, "chat")) !== null,
+          adminPrivate: (yield* providerRepo.usableModel(admin, privateModel, "chat")) !== null,
+          missing: (yield* providerRepo.usableModel(member, uuidv7(), "chat")) !== null,
         };
       }),
     );
@@ -521,9 +532,9 @@ describe("model visibility", () => {
         const privateModel = yield* makeModel({ access: "groups" });
         yield* providerRepo.updateModelAccess(privateModel, "groups", [group.id]);
 
-        const before = yield* providerRepo.isModelAccessible(member, privateModel);
+        const before = (yield* providerRepo.usableModel(member, privateModel, "chat")) !== null;
         yield* groupRepo.deleteGroup(group.id);
-        const after = yield* providerRepo.isModelAccessible(member, privateModel);
+        const after = (yield* providerRepo.usableModel(member, privateModel, "chat")) !== null;
         const links = yield* db
           .select()
           .from(modelGroupAccess)

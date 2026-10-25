@@ -794,16 +794,7 @@ function makeChatService() {
       userId: string,
       saved: string | null,
     ) {
-      if (saved) {
-        const model = yield* providers.getModel(saved);
-        if (
-          model &&
-          model.enabled &&
-          model.type === "chat" &&
-          (yield* providers.isModelAccessible(userId, saved))
-        )
-          return saved;
-      }
+      if (saved && (yield* providers.usableModel(userId, saved, "chat"))) return saved;
       const models = yield* providers.listChatModelsFor(userId);
       return (models.find((model) => model.isDefault) ?? models[0])?.id ?? null;
     });
@@ -949,15 +940,10 @@ function makeChatService() {
           reason: "original model is no longer known",
         });
       }
-      const model = yield* providers.getModel(modelId);
-      if (!model || !model.enabled || model.type !== "chat") {
-        return yield* new ModelNotFound({ modelId });
-      }
       // Checked on the resolved id: "Retry same" must also stop working once
       // the user's group access to the original model is gone.
-      if (!(yield* providers.isModelAccessible(input.userId, modelId))) {
-        return yield* new ModelNotFound({ modelId });
-      }
+      const model = yield* providers.usableModel(input.userId, modelId, "chat");
+      if (!model) return yield* new ModelNotFound({ modelId });
 
       // A different model must read the question being answered again, which
       // is about its own files; earlier turns' files reach it as stand-ins.
@@ -1038,13 +1024,8 @@ function makeChatService() {
           reason: "original model is no longer known",
         });
       }
-      const model = yield* providers.getModel(modelId);
-      if (!model || !model.enabled || model.type !== "chat") {
-        return yield* new ModelNotFound({ modelId });
-      }
-      if (!(yield* providers.isModelAccessible(input.userId, modelId))) {
-        return yield* new ModelNotFound({ modelId });
-      }
+      const model = yield* providers.usableModel(input.userId, modelId, "chat");
+      if (!model) return yield* new ModelNotFound({ modelId });
       // Refused here, before the claim, so a resume that cannot succeed never
       // replaces the answer's error.
       const all = yield* repo.listMessages(input.conversationId);

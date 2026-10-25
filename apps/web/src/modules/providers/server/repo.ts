@@ -65,6 +65,11 @@ type ProviderRow = typeof providers.$inferSelect;
 export type PublicProvider = Omit<ProviderRow, "apiKeyCiphertext"> & { hasApiKey: boolean };
 export type ProviderWithKey = PublicProvider & { apiKey: Redacted.Redacted<string> | null };
 
+// A family its provider's preset no longer hosts cannot be called.
+const hostsFamily = (row: { imageFamily: string | null; preset: PresetId }) =>
+  row.imageFamily !== null &&
+  imageFamiliesFor(row.preset).some((family) => family.id === row.imageFamily);
+
 const toPublic = ({ apiKeyCiphertext, ...rest }: ProviderRow): PublicProvider => ({
   ...rest,
   hasApiKey: apiKeyCiphertext !== null,
@@ -116,12 +121,15 @@ export class ProviderRepo extends Context.Service<
     getUtilityModelId(): Effect.Effect<string | null>;
     setUtilityModelId(modelId: string | null): Effect.Effect<void, InvalidUtilityModel>;
     /**
-     * May this user use this model right now: the listChatModelsFor access
-     * predicate plus an enabled provider. The model's own enabled/type flags
-     * are deliberately not checked; callers already hold the row via
-     * getModel and fold those into the same ModelNotFound.
+     * The model row when this user may use it as `type` right now, else null:
+     * the listing's own predicate, so a listed model always passes and an
+     * unlisted one never does.
      */
-    isModelAccessible(userId: string, modelId: string): Effect.Effect<boolean>;
+    usableModel(
+      userId: string,
+      modelId: string,
+      type: OrderedModelType,
+    ): Effect.Effect<ModelRow | null>;
     /** Sets access independently for internal callers and access-policy tests. */
     updateModelAccess(
       modelId: string,
@@ -169,6 +177,16 @@ export class ProviderRepo extends Context.Service<
               .innerJoin(groupMembers, eq(groupMembers.groupId, modelGroupAccess.groupId))
               .where(and(eq(modelGroupAccess.modelId, models.id), eq(groupMembers.userId, userId))),
           ),
+        );
+
+      // What makes a model usable as `type`: the listings and `usableModel`
+      // all filter on this, so they cannot disagree.
+      const usableAs = (userId: string, type: OrderedModelType) =>
+        and(
+          eq(providers.enabled, true),
+          eq(models.enabled, true),
+          eq(models.type, type),
+          accessibleBy(userId),
         );
 
       // The admin UI offers only the families a preset hosts; this is the
@@ -305,14 +323,7 @@ export class ProviderRepo extends Context.Service<
             })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
-            .where(
-              and(
-                eq(providers.enabled, true),
-                eq(models.enabled, true),
-                eq(models.type, "chat"),
-                accessibleBy(userId),
-              ),
-            )
+            .where(usableAs(userId, "chat"))
             // The admin's order; Postgres sorts nulls last on ascending, so a
             // model nobody has placed yet follows the placed ones alphabetically.
             .orderBy(asc(models.defaultPriority), asc(models.displayName), asc(models.id))
@@ -345,22 +356,10 @@ export class ProviderRepo extends Context.Service<
             })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
-            .where(
-              and(
-                eq(providers.enabled, true),
-                eq(models.enabled, true),
-                eq(models.type, "image"),
-                accessibleBy(userId),
-              ),
-            )
+            .where(usableAs(userId, "image"))
             .orderBy(asc(models.defaultPriority), asc(models.displayName), asc(models.id))
             .pipe(Effect.orDie);
-          // A family its provider's preset no longer hosts cannot be called.
-          const usable = rows.filter(
-            (row) =>
-              row.imageFamily !== null &&
-              imageFamiliesFor(row.preset).some((family) => family.id === row.imageFamily),
-          );
+          const usable = rows.filter(hostsFamily);
           return markDefaultModel(usable).map(({ imageFamily, preset: _, ...model }) => ({
             ...model,
             imageCapabilities:
@@ -458,15 +457,21 @@ export class ProviderRepo extends Context.Service<
             .pipe(Effect.orDie);
         }),
 
-        isModelAccessible: Effect.fn("ProviderRepo.isModelAccessible")(function* (userId, modelId) {
-          const rows = yield* db
-            .select({ id: models.id })
+        usableModel: Effect.fn("ProviderRepo.usableModel")(function* (userId, modelId, type) {
+          const [row] = yield* db
+            .select({ model: models, preset: providers.preset })
             .from(models)
             .innerJoin(providers, eq(providers.id, models.providerId))
-            .where(and(eq(models.id, modelId), eq(providers.enabled, true), accessibleBy(userId)))
+            .where(and(eq(models.id, modelId), usableAs(userId, type)))
             .limit(1)
             .pipe(Effect.orDie);
-          return rows.length > 0;
+          if (!row) return null;
+          if (
+            type === "image" &&
+            !hostsFamily({ imageFamily: row.model.imageFamily, preset: row.preset })
+          )
+            return null;
+          return row.model;
         }),
 
         updateModelAccess: Effect.fn("ProviderRepo.updateModelAccess")(

@@ -65,15 +65,19 @@ describe("schedule model", () => {
     prompt: "Summarize the news",
     modelId: "m1",
   };
-  const validate = (model: { type: "chat" | "image"; enabled: boolean }) =>
-    Effect.runPromise(
+  // Which models are usable is the providers' one query; this checks the
+  // schedule asks it about a chat model and refuses what it does not return.
+  const validate = (usable: boolean) => {
+    const asked: string[] = [];
+    return Effect.runPromise(
       Effect.result(
         validateScheduleSettings(
           {
-            // Only what the model check reads; the rest of the settings name nothing.
             providers: {
-              getModel: () => Effect.succeed({ id: "m1", ...model }),
-              isModelAccessible: () => Effect.succeed(true),
+              usableModel: (_userId: string, modelId: string, type: string) => {
+                asked.push(`${modelId}:${type}`);
+                return Effect.succeed(usable ? { id: modelId } : null);
+              },
             } as never,
             agents: {} as never,
             policy: { can: () => Effect.succeed(true) } as never,
@@ -82,19 +86,19 @@ describe("schedule model", () => {
           settings,
         ),
       ),
-    );
+    ).then((result) => ({ result, asked }));
+  };
 
-  it.each([
-    { type: "image" as const, enabled: true },
-    { type: "chat" as const, enabled: false },
-  ])("refuses a model a send could not use: %j", async (model) => {
-    expect(await validate(model)).toMatchObject({
+  it("refuses a model a send could not use", async () => {
+    const { result, asked } = await validate(false);
+    expect(asked).toEqual(["m1:chat"]);
+    expect(result).toMatchObject({
       _tag: "Failure",
       failure: { reason: "selected model is unavailable" },
     });
   });
 
-  it("accepts an enabled chat model", async () => {
-    expect(await validate({ type: "chat", enabled: true })).toMatchObject({ _tag: "Success" });
+  it("accepts a usable chat model", async () => {
+    expect((await validate(true)).result).toMatchObject({ _tag: "Success" });
   });
 });

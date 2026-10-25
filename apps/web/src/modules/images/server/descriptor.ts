@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { effectiveImageCapabilities, imageFamiliesFor } from "@chat/model-client";
+import { effectiveImageCapabilities } from "@chat/model-client";
 import { connectionOf } from "~/modules/providers/server/gateway.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ImageModelDescriptor } from "./image-tool.ts";
@@ -14,20 +14,10 @@ export const loadImageModel = Effect.fn("images.loadImageModel")(function* (
   modelId: string,
 ) {
   const providers = yield* ProviderRepo;
-  const model = yield* providers.getModel(modelId);
-  if (
-    !model ||
-    !model.enabled ||
-    model.type !== "image" ||
-    !model.imageFamily ||
-    !model.imageCapabilities
-  )
-    return null;
-  if (!(yield* providers.isModelAccessible(userId, modelId))) return null;
+  const model = yield* providers.usableModel(userId, modelId, "image");
+  if (!model?.imageFamily || !model.imageCapabilities) return null;
   const provider = yield* providers.getProviderWithKey(model.providerId);
-  if (!provider?.enabled) return null;
-  if (!imageFamiliesFor(provider.preset).some((family) => family.id === model.imageFamily))
-    return null;
+  if (!provider) return null;
   const connection = connectionOf(provider);
   if (!connection) return null;
   return {

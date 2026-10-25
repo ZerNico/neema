@@ -119,15 +119,10 @@ export const makeAttemptOptions = Effect.gen(function* () {
         });
       }
 
-      const model = yield* providers.getModel(input.modelId);
-      if (!model || !model.enabled || model.type !== "chat") {
-        return yield* new ModelNotFound({ modelId: input.modelId });
-      }
       // Group-restricted models answer exactly like nonexistent ones, so a
       // denied id discloses nothing.
-      if (!(yield* providers.isModelAccessible(input.userId, input.modelId))) {
-        return yield* new ModelNotFound({ modelId: input.modelId });
-      }
+      const model = yield* providers.usableModel(input.userId, input.modelId, "chat");
+      if (!model) return yield* new ModelNotFound({ modelId: input.modelId });
       if (
         input.reasoningEffort != null &&
         !(yield* supportsReasoningEffort(model, input.reasoningEffort))

@@ -19,15 +19,8 @@ const modelFor = Effect.fn(function* (
   userId: string,
   modelId: string,
 ) {
-  const model = yield* providers.getModel(modelId);
-  if (
-    !model ||
-    !model.enabled ||
-    model.type !== "chat" ||
-    !(yield* providers.isModelAccessible(userId, modelId))
-  )
-    return null;
-  return { id: model.id, name: model.displayName, available: true };
+  const model = yield* providers.usableModel(userId, modelId, "chat");
+  return model ? { id: model.id, name: model.displayName, available: true } : null;
 });
 
 /** Shared by manual saves and the draft transaction; never normalize working input. */
@@ -51,9 +44,7 @@ export const validateAgentSettings = Effect.fn(function* (
     return yield* new AgentRejected({ reason: "selected model is unavailable" });
   if (
     settings.imageModelId &&
-    !(yield* providers.listImageModelsFor(userId)).some(
-      (model) => model.id === settings.imageModelId,
-    )
+    !(yield* providers.usableModel(userId, settings.imageModelId, "image"))
   )
     return yield* new AgentRejected({ reason: "selected image model is unavailable" });
   return {

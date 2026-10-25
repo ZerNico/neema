@@ -61,7 +61,7 @@ async function setup(timeZone?: string) {
       setDefaultModelOrder: unexpected,
       getUtilityModelId: unexpected,
       setUtilityModelId: unexpected,
-      isModelAccessible: unexpected,
+      usableModel: unexpected,
       updateModelAccess: unexpected,
       listModelAccess: unexpected,
       getModel: unexpected,
