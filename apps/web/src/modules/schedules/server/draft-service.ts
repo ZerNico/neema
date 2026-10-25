@@ -193,9 +193,6 @@ export class ScheduleDraftService extends Context.Service<
                     );
                     return { outcome: "saved" as const, scheduleId: row.id, row };
                   }
-                  // Only over the schedule as the draft found it: an edit
-                  // elsewhere, or a fire adopting its chat, would otherwise be
-                  // silently written back.
                   const row = yield* repo.update(
                     userId,
                     draft.targetId,
@@ -203,11 +200,11 @@ export class ScheduleDraftService extends Context.Service<
                     tx,
                     draft.targetRevision ?? 0,
                   );
-                  if (row) return { outcome: "saved" as const, scheduleId: row.id, row };
-                  return (yield* repo.get(userId, draft.targetId, tx))
-                    ? { outcome: "schedule_changed" as const }
-                    : yield* new ScheduleNotAvailable({ scheduleId: draft.targetId });
+                  return { outcome: "saved" as const, scheduleId: row.id, row };
                 }).pipe(
+                  Effect.catchTag("ScheduleChanged", () =>
+                    Effect.succeed({ outcome: "schedule_changed" as const }),
+                  ),
                   Effect.catchTag("ScheduleNotAvailable", () =>
                     Effect.succeed({ outcome: "schedule_unavailable" as const }),
                   ),

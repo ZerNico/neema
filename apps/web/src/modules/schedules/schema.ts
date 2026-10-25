@@ -101,6 +101,14 @@ export class ScheduleNotAvailable extends Schema.TaggedError<ScheduleNotAvailabl
   "ScheduleNotAvailable",
   { scheduleId: Schema.String },
 ) {}
+/** The schedule moved past the revision a save was based on. */
+export class ScheduleChanged extends Schema.TaggedError<ScheduleChanged>()("ScheduleChanged", {
+  scheduleId: Schema.String,
+}) {
+  get reason() {
+    return "schedule changed; reload before saving";
+  }
+}
 export class ScheduleRejected extends Schema.TaggedError<ScheduleRejected>()("ScheduleRejected", {
   reason: Schema.String,
 }) {}

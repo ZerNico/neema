@@ -10,7 +10,12 @@ import {
   schedules,
 } from "~/db/schema/index.ts";
 import { Db, type DbTx } from "~/server/db.ts";
-import type { ScheduleRunSummary, ScheduleSummary } from "../schema.ts";
+import {
+  ScheduleChanged,
+  ScheduleNotAvailable,
+  type ScheduleRunSummary,
+  type ScheduleSummary,
+} from "../schema.ts";
 import type { IntegrationGrant, ScheduleGrant } from "~/modules/integrations/grant.ts";
 import { answered, type SettledRun } from "../settled-run.ts";
 
@@ -100,17 +105,17 @@ export class ScheduleRepo extends Context.Service<
     /** The owner's schedule that keeps running in this chat, if any. */
     findByChat(userId: string, chatId: string): Effect.Effect<ScheduleRow | null>;
     /**
-     * Replaces every setting and grant and moves the config revision. With
-     * `expectedRevision`, only over that revision; null when the schedule is
-     * gone or has moved on.
+     * Replaces every setting and grant and moves the config revision, only
+     * over `expectedRevision`: an edit elsewhere, or a fire adopting its chat,
+     * would otherwise be silently written back.
      */
     update(
       userId: string,
       scheduleId: string,
       settings: ScheduleSettingsWrite,
       tx: DbTx,
-      expectedRevision?: number,
-    ): Effect.Effect<ScheduleRow | null>;
+      expectedRevision: number,
+    ): Effect.Effect<ScheduleRow, ScheduleNotAvailable | ScheduleChanged>;
     setPaused(
       userId: string,
       scheduleId: string,
@@ -276,17 +281,24 @@ export class ScheduleRepo extends Context.Service<
               and(
                 eq(schedules.id, scheduleId),
                 eq(schedules.userId, userId),
-                expectedRevision === undefined
-                  ? undefined
-                  : eq(schedules.configRevision, expectedRevision),
+                eq(schedules.configRevision, expectedRevision),
               ),
             )
             .returning()
             .pipe(Effect.orDie);
-          if (!row) return null;
+          if (!row) {
+            const [exists] = yield* tx
+              .select({ id: schedules.id })
+              .from(schedules)
+              .where(and(eq(schedules.id, scheduleId), eq(schedules.userId, userId)))
+              .pipe(Effect.orDie);
+            return yield* exists
+              ? new ScheduleChanged({ scheduleId })
+              : new ScheduleNotAvailable({ scheduleId });
+          }
           yield* replaceGrants(tx, row.id, integrationGrants);
           const [stored] = yield* withGrants(tx, [row]);
-          return stored ?? null;
+          return stored!;
         }),
         setPaused: Effect.fn("ScheduleRepo.setPaused")(function* (
           userId,

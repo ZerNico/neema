@@ -117,10 +117,11 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   computed from now, and stamps the target/saved receipt in one transaction; `schedule.changed`
   and `draft.changed` publish afterwards. Reload re-snapshots from the live schedule.
 - `schedules.config_revision` moves with every settings write, a fire adopting its chat
-  included, and never with a claim, pause or resume. A draft records the revision it opened
-  from and saves only over that one, else `schedule_changed` asks for a reload: without it a
-  draft opened before a first fire wrote its null `chatId` back, and the next fire made yet
-  another chat. `updated_at` cannot serve, since every claim moves it.
+  included, and never with a claim, pause or resume. Every settings save names the revision
+  its values came from, the detail page's form as much as a draft, and the repository writes
+  only over that one, else `ScheduleChanged` asks for a reload: without it an editor opened
+  before a first fire wrote its null `chatId` back, and the next fire made yet another chat.
+  `updated_at` cannot serve, since every claim moves it.
 - Sync events: `schedule.changed { scheduleId }` and `schedule.run.changed { scheduleId,
   runId }`; the client invalidates `["schedules"]`, `["schedule", id]` and
   `["schedule-runs", id]`.

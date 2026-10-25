@@ -56,7 +56,11 @@ import type {
   InvalidUtilityModel,
   UnhostedImageFamily,
 } from "~/modules/providers/default-models.ts";
-import type { ScheduleNotAvailable, ScheduleRejected } from "~/modules/schedules/schema.ts";
+import type {
+  ScheduleChanged,
+  ScheduleNotAvailable,
+  ScheduleRejected,
+} from "~/modules/schedules/schema.ts";
 import type {
   SharedResourceNotAvailable,
   SharingNotAllowed,
@@ -127,6 +131,7 @@ export type Refusable =
   | QueueFull
   | ResumeNotAllowed
   | RetryNotAllowed
+  | ScheduleChanged
   | ScheduleNotAvailable
   | ScheduleRejected
   | SharingNotAllowed
@@ -221,6 +226,7 @@ const refusals: RefusalTable = {
   QueueFull: () => ({ status: 409, body: "Too many messages are queued" }),
   ResumeNotAllowed: because(409),
   RetryNotAllowed: because(409),
+  ScheduleChanged: because(409),
   ScheduleNotAvailable: notFound,
   ScheduleRejected: because(400),
   SharingNotAllowed: because(400),

@@ -5,7 +5,12 @@ import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
-import { ScheduleNotAvailable, ScheduleRejected, type ScheduleRunSummary } from "../schema.ts";
+import {
+  type ScheduleChanged,
+  ScheduleNotAvailable,
+  ScheduleRejected,
+  type ScheduleRunSummary,
+} from "../schema.ts";
 import { cadenceIssue, previewFires } from "./cron.ts";
 import { ScheduleFire, type FireOutcome } from "./fire.ts";
 import { ScheduleRepo, toSummary, type ScheduleRow } from "./repo.ts";
@@ -29,11 +34,13 @@ export class ScheduleService extends Context.Service<
       ScheduleNotAvailable
     >;
     create(userId: string, input: unknown): Effect.Effect<ScheduleRow, ScheduleRejected>;
+    /** Over `expectedRevision` only, the revision the editor loaded. */
     update(
       userId: string,
       scheduleId: string,
+      expectedRevision: number,
       input: unknown,
-    ): Effect.Effect<ScheduleRow, ScheduleNotAvailable | ScheduleRejected>;
+    ): Effect.Effect<ScheduleRow, ScheduleNotAvailable | ScheduleRejected | ScheduleChanged>;
     pause(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
     resume(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
     remove(userId: string, scheduleId: string): Effect.Effect<void, ScheduleNotAvailable>;
@@ -211,7 +218,12 @@ export class ScheduleService extends Context.Service<
           yield* changed(userId, row.id);
           return row;
         }),
-        update: Effect.fn("ScheduleService.update")(function* (userId, scheduleId, input) {
+        update: Effect.fn("ScheduleService.update")(function* (
+          userId,
+          scheduleId,
+          expectedRevision,
+          input,
+        ) {
           const settings = yield* validate(userId, input);
           const row = yield* db
             .transaction((tx) =>
@@ -219,14 +231,13 @@ export class ScheduleService extends Context.Service<
                 if (!(yield* policy.can(userId, "schedules", tx)))
                   return yield* new ScheduleNotAvailable({ scheduleId });
                 yield* checkScheduleResources(tx, userId, settings);
-                const updated = yield* repo.update(
+                return yield* repo.update(
                   userId,
                   scheduleId,
                   { ...settings, nextFireAt: firstFireAt(settings) },
                   tx,
+                  expectedRevision,
                 );
-                if (!updated) return yield* new ScheduleNotAvailable({ scheduleId });
-                return updated;
               }),
             )
             .pipe(

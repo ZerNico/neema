@@ -9,7 +9,7 @@ import { useStore } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { scheduleAuthoringRequest } from "../authoring.ts";
 import { scheduleQuery, scheduleRunsQuery } from "../client/queries.ts";
@@ -33,6 +33,7 @@ import { ErrorState, ListSkeleton, Page, Section } from "~/ui/page-shell.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
+import { FieldError } from "~/ui/primitives/field";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -106,12 +107,18 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     onError: (error) => toastError("Could not delete the schedule.", error),
   });
   const formId = useId();
+  // Dirty values keep the revision they came from, not the latest query's: a
+  // fire adopting its chat moves it too, and a save must not write that back.
+  const revision = useRef(schedule.configRevision);
   const form = useAppForm({
     defaultValues: scheduleToSettings(schedule),
     validators: { onSubmit: Schema.toStandardSchemaV1(ScheduleSettings) },
     onSubmit: async ({ value, formApi }) => {
       try {
-        await updateSchedule({ data: { scheduleId, settings: value } });
+        const saved = await updateSchedule({
+          data: { scheduleId, expectedRevision: revision.current, settings: value },
+        });
+        revision.current = saved.configRevision;
         // Confirm before the reset: resetting ends the submit, and in between
         // the button would show its idle label for a moment.
         markSaved();
@@ -124,6 +131,15 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
     },
   });
   const dirty = useStore(form.store, (state) => state.isDirty);
+  const externalChange = useStore(
+    form.store,
+    (state) => state.isDirty && schedule.configRevision !== revision.current,
+  );
+  useEffect(() => {
+    if (schedule.configRevision === revision.current || form.state.isDirty) return;
+    revision.current = schedule.configRevision;
+    form.reset(scheduleToSettings(schedule), { keepDefaultValues: true });
+  }, [schedule, form]);
   const [startingRun, setStartingRun] = useState(false);
   const { justSaved, markSaved } = useSaveStatus();
   const submitting = useStore(form.store, (state) => state.isSubmitting);
@@ -246,6 +262,24 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
           void form.handleSubmit();
         }}
       >
+        {externalChange ? (
+          <div className="space-y-2">
+            <FieldError>
+              This schedule changed elsewhere. Your edits are kept. Reloading replaces them with the
+              current schedule.
+            </FieldError>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                revision.current = schedule.configRevision;
+                form.reset(scheduleToSettings(schedule), { keepDefaultValues: true });
+              }}
+            >
+              Reload schedule
+            </Button>
+          </div>
+        ) : null}
         <ScheduleSettingsFields form={form} />
       </form>
       <Section title="Runs">

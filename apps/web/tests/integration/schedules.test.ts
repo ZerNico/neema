@@ -113,13 +113,19 @@ const edit = (row: ScheduleRow, changes: Partial<Pick<ScheduleRow, "chatId" | "n
       lastFiredAt: _lastFiredAt,
       createdAt: _createdAt,
       updatedAt: _updatedAt,
-      configRevision: _configRevision,
+      configRevision,
       integrationGrants: _grants,
       ...settings
     } = (yield* repo.get(row.userId, row.id))!;
     return yield* db
       .transaction((tx) =>
-        repo.update(userId, row.id, { ...settings, integrationGrants: [], ...changes }, tx),
+        repo.update(
+          userId,
+          row.id,
+          { ...settings, integrationGrants: [], ...changes },
+          tx,
+          configRevision,
+        ),
       )
       .pipe(Effect.orDie);
   });

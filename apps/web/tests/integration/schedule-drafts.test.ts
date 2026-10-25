@@ -21,7 +21,7 @@ import { KeyCipher } from "~/modules/providers/server/crypto.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { ScheduleDraft } from "~/modules/schedules/draft-schema.ts";
 import { ScheduleDraftService } from "~/modules/schedules/server/draft-service.ts";
-import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ScheduleRepo, type ScheduleRow } from "~/modules/schedules/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db } from "~/server/db.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
@@ -134,6 +134,18 @@ const fireAdopts = (context: Awaited<ReturnType<typeof setup>>) =>
     }),
   );
 
+const scheduleWrite = ({
+  paused: _paused,
+  lastFiredAt: _lastFiredAt,
+  createdAt: _createdAt,
+  updatedAt: _updatedAt,
+  integrationGrants: _grants,
+  ...settings
+}: Omit<ScheduleRow, "id" | "userId" | "configRevision">) => ({
+  ...settings,
+  integrationGrants: [],
+});
+
 const storedChat = (scheduleId: string) =>
   run(
     Effect.flatMap(Db, (db) =>
@@ -175,6 +187,33 @@ describe("saving a schedule draft", () => {
       ),
     );
     expect(await save(context.userId, patched.draft)).toMatchObject({ outcome: "saved" });
+  });
+});
+
+describe("saving a schedule from its editor", () => {
+  it("refuses the revision it loaded once a fire adopted a chat, and keeps that chat", async () => {
+    const context = await setup();
+    const { schedule } = context;
+    const adopted = await fireAdopts(context);
+    // What the editor loaded: every setting, at the revision before the fire.
+    const { id, userId, configRevision, ...loaded } = schedule;
+    const saved = await run(
+      Effect.flatMap(Db, (db) =>
+        db.transaction((tx) =>
+          Effect.flatMap(ScheduleRepo, (repo) =>
+            repo.update(
+              userId,
+              id,
+              { ...scheduleWrite(loaded), name: "Renamed" },
+              tx,
+              configRevision,
+            ),
+          ),
+        ),
+      ).pipe(Effect.flip),
+    );
+    expect(saved).toMatchObject({ _tag: "ScheduleChanged", scheduleId: schedule.id });
+    expect(await storedChat(schedule.id)).toBe(adopted);
   });
 });
 

@@ -11,6 +11,7 @@ const ScheduleIdInput = Schema.Struct({
 });
 const UpdateScheduleInput = Schema.Struct({
   ...ScheduleIdInput.fields,
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   settings: ScheduleSettings,
 });
 const ListRunsInput = Schema.Struct({
@@ -72,7 +73,12 @@ export const updateSchedule = createServerFn({ method: "POST" })
   .handler(({ context, data }) =>
     runServerFn(
       Effect.flatMap(ScheduleService, (service) =>
-        service.update(context.session.user.id, data.scheduleId, data.settings),
+        service.update(
+          context.session.user.id,
+          data.scheduleId,
+          data.expectedRevision,
+          data.settings,
+        ),
       ),
     ),
   );

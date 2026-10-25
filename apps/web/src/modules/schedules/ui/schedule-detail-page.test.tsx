@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import {
   deleteSchedule,
+  getSchedule,
   listScheduleRuns,
   runScheduleNow,
   updateSchedule,
@@ -71,6 +72,7 @@ const schedule = {
   integrationGrants: [],
   notify: "always" as const,
   paused: false,
+  configRevision: 1,
 };
 
 const renderPage = () => {
@@ -84,6 +86,7 @@ const renderPage = () => {
       </ConfirmProvider>
     </QueryClientProvider>,
   );
+  return client;
 };
 
 beforeEach(() => {
@@ -179,7 +182,7 @@ describe("ScheduleDetailPage run now", () => {
   });
 
   it("saves pending edits first, so the run uses what is on screen", async () => {
-    vi.mocked(updateSchedule).mockResolvedValue(undefined as never);
+    vi.mocked(updateSchedule).mockResolvedValue({ ...schedule, configRevision: 2 } as never);
     renderPage();
     fireEvent.change(await screen.findByLabelText("Prompt"), {
       target: { value: "Summarize the tech news" },
@@ -206,5 +209,58 @@ describe("ScheduleDetailPage run now", () => {
     await waitFor(() => expect(updateSchedule).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled());
     expect(runScheduleNow).not.toHaveBeenCalled();
+  });
+});
+
+describe("ScheduleDetailPage revisions", () => {
+  /** What a fire adopting its chat looks like from here: a newer revision of the row. */
+  const adopted = { ...schedule, chatMode: "same" as const, chatId: "c1", configRevision: 2 };
+
+  it("saves over the revision the form was loaded from", async () => {
+    vi.mocked(updateSchedule).mockResolvedValue(adopted as never);
+    vi.mocked(getSchedule).mockResolvedValue(adopted as never);
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Prompt"), { target: { value: "Edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateSchedule).toHaveBeenCalledOnce());
+    expect(vi.mocked(updateSchedule).mock.calls[0]![0].data.expectedRevision).toBe(1);
+  });
+
+  it("keeps edits made over a revision that moved on, and offers to reload", async () => {
+    const client = renderPage();
+    const prompt = await screen.findByLabelText("Prompt");
+    fireEvent.change(prompt, { target: { value: "Edited" } });
+    act(() => client.setQueryData(["schedule", "s1"], adopted));
+
+    expect(await screen.findByText(/This schedule changed elsewhere/)).toBeVisible();
+    expect(prompt).toHaveValue("Edited");
+    fireEvent.click(screen.getByRole("button", { name: "Reload schedule" }));
+    expect(prompt).toHaveValue(schedule.prompt);
+    expect(screen.queryByText(/This schedule changed elsewhere/)).toBeNull();
+
+    vi.mocked(updateSchedule).mockResolvedValue({ ...adopted, configRevision: 3 } as never);
+    vi.mocked(getSchedule).mockResolvedValue({ ...adopted, configRevision: 3 } as never);
+    fireEvent.change(prompt, { target: { value: "Edited again" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateSchedule).toHaveBeenCalledOnce());
+    expect(vi.mocked(updateSchedule).mock.calls[0]![0].data).toMatchObject({
+      expectedRevision: 2,
+      settings: { chatMode: "same", chatId: "c1" },
+    });
+  });
+
+  it("follows the stored schedule while nothing is edited", async () => {
+    const client = renderPage();
+    const prompt = await screen.findByLabelText("Prompt");
+    act(() => client.setQueryData(["schedule", "s1"], { ...adopted, prompt: "Newer prompt" }));
+    await waitFor(() => expect(prompt).toHaveValue("Newer prompt"));
+    expect(screen.queryByText(/This schedule changed elsewhere/)).toBeNull();
+
+    vi.mocked(updateSchedule).mockResolvedValue({ ...adopted, configRevision: 3 } as never);
+    vi.mocked(getSchedule).mockResolvedValue({ ...adopted, configRevision: 3 } as never);
+    fireEvent.change(prompt, { target: { value: "Edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(updateSchedule).toHaveBeenCalledOnce());
+    expect(vi.mocked(updateSchedule).mock.calls[0]![0].data.expectedRevision).toBe(2);
   });
 });
