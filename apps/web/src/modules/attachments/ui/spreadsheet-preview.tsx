@@ -27,6 +27,8 @@ import type { SpreadsheetPreview as Preview } from "~/modules/spreadsheets/previ
 import type { OfficeFile } from "./office-preview.ts";
 import { previewSheet } from "./spreadsheet-preview-sheet.ts";
 import { usePreviewJson } from "./use-preview-json.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 const isPreview = (data: unknown): data is Preview =>
   !!data &&
@@ -71,18 +73,14 @@ export function SpreadsheetPreview({
 
   if (state.status === "error" && sheets.length === 0)
     return (
-      <FieldError>
-        Could not load this workbook. Download the original to open it elsewhere.
-      </FieldError>
+      <FieldError>{m.spreadsheets_preview_load_failed()}</FieldError>
     );
   return (
     <div className="flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2">
       <div className="paper bg-background text-foreground relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border">
         {state.status === "error" ? (
           <div className="p-4">
-            <FieldError>
-              Could not load this sheet. Download the original to open it elsewhere.
-            </FieldError>
+            <FieldError>{m.spreadsheets_preview_sheet_failed()}</FieldError>
           </div>
         ) : preview ? (
           // Keyed so each sheet starts at its own first cell.
@@ -94,7 +92,7 @@ export function SpreadsheetPreview({
           />
         ) : (
           <Spinner
-            aria-label="Loading workbook"
+            aria-label={m.spreadsheets_preview_loading()}
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
           />
         )}
@@ -102,7 +100,7 @@ export function SpreadsheetPreview({
       {visible.length > 1 ? (
         <div className="overflow-x-auto">
           <SegmentedControl
-            aria-label="Sheet"
+            aria-label={m.spreadsheets_preview_sheets()}
             value={[preview?.sheet ?? sheet ?? ""]}
             multiple={false}
             onValueChange={(value) => {
@@ -120,22 +118,25 @@ export function SpreadsheetPreview({
       {preview && (preview.truncated || preview.otherCharts) ? (
         <p className="text-muted-foreground text-xs">
           {[
-            preview.truncated ? "Showing the start of this sheet." : null,
+            preview.truncated ? m.spreadsheets_preview_truncated() : null,
             preview.otherCharts
-              ? `${preview.otherCharts === 1 ? "A chart isn’t" : `${preview.otherCharts} charts aren’t`} shown here.`
+              ? m.spreadsheets_preview_charts_hidden({ count: preview.otherCharts })
               : null,
+            m.spreadsheets_preview_download_hint(),
           ]
             .filter(Boolean)
-            .join(" ")}{" "}
-          Download the original for everything.
+            .join(" ")}
         </p>
       ) : null}
     </div>
   );
 }
 
-const tooMany = () => toast.error("Too many cells to copy", { description: "Select fewer." });
-const locale = sheetLocale(typeof navigator === "undefined" ? null : navigator.language);
+const tooMany = () =>
+  toast.error(m.spreadsheets_copy_too_many(), { description: m.spreadsheets_copy_too_many_hint() });
+// The browser's region (en-GB dates) while it speaks the page's language; the page's otherwise.
+const browser = typeof navigator === "undefined" ? null : navigator.language;
+const locale = sheetLocale(browser?.split("-")[0] === getLocale() ? browser : getLocale());
 
 /** One sheet's cells in the grid, with the active cell's formula or value above them. */
 function SheetView({
@@ -175,7 +176,7 @@ function SheetView({
     const copied = selectionText(sheet, value, locale, selection);
     if (copied === null) return tooMany();
     navigator.clipboard.writeText(copied).catch(() => {
-      toast.error("Couldn’t copy the cells");
+      toast.error(m.spreadsheets_copy_failed());
     });
   };
   const held = value(head.r, head.c);
@@ -195,7 +196,9 @@ function SheetView({
               offset: { x: image.x, y: image.y },
               width: image.width,
               height: image.height,
-              label: image.alt ? `Picture: ${image.alt}` : "Picture",
+              label: image.alt
+                ? m.spreadsheets_preview_picture_named({ alt: image.alt })
+                : m.spreadsheets_preview_picture(),
               content: (
                 <img
                   src={image.src}
@@ -210,7 +213,7 @@ function SheetView({
     }),
     ...preview.charts.flatMap((chart) => {
       const at = shown.cellAt(chart.row, chart.col);
-      const label = `Chart ${chart.index + 1} on ${preview.sheet}`;
+      const label = m.spreadsheets_preview_chart({ number: chart.index + 1, sheet: preview.sheet });
       return at
         ? [
             {
@@ -238,7 +241,7 @@ function SheetView({
         {/* Read-only but selectable, so a long formula can be read and copied in full. */}
         <input
           readOnly
-          aria-label="Formula bar"
+          aria-label={m.spreadsheets_preview_formula_bar()}
           value={text}
           className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs outline-none"
         />
@@ -280,7 +283,7 @@ function SheetView({
         >
           <ContextMenuItem onClick={copy}>
             <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
-            Copy
+            {m.common_copy()}
           </ContextMenuItem>
           {onComment ? (
             <ContextMenuItem
@@ -290,7 +293,7 @@ function SheetView({
               }}
             >
               <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} />
-              Comment on {range}
+              {m.spreadsheets_comment_on_range({ range })}
             </ContextMenuItem>
           ) : null}
         </ContextMenuContent>
@@ -305,7 +308,7 @@ function ChartImage({ src, label }: { src: string; label: string }) {
   if (state === "error")
     return (
       <div className="bg-background flex h-full items-center justify-center border p-2">
-        <FieldError>Could not draw this chart.</FieldError>
+        <FieldError>{m.spreadsheets_preview_chart_failed()}</FieldError>
       </div>
     );
   return (
@@ -324,7 +327,7 @@ function ChartImage({ src, label }: { src: string; label: string }) {
       />
       {state === "loading" ? (
         <Spinner
-          aria-label="Loading chart"
+          aria-label={m.spreadsheets_preview_chart_loading()}
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
         />
       ) : null}
@@ -357,8 +360,8 @@ function CommentButton({
     setSending(false);
     if (sent === null) return;
     if (!sent) {
-      toast.error("Couldn’t send it to the assistant", {
-        description: "Try again once the current answer is done.",
+      toast.error(m.spreadsheets_comment_failed(), {
+        description: m.spreadsheets_comment_failed_hint(),
       });
       return;
     }
@@ -369,7 +372,7 @@ function CommentButton({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button size="sm" variant="ghost" />}>
         <HugeiconsIcon icon={Comment01Icon} strokeWidth={2} />
-        Comment
+        {m.spreadsheets_comment()}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80">
         <form
@@ -380,8 +383,8 @@ function CommentButton({
           }}
         >
           <Textarea
-            aria-label={`Comment on ${range}`}
-            placeholder={`What should change in ${range}?`}
+            aria-label={m.spreadsheets_comment_on_range({ range })}
+            placeholder={m.spreadsheets_comment_placeholder({ range })}
             value={body}
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={(event) => {
@@ -391,7 +394,7 @@ function CommentButton({
             }}
           />
           <PendingButton type="submit" size="sm" pending={sending} disabled={!body.trim()}>
-            Send
+            {m.spreadsheets_comment_send()}
           </PendingButton>
         </form>
       </PopoverContent>

@@ -125,5 +125,36 @@
   "language_title": "Sprache",
   "sharing_error_rate_limited": "Zu viele Freigaben auf einmal. Versuch es gleich noch mal",
   "skills_error_conflict": "Dieser Skill wurde in einem anderen Editor geändert. Dein Entwurf bleibt erhalten. Sieh dir die aktuelle Fassung an, bevor du speicherst.",
+  "spreadsheets_comment": "Kommentieren",
+  "spreadsheets_comment_failed": "Der Kommentar konnte nicht an den Assistenten gesendet werden",
+  "spreadsheets_comment_failed_hint": "Versuch es noch einmal, sobald die aktuelle Antwort fertig ist.",
+  "spreadsheets_comment_on_range": "{range} kommentieren",
+  "spreadsheets_comment_placeholder": "Was soll sich in {range} ändern?",
+  "spreadsheets_comment_send": "Senden",
+  "spreadsheets_copy_failed": "Die Zellen konnten nicht kopiert werden",
+  "spreadsheets_copy_too_many": "Zu viele Zellen zum Kopieren",
+  "spreadsheets_copy_too_many_hint": "Wähle weniger aus.",
+  "spreadsheets_preview_chart": "Diagramm {number} auf {sheet}",
+  "spreadsheets_preview_chart_failed": "Das Diagramm konnte nicht gezeichnet werden.",
+  "spreadsheets_preview_chart_loading": "Diagramm wird geladen",
+  "spreadsheets_preview_charts_hidden": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Ein Diagramm wird hier nicht angezeigt.",
+        "countPlural=other": "{count} Diagramme werden hier nicht angezeigt."
+      }
+    }
+  ],
+  "spreadsheets_preview_download_hint": "Lade das Original herunter, um alles zu sehen.",
+  "spreadsheets_preview_formula_bar": "Bearbeitungsleiste",
+  "spreadsheets_preview_load_failed": "Die Arbeitsmappe konnte nicht geladen werden. Lade das Original herunter, um sie anderswo zu öffnen.",
+  "spreadsheets_preview_loading": "Arbeitsmappe wird geladen",
+  "spreadsheets_preview_picture": "Bild",
+  "spreadsheets_preview_picture_named": "Bild: {alt}",
+  "spreadsheets_preview_sheet_failed": "Das Tabellenblatt konnte nicht geladen werden. Lade das Original herunter, um es anderswo zu öffnen.",
+  "spreadsheets_preview_sheets": "Tabellenblatt",
+  "spreadsheets_preview_truncated": "Angezeigt wird der Anfang des Tabellenblatts.",
   "tools_error_web_search_unavailable": "Websuche nicht verfügbar: {reason}"
 }

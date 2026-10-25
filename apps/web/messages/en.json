@@ -125,5 +125,36 @@
   "language_title": "Language",
   "sharing_error_rate_limited": "Too many sharing requests. Try again shortly",
   "skills_error_conflict": "This skill changed in another editor. Your draft is kept. Review the current revision before saving.",
+  "spreadsheets_comment": "Comment",
+  "spreadsheets_comment_failed": "Couldn’t send it to the assistant",
+  "spreadsheets_comment_failed_hint": "Try again once the current answer is done.",
+  "spreadsheets_comment_on_range": "Comment on {range}",
+  "spreadsheets_comment_placeholder": "What should change in {range}?",
+  "spreadsheets_comment_send": "Send",
+  "spreadsheets_copy_failed": "Couldn’t copy the cells",
+  "spreadsheets_copy_too_many": "Too many cells to copy",
+  "spreadsheets_copy_too_many_hint": "Select fewer.",
+  "spreadsheets_preview_chart": "Chart {number} on {sheet}",
+  "spreadsheets_preview_chart_failed": "Could not draw this chart.",
+  "spreadsheets_preview_chart_loading": "Loading chart",
+  "spreadsheets_preview_charts_hidden": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "A chart isn’t shown here.",
+        "countPlural=other": "{count} charts aren’t shown here."
+      }
+    }
+  ],
+  "spreadsheets_preview_download_hint": "Download the original for everything.",
+  "spreadsheets_preview_formula_bar": "Formula bar",
+  "spreadsheets_preview_load_failed": "Could not load this workbook. Download the original to open it elsewhere.",
+  "spreadsheets_preview_loading": "Loading workbook",
+  "spreadsheets_preview_picture": "Picture",
+  "spreadsheets_preview_picture_named": "Picture: {alt}",
+  "spreadsheets_preview_sheet_failed": "Could not load this sheet. Download the original to open it elsewhere.",
+  "spreadsheets_preview_sheets": "Sheet",
+  "spreadsheets_preview_truncated": "Showing the start of this sheet.",
   "tools_error_web_search_unavailable": "Web search unavailable: {reason}"
 }
