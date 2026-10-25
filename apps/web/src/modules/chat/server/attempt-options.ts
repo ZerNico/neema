@@ -326,7 +326,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
                 userId: input.userId,
                 agentId: defaults.agent.agentId,
               })
-            : yield* new AgentNotAvailable({ agentId: "deleted" })
+            : yield* new AgentNotAvailable({ agentId: null })
           : null;
         const resolved = yield* resolveEffectiveGeneration({
           tx,

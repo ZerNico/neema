@@ -770,11 +770,13 @@ function makeChatService() {
         // agent made inaccessible by policy must not run under changed settings.
         Effect.catchTag("AgentNotAvailable", (error) =>
           Effect.gen(function* () {
-            const [existing] = yield* db
-              .select({ id: savedAgents.id })
-              .from(savedAgents)
-              .where(eq(savedAgents.id, error.agentId))
-              .pipe(Effect.orDie);
+            const [existing] = error.agentId
+              ? yield* db
+                  .select({ id: savedAgents.id })
+                  .from(savedAgents)
+                  .where(eq(savedAgents.id, error.agentId))
+                  .pipe(Effect.orDie)
+              : [];
             if (existing) return yield* error;
             return yield* fire(undefined);
           }),
