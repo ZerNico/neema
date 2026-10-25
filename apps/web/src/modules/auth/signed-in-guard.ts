@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
-import { meQuery, needsSetupQuery } from "./client.ts";
+import { meQuery, needsSetupQuery, type Me } from "./client.ts";
 import { redirectSearch } from "./redirect.ts";
 
 /**
@@ -10,14 +10,25 @@ import { redirectSearch } from "./redirect.ts";
  * they wanted sits behind a form they cannot usefully submit.
  */
 export async function leaveIfSignedIn(queryClient: QueryClient, redirectTo: string | undefined) {
-  const me = await queryClient.ensureQueryData(meQuery);
+  leave(await queryClient.ensureQueryData(meQuery), redirectTo);
+}
+
+function leave(me: Me | null, redirectTo: string | undefined) {
   if (!me) return;
   if (me.approval !== "approved") throw redirect({ to: "/pending" });
   throw redirect({ href: redirectTo ?? "/" });
 }
 
-/** Sign-in and registration have nothing to offer an instance nobody owns yet. */
-export async function setUpFirst(queryClient: QueryClient, redirectTo: string | undefined) {
-  if (await queryClient.fetchQuery(needsSetupQuery))
-    throw redirect({ to: "/setup", search: redirectSearch(redirectTo) });
+/**
+ * Sign-in, registration and password reset: setup first, since they have
+ * nothing to offer an instance nobody owns yet, then `leaveIfSignedIn`. Both
+ * are read at once and decided in that order.
+ */
+export async function guardSignInPage(queryClient: QueryClient, redirectTo: string | undefined) {
+  const [needsSetup, me] = await Promise.all([
+    queryClient.fetchQuery(needsSetupQuery),
+    queryClient.ensureQueryData(meQuery),
+  ]);
+  if (needsSetup) throw redirect({ to: "/setup", search: redirectSearch(redirectTo) });
+  leave(me, redirectTo);
 }

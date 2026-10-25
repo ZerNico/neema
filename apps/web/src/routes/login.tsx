@@ -4,7 +4,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
-import { leaveIfSignedIn, setUpFirst } from "~/modules/auth/signed-in-guard.ts";
+import { guardSignInPage } from "~/modules/auth/signed-in-guard.ts";
 import { DesktopSignIn } from "~/modules/auth/ui/desktop-sign-in.tsx";
 import { SignInProviders } from "~/modules/auth/ui/sign-in-providers.tsx";
 import { oauthErrorMessage } from "~/modules/auth/oauth-errors.ts";
@@ -31,8 +31,7 @@ export const Route = createFileRoute("/login")({
     ...(typeof search["error"] === "string" ? { error: search["error"].slice(0, 100) } : {}),
   }),
   beforeLoad: async ({ context, search }) => {
-    await setUpFirst(context.queryClient, search.redirect);
-    await leaveIfSignedIn(context.queryClient, search.redirect);
+    await guardSignInPage(context.queryClient, search.redirect);
   },
   loader: ({ context }) => context.queryClient.ensureQueryData(signInOptionsQuery),
   component: LoginPage,

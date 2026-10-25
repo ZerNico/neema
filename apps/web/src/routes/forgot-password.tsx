@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 import { authClient } from "~/modules/auth/client.ts";
-import { leaveIfSignedIn, setUpFirst } from "~/modules/auth/signed-in-guard.ts";
+import { guardSignInPage } from "~/modules/auth/signed-in-guard.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import {
@@ -23,8 +23,7 @@ const ForgotSchema = Schema.Struct({
 
 export const Route = createFileRoute("/forgot-password")({
   beforeLoad: async ({ context }) => {
-    await setUpFirst(context.queryClient, undefined);
-    await leaveIfSignedIn(context.queryClient, undefined);
+    await guardSignInPage(context.queryClient, undefined);
   },
   component: ForgotPasswordPage,
 });

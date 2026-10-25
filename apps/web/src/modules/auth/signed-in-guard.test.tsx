@@ -1,7 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMe } from "~/modules/auth/server/functions.ts";
-import { leaveIfSignedIn } from "./signed-in-guard.ts";
+import { getNeedsSetup } from "~/modules/auth/server/signup-functions.ts";
+import { guardSignInPage, leaveIfSignedIn } from "./signed-in-guard.ts";
 
 vi.mock("~/modules/auth/server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("~/modules/auth/server/signup-functions.ts", () => ({ getNeedsSetup: vi.fn() }));
@@ -40,5 +41,25 @@ describe("sign-in page guard", () => {
     await expect(leaveIfSignedIn(newClient(), "/desktop/sign-in")).rejects.toMatchObject({
       options: { to: "/pending" },
     });
+  });
+});
+
+describe("sign-in page guard with setup", () => {
+  it("sends to setup before anything else, even a signed-in visitor", async () => {
+    vi.mocked(getNeedsSetup).mockResolvedValue(true);
+    vi.mocked(getMe).mockResolvedValue(signedIn());
+    await expect(guardSignInPage(newClient(), "/chat")).rejects.toMatchObject({
+      options: { to: "/setup", search: { redirect: "/chat" } },
+    });
+  });
+
+  it("reads setup and the session at once, then leaves when signed in", async () => {
+    let releaseSetup!: (value: boolean) => void;
+    vi.mocked(getNeedsSetup).mockReturnValue(new Promise((resolve) => (releaseSetup = resolve)));
+    vi.mocked(getMe).mockResolvedValue(signedIn());
+    const guard = guardSignInPage(newClient(), undefined);
+    await vi.waitFor(() => expect(getMe).toHaveBeenCalled());
+    releaseSetup(false);
+    await expect(guard).rejects.toMatchObject({ options: { href: "/" } });
   });
 });
