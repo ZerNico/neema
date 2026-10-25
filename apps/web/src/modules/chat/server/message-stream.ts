@@ -12,7 +12,7 @@ export const openMessageStream = (input: {
   sessionId: string;
   messageId: string;
   afterSeq: number;
-  runId: string | undefined;
+  generationId: string | undefined;
 }) =>
   Effect.gen(function* () {
     const repo = yield* ChatRepo;
@@ -22,6 +22,6 @@ export const openMessageStream = (input: {
     yield* repo.getConversation(input.userId, message.conversationId);
     const ended = yield* sessionEnded(input.sessionId, input.userId);
     return engine
-      .subscribe(input.messageId, input.afterSeq, input.runId)
+      .subscribe(input.messageId, input.afterSeq, input.generationId)
       .pipe(Stream.interruptWhen(ended));
   }).pipe(Effect.catchTag("ConversationNotFound", () => Effect.succeed(null)));

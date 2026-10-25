@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
             sessionId: session.session.id,
             messageId: params.messageId,
             afterSeq,
-            runId: url.searchParams.get("runId") ?? undefined,
+            generationId: url.searchParams.get("generationId") ?? undefined,
           }),
         );
 
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
           event.kind === "status"
             ? sseFrame("status", {
                 reading: event.reading,
-                ...(event.runId ? { runId: event.runId } : {}),
+                ...(event.generationId ? { generationId: event.generationId } : {}),
               })
             : event.kind === "chunk"
               ? sseFrame("chunk", {
@@ -45,23 +45,23 @@ export const Route = createFileRoute("/api/messages/$messageId/stream")({
                   at: event.at ?? Date.now(),
                   // The server's clock now, so the client can read `at` against it.
                   sentAt: Date.now(),
-                  ...(event.runId ? { runId: event.runId } : {}),
+                  ...(event.generationId ? { generationId: event.generationId } : {}),
                 })
               : event.kind === "lookups"
                 ? sseFrame("lookups", {
                     lookups: event.lookups,
-                    ...(event.runId ? { runId: event.runId } : {}),
+                    ...(event.generationId ? { generationId: event.generationId } : {}),
                   })
                 : event.kind === "preview"
                   ? sseFrame("preview", {
                       callId: event.callId,
                       mediaType: event.mediaType,
                       data: event.data,
-                      ...(event.runId ? { runId: event.runId } : {}),
+                      ...(event.generationId ? { generationId: event.generationId } : {}),
                     })
                   : sseFrame("done", {
                       status: event.status,
-                      ...(event.runId ? { runId: event.runId } : {}),
+                      ...(event.generationId ? { generationId: event.generationId } : {}),
                     }),
         );
       },

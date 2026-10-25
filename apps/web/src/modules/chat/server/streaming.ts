@@ -69,12 +69,12 @@ export class StreamEngine extends Context.Service<
      * the same single-instance constraint the live chunk tail has (replay is
      * durable, the in-flight fiber is not).
      */
-    stopGeneration(messageId: string, expectedRunId?: string): Effect.Effect<boolean>;
+    stopGeneration(messageId: string, expectedGenerationId?: string): Effect.Effect<boolean>;
     /**
      * Waits until this instance's attempt has finalized: persisted, announced
      * and settled. Returns at once when it is not running here.
      */
-    awaitSettled(messageId: string, expectedRunId?: string): Effect.Effect<void>;
+    awaitSettled(messageId: string, expectedGenerationId?: string): Effect.Effect<void>;
     /**
      * Settles ordinary generations whose lease lapsed (their process is gone)
      * and notifies subscribers. Runs on a timer; callers may run it on demand.
@@ -87,7 +87,7 @@ export class StreamEngine extends Context.Service<
     subscribe(
       messageId: string,
       afterSeq: number,
-      expectedRunId?: string,
+      expectedGenerationId?: string,
     ): Stream.Stream<StreamEvent>;
   }
 >()("chat/chat/StreamEngine") {
@@ -126,7 +126,7 @@ export class StreamEngine extends Context.Service<
           abort: Deferred.Deferred<void>;
           /** Completed once finalize has run, for a caller that must wait it out. */
           settled: Deferred.Deferred<void>;
-          runId?: string | undefined;
+          generationId?: string | undefined;
           owner: ExternalOwner | null;
         }
       >();
@@ -134,7 +134,7 @@ export class StreamEngine extends Context.Service<
       // row commits a few steps before the fiber). The fiber claims it and
       // stops at once. Kept here, not on the chat, so an Undo cannot clear it;
       // an unclaimed one is pruned after a minute.
-      const earlyStops = new Map<string, { runId: string; at: number }>();
+      const earlyStops = new Map<string, { generationId: string; at: number }>();
       const runtimeScope = yield* Effect.scope;
       // A generation whose process died stays "streaming" forever unless
       // someone settles it: the client cannot stop it (nothing is registered
@@ -149,7 +149,7 @@ export class StreamEngine extends Context.Service<
               PubSub.publish(pubsub, {
                 kind: "done",
                 messageId: row.messageId,
-                ...(row.generationId ? { runId: row.generationId } : {}),
+                ...(row.generationId ? { generationId: row.generationId } : {}),
                 status: "error",
               }).pipe(
                 Effect.andThen(
@@ -309,14 +309,14 @@ export class StreamEngine extends Context.Service<
         const registration = {
           abort,
           settled: yield* Deferred.make<void>(),
-          runId: fence?.generationId,
+          generationId: fence?.generationId,
           owner,
         };
         inFlight.set(input.messageId, registration);
         // After registering: a stop from now on finds the registration, and
         // one from before it left an early stop to claim.
         const early = earlyStops.get(input.messageId);
-        if (early?.runId === input.generationId) {
+        if (early?.generationId === input.generationId) {
           earlyStops.delete(input.messageId);
           yield* Deferred.succeed(abort, undefined);
         }
@@ -360,7 +360,7 @@ export class StreamEngine extends Context.Service<
                 yield* PubSub.publish(pubsub, {
                   kind: "done",
                   messageId: input.messageId,
-                  ...(input.generationId ? { runId: input.generationId } : {}),
+                  ...(input.generationId ? { generationId: input.generationId } : {}),
                   status: "error",
                 });
                 yield* sync.publish(input.userId, {
@@ -400,15 +400,19 @@ export class StreamEngine extends Context.Service<
         );
       });
 
-      const stopGeneration = (messageId: string, expectedRunId?: string): Effect.Effect<boolean> =>
+      const stopGeneration = (
+        messageId: string,
+        expectedGenerationId?: string,
+      ): Effect.Effect<boolean> =>
         Effect.suspend(() => {
           const registration = inFlight.get(messageId);
-          if (!registration && expectedRunId) {
+          if (!registration && expectedGenerationId) {
             const now = Date.now();
             for (const [id, stop] of earlyStops) if (now - stop.at > 60_000) earlyStops.delete(id);
-            earlyStops.set(messageId, { runId: expectedRunId, at: now });
+            earlyStops.set(messageId, { generationId: expectedGenerationId, at: now });
           }
-          if (!registration || registration.runId !== expectedRunId) return Effect.succeed(false);
+          if (!registration || registration.generationId !== expectedGenerationId)
+            return Effect.succeed(false);
           return Deferred.succeed(registration.abort, undefined).pipe(
             Effect.tap(() =>
               registration.owner ? external.cancelAttempt(registration.owner) : Effect.void,
@@ -416,17 +420,21 @@ export class StreamEngine extends Context.Service<
           );
         });
 
-      const awaitSettled = (messageId: string, expectedRunId?: string): Effect.Effect<void> =>
+      const awaitSettled = (
+        messageId: string,
+        expectedGenerationId?: string,
+      ): Effect.Effect<void> =>
         Effect.suspend(() => {
           const registration = inFlight.get(messageId);
-          if (!registration || registration.runId !== expectedRunId) return Effect.void;
+          if (!registration || registration.generationId !== expectedGenerationId)
+            return Effect.void;
           return Deferred.await(registration.settled);
         });
 
       const subscribe = (
         messageId: string,
         afterSeq: number,
-        expectedRunId?: string,
+        expectedGenerationId?: string,
       ): Stream.Stream<StreamEvent> =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -441,12 +449,12 @@ export class StreamEngine extends Context.Service<
             const subscription = yield* PubSub.subscribe(pubsub);
             if (message.status === "streaming" && !inFlight.has(messageId)) yield* reapGenerations;
             const current = (yield* repo.getMessage(messageId).pipe(Effect.orDie)) ?? message;
-            const runId = expectedRunId ?? current.generationId ?? undefined;
-            if (current.generationId && current.generationId !== runId)
+            const generationId = expectedGenerationId ?? current.generationId ?? undefined;
+            if (current.generationId && current.generationId !== generationId)
               return Stream.make({
                 kind: "done" as const,
                 messageId,
-                runId: current.generationId,
+                generationId: current.generationId,
                 status: "error" as const,
               });
             const persisted = yield* repo.chunksAfter(messageId, afterSeq);
@@ -457,7 +465,7 @@ export class StreamEngine extends Context.Service<
               return Stream.make({
                 kind: "done" as const,
                 messageId,
-                ...(afterReplay?.generationId ? { runId: afterReplay.generationId } : {}),
+                ...(afterReplay?.generationId ? { generationId: afterReplay.generationId } : {}),
                 status: "error" as const,
               });
             let lastSeq = persisted.at(-1)?.seq ?? afterSeq;
@@ -466,7 +474,7 @@ export class StreamEngine extends Context.Service<
             const replay: Stream.Stream<StreamEvent> = Stream.fromIterable(
               persisted.map((c) => ({
                 kind: "chunk" as const,
-                ...(runId ? { runId } : {}),
+                ...(generationId ? { generationId } : {}),
                 messageId,
                 seq: c.seq,
                 chunkKind: c.kind,
@@ -479,7 +487,7 @@ export class StreamEngine extends Context.Service<
               const done: StreamEvent = {
                 kind: "done",
                 messageId,
-                ...(runId ? { runId } : {}),
+                ...(generationId ? { generationId } : {}),
                 status: current.status,
               };
               return replay.pipe(Stream.concat(Stream.make(done)));
@@ -488,7 +496,7 @@ export class StreamEngine extends Context.Service<
             const status = statuses.get(messageId);
             const toChunk = (c: (typeof persisted)[number]): StreamEvent => ({
               kind: "chunk",
-              ...(runId ? { runId } : {}),
+              ...(generationId ? { generationId } : {}),
               messageId,
               seq: c.seq,
               chunkKind: c.kind,
@@ -508,7 +516,9 @@ export class StreamEngine extends Context.Service<
                   )
                 : Stream.make(event);
             const live: Stream.Stream<StreamEvent> = Stream.fromSubscription(subscription).pipe(
-              Stream.filter((event) => event.messageId === messageId && event.runId === runId),
+              Stream.filter(
+                (event) => event.messageId === messageId && event.generationId === generationId,
+              ),
               Stream.filter((event) => event.kind !== "chunk" || event.seq > lastSeq),
               Stream.flatMap(inOrder),
             );
@@ -519,7 +529,8 @@ export class StreamEngine extends Context.Service<
               Schedule.spaced(settledEvery),
             ).pipe(
               Stream.filter(
-                (row) => row?.status !== "streaming" || (row.generationId ?? undefined) !== runId,
+                (row) =>
+                  row?.status !== "streaming" || (row.generationId ?? undefined) !== generationId,
               ),
               Stream.take(1),
               Stream.flatMap((row) =>
@@ -530,10 +541,10 @@ export class StreamEngine extends Context.Service<
                       {
                         kind: "done",
                         messageId,
-                        ...(runId ? { runId } : {}),
+                        ...(generationId ? { generationId } : {}),
                         status:
                           row &&
-                          (row.generationId ?? undefined) === runId &&
+                          (row.generationId ?? undefined) === generationId &&
                           row.status !== "streaming"
                             ? row.status
                             : "error",
@@ -554,7 +565,7 @@ export class StreamEngine extends Context.Service<
             );
 
             const reading: Stream.Stream<StreamEvent> =
-              status && status.runId === runId
+              status && status.generationId === generationId
                 ? Stream.make({ kind: "status", ...status })
                 : Stream.empty;
             // Read after subscribing, so an image recorded since the loader ran is in one or the other.
@@ -564,13 +575,13 @@ export class StreamEngine extends Context.Service<
                 ? Stream.make({
                     kind: "lookups",
                     messageId,
-                    ...(runId ? { runId } : {}),
+                    ...(generationId ? { generationId } : {}),
                     lookups: lookupsOf(output),
                   })
                 : Stream.empty;
             const drawing: Stream.Stream<StreamEvent> = Stream.fromIterable(
               [...(previews.get(messageId)?.values() ?? [])]
-                .filter((event) => event.runId === runId)
+                .filter((event) => event.generationId === generationId)
                 .map((event) => ({ kind: "preview" as const, ...event })),
             );
             return replay.pipe(

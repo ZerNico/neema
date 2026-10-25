@@ -792,6 +792,58 @@ describe("loadConversationDetail", () => {
     );
   });
 
+  it("renames a stored writing marker's attempt to generationId and nothing else", async () => {
+    await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const thread = yield* seedThread(userId, "Kept chunks");
+        const marker = { v: 1, id: "deck-call", name: "edit_presentation", textOffset: 0 };
+        const research = JSON.stringify({ v: 1, family: "research", runId: "run-1" });
+        const prose = 'Quoted JSON: {"runId": "gen-1"}';
+        const db = yield* Db;
+        yield* db.insert(messageChunks).values([
+          {
+            messageId: thread.assistantId,
+            seq: 1,
+            kind: "writing",
+            delta: JSON.stringify({ ...marker, turnIndex: 0, runId: "gen-1" }),
+          },
+          { messageId: thread.assistantId, seq: 2, kind: "tool", delta: research },
+          { messageId: thread.assistantId, seq: 3, kind: "text", delta: prose },
+          {
+            messageId: thread.assistantId,
+            seq: 4,
+            kind: "writing",
+            delta: JSON.stringify({ ...marker, turnIndex: 1 }),
+          },
+        ]);
+        yield* db.execute(
+          readFileSync(
+            new URL(
+              "../../drizzle/20261025144148_writing_marker_generation_id/migration.sql",
+              import.meta.url,
+            ),
+            "utf8",
+          ) as never,
+        );
+        const rows = yield* db
+          .select({ seq: messageChunks.seq, delta: messageChunks.delta })
+          .from(messageChunks)
+          .where(eq(messageChunks.messageId, thread.assistantId))
+          .orderBy(messageChunks.seq);
+        expect(rows.map((row) => row.seq)).toEqual([1, 2, 3, 4]);
+        expect(JSON.parse(rows[0]!.delta)).toEqual({
+          ...marker,
+          turnIndex: 0,
+          generationId: "gen-1",
+        });
+        expect(rows[1]!.delta).toBe(research);
+        expect(rows[2]!.delta).toBe(prose);
+        expect(JSON.parse(rows[3]!.delta)).toEqual({ ...marker, turnIndex: 1 });
+      }),
+    );
+  });
+
   it("fails before reading anything for a conversation the caller does not own", async () => {
     const owner = await run(makeUser());
     const stranger = await run(makeUser());

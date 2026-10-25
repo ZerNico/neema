@@ -55,9 +55,9 @@ export const watchTurn = Effect.fn("mcp.watchTurn")(function* (input: {
   // The engine ends a subscription at once, naming the new attempt, when a
   // retry has replaced the one asked for.
   if (Option.isSome(event) && event.value.kind === "done") {
-    const runId = event.value.runId;
-    if (runId !== undefined && runId !== input.generationId)
-      return { kind: "superseded", generationId: runId } satisfies WatchOutcome;
+    const generationId = event.value.generationId;
+    if (generationId !== undefined && generationId !== input.generationId)
+      return { kind: "superseded", generationId } satisfies WatchOutcome;
   }
   return { kind: "settled" } satisfies WatchOutcome;
 });

@@ -8,7 +8,7 @@ import type { ChunkKind } from "../repo.ts";
  */
 export interface ChunkEvent {
   readonly messageId: string;
-  readonly runId?: string;
+  readonly generationId?: string;
   readonly seq: number;
   readonly chunkKind: ChunkKind;
   readonly delta: string;
@@ -18,7 +18,7 @@ export interface ChunkEvent {
 
 export interface DoneEvent {
   readonly messageId: string;
-  readonly runId?: string;
+  readonly generationId?: string;
   readonly status: "complete" | "error" | "aborted";
 }
 
@@ -28,7 +28,7 @@ export interface DoneEvent {
  */
 export interface StatusEvent {
   readonly messageId: string;
-  readonly runId?: string;
+  readonly generationId?: string;
   readonly reading: { readonly read: number; readonly total: number } | null;
 }
 
@@ -39,14 +39,14 @@ export interface StatusEvent {
  */
 export interface LookupsEvent {
   readonly messageId: string;
-  readonly runId?: string;
+  readonly generationId?: string;
   readonly lookups: UiLookups;
 }
 
 /** The latest in-progress image of a running image call, by its row id. Never persisted. */
 export interface PreviewEvent {
   readonly messageId: string;
-  readonly runId?: string;
+  readonly generationId?: string;
   readonly callId: string;
   readonly mediaType: string;
   /** Base64; the client draws it as a data URI. */

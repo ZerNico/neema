@@ -5847,7 +5847,7 @@ describe("resumable streaming pipeline", () => {
     const repo = await runtime.runPromise(ChatRepo);
     const db = await runtime.runPromise(Db);
     const seed = await runtime.runPromise(setupConversation);
-    const nextRunId = uuidv7();
+    const nextGenerationId = uuidv7();
     const chunksAfter = repo.chunksAfter;
     const replayRead = vi.spyOn(repo, "chunksAfter").mockImplementationOnce((messageId, afterSeq) =>
       Effect.gen(function* () {
@@ -5856,7 +5856,7 @@ describe("resumable streaming pipeline", () => {
           Effect.gen(function* () {
             yield* tx
               .update(messages)
-              .set({ generationId: nextRunId, status: "complete" })
+              .set({ generationId: nextGenerationId, status: "complete" })
               .where(eq(messages.id, messageId));
             yield* tx.delete(messageChunks).where(eq(messageChunks.messageId, messageId));
             yield* tx
@@ -5876,7 +5876,12 @@ describe("resumable streaming pipeline", () => {
         ),
       );
       expect(Array.from(events)).toEqual([
-        { kind: "done", messageId: seed.assistant.id, runId: nextRunId, status: "error" },
+        {
+          kind: "done",
+          messageId: seed.assistant.id,
+          generationId: nextGenerationId,
+          status: "error",
+        },
       ]);
       expect(replayRead).toHaveBeenCalledTimes(1);
     } finally {
@@ -6108,7 +6113,7 @@ describe("resumable streaming pipeline", () => {
       expect(result.events.at(-1)).toEqual({
         kind: "done",
         messageId: result.message?.id,
-        runId: result.generationId,
+        generationId: result.generationId,
         status: "error",
       });
       expect(result.message?.status).toBe("error");
@@ -7506,7 +7511,7 @@ describe("generated image streaming", () => {
         expect(live.at(-1)).toMatchObject({
           kind: "done",
           status: "complete",
-          runId: assistant.generationId,
+          generationId: assistant.generationId,
         });
         expect(JSON.stringify(live)).not.toContain(generatedPng.toString("base64"));
         expect(JSON.stringify(live)).not.toContain("private-replay");
@@ -8957,6 +8962,7 @@ describe("custom tool calls", () => {
           name: "edit_presentation",
           textOffset: 0,
           turnIndex: 0,
+          generationId: expect.any(String),
         });
         // A marker, not content: the answer is only what was written as text.
         expect(
@@ -12274,7 +12280,7 @@ describe("the live tail", () => {
                 if (event.kind !== "chunk" || !first) return Effect.void;
                 first = false;
                 return Deferred.succeed(go, undefined).pipe(
-                  Effect.andThen(engine.awaitSettled(assistantMessageId, event.runId)),
+                  Effect.andThen(engine.awaitSettled(assistantMessageId, event.generationId)),
                 );
               }),
             ),
@@ -12391,7 +12397,7 @@ describe("the message stream route's owner check", () => {
             sessionId: userId,
             messageId,
             afterSeq: 0,
-            runId: undefined,
+            generationId: undefined,
           }).pipe(Effect.map((stream) => stream !== null));
         return {
           owner: yield* open(owner.userId, owner.assistant.id),

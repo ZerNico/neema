@@ -32,4 +32,4 @@ Retry throws an answer away and starts over. Resume keeps it: the same assistant
 - Each attempt appends its own `usage_events` row. The message's `usage` sums the attempts, because its text spans them.
 - A research run was fenced by the attempt that started it and stays terminal; the model may start another. A run may settle its own call row after its generation ended, and resume keeps that row.
 - Saved ```ui block state and the images its blocks found stay with the row. The new attempt skips image queries already settled and counts them against the answer's caps. See [generative UI](generative-ui.md).
-- The client drops a `writing` marker whose `runId` names an earlier attempt: that attempt ended mid-call, so nothing would ever replace it.
+- The client drops a `writing` marker whose `generationId` names an earlier attempt: that attempt ended mid-call, so nothing would ever replace it.

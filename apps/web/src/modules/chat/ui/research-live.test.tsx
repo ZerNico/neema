@@ -167,18 +167,18 @@ it.each(["stream first", "detail first"])(
       entry.url.includes("/messages/m1/stream"),
     )!;
     // The stream is fenced by the attempt, not by the run a call inside it made.
-    expect(source.url).toContain("runId=gen-1");
+    expect(source.url).toContain("generationId=gen-1");
     act(() => {
       source.emit("chunk", {
         seq: 1,
         kind: "tool",
-        runId: "gen-1",
+        generationId: "gen-1",
         delta: JSON.stringify({ ...root, phase: "progress", progress }),
       });
       source.emit("chunk", {
         seq: 2,
         kind: "tool",
-        runId: "gen-1",
+        generationId: "gen-1",
         delta: JSON.stringify({ ...ask, phase: "start" }),
       });
     });
@@ -194,7 +194,7 @@ it.each(["stream first", "detail first"])(
       source.emit("chunk", {
         seq: 3,
         kind: "tool",
-        runId: "gen-1",
+        generationId: "gen-1",
         delta: JSON.stringify({ ...ask, phase: "result", result }),
       });
     });
@@ -206,14 +206,14 @@ it.each(["stream first", "detail first"])(
       source.emit("chunk", {
         seq: 4,
         kind: "tool",
-        runId: "gen-1",
+        generationId: "gen-1",
         delta: JSON.stringify({
           ...root,
           phase: "result",
           progress: { ...progress, phase: "complete" },
         }),
       });
-      source.emit("done", { status: "complete", runId: "gen-1" });
+      source.emit("done", { status: "complete", generationId: "gen-1" });
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send answers" })).toBeEnabled());
     expect(screen.getByRole("textbox", { name: "Your answer" })).toBe(draft);

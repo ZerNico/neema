@@ -70,13 +70,13 @@ export const makeConversationLifecycle = Effect.gen(function* () {
           live,
           (answer) =>
             Effect.gen(function* () {
-              const runId = answer.generationId ?? undefined;
+              const generationId = answer.generationId ?? undefined;
               if (answer.generationId && repo.research)
                 yield* repo.research.cancelForGeneration(answer.messageId, answer.generationId);
-              yield* engine.stopGeneration(answer.messageId, runId);
+              yield* engine.stopGeneration(answer.messageId, generationId);
               // Awaited even when another Stop got there first and is still settling.
               yield* engine
-                .awaitSettled(answer.messageId, runId)
+                .awaitSettled(answer.messageId, generationId)
                 .pipe(Effect.timeoutOption(Duration.seconds(10)));
             }),
           { discard: true },

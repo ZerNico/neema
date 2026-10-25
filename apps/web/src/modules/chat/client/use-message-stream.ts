@@ -483,10 +483,14 @@ const withoutWriting = (tools: ToolActivity[]) =>
  * A writing marker from an earlier attempt of a resumed answer. That attempt
  * ended mid-call, so nothing will ever replace the marker.
  */
-export const isStaleWriting = (delta: string, runId: string | null) => {
+export const isStaleWriting = (delta: string, generationId: string | null) => {
   try {
-    const writing = JSON.parse(delta) as { runId?: unknown };
-    return typeof writing.runId === "string" && runId !== null && writing.runId !== runId;
+    const writing = JSON.parse(delta) as { generationId?: unknown };
+    return (
+      typeof writing.generationId === "string" &&
+      generationId !== null &&
+      writing.generationId !== generationId
+    );
   } catch {
     return false;
   }
@@ -708,7 +712,7 @@ export function useMessageStream(
   initial: InitialStream | null,
   conversationId: string | null,
   /** The attempt's generation: retry, edit and resume reuse the row but not this. */
-  runId: string | null = null,
+  generationId: string | null = null,
   canonicalStatus?: "streaming" | "complete" | "error" | "aborted",
 ) {
   const queryClient = useQueryClient();
@@ -725,7 +729,7 @@ export function useMessageStream(
   const [live, setLive] = useState(() => liveTextFrom(initial));
   // Reset when the target generation changes (navigation between chats, or a
   // retry of the same message).
-  const generationKey = `${messageId}:${runId ?? "chat"}`;
+  const generationKey = `${messageId}:${generationId ?? "chat"}`;
   const [stateGeneration, setStateGeneration] = useState(generationKey);
   // Reset before commit: a same-message retry must never paint the prior files.
   if (messageId && stateGeneration !== generationKey) {
@@ -763,12 +767,12 @@ export function useMessageStream(
 
     const after = initial?.lastSeq ?? 0;
     const source = new EventSource(
-      `/api/messages/${messageId}/stream?after=${after}${runId ? `&runId=${encodeURIComponent(runId)}` : ""}`,
+      `/api/messages/${messageId}/stream?after=${after}${generationId ? `&generationId=${encodeURIComponent(generationId)}` : ""}`,
     );
     let closed = false;
-    const acceptsRun = (eventRunId: string | undefined) => {
+    const acceptsGeneration = (eventGenerationId: string | undefined) => {
       if (closed || activeRef.current !== generationKey) return false;
-      if ((eventRunId ?? null) === runId) return true;
+      if ((eventGenerationId ?? null) === generationId) return true;
       closed = true;
       source.close();
       if (conversationId)
@@ -781,14 +785,14 @@ export function useMessageStream(
         seq: number;
         kind?: ChunkKind;
         delta: string;
-        runId?: string;
+        generationId?: string;
         at?: number;
         sentAt?: number;
       };
       if (data.sentAt !== undefined) learnServerClock(data.sentAt);
-      if (!acceptsRun(data.runId) || !live.claim(data.seq)) return;
+      if (!acceptsGeneration(data.generationId) || !live.claim(data.seq)) return;
       const chunkKind = data.kind ?? "text";
-      if (chunkKind === "writing" && isStaleWriting(data.delta, runId)) return;
+      if (chunkKind === "writing" && isStaleWriting(data.delta, generationId)) return;
       if (chunkKind === "text" || chunkKind === "reasoning") live.append(chunkKind, data.delta);
       else
         dispatch({
@@ -809,18 +813,18 @@ export function useMessageStream(
     source.addEventListener("status", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         reading: StreamState["reading"];
-        runId?: string;
+        generationId?: string;
       };
-      if (!acceptsRun(data.runId)) return;
+      if (!acceptsGeneration(data.generationId)) return;
       dispatch({ kind: "reading", reading: data.reading });
     });
 
     source.addEventListener("lookups", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         lookups: UiLookups;
-        runId?: string;
+        generationId?: string;
       };
-      if (!acceptsRun(data.runId)) return;
+      if (!acceptsGeneration(data.generationId)) return;
       dispatch({ kind: "lookups", lookups: data.lookups });
     });
 
@@ -829,9 +833,10 @@ export function useMessageStream(
         callId: string;
         mediaType: string;
         data: string;
-        runId?: string;
+        generationId?: string;
       };
-      if (!acceptsRun(data.runId) || !/^image\/(png|jpeg|webp)$/.test(data.mediaType)) return;
+      if (!acceptsGeneration(data.generationId) || !/^image\/(png|jpeg|webp)$/.test(data.mediaType))
+        return;
       dispatch({
         kind: "preview",
         callId: data.callId,
@@ -842,9 +847,9 @@ export function useMessageStream(
     source.addEventListener("done", (raw) => {
       const data = JSON.parse((raw as MessageEvent).data) as {
         status: "complete" | "error" | "aborted";
-        runId?: string;
+        generationId?: string;
       };
-      if (!acceptsRun(data.runId)) return;
+      if (!acceptsGeneration(data.generationId)) return;
       closed = true;
       dispatch({ kind: "done", status: data.status });
       source.close();
@@ -872,7 +877,7 @@ export function useMessageStream(
     };
     // initial is intentionally captured only when the generation changes
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the resume point is read once, when this generation subscribes
-  }, [messageId, runId, terminalFailure, conversationId, queryClient, generationKey, live]);
+  }, [messageId, generationId, terminalFailure, conversationId, queryClient, generationKey, live]);
 
   // Completion is only reported once the words are all on screen; the pacer
   // keeps advancing regardless of status, so this converges within ticks of

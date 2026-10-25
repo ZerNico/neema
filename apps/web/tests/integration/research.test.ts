@@ -558,9 +558,9 @@ const send = (
       attachmentIds: [],
     }),
   );
-const collect = (messageId: string, runId?: string) =>
+const collect = (messageId: string, generationId?: string) =>
   Effect.flatMap(StreamEngine, (engine) =>
-    Stream.runCollect(engine.subscribe(messageId, 0, runId)),
+    Stream.runCollect(engine.subscribe(messageId, 0, generationId)),
   );
 /**
  * A message no longer points at a run: the run points back, through the tool
@@ -1553,7 +1553,7 @@ describe("ending a run", () => {
     expect(fresh.generationId).toBe(retried.generationId);
     const oldStream = await runtime.runPromise(collect(sent.assistantMessageId, firstGeneration));
     expect(oldStream).toHaveLength(1);
-    expect(oldStream[0]).toMatchObject({ kind: "done", runId: retried.generationId });
+    expect(oldStream[0]).toMatchObject({ kind: "done", generationId: retried.generationId });
     await runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* Db;

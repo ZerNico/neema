@@ -1685,7 +1685,7 @@ export const observePart = (
               turnIndex: turn,
               // A resumed answer replays this chunk; the attempt
               // it names tells the client it is no longer writing.
-              ...(fence ? { runId: fence.generationId } : {}),
+              ...(fence ? { generationId: fence.generationId } : {}),
             }),
           );
           yield* sink.flush;

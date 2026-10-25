@@ -34,8 +34,8 @@ describe("presentation writing events", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", runId),
-      { wrapper, initialProps: { runId: "generation-1" } },
+      ({ generationId }) => useMessageStream("m1", null, "c1", generationId),
+      { wrapper, initialProps: { generationId: "generation-1" } },
     );
     const old = FakeEventSource.instances.at(-1)!;
     const delta = JSON.stringify({
@@ -45,11 +45,11 @@ describe("presentation writing events", () => {
       textOffset: 0,
       turnIndex: 0,
     });
-    act(() => old.emit("chunk", { runId: "generation-1", seq: 1, kind: "writing", delta }));
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 1, kind: "writing", delta }));
     expect(result.current.tools).toHaveLength(1);
-    rerender({ runId: "generation-2" });
+    rerender({ generationId: "generation-2" });
     expect(result.current.tools).toEqual([]);
-    act(() => old.emit("chunk", { runId: "generation-1", seq: 2, kind: "writing", delta }));
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 2, kind: "writing", delta }));
     expect(result.current.tools).toEqual([]);
     expect(result.current.live.lastSeq).toBe(0);
   });
@@ -224,8 +224,8 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", runId),
-      { wrapper, initialProps: { runId: "run-1" } },
+      ({ generationId }) => useMessageStream("m1", null, "c1", generationId),
+      { wrapper, initialProps: { generationId: "generation-1" } },
     );
     const delta = JSON.stringify({
       v: 1,
@@ -237,21 +237,21 @@ describe("research attempt identity", () => {
       outcome: "created",
     });
     const old = FakeEventSource.instances.at(-1)!;
-    act(() => old.emit("chunk", { runId: "run-1", seq: 1, kind: "tool", delta }));
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 1, kind: "tool", delta }));
     expect(result.current.tools).toHaveLength(1);
     expect(result.current.tools[0]).toMatchObject({
       family: "memory",
       status: "complete",
       outcome: "created",
     });
-    rerender({ runId: "run-2" });
+    rerender({ generationId: "generation-2" });
     expect(result.current.tools).toEqual([]);
     const current = FakeEventSource.instances.at(-1)!;
-    act(() => old.emit("chunk", { runId: "run-1", seq: 2, kind: "tool", delta }));
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 2, kind: "tool", delta }));
     expect(result.current.tools).toEqual([]);
-    act(() => current.emit("chunk", { runId: "run-2", seq: 1, kind: "tool", delta }));
+    act(() => current.emit("chunk", { generationId: "generation-2", seq: 1, kind: "tool", delta }));
     expect(result.current.tools).toHaveLength(1);
-    act(() => current.emit("chunk", { runId: "run-1", seq: 2, kind: "tool", delta }));
+    act(() => current.emit("chunk", { generationId: "generation-1", seq: 2, kind: "tool", delta }));
     expect(result.current.live.lastSeq).toBe(1);
     expect(current.close).toHaveBeenCalled();
   });
@@ -262,26 +262,26 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", runId),
+      ({ generationId }) => useMessageStream("m1", null, "c1", generationId),
       {
         wrapper,
-        initialProps: { runId: "run-1" },
+        initialProps: { generationId: "generation-1" },
       },
     );
     const old = FakeEventSource.instances.at(-1)!;
-    expect(old.url).toContain("runId=run-1");
-    act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Old text" }));
+    expect(old.url).toContain("generationId=generation-1");
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 1, delta: "Old text" }));
     expect(result.current.live.lastSeq).toBe(1);
-    rerender({ runId: "run-2" });
+    rerender({ generationId: "generation-2" });
     const current = FakeEventSource.instances.at(-1)!;
-    expect(current.url).toContain("after=0&runId=run-2");
+    expect(current.url).toContain("after=0&generationId=generation-2");
     expect(result.current.live.lastSeq).toBe(0);
     // A retry must never flash the previous generation's words.
     expect(result.current.live.getSnapshot().text).toBe("");
     act(() => {
-      old.emit("chunk", { runId: "run-1", seq: 2, delta: "Late text" });
-      old.emit("done", { runId: "run-1", status: "error" });
-      current.emit("chunk", { runId: "run-2", seq: 1, delta: "New text" });
+      old.emit("chunk", { generationId: "generation-1", seq: 2, delta: "Late text" });
+      old.emit("done", { generationId: "generation-1", status: "error" });
+      current.emit("chunk", { generationId: "generation-2", seq: 1, delta: "New text" });
     });
     expect(result.current.live.lastSeq).toBe(1);
     expect(result.current.status).toBe("streaming");
@@ -295,20 +295,20 @@ describe("research attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ status, runId }) => useMessageStream("m1", null, "c1", runId, status),
+      ({ status, generationId }) => useMessageStream("m1", null, "c1", generationId, status),
       {
         wrapper,
         initialProps: {
           status: "streaming" as "streaming" | "error",
-          runId: "run-1",
+          generationId: "generation-1",
         },
       },
     );
     const old = FakeEventSource.instances.at(-1)!;
-    rerender({ status: "error", runId: "run-1" });
+    rerender({ status: "error", generationId: "generation-1" });
     expect(old.close).toHaveBeenCalled();
     expect(result.current.status).toBe("error");
-    act(() => old.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
+    act(() => old.emit("chunk", { generationId: "generation-1", seq: 1, delta: "Late" }));
     expect(result.current.live.lastSeq).toBe(0);
   });
 
@@ -318,15 +318,15 @@ describe("research attempt identity", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    const { result } = renderHook(() => useMessageStream("m1", null, "c1", "run-1"), {
+    const { result } = renderHook(() => useMessageStream("m1", null, "c1", "generation-1"), {
       wrapper,
     });
     const source = FakeEventSource.instances.at(-1)!;
-    act(() => source.emit("done", { runId: "run-2", status: "complete" }));
+    act(() => source.emit("done", { generationId: "generation-2", status: "complete" }));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversation", "c1"] });
     expect(source.close).toHaveBeenCalled();
     expect(result.current.status).toBe("streaming");
-    act(() => source.emit("chunk", { runId: "run-1", seq: 1, delta: "Late" }));
+    act(() => source.emit("chunk", { generationId: "generation-1", seq: 1, delta: "Late" }));
     expect(result.current.live.lastSeq).toBe(0);
   });
 });
@@ -345,31 +345,38 @@ describe("resumed answer", () => {
       compactions: [],
       lastSeq: 3,
     };
-    const { result } = renderHook(() => useMessageStream("m1", kept, "c1", "run-2"), {
+    const { result } = renderHook(() => useMessageStream("m1", kept, "c1", "generation-2"), {
       wrapper,
     });
     const source = FakeEventSource.instances.at(-1)!;
-    expect(source.url).toContain("after=3&runId=run-2");
-    const writing = (runId: string, id: string) =>
-      JSON.stringify({ v: 1, id, name: "edit_presentation", textOffset: 0, turnIndex: 0, runId });
+    expect(source.url).toContain("after=3&generationId=generation-2");
+    const writing = (generationId: string, id: string) =>
+      JSON.stringify({
+        v: 1,
+        id,
+        name: "edit_presentation",
+        textOffset: 0,
+        turnIndex: 0,
+        generationId,
+      });
     act(() => {
       // Replay labels every stored chunk with the current attempt.
-      source.emit("chunk", { runId: "run-2", seq: 3, delta: "Half an answer. " });
+      source.emit("chunk", { generationId: "generation-2", seq: 3, delta: "Half an answer. " });
       source.emit("chunk", {
-        runId: "run-2",
+        generationId: "generation-2",
         seq: 4,
         kind: "writing",
-        delta: writing("run-1", "a"),
+        delta: writing("generation-1", "a"),
       });
-      source.emit("chunk", { runId: "run-2", seq: 5, delta: "The rest." });
+      source.emit("chunk", { generationId: "generation-2", seq: 5, delta: "The rest." });
     });
     expect(result.current.tools).toEqual([]);
     act(() =>
       source.emit("chunk", {
-        runId: "run-2",
+        generationId: "generation-2",
         seq: 6,
         kind: "writing",
-        delta: writing("run-2", "b"),
+        delta: writing("generation-2", "b"),
       }),
     );
     expect(result.current.tools).toMatchObject([{ callId: "writing:b", writing: true }]);
@@ -475,19 +482,19 @@ describe("ordinary image attempt identity", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result, rerender } = renderHook(
-      ({ runId }) => useMessageStream("m1", null, "c1", runId),
-      { wrapper, initialProps: { runId: "generation-1" } },
+      ({ generationId }) => useMessageStream("m1", null, "c1", generationId),
+      { wrapper, initialProps: { generationId: "generation-1" } },
     );
     const old = FakeEventSource.instances.at(-1)!;
     act(() => {
       old.emit("chunk", {
-        runId: "generation-1",
+        generationId: "generation-1",
         seq: 1,
         kind: "file",
         delta: JSON.stringify(image),
       });
       old.emit("chunk", {
-        runId: "generation-1",
+        generationId: "generation-1",
         seq: 2,
         kind: "file",
         delta: JSON.stringify(image),
@@ -495,13 +502,13 @@ describe("ordinary image attempt identity", () => {
     });
     expect(result.current.files).toEqual([image]);
     expect(result.current.live.getSnapshot().text).toBe("");
-    act(() => old.emit("done", { runId: "generation-1", status: "complete" }));
+    act(() => old.emit("done", { generationId: "generation-1", status: "complete" }));
     expect(result.current.status).toBe("complete");
-    rerender({ runId: "generation-2" });
+    rerender({ generationId: "generation-2" });
     expect(result.current.files).toEqual([]);
     act(() =>
       old.emit("chunk", {
-        runId: "generation-1",
+        generationId: "generation-1",
         seq: 3,
         kind: "file",
         delta: JSON.stringify(image),

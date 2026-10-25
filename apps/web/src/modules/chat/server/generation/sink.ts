@@ -115,7 +115,7 @@ export const makeGenerationSink = (input: {
                 (chunk) =>
                   PubSub.publish(pubsub, {
                     kind: "chunk",
-                    ...(fence ? { runId: fence.generationId } : {}),
+                    ...(fence ? { generationId: fence.generationId } : {}),
                     messageId: input.messageId,
                     seq: chunk.seq,
                     chunkKind: chunk.kind,
@@ -154,7 +154,7 @@ export const makeGenerationSink = (input: {
               yield* PubSub.publish(pubsub, {
                 kind: "chunk",
                 messageId: input.messageId,
-                ...(fence ? { runId: fence.generationId } : {}),
+                ...(fence ? { generationId: fence.generationId } : {}),
                 seq,
                 chunkKind: "file",
                 delta: JSON.stringify(written),
@@ -175,7 +175,7 @@ export const makeGenerationSink = (input: {
           PubSub.publish(pubsub, {
             kind: "lookups",
             messageId: input.messageId,
-            runId: owner.generationId,
+            generationId: owner.generationId,
             lookups,
           }),
         ),
@@ -185,13 +185,13 @@ export const makeGenerationSink = (input: {
     const publishStatus = (reading: StatusEvent["reading"]) =>
       Effect.suspend(() => {
         const event: StatusEvent = {
-          ...(fence ? { runId: fence.generationId } : {}),
+          ...(fence ? { generationId: fence.generationId } : {}),
           messageId: input.messageId,
           reading,
         };
         if (reading) statuses.set(input.messageId, event);
         // Only this attempt's own line: a stale attempt must not clear a newer one's.
-        else if (statuses.get(input.messageId)?.runId === event.runId)
+        else if (statuses.get(input.messageId)?.generationId === event.generationId)
           statuses.delete(input.messageId);
         return PubSub.publish(pubsub, { kind: "status", ...event });
       });
@@ -201,7 +201,7 @@ export const makeGenerationSink = (input: {
         if (!fence) return;
         const event: PreviewEvent = {
           messageId: input.messageId,
-          runId: fence.generationId,
+          generationId: fence.generationId,
           callId,
           mediaType: image.mediaType,
           data: Buffer.from(image.data).toString("base64"),
@@ -304,7 +304,7 @@ export const makeGenerationSink = (input: {
         yield* PubSub.publish(pubsub, {
           kind: "done",
           messageId: input.messageId,
-          ...(fence ? { runId: fence.generationId } : {}),
+          ...(fence ? { generationId: fence.generationId } : {}),
           status,
         });
         yield* input.sync.publish(input.userId, {
