@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from "~/ui/primitives/avatar";
 import { Badge } from "~/ui/primitives/badge";
 import { decideAccount } from "../server/signup-functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 import { pendingAccountsQuery } from "../queries.ts";
 
 /**
@@ -27,13 +28,13 @@ export function PendingAccounts() {
         queryClient.invalidateQueries({ queryKey: ["admin", "pending-accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
       ]),
-    onError: (error) => toastError("Could not decide on the account.", error),
+    onError: (error) => toastError(m.auth_pending_error(), error),
   });
 
   if (pending.length === 0) return null;
 
   return (
-    <Section title="Waiting for approval">
+    <Section title={m.auth_pending_title()}>
       <ListCard>
         {pending.map((account) => (
           <ListRow key={account.userId}>
@@ -45,31 +46,32 @@ export function PendingAccounts() {
               <span className="text-muted-foreground truncate text-xs">{account.email}</span>
             </div>
             {/* Approving lets them in, not whoever owns the address they typed. */}
-            {account.emailVerified ? null : <Badge variant="outline">Unverified</Badge>}
+            {account.emailVerified ? null : (
+              <Badge variant="outline">{m.auth_pending_unverified()}</Badge>
+            )}
             <PendingButton
               size="sm"
               variant="outline"
-              aria-label={`Decline ${account.name}`}
+              aria-label={m.auth_pending_decline_label({ name: account.name })}
               pending={decide.isPending}
               onClick={async () => {
                 const confirmed = await confirm({
-                  title: `Decline ${account.name}?`,
-                  description:
-                    "The account is kept so the same person cannot sign up again and reappear here. They are told an admin declined them.",
-                  confirmLabel: "Decline",
+                  title: m.auth_pending_decline_title({ name: account.name }),
+                  description: m.auth_pending_decline_description(),
+                  confirmLabel: m.auth_pending_decline(),
                 });
                 if (confirmed) decide.mutate({ userId: account.userId, status: "rejected" });
               }}
             >
-              Decline
+              {m.auth_pending_decline()}
             </PendingButton>
             <PendingButton
               size="sm"
-              aria-label={`Approve ${account.name}`}
+              aria-label={m.auth_pending_approve_label({ name: account.name })}
               pending={decide.isPending}
               onClick={() => decide.mutate({ userId: account.userId, status: "approved" })}
             >
-              Approve
+              {m.auth_pending_approve()}
             </PendingButton>
           </ListRow>
         ))}

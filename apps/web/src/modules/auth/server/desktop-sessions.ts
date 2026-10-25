@@ -9,6 +9,8 @@ import { setSessionCookie } from "better-auth/cookies";
 import type { BetterAuthPlugin } from "better-auth";
 import { Option, Schema } from "effect";
 import { uuidv7 } from "uuidv7";
+import { m } from "~/paraglide/messages.js";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
 import {
   DESKTOP_SESSION_SECONDS,
   DESKTOP_TICKET_MINUTES,
@@ -24,8 +26,10 @@ const IDENTIFIER_PREFIX = "desktop-ticket:";
 
 // One message for wrong, expired and already-used codes, so a guess learns
 // nothing about which codes exist.
-const INVALID_TICKET = "That code is not valid.";
-const invalid = () => new APIError("BAD_REQUEST", { message: INVALID_TICKET });
+/** A refusal the desktop or the page shows, worded in the request it refuses. */
+const said = (message: (inputs: Record<string, never>, options: { locale: Locale }) => string) =>
+  message({}, { locale: getLocale() });
+const invalid = () => new APIError("BAD_REQUEST", { message: said(m.auth_error_invalid_ticket) });
 
 const TicketBody = Schema.toStandardSchemaV1(
   Schema.Struct({ challenge: Schema.optionalKey(Schema.String) }),
@@ -93,7 +97,7 @@ export const desktopSessions = ({
           // An unapproved account may not use the app yet. Impersonation is
           // refused for every endpoint but a few in the auth instance's hook.
           if (!(await approved(user.id))) {
-            throw new APIError("FORBIDDEN", { message: "This account cannot add a desktop." });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_cannot_add_desktop) });
           }
           const ticket = generateTicket();
           // The handle the minting tab keeps to recognise its own redemption.
@@ -175,13 +179,14 @@ export const desktopSessions = ({
           // Only a session this plugin minted by redemption gets the long lease;
           // any browser can send the shell's user agent.
           if (!markedDesktop(session) || !(await approved(user.id))) {
-            throw new APIError("FORBIDDEN", { message: "Only the desktop app can do this." });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_desktop_only) });
           }
           const updated = await ctx.context.internalAdapter.updateSession(session.token, {
             expiresAt: desktopExpiry(),
             updatedAt: new Date(),
           });
-          if (!updated) throw new APIError("UNAUTHORIZED", { message: "Session not found." });
+          if (!updated)
+            throw new APIError("UNAUTHORIZED", { message: said(m.auth_error_session_not_found) });
           await setSessionCookie(ctx, { session: updated, user }, false, {
             maxAge: DESKTOP_SESSION_SECONDS,
           });
@@ -200,7 +205,7 @@ export const desktopSessions = ({
         async (ctx) => {
           const { session, user } = ctx.context.session;
           if (!(await approved(user.id)))
-            throw new APIError("FORBIDDEN", { message: "This account cannot list devices." });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_cannot_list_devices) });
           const sessions = await ctx.context.internalAdapter.listSessions(user.id, {
             onlyActiveSessions: true,
           });
@@ -225,10 +230,12 @@ export const desktopSessions = ({
         async (ctx) => {
           const { session, user } = ctx.context.session;
           if (!(await approved(user.id))) {
-            throw new APIError("FORBIDDEN", { message: "This account cannot sign out devices." });
+            throw new APIError("FORBIDDEN", {
+              message: said(m.auth_error_cannot_sign_out_devices),
+            });
           }
           if (ctx.body.id === session.id) {
-            throw new APIError("BAD_REQUEST", { message: "Use sign out for this device." });
+            throw new APIError("BAD_REQUEST", { message: said(m.auth_error_use_sign_out) });
           }
           // Looked up among the caller's own sessions, so another user's id
           // is indistinguishable from one that never existed.

@@ -1,3 +1,6 @@
+import { m } from "~/paraglide/messages.js";
+import { baseLocale, type Locale } from "~/paraglide/runtime.js";
+
 export interface SessionIdentity {
   userId: string;
   impersonatedBy: string | null;
@@ -28,7 +31,10 @@ export const isImpersonated = (session: object) =>
  * The refusal of anything that would outlast an impersonated session: a key,
  * a linked login, a desktop, a connected app or service, a schedule.
  */
-export const IMPERSONATING_BODY = "Stop impersonating first. This would outlast your session.";
+export const impersonatingBody = (locale: Locale) => m.auth_error_impersonating({}, { locale });
+
+/** The same refusal in English, for callers that pass it on rather than show it. */
+export const IMPERSONATING_BODY = impersonatingBody(baseLocale);
 
 export function sameIdentity(a: SessionIdentity | null, b: SessionIdentity | null) {
   return a?.userId === b?.userId && a?.impersonatedBy === b?.impersonatedBy;

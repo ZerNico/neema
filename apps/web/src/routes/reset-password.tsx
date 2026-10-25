@@ -17,11 +17,11 @@ import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 import { m } from "~/paraglide/messages.js";
 
-// A function, so the messages read in the locale of the page that shows them.
+// Built where used, so its messages read in the page's language.
 const resetSchema = () =>
   Schema.Struct({
     password: Schema.String.check(
-      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+      Schema.isMinLength(8, { message: m.auth_form_password_length() }),
     ),
   });
 
@@ -45,7 +45,7 @@ function ResetPasswordPage() {
       setServerError(null);
       const { error } = await authClient.resetPassword({ newPassword: value.password, token });
       if (error) {
-        setServerError(error.message ?? m.app_reset_error());
+        setServerError(error.message ?? m.auth_reset_error());
         return;
       }
       await navigate({ to: "/login" });
@@ -56,8 +56,8 @@ function ResetPasswordPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{m.app_reset_title()}</CardTitle>
-          {token ? null : <CardDescription>{m.app_reset_link_expired()}</CardDescription>}
+          <CardTitle>{m.auth_reset_title()}</CardTitle>
+          {token ? null : <CardDescription>{m.auth_reset_expired()}</CardDescription>}
         </CardHeader>
         {token ? (
           <CardContent>
@@ -71,7 +71,7 @@ function ResetPasswordPage() {
               <form.AppField name="password">
                 {(field) => (
                   <field.TextField
-                    label={m.app_reset_new_password()}
+                    label={m.auth_reset_new_password()}
                     type="password"
                     autoComplete="new-password"
                   />
@@ -79,7 +79,7 @@ function ResetPasswordPage() {
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">{m.app_reset_submit()}</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.auth_reset_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           </CardContent>
@@ -89,7 +89,7 @@ function ResetPasswordPage() {
             to={token ? "/login" : "/forgot-password"}
             className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
           >
-            {token ? m.app_auth_back_to_sign_in() : m.app_reset_send_new_link()}
+            {token ? m.auth_back_to_sign_in() : m.auth_reset_new_link()}
           </Link>
         </CardFooter>
       </Card>

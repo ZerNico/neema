@@ -30,11 +30,13 @@ function PendingPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{rejected ? m.app_pending_declined_title() : m.app_pending_title()}</CardTitle>
+          <CardTitle>
+            {rejected ? m.auth_pending_page_declined() : m.auth_pending_page_waiting()}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">
-            {rejected ? m.app_pending_declined_description() : m.app_pending_description()}
+            {rejected ? m.auth_pending_page_declined_body() : m.auth_pending_page_waiting_body()}
           </p>
         </CardContent>
         <CardFooter>
@@ -49,7 +51,7 @@ function PendingPage() {
               window.location.assign("/login");
             }}
           >
-            {m.app_pending_sign_out()}
+            {m.auth_pending_page_sign_out()}
           </Button>
         </CardFooter>
       </Card>

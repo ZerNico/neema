@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import type { SignInProvider } from "./oauth.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * How one way in admits a new account: email and password has a mode, and so
@@ -11,26 +12,37 @@ export const SIGNUP_MODES = ["open", "approval", "closed"] as const;
 export type SignupMode = (typeof SIGNUP_MODES)[number];
 export const SignupModeSchema = Schema.Literals(SIGNUP_MODES);
 
+/** Read where shown, in the reader's language. */
 export const SIGNUP_MODE_LABELS: Record<SignupMode, { title: string; description: string }> = {
   open: {
-    title: "Anyone can join",
-    description: "A new account works straight away.",
+    get title() {
+      return m.auth_signup_open_title();
+    },
+    get description() {
+      return m.auth_signup_open_description();
+    },
   },
   approval: {
-    title: "Approval required",
-    description: "A new account waits until an admin lets it in.",
+    get title() {
+      return m.auth_signup_approval_title();
+    },
+    get description() {
+      return m.auth_signup_approval_description();
+    },
   },
   closed: {
-    title: "Nobody new",
-    description: "Only existing accounts can sign in.",
+    get title() {
+      return m.auth_signup_closed_title();
+    },
+    get description() {
+      return m.auth_signup_closed_description();
+    },
   },
 };
 
 /** For a select: the value with its title. */
-export const SIGNUP_MODE_ITEMS = SIGNUP_MODES.map((value) => ({
-  value,
-  label: SIGNUP_MODE_LABELS[value].title,
-}));
+export const signupModeItems = () =>
+  SIGNUP_MODES.map((value) => ({ value, label: SIGNUP_MODE_LABELS[value].title }));
 
 export interface AuthSettings {
   readonly passwordSignup: SignupMode;

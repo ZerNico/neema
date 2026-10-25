@@ -6,7 +6,7 @@ import { authClient, needsSetupQuery } from "~/modules/auth/client.ts";
 import { redirectSearch, safeRedirect } from "~/modules/auth/redirect.ts";
 import { saveAuthSettings } from "~/modules/auth/server/signup-functions.ts";
 import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
-import { SIGNUP_MODE_ITEMS, SIGNUP_MODE_LABELS, type SignupMode } from "~/modules/auth/signup.ts";
+import { signupModeItems, SIGNUP_MODE_LABELS, type SignupMode } from "~/modules/auth/signup.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/ui/card.tsx";
@@ -20,13 +20,13 @@ import {
 } from "~/ui/primitives/select";
 import { m } from "~/paraglide/messages.js";
 
-// A function, so the messages read in the locale of the page that shows them.
+// Built where used, so its messages read in the page's language.
 const setupSchema = () =>
   Schema.Struct({
-    name: Schema.String.check(Schema.isMinLength(1, { message: m.app_auth_name_required() })),
-    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    name: Schema.String.check(Schema.isMinLength(1, { message: m.auth_form_enter_name() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.auth_form_enter_email() })),
     password: Schema.String.check(
-      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+      Schema.isMinLength(8, { message: m.auth_form_password_length() }),
     ),
   });
 
@@ -60,7 +60,7 @@ function SetupPage() {
       setServerError(null);
       const { data, error } = await authClient.signUp.email(value);
       if (error) {
-        setServerError(error.message ?? m.app_register_error());
+        setServerError(error.message ?? m.auth_register_error());
         return;
       }
       // Someone who set the instance up a moment earlier gets an ordinary
@@ -84,8 +84,8 @@ function SetupPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{m.app_setup_title()}</CardTitle>
-          <CardDescription>{m.app_setup_description()}</CardDescription>
+          <CardTitle>{m.auth_setup_title()}</CardTitle>
+          <CardDescription>{m.auth_setup_description()}</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -96,34 +96,34 @@ function SetupPage() {
             }}
           >
             <form.AppField name="name">
-              {(field) => <field.TextField label={m.common_name()} autoComplete="name" />}
+              {(field) => <field.TextField label={m.auth_form_name()} autoComplete="name" />}
             </form.AppField>
             <form.AppField name="email">
               {(field) => (
-                <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                <field.TextField label={m.auth_form_email()} type="email" autoComplete="email" />
               )}
             </form.AppField>
             <form.AppField name="password">
               {(field) => (
                 <field.TextField
-                  label={m.app_auth_password()}
+                  label={m.auth_form_password()}
                   type="password"
                   autoComplete="new-password"
                 />
               )}
             </form.AppField>
             <Field>
-              <FieldLabel htmlFor={modeId}>{m.app_setup_who_can_join()}</FieldLabel>
+              <FieldLabel htmlFor={modeId}>{m.auth_setup_who_can_join()}</FieldLabel>
               <Select
                 value={mode}
                 onValueChange={(value) => value && setMode(value)}
-                items={SIGNUP_MODE_ITEMS}
+                items={signupModeItems()}
               >
                 <SelectTrigger id={modeId} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SIGNUP_MODE_ITEMS.map((item) => (
+                  {signupModeItems().map((item) => (
                     <SelectItem key={item.value} value={item.value}>
                       {item.label}
                     </SelectItem>
@@ -134,7 +134,7 @@ function SetupPage() {
             </Field>
             {serverError ? <FieldError>{serverError}</FieldError> : null}
             <form.AppForm>
-              <form.SubmitButton className="w-full">{m.app_setup_submit()}</form.SubmitButton>
+              <form.SubmitButton className="w-full">{m.auth_setup_submit()}</form.SubmitButton>
             </form.AppForm>
           </form>
         </CardContent>

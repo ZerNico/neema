@@ -7,6 +7,8 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { Schema } from "effect";
+import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 
 /** What a valid MCP bearer token proves: one person, through one app, with these scopes. */
 export interface McpGrant {
@@ -56,7 +58,9 @@ export const mcpAccess = ({
             if (ctx.path === "/oauth2/authorize") {
               return { context: { query: { ...ctx.query, prompt: "consent" } } };
             }
-            throw new APIError("FORBIDDEN", { message: "This account cannot connect apps." });
+            throw new APIError("FORBIDDEN", {
+              message: m.auth_error_cannot_connect_apps({}, { locale: getLocale() }),
+            });
           }),
         },
       ],

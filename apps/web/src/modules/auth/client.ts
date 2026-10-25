@@ -3,6 +3,7 @@ import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { getMe } from "./server/functions.ts";
 import { getNeedsSetup } from "./server/signup-functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 export const authClient = createAuthClient({
   plugins: [adminClient()],
@@ -49,7 +50,7 @@ type DesktopFetch<T> = Promise<{ data: T | null; error: { message?: string } | n
 
 const unwrap = async <T>(call: DesktopFetch<T>): Promise<T> => {
   const { data, error } = await call;
-  if (error || data === null) throw new Error(error?.message ?? "Something went wrong.");
+  if (error || data === null) throw new Error(error?.message ?? m.auth_client_error());
   return data;
 };
 

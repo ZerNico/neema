@@ -20,6 +20,7 @@ import { Field, FieldError, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
 import { cn } from "~/ui/utils";
 import { AuthScreen } from "./auth-screen.tsx";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Session storage rather than state: the verifier must survive a reload of
@@ -83,7 +84,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
     (raw: string) => {
       const ticket = normaliseTicket(raw);
       if (!isTicketShaped(ticket)) {
-        setShapeError("Enter the whole code from your browser.");
+        setShapeError(m.auth_desktop_enter_code());
         return;
       }
       setShapeError(null);
@@ -120,12 +121,10 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in</CardTitle>
+          <CardTitle>{m.auth_desktop_title()}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <p className="text-muted-foreground text-sm">
-            Sign in in your browser. If neema doesn’t continue by itself, paste the code it shows.
-          </p>
+          <p className="text-muted-foreground text-sm">{m.auth_desktop_intro()}</p>
           {browserHref ? (
             <a
               href={browserHref}
@@ -133,7 +132,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
               rel="noopener"
               className={cn(buttonVariants({ variant: "default" }), "w-full")}
             >
-              Sign in in your browser
+              {m.auth_desktop_browser()}
             </a>
           ) : null}
           <form
@@ -144,7 +143,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
             }}
           >
             <Field>
-              <FieldLabel htmlFor="desktop-code">Code</FieldLabel>
+              <FieldLabel htmlFor="desktop-code">{m.auth_desktop_code()}</FieldLabel>
               <Input
                 id="desktop-code"
                 value={code}
@@ -152,6 +151,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}
+                // oxlint-disable-next-line i18n/no-literal-text -- the code's shape, not words
                 placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
                 disabled={redeem.isPending}
               />
@@ -163,7 +163,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
               className="w-full"
               pending={redeem.isPending}
             >
-              Continue
+              {m.auth_desktop_continue()}
             </PendingButton>
           </form>
           {auth.canChangeServer ? (
@@ -175,7 +175,7 @@ export function DesktopSignIn({ auth }: { auth: DesktopAuth }) {
               disabled={changeServer.isPending}
               onClick={() => changeServer.mutate()}
             >
-              Not your server? Change server
+              {m.auth_desktop_change_server()}
             </Button>
           ) : null}
         </CardContent>

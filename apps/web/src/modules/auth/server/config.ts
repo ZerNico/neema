@@ -15,16 +15,19 @@ import { and, count, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
+
+/** A refusal Better Auth sends back, worded in the request it refuses. */
+const said = (message: (inputs: Record<string, never>, options: { locale: Locale }) => string) =>
+  message({}, { locale: getLocale() });
 import type { Db } from "~/db/client.ts";
 import * as schema from "~/db/schema/index.ts";
 import { MCP_SCOPES, OFFLINE_ACCESS } from "~/modules/mcp-server/scopes.ts";
-import { IMPERSONATING_BODY, isImpersonated } from "../identity.ts";
+import { impersonatingBody, isImpersonated } from "../identity.ts";
 import { IMPERSONATING, SIGN_IN_WITH_PROVIDER, SIGNUP_CLOSED } from "../oauth-errors.ts";
 import { desktopSessions } from "./desktop-sessions.ts";
 import { mcpAccess } from "./mcp-access.ts";
 import { passwordLoginForced } from "./password-login.ts";
-import { NO_WAY_IN } from "./way-in.ts";
 import {
   resetPasswordMail,
   verifyEmailMail,
@@ -226,7 +229,7 @@ const refuseNewAccount = () =>
   new APIError("FORBIDDEN", {
     // The OAuth callback forwards a code to the error page.
     code: SIGNUP_CLOSED,
-    message: "This instance is not accepting new accounts.",
+    message: said(m.auth_error_signup_closed),
   });
 
 /**
@@ -374,7 +377,10 @@ export function createAppAuth({
             if (signsInThrough(context, exclusive)) return;
             throw new APIError("FORBIDDEN", {
               code: SIGN_IN_WITH_PROVIDER,
-              message: `This account signs in with ${exclusive[0]!.label}.`,
+              message: m.auth_error_sign_in_with(
+                { provider: exclusive[0]!.label },
+                { locale: getLocale() },
+              ),
             });
           },
         },
@@ -385,7 +391,7 @@ export function createAppAuth({
           before: async (created) => {
             if (created.providerId !== "credential") return;
             if ((await exclusiveSignIns(created.userId)).length > 0)
-              throw new APIError("FORBIDDEN", { message: "This account has no password." });
+              throw new APIError("FORBIDDEN", { message: said(m.auth_error_no_password) });
           },
         },
       },
@@ -446,7 +452,10 @@ export function createAppAuth({
         if (!WHILE_IMPERSONATING.has(ctx.path)) {
           const current = await getAuthoritativeSessionFromCtx(ctx);
           if (current && isImpersonated(current.session))
-            throw new APIError("FORBIDDEN", { code: IMPERSONATING, message: IMPERSONATING_BODY });
+            throw new APIError("FORBIDDEN", {
+              code: IMPERSONATING,
+              message: impersonatingBody(getLocale()),
+            });
         }
         if (ctx.path === "/unlink-account") {
           // The account row's own id, which is what Better Auth unlinks by.
@@ -465,16 +474,16 @@ export function createAppAuth({
             )
             .where(eq(schema.account.id, leaving));
           if (bound)
-            throw new APIError("FORBIDDEN", { message: "This sign-in can’t be disconnected." });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_cannot_disconnect) });
           const session = await getAuthoritativeSessionFromCtx(ctx);
           if (!session) return; // The endpoint owns unauthenticated errors.
           if (!(await signup.keepsWayIn(session.user.id, { unlinking: leaving })))
-            throw new APIError("FORBIDDEN", { message: NO_WAY_IN });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_no_way_in) });
           return;
         }
         if (PASSWORD_PATHS.some((path) => ctx.path.startsWith(path))) {
           if (!(await signup.passwordAllowed()))
-            throw new APIError("FORBIDDEN", { message: "Password sign-in is turned off." });
+            throw new APIError("FORBIDDEN", { message: said(m.auth_error_password_off) });
           if (ctx.path !== "/sign-up/email") return;
           // Asked here as well as at creation: with verification required,
           // Better Auth answers a refused creation as success, so the person
@@ -495,7 +504,7 @@ export function createAppAuth({
         // stays usable after suspension, but grants no new authority.
         if (ctx.path !== stopPath && !(await signup.approved(session.user.id))) {
           throw new APIError("FORBIDDEN", {
-            message: "This account cannot administer the instance.",
+            message: said(m.auth_error_cannot_administer),
           });
         }
         if (ctx.path !== startPath && ctx.path !== stopPath) return;

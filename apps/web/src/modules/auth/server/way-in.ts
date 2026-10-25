@@ -3,6 +3,9 @@ import { Effect } from "effect";
 import { account, oauthProviders } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
 import { refuse } from "~/server/refusal.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { baseLocale } from "~/paraglide/runtime.js";
 import { passwordLoginForced } from "./password-login.ts";
 import { SignupRepo } from "./signup-repo.ts";
 
@@ -16,7 +19,7 @@ export interface WayInChange {
   readonly unlinking?: string;
 }
 
-export const NO_WAY_IN = "This would leave you no way to sign in. Connect another sign-in first.";
+export const NO_WAY_IN = m.auth_error_no_way_in({}, { locale: baseLocale });
 
 /**
  * Whether this person could still sign in after the change: with their
@@ -49,5 +52,7 @@ export const keepsWayIn = Effect.fn("auth.keepsWayIn")(function* (
 /** Refuses the change when it would lock the acting person out. */
 export const requireWayIn = (userId: string, change: WayInChange) =>
   keepsWayIn(userId, change).pipe(
-    Effect.flatMap((keeps) => (keeps ? Effect.void : refuse(409, NO_WAY_IN))),
+    Effect.flatMap((keeps) =>
+      keeps ? Effect.void : refuse(409, localized(m.auth_error_no_way_in)),
+    ),
   );

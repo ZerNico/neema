@@ -26,7 +26,8 @@ import { readServerError } from "~/server-error.ts";
 import { findBuiltin, OIDC_DEFAULT_SCOPES, type OAuthBuiltin } from "../oauth.ts";
 import { saveBuiltinOAuthProvider, saveOidcOAuthProvider } from "../server/oauth-functions.ts";
 import type { PublicOAuthProvider } from "../server/oauth-repo.ts";
-import { SIGNUP_MODE_ITEMS, SIGNUP_MODE_LABELS, type SignupMode } from "../signup.ts";
+import { signupModeItems, SIGNUP_MODE_LABELS, type SignupMode } from "../signup.ts";
+import { m } from "~/paraglide/messages.js";
 
 const OIDC = "oidc";
 
@@ -105,7 +106,7 @@ export function OAuthProviderDialog({
   const id = builtin ? builtin.id : draft.id;
   const typeItems = [
     ...available.map((b) => ({ value: b.id, label: b.label })),
-    { value: OIDC, label: "OpenID Connect" },
+    { value: OIDC, label: m.auth_dialog_oidc() },
   ];
 
   const complete = Boolean(
@@ -152,8 +153,7 @@ export function OAuthProviderDialog({
       await queryClient.invalidateQueries({ queryKey: ["admin", "oauth"] });
       onOpenChange(false);
     },
-    onError: (failure) =>
-      setError(readServerError(failure).reason ?? "Could not save the provider."),
+    onError: (failure) => setError(readServerError(failure).reason ?? m.auth_dialog_error_save()),
   });
 
   return (
@@ -167,10 +167,10 @@ export function OAuthProviderDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{provider ? `Edit ${provider.label}` : "Add provider"}</DialogTitle>
-          <DialogDescription>
-            The client secret is encrypted at rest and never shown again.
-          </DialogDescription>
+          <DialogTitle>
+            {provider ? m.auth_dialog_edit_title({ name: provider.label }) : m.auth_dialog_add()}
+          </DialogTitle>
+          <DialogDescription>{m.auth_dialog_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -183,7 +183,7 @@ export function OAuthProviderDialog({
           <FieldGroup>
             {provider ? null : (
               <Field>
-                <FieldLabel htmlFor={`${fieldId}-type`}>Type</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-type`}>{m.auth_dialog_type()}</FieldLabel>
                 <Select
                   value={draft.type}
                   onValueChange={(type) => type && patch({ ...emptyDraft(type) })}
@@ -202,7 +202,7 @@ export function OAuthProviderDialog({
                   </SelectContent>
                 </Select>
                 {available.length === 0 ? (
-                  <FieldDescription>Every built-in provider is already set up.</FieldDescription>
+                  <FieldDescription>{m.auth_dialog_all_builtins()}</FieldDescription>
                 ) : null}
               </Field>
             )}
@@ -210,37 +210,41 @@ export function OAuthProviderDialog({
             {builtin ? null : (
               <>
                 <Field>
-                  <FieldLabel htmlFor={`${fieldId}-id`}>Provider ID</FieldLabel>
+                  <FieldLabel htmlFor={`${fieldId}-id`}>{m.auth_dialog_provider_id()}</FieldLabel>
                   <Input
                     id={`${fieldId}-id`}
                     value={draft.id}
                     onChange={(e) => patch({ id: e.target.value })}
+                    // oxlint-disable-next-line i18n/no-literal-text -- an example id, not words
                     placeholder="authentik"
                     disabled={save.isPending || Boolean(provider)}
                   />
                   <FieldDescription>
-                    {provider
-                      ? "Fixed: accounts were created through the callback URL it builds."
-                      : "Lowercase letters, digits and dashes. Appears in the callback URL."}
+                    {provider ? m.auth_dialog_id_fixed() : m.auth_dialog_id_hint()}
                   </FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${fieldId}-label`}>Button label</FieldLabel>
+                  <FieldLabel htmlFor={`${fieldId}-label`}>
+                    {m.auth_dialog_button_label()}
+                  </FieldLabel>
                   <Input
                     id={`${fieldId}-label`}
                     value={draft.label}
                     onChange={(e) => patch({ label: e.target.value })}
-                    placeholder="Company SSO"
+                    placeholder={m.auth_dialog_button_placeholder()}
                     disabled={save.isPending}
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor={`${fieldId}-discovery`}>Discovery URL</FieldLabel>
+                  <FieldLabel htmlFor={`${fieldId}-discovery`}>
+                    {m.auth_dialog_discovery()}
+                  </FieldLabel>
                   <Input
                     id={`${fieldId}-discovery`}
                     type="url"
                     value={draft.discoveryUrl}
                     onChange={(e) => patch({ discoveryUrl: e.target.value })}
+                    // oxlint-disable-next-line i18n/no-literal-text -- an example URL, not words
                     placeholder="https://id.example.com/.well-known/openid-configuration"
                     disabled={save.isPending}
                   />
@@ -249,21 +253,19 @@ export function OAuthProviderDialog({
             )}
 
             <Field>
-              <FieldLabel htmlFor={`${fieldId}-callback`}>Callback URL</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-callback`}>{m.auth_dialog_callback()}</FieldLabel>
               <Input
                 id={`${fieldId}-callback`}
                 readOnly
                 value={id ? `${baseURL ?? ""}/api/auth/callback/${id}` : ""}
               />
               <FieldDescription>
-                {baseURL
-                  ? "Register this with the provider before signing in."
-                  : "Set PUBLIC_URL so this URL is complete, then register it with the provider."}
+                {baseURL ? m.auth_dialog_callback_hint() : m.auth_dialog_callback_needs_url()}
               </FieldDescription>
             </Field>
 
             <Field>
-              <FieldLabel htmlFor={`${fieldId}-client`}>Client ID</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-client`}>{m.auth_dialog_client_id()}</FieldLabel>
               <Input
                 id={`${fieldId}-client`}
                 value={draft.clientId}
@@ -272,18 +274,18 @@ export function OAuthProviderDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${fieldId}-secret`}>Client secret</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-secret`}>{m.auth_dialog_client_secret()}</FieldLabel>
               <Input
                 id={`${fieldId}-secret`}
                 type="password"
                 autoComplete="off"
-                placeholder={provider?.secretConfigured ? "Unchanged" : undefined}
+                placeholder={provider?.secretConfigured ? m.auth_dialog_unchanged() : undefined}
                 value={draft.secret}
                 onChange={(e) => patch({ secret: e.target.value })}
                 disabled={save.isPending}
               />
               {provider?.secretConfigured ? (
-                <FieldDescription>Leave empty to keep the stored secret.</FieldDescription>
+                <FieldDescription>{m.auth_dialog_keep_secret()}</FieldDescription>
               ) : null}
             </Field>
 
@@ -305,7 +307,7 @@ export function OAuthProviderDialog({
             {builtin ? null : (
               <Field>
                 <FieldLabel htmlFor={`${fieldId}-scopes`}>
-                  Scopes <OptionalMark />
+                  {m.auth_dialog_scopes()} <OptionalMark />
                 </FieldLabel>
                 <Input
                   id={`${fieldId}-scopes`}
@@ -313,23 +315,23 @@ export function OAuthProviderDialog({
                   onChange={(e) => patch({ scopes: e.target.value })}
                   disabled={save.isPending}
                 />
-                <FieldDescription>Separated by spaces.</FieldDescription>
+                <FieldDescription>{m.auth_dialog_scopes_hint()}</FieldDescription>
               </Field>
             )}
 
             <Field>
-              <FieldLabel htmlFor={`${fieldId}-signup`}>New accounts</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-signup`}>{m.auth_dialog_new_accounts()}</FieldLabel>
               <Select
                 value={draft.signup}
                 onValueChange={(signup) => signup && patch({ signup })}
-                items={SIGNUP_MODE_ITEMS}
+                items={signupModeItems()}
                 disabled={save.isPending}
               >
                 <SelectTrigger id={`${fieldId}-signup`} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SIGNUP_MODE_ITEMS.map((item) => (
+                  {signupModeItems().map((item) => (
                     <SelectItem key={item.value} value={item.value}>
                       {item.label}
                     </SelectItem>
@@ -344,7 +346,7 @@ export function OAuthProviderDialog({
                   switch at it with aria-labelledby, so anything in there ends
                   up read aloud as the control's name. */}
               <div className="flex items-center justify-between gap-3">
-                <FieldLabel htmlFor={`${fieldId}-trust-emails`}>Trust its emails</FieldLabel>
+                <FieldLabel htmlFor={`${fieldId}-trust-emails`}>{m.auth_dialog_trust()}</FieldLabel>
                 <Switch
                   id={`${fieldId}-trust-emails`}
                   checked={draft.trustEmails}
@@ -352,15 +354,13 @@ export function OAuthProviderDialog({
                   disabled={save.isPending}
                 />
               </div>
-              <FieldDescription>
-                Count its addresses as verified. Only for a provider that owns its domain.
-              </FieldDescription>
+              <FieldDescription>{m.auth_dialog_trust_hint()}</FieldDescription>
             </Field>
 
             <Field>
               <div className="flex items-center justify-between gap-3">
                 <FieldLabel htmlFor={`${fieldId}-exclusive`}>
-                  Only sign-in for its accounts
+                  {m.auth_dialog_exclusive()}
                 </FieldLabel>
                 <Switch
                   id={`${fieldId}-exclusive`}
@@ -369,18 +369,16 @@ export function OAuthProviderDialog({
                   disabled={save.isPending}
                 />
               </div>
-              <FieldDescription>
-                Accounts connected to it can’t use or set a password.
-              </FieldDescription>
+              <FieldDescription>{m.auth_dialog_exclusive_hint()}</FieldDescription>
             </Field>
           </FieldGroup>
           {error ? <FieldError>{error}</FieldError> : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!complete}>
-              {provider ? "Save" : "Add provider"}
+              {provider ? m.common_save() : m.auth_dialog_add()}
             </PendingButton>
           </DialogFooter>
         </form>

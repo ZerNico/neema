@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { SignupModeSchema } from "./signup.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * A provider Better Auth ships an implementation for. The id is Better Auth's
@@ -30,8 +31,12 @@ export const OAUTH_BUILTINS: readonly OAuthBuiltin[] = [
     label: "Microsoft",
     field: {
       key: "tenantId",
-      label: "Tenant ID",
-      description: "Leave empty to accept any Microsoft account.",
+      get label() {
+        return m.auth_microsoft_tenant();
+      },
+      get description() {
+        return m.auth_microsoft_tenant_description();
+      },
     },
   },
   {
@@ -39,8 +44,12 @@ export const OAUTH_BUILTINS: readonly OAuthBuiltin[] = [
     label: "GitLab",
     field: {
       key: "issuer",
-      label: "GitLab URL",
-      description: "Leave empty for gitlab.com.",
+      get label() {
+        return m.auth_gitlab_url();
+      },
+      get description() {
+        return m.auth_gitlab_url_description();
+      },
     },
   },
   { id: "discord", label: "Discord" },

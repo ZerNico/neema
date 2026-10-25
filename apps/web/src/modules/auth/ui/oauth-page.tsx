@@ -27,13 +27,14 @@ import { saveAuthSettings } from "../server/signup-functions.ts";
 import {
   MAX_ADMIT_DOMAINS,
   parseDomain,
-  SIGNUP_MODE_ITEMS,
+  signupModeItems,
   SIGNUP_MODE_LABELS,
   type AuthSettings,
   type SignupMode,
 } from "../signup.ts";
 import { OAuthProviderDialog } from "./oauth-provider-dialog.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 import { authSettingsQuery, oauthProvidersQuery } from "../queries.ts";
 import {
   Combobox,
@@ -45,9 +46,9 @@ import {
 } from "~/ui/primitives/combobox";
 
 // Approval is the ordinary case, so only the other two earn a badge.
-const MODE_BADGES: Partial<Record<SignupMode, string>> = {
-  open: "Joins directly",
-  closed: "Sign-in only",
+const MODE_BADGES: Partial<Record<SignupMode, () => string>> = {
+  open: m.auth_admin_badge_open,
+  closed: m.auth_admin_badge_closed,
 };
 
 export function OAuthPage() {
@@ -69,33 +70,29 @@ export function OAuthPage() {
     mutationFn: (input: { id: string; enabled: boolean }) =>
       setOAuthProviderEnabled({ data: input }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not update the provider.", error),
+    onError: (error) => toastError(m.auth_admin_error_update_provider(), error),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => deleteOAuthProvider({ data: { id } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not remove the provider.", error),
+    onError: (error) => toastError(m.auth_admin_error_remove_provider(), error),
   });
 
   const addButton = (
     <Button size="sm" onClick={() => setAdding(true)}>
       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-      Add provider
+      {m.auth_admin_add_provider()}
     </Button>
   );
 
   return (
-    <Page
-      title="Sign-in"
-      description="How people get into this instance and who can join."
-      actions={addButton}
-    >
+    <Page title={m.auth_admin_title()} description={m.auth_admin_description()} actions={addButton}>
       {data.providers.length === 0 ? (
         <EmptyState
           icon={Key01Icon}
-          title="No sign-in providers yet"
-          description="Connect Google, a company identity provider, or anything with an OpenID Connect discovery document."
+          title={m.auth_admin_empty_title()}
+          description={m.auth_admin_empty_description()}
           action={addButton}
         />
       ) : (
@@ -109,9 +106,9 @@ export function OAuthPage() {
               onEdit={() => setEditingId(provider.id)}
               onRemove={async () => {
                 const confirmed = await confirm({
-                  title: `Remove “${provider.label}”?`,
-                  description: `The stored credentials are deleted, and anyone whose account signs in with ${provider.label} cannot get in until it is set up again.`,
-                  confirmLabel: "Remove provider",
+                  title: m.auth_admin_remove_title({ name: provider.label }),
+                  description: m.auth_admin_remove_description({ name: provider.label }),
+                  confirmLabel: m.auth_admin_remove_provider(),
                 });
                 if (confirmed) remove.mutate(provider.id);
               }}
@@ -169,10 +166,14 @@ function ProviderRow({
         <span className="flex items-center gap-2 text-sm font-medium">
           <span className="min-w-0 truncate">{provider.label}</span>
           {MODE_BADGES[provider.signup] ? (
-            <Badge variant="secondary">{MODE_BADGES[provider.signup]}</Badge>
+            <Badge variant="secondary">{MODE_BADGES[provider.signup]?.()}</Badge>
           ) : null}
-          {provider.trustEmails ? <Badge variant="secondary">Trusted emails</Badge> : null}
-          {provider.exclusive ? <Badge variant="secondary">No passwords</Badge> : null}
+          {provider.trustEmails ? (
+            <Badge variant="secondary">{m.auth_admin_trusted_emails()}</Badge>
+          ) : null}
+          {provider.exclusive ? (
+            <Badge variant="secondary">{m.auth_admin_no_passwords()}</Badge>
+          ) : null}
         </span>
         {/* A built-in's label already names it; an OpenID Connect id is chosen,
             so it is the only one worth repeating under the name. */}
@@ -184,15 +185,20 @@ function ProviderRow({
         checked={provider.enabled}
         disabled={pending}
         onCheckedChange={onToggle}
-        aria-label={`${provider.label} enabled`}
+        aria-label={m.auth_admin_enabled_label({ name: provider.label })}
       />
-      <Button variant="ghost" size="icon-sm" aria-label={`Edit ${provider.label}`} onClick={onEdit}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={m.auth_admin_edit_label({ name: provider.label })}
+        onClick={onEdit}
+      >
         <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
       </Button>
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={`Remove ${provider.label}`}
+        aria-label={m.auth_admin_remove_label({ name: provider.label })}
         disabled={pending}
         onClick={onRemove}
       >
@@ -217,7 +223,7 @@ function useSaveSettings() {
         },
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "auth-settings"] }),
-    onError: (error) => toastError("Could not save.", error),
+    onError: (error) => toastError(m.auth_admin_error_save(), error),
   });
   return { settings, save };
 }
@@ -229,12 +235,12 @@ function PasswordSection() {
   const passwordOn = settings.passwordLogin || settings.passwordLoginForced;
 
   return (
-    <Section title="Email and password">
+    <Section title={m.auth_admin_password_section()}>
       <ListCard>
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={`${fieldId}-login`}>Password sign-in</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-login`}>{m.auth_admin_password_login()}</FieldLabel>
               <Switch
                 id={`${fieldId}-login`}
                 checked={passwordOn}
@@ -244,25 +250,25 @@ function PasswordSection() {
             </div>
             <FieldDescription>
               {settings.passwordLoginForced
-                ? "Kept on by AUTH_PASSWORD_LOGIN on the server."
-                : "Off leaves only the providers above."}
+                ? m.auth_admin_password_forced()
+                : m.auth_admin_password_off()}
             </FieldDescription>
           </Field>
         </ListRow>
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
-            <FieldLabel htmlFor={`${fieldId}-signup`}>New accounts</FieldLabel>
+            <FieldLabel htmlFor={`${fieldId}-signup`}>{m.auth_admin_new_accounts()}</FieldLabel>
             <Select
               value={settings.passwordSignup}
               onValueChange={(passwordSignup) => passwordSignup && save.mutate({ passwordSignup })}
-              items={SIGNUP_MODE_ITEMS}
+              items={signupModeItems()}
               disabled={save.isPending || !passwordOn}
             >
               <SelectTrigger id={`${fieldId}-signup`} className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SIGNUP_MODE_ITEMS.map((item) => (
+                {signupModeItems().map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -277,7 +283,9 @@ function PasswordSection() {
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={`${fieldId}-verify`}>Require email verification</FieldLabel>
+              <FieldLabel htmlFor={`${fieldId}-verify`}>
+                {m.auth_admin_require_verification()}
+              </FieldLabel>
               <Switch
                 id={`${fieldId}-verify`}
                 checked={settings.requireEmailVerification}
@@ -291,8 +299,8 @@ function PasswordSection() {
             </div>
             <FieldDescription>
               {settings.smtpConfigured
-                ? "Password accounts confirm their address before signing in. Only confirmed addresses can be found by email."
-                : "Set up email under Email first."}
+                ? m.auth_admin_verification_on()
+                : m.auth_admin_verification_needs_email()}
             </FieldDescription>
           </Field>
         </ListRow>
@@ -331,11 +339,11 @@ function DomainsSection() {
   };
 
   return (
-    <Section title="Domains">
+    <Section title={m.auth_admin_domains()}>
       <ListCard>
         <ListRow className="flex-col items-stretch gap-3">
           <Field>
-            <FieldLabel htmlFor={`${fieldId}-domains`}>Domains that join directly</FieldLabel>
+            <FieldLabel htmlFor={`${fieldId}-domains`}>{m.auth_admin_domains_label()}</FieldLabel>
             <Combobox
               multiple
               items={[...domains]}
@@ -359,6 +367,7 @@ function DomainsSection() {
                       ))}
                       <ComboboxChipsInput
                         id={`${fieldId}-domains`}
+                        // oxlint-disable-next-line i18n/no-literal-text -- an example domain, not words
                         placeholder={value.length ? "" : "example.com"}
                         disabled={domains.length >= MAX_ADMIT_DOMAINS}
                         onKeyDown={(event) => {
@@ -378,8 +387,8 @@ function DomainsSection() {
             </Combobox>
             <FieldDescription>
               {rejected
-                ? `“${rejected}” isn’t a domain.`
-                : "A verified address here gets in even where new accounts wait or are refused."}
+                ? m.auth_admin_domain_rejected({ text: rejected })
+                : m.auth_admin_domains_hint()}
             </FieldDescription>
           </Field>
         </ListRow>

@@ -1,5 +1,6 @@
 import { createMiddleware } from "@tanstack/react-start";
-import { IMPERSONATING_BODY, isImpersonated, UNAUTHENTICATED_BODY } from "../identity.ts";
+import { impersonatingBody, isImpersonated, UNAUTHENTICATED_BODY } from "../identity.ts";
+import { getLocale } from "~/paraglide/runtime.js";
 import { NOT_APPROVED_BODY } from "../signup.ts";
 import { sessionFromHeaders } from "./auth.ts";
 
@@ -29,7 +30,8 @@ export const requireSession = createMiddleware().server(async ({ request, next }
  */
 export const requireOwnSession = createMiddleware().server(async ({ request, next }) => {
   const session = await approvedSession(request);
-  if (isImpersonated(session.session)) throw new Response(IMPERSONATING_BODY, { status: 403 });
+  if (isImpersonated(session.session))
+    throw new Response(impersonatingBody(getLocale()), { status: 403 });
   return next({ context: { session } });
 });
 

@@ -5,6 +5,7 @@ import { FieldError } from "~/ui/primitives/field";
 import { Separator } from "~/ui/primitives/separator";
 import type { SignInProvider } from "../oauth.ts";
 import { loginErrorURL } from "../oauth-errors.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * One button per provider given. Both built-in and OpenID Connect entries go
@@ -47,12 +48,12 @@ export function SignInProviders({
               });
               // A success redirects away, so only a failure resumes here.
               if (failure) {
-                setError(failure.message ?? `Could not sign in with ${provider.label}.`);
+                setError(failure.message ?? m.auth_providers_error({ provider: provider.label }));
                 setPending(null);
               }
             }}
           >
-            Continue with {provider.label}
+            {m.auth_providers_continue({ provider: provider.label })}
           </PendingButton>
         ))}
       </div>
@@ -60,7 +61,7 @@ export function SignInProviders({
       {separated ? (
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
-          <span className="text-muted-foreground text-xs">or</span>
+          <span className="text-muted-foreground text-xs">{m.auth_providers_or()}</span>
           <Separator className="flex-1" />
         </div>
       ) : null}

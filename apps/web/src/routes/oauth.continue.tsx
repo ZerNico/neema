@@ -37,10 +37,10 @@ function SignInAgain() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{m.app_oauth_continue_title()}</CardTitle>
+          <CardTitle>{m.auth_continue_title()}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground text-sm">{m.app_oauth_continue_description()}</p>
+          <p className="text-muted-foreground text-sm">{m.auth_continue_body()}</p>
         </CardContent>
         <CardFooter className="flex flex-col gap-2">
           <Button
@@ -51,7 +51,7 @@ function SignInAgain() {
               window.location.assign(`/login?redirect=${encodeURIComponent(back)}`);
             }}
           >
-            {m.app_oauth_continue_submit()}
+            {m.auth_continue_submit()}
           </Button>
           <Button variant="ghost" className="w-full" onClick={() => window.location.assign("/")}>
             {m.common_cancel()}

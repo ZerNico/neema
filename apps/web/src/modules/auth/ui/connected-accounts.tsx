@@ -7,6 +7,7 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { FieldError } from "~/ui/primitives/field";
 import { oauthErrorMessage } from "../oauth-errors.ts";
 import { linkedAccountsQuery, signInOptionsQuery } from "../queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 const RETURN_TO = "/settings/profile";
 
@@ -26,10 +27,10 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
     mutationFn: async (input: { providerId: string; accountId: string }) => {
       // Better Auth unlinks by the account row's id alone.
       const { error: refused } = await authClient.unlinkAccount({ accountId: input.accountId });
-      if (refused) throw new Error(refused.message ?? "Could not disconnect.");
+      if (refused) throw new Error(refused.message ?? m.auth_linked_error_disconnect());
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: linkedAccountsQuery.queryKey }),
-    onError: (cause) => toastError("Could not disconnect.", cause),
+    onError: (cause) => toastError(m.auth_linked_error_disconnect(), cause),
   });
 
   // Bound to a provider that is its only sign-in, another one could never sign it in.
@@ -40,7 +41,7 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
   if (shown.length === 0) return null;
 
   return (
-    <Section title="Connected sign-ins">
+    <Section title={m.auth_linked_title()}>
       <ListCard>
         {shown.map((provider) => {
           const linked = accounts?.find((a) => a.providerId === provider.id);
@@ -49,7 +50,7 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{provider.label}</span>
               {linked && provider.exclusive ? (
                 // Disconnecting would hand the account back to a password.
-                <span className="text-muted-foreground text-xs">Connected</span>
+                <span className="text-muted-foreground text-xs">{m.auth_linked_connected()}</span>
               ) : linked ? (
                 <PendingButton
                   size="sm"
@@ -58,7 +59,7 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
                   disabled={unlink.isPending}
                   onClick={() => unlink.mutate({ providerId: provider.id, accountId: linked.id })}
                 >
-                  Disconnect
+                  {m.auth_linked_disconnect()}
                 </PendingButton>
               ) : (
                 <PendingButton
@@ -76,12 +77,15 @@ export function ConnectedAccounts({ error }: { error?: string | undefined }) {
                     });
                     // A success redirects away, so only a failure resumes here.
                     if (refused) {
-                      setFailure(refused.message ?? `Could not connect ${provider.label}.`);
+                      setFailure(
+                        refused.message ??
+                          m.auth_linked_error_connect({ provider: provider.label }),
+                      );
                       setLinking(null);
                     }
                   }}
                 >
-                  Connect
+                  {m.auth_linked_connect()}
                 </PendingButton>
               )}
             </ListRow>

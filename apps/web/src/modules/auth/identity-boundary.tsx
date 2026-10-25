@@ -18,6 +18,7 @@ import {
   IdentityContext,
   type Destination,
 } from "./identity-context.ts";
+import { m } from "~/paraglide/messages.js";
 
 /**
  * Guards one signed-in identity for the lifetime of the authenticated tree.
@@ -236,13 +237,13 @@ export function IdentityBoundary({
     <IdentityContext.Provider value={actions}>
       {leaving || changedRouteIdentity ? (
         <p role="status" className="p-4">
-          Changing session…
+          {m.auth_boundary_changing()}
         </p>
       ) : (
         <>
           {frozen && (
             <p className="p-4" role="status">
-              Checking session…
+              {m.auth_boundary_checking()}
             </p>
           )}
           {/* Hidden only across a BFCache round trip; a live tab is never blanked. */}

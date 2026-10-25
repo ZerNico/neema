@@ -15,6 +15,8 @@ import { invalidateAuth } from "./auth.ts";
 import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo, type UpsertOAuthProvider } from "./oauth-repo.ts";
 import { requireWayIn } from "./way-in.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -27,7 +29,7 @@ const save = async (actorId: string, input: UpsertOAuthProvider) => {
       if (input.enabled && !input.secret) {
         const stored = (yield* repo.list()).find((p) => p.id === input.id);
         if (!stored?.secretConfigured)
-          return yield* refuse(400, "Enter the client secret before enabling this.");
+          return yield* refuse(400, localized(m.auth_error_enter_secret));
       }
       return yield* repo.upsert(input);
     }),
@@ -54,7 +56,7 @@ export const saveBuiltinOAuthProvider = createServerFn({ method: "POST" })
   .validator(standard(SaveBuiltinProviderInput))
   .handler(({ data, context }) => {
     const builtin = findBuiltin(data.id);
-    if (!builtin) return runServerFn(refuse(400, "Unknown provider."));
+    if (!builtin) return runServerFn(refuse(400, localized(m.auth_error_unknown_provider)));
     const config: Record<string, JsonValue> = {};
     // Only the field this provider actually reads is stored, so switching
     // catalogue entries cannot leave another provider's setting behind.
@@ -79,7 +81,7 @@ export const saveOidcOAuthProvider = createServerFn({ method: "POST" })
   .validator(standard(SaveOidcProviderInput))
   .handler(({ data, context }) => {
     if (findBuiltin(data.id))
-      return runServerFn(refuse(400, `"${data.id}" is reserved for the built-in provider.`));
+      return runServerFn(refuse(400, localized(m.auth_error_reserved_id, { id: data.id })));
     return save(context.session.user.id, {
       id: data.id,
       kind: "oidc",
@@ -102,10 +104,10 @@ export const setOAuthProviderEnabled = createServerFn({ method: "POST" })
       Effect.gen(function* () {
         const repo = yield* OAuthRepo;
         const stored = (yield* repo.list()).find((p) => p.id === data.id);
-        if (!stored) return yield* refuse(409, "That provider is gone.");
+        if (!stored) return yield* refuse(409, localized(m.auth_error_provider_gone));
         if (!data.enabled) yield* requireWayIn(context.session.user.id, { providerOff: data.id });
         if (data.enabled && !stored.secretConfigured)
-          return yield* refuse(400, "Add the client secret before enabling this.");
+          return yield* refuse(400, localized(m.auth_error_add_secret));
         yield* repo.setEnabled(data.id, data.enabled);
       }),
     );

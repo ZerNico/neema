@@ -5,6 +5,7 @@ import { formatTicket } from "~/modules/auth/desktop-ticket.ts";
 import { subscribeTicketRedeemed } from "~/modules/auth/ticket-events.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
+import { m } from "~/paraglide/messages.js";
 
 /** Whole seconds left before `expiresAt`, re-read once a second. */
 function useSecondsLeft(expiresAt: string): number {
@@ -57,10 +58,10 @@ export function TicketCode({
     return (
       <div className="flex flex-col items-start gap-3">
         <p className="text-sm" role="status">
-          Signed in on the new device.
+          {m.auth_ticket_redeemed()}
         </p>
         <PendingButton variant="outline" pending={renewing} onClick={onRenew}>
-          Generate another code
+          {m.auth_ticket_another()}
         </PendingButton>
       </div>
     );
@@ -68,9 +69,9 @@ export function TicketCode({
   if (seconds === 0)
     return (
       <div className="flex flex-col items-start gap-3">
-        <p className="text-muted-foreground text-sm">This code has expired.</p>
+        <p className="text-muted-foreground text-sm">{m.auth_ticket_expired()}</p>
         <PendingButton variant="outline" pending={renewing} onClick={onRenew}>
-          Get a new code
+          {m.auth_ticket_new()}
         </PendingButton>
       </div>
     );
@@ -95,11 +96,11 @@ export function TicketCode({
           }}
         >
           <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} strokeWidth={2} />
-          {copied ? "Copied" : "Copy"}
+          {copied ? m.auth_ticket_copied() : m.auth_ticket_copy()}
         </Button>
       </div>
       <p className="text-muted-foreground text-sm" role="timer">
-        Expires in {clock(seconds)}
+        {m.auth_ticket_expires({ time: clock(seconds) })}
       </p>
     </div>
   );

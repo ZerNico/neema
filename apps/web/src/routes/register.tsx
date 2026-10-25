@@ -22,13 +22,13 @@ import { cn } from "~/ui/utils";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { m } from "~/paraglide/messages.js";
 
-// A function, so the messages read in the locale of the page that shows them.
+// Built where used, so its messages read in the page's language.
 const registerSchema = () =>
   Schema.Struct({
-    name: Schema.String.check(Schema.isMinLength(1, { message: m.app_auth_name_required() })),
-    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    name: Schema.String.check(Schema.isMinLength(1, { message: m.auth_form_enter_name() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.auth_form_enter_email() })),
     password: Schema.String.check(
-      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+      Schema.isMinLength(8, { message: m.auth_form_password_length() }),
     ),
   });
 
@@ -64,7 +64,7 @@ function RegisterPage() {
         callbackURL: destination,
       });
       if (error) {
-        setServerError(error.message ?? m.app_register_error());
+        setServerError(error.message ?? m.auth_register_error());
         return;
       }
       // With verification required there is no session until the link is opened.
@@ -84,10 +84,8 @@ function RegisterPage() {
       <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>{m.app_register_check_email()}</CardTitle>
-            <CardDescription>
-              {m.app_register_check_email_description({ email: awaitingProof })}
-            </CardDescription>
+            <CardTitle>{m.auth_register_check_email()}</CardTitle>
+            <CardDescription>{m.auth_register_link_sent({ email: awaitingProof })}</CardDescription>
           </CardHeader>
         </Card>
       </AuthScreen>
@@ -98,7 +96,7 @@ function RegisterPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{m.app_register_title()}</CardTitle>
+          <CardTitle>{m.auth_register_title()}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <SignInProviders
@@ -115,17 +113,17 @@ function RegisterPage() {
               }}
             >
               <form.AppField name="name">
-                {(field) => <field.TextField label={m.common_name()} autoComplete="name" />}
+                {(field) => <field.TextField label={m.auth_form_name()} autoComplete="name" />}
               </form.AppField>
               <form.AppField name="email">
                 {(field) => (
-                  <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                  <field.TextField label={m.auth_form_email()} type="email" autoComplete="email" />
                 )}
               </form.AppField>
               <form.AppField name="password">
                 {(field) => (
                   <field.TextField
-                    label={m.app_auth_password()}
+                    label={m.auth_form_password()}
                     type="password"
                     autoComplete="new-password"
                   />
@@ -133,23 +131,23 @@ function RegisterPage() {
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">{m.app_register_submit()}</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.auth_register_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           ) : null}
           {!options.passwordSignup && providers.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{m.app_register_closed()}</p>
+            <p className="text-muted-foreground text-sm">{m.auth_register_closed()}</p>
           ) : null}
         </CardContent>
         <CardFooter>
           <p className="text-muted-foreground text-sm">
-            {m.app_register_have_account()}{" "}
+            {m.auth_register_have_account()}{" "}
             <Link
               to="/login"
               search={redirectSearch(redirect)}
               className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
             >
-              {m.app_register_sign_in()}
+              {m.auth_register_sign_in()}
             </Link>
           </p>
         </CardFooter>

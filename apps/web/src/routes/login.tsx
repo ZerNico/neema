@@ -18,12 +18,12 @@ import { cn } from "~/ui/utils";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
 import { m } from "~/paraglide/messages.js";
 
-// A function, so the messages read in the locale of the page that shows them.
+// Built where used, so its messages read in the page's language.
 const loginSchema = () =>
   Schema.Struct({
-    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.auth_form_enter_email() })),
     password: Schema.String.check(
-      Schema.isMinLength(8, { message: m.app_auth_password_too_short() }),
+      Schema.isMinLength(8, { message: m.auth_form_password_length() }),
     ),
   });
 
@@ -70,8 +70,8 @@ function LoginForm() {
         setServerError(
           // Better Auth has just mailed a fresh link.
           error.code === "EMAIL_NOT_VERIFIED"
-            ? m.app_login_email_not_verified()
-            : (error.message ?? m.app_login_error()),
+            ? m.auth_login_unverified()
+            : (error.message ?? m.auth_login_error()),
         );
         return;
       }
@@ -86,7 +86,7 @@ function LoginForm() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{m.app_login_title()}</CardTitle>
+          <CardTitle>{m.auth_login_title()}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <SignInProviders
@@ -104,13 +104,13 @@ function LoginForm() {
             >
               <form.AppField name="email">
                 {(field) => (
-                  <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                  <field.TextField label={m.auth_form_email()} type="email" autoComplete="email" />
                 )}
               </form.AppField>
               <form.AppField name="password">
                 {(field) => (
                   <field.TextField
-                    label={m.app_auth_password()}
+                    label={m.auth_form_password()}
                     type="password"
                     autoComplete="current-password"
                   />
@@ -118,7 +118,7 @@ function LoginForm() {
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">{m.app_login_submit()}</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.auth_login_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           ) : serverError ? (
@@ -132,18 +132,18 @@ function LoginForm() {
                 to="/forgot-password"
                 className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
               >
-                {m.app_login_forgot_password()}
+                {m.auth_login_forgot()}
               </Link>
             ) : null}
             {canRegister ? (
               <p className="text-muted-foreground text-sm">
-                {m.app_login_no_account()}{" "}
+                {m.auth_login_no_account()}{" "}
                 <Link
                   to="/register"
                   search={redirectSearch(redirect)}
                   className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}
                 >
-                  {m.app_login_register()}
+                  {m.auth_login_register()}
                 </Link>
               </p>
             ) : null}

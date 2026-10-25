@@ -16,6 +16,8 @@ import { requireAdmin } from "./middleware.ts";
 import { OAuthRepo } from "./oauth-repo.ts";
 import { SignupRepo } from "./signup-repo.ts";
 import { requireWayIn } from "./way-in.ts";
+import { localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
 
 const standard = Schema.toStandardSchemaV1;
 
@@ -85,10 +87,10 @@ export const saveAuthSettings = createServerFn({ method: "POST" })
         const current = yield* Effect.flatMap(SignupRepo, (repo) => repo.settings());
         if (data.requireEmailVerification && !current.requireEmailVerification) {
           const mail = yield* Effect.flatMap(MailService, (service) => service.available);
-          if (!mail) return yield* refuse(409, "Set up email before requiring verification");
+          if (!mail) return yield* refuse(409, localized(m.auth_error_email_needed));
           // Proving your own address first also proves the mail server delivers.
           if (!context.session.user.emailVerified)
-            return yield* refuse(409, "Verify your own email under Profile first");
+            return yield* refuse(409, localized(m.auth_error_verify_own));
         }
         if (current.passwordLogin && !data.passwordLogin)
           yield* requireWayIn(context.session.user.id, { passwordLogin: false });
@@ -128,9 +130,7 @@ export const decideAccount = createServerFn({ method: "POST" })
         }),
       ).pipe(
         Effect.flatMap((decided) =>
-          decided
-            ? Effect.void
-            : refuse(409, "You can’t decide on your own account or the owner’s"),
+          decided ? Effect.void : refuse(409, localized(m.auth_error_decide_self)),
         ),
       ),
     ),

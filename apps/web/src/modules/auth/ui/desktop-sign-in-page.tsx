@@ -11,6 +11,7 @@ import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 import { AuthScreen } from "./auth-screen.tsx";
 import { desktopSignInPath } from "./desktop-sign-in-path.ts";
+import { m } from "~/paraglide/messages.js";
 
 const deepLink = (ticket: string) => `chat-desktop://sign-in?ticket=${encodeURIComponent(ticket)}`;
 
@@ -42,7 +43,7 @@ export function DesktopSignInPage({
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in to neema Desktop</CardTitle>
+          <CardTitle>{m.auth_desktop_page_title()}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {ticket ? (
@@ -51,11 +52,9 @@ export function DesktopSignInPage({
                 href={deepLink(ticket.ticket)}
                 className={cn(buttonVariants({ variant: "default" }), "w-full")}
               >
-                Open neema Desktop
+                {m.auth_desktop_page_open()}
               </a>
-              <p className="text-muted-foreground text-sm">
-                If the app doesn’t open, paste this code into it.
-              </p>
+              <p className="text-muted-foreground text-sm">{m.auth_desktop_page_paste()}</p>
               <TicketCode
                 ticket={ticket.ticket}
                 ticketId={ticket.ticketId}
@@ -63,7 +62,7 @@ export function DesktopSignInPage({
                 renewing={mint.isPending}
                 onRenew={() => mint.mutate()}
               />
-              <p className="text-muted-foreground text-sm">You can close this tab afterwards.</p>
+              <p className="text-muted-foreground text-sm">{m.auth_desktop_page_close()}</p>
             </>
           ) : (
             <>
@@ -83,7 +82,7 @@ export function DesktopSignInPage({
                 pending={mint.isPending}
                 onClick={() => mint.mutate()}
               >
-                Continue as {user.name}
+                {m.auth_desktop_page_continue_as({ name: user.name })}
               </PendingButton>
             </>
           )}
@@ -106,7 +105,7 @@ export function DesktopSignInPage({
                 });
               }}
             >
-              Use a different account
+              {m.auth_desktop_page_other_account()}
             </Button>
           </CardFooter>
         )}

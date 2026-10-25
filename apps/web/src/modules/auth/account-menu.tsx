@@ -29,6 +29,7 @@ import { useRailTooltip } from "~/modules/navigation/ui/use-rail-tooltip.ts";
 import { Spinner } from "~/ui/primitives/spinner";
 import { ThemeSwitch } from "~/ui/theme-switch.tsx";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 async function signOutSession() {
   const { error } = await authClient.signOut();
@@ -45,7 +46,10 @@ export function AccountMenu({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isAdmin = user.role === "admin";
-  const accountLabel = `${user.name}, ${user.email}${impersonating ? ", Impersonating" : ""}`;
+  const accountLabel = (impersonating ? m.auth_menu_label_impersonating : m.auth_menu_label)({
+    name: user.name,
+    email: user.email,
+  });
   const boundary = useIdentityBoundary();
   const desktopAuth = useDesktopAuth();
   const tooltip = useRailTooltip();
@@ -61,10 +65,7 @@ export function AccountMenu({
         if (error) throw new Error(error.message);
       }, "/admin/users");
     },
-    onError: () =>
-      toast.error(
-        "Could not stop impersonating. Retry, or sign out and sign in with your admin account.",
-      ),
+    onError: () => toast.error(m.auth_menu_error_stop()),
   });
   const signOut = useMutation({
     mutationFn: async () => {
@@ -77,7 +78,7 @@ export function AccountMenu({
         await navigate({ to: "/login" });
       }
     },
-    onError: (error) => toastError("Could not sign out. Please retry.", error),
+    onError: (error) => toastError(m.auth_menu_error_sign_out(), error),
   });
   const pending = stop.isPending || signOut.isPending;
   return (
@@ -102,7 +103,9 @@ export function AccountMenu({
           <DropdownMenuLabel>
             <span className="text-foreground block truncate font-medium">{user.name}</span>
             {impersonating ? (
-              <span className="text-warning block truncate font-medium">Impersonating</span>
+              <span className="text-warning block truncate font-medium">
+                {m.auth_menu_impersonating()}
+              </span>
             ) : (
               <span className="block truncate">{user.email}</span>
             )}
@@ -111,16 +114,16 @@ export function AccountMenu({
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link to="/settings" />}>
           <HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
-          Settings
+          {m.auth_menu_settings()}
         </DropdownMenuItem>
         <DropdownMenuItem render={<Link to="/help" />}>
           <HugeiconsIcon icon={HelpCircleIcon} strokeWidth={2} />
-          Help
+          {m.auth_menu_help()}
         </DropdownMenuItem>
         {isAdmin ? (
           <DropdownMenuItem render={<Link to="/admin" />}>
             <HugeiconsIcon icon={SecurityIcon} strokeWidth={2} />
-            Admin
+            {m.auth_menu_admin()}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />
@@ -141,7 +144,7 @@ export function AccountMenu({
               onClick={() => changeServer.mutate()}
             >
               <HugeiconsIcon icon={CloudServerIcon} strokeWidth={2} />
-              Change server
+              {m.auth_menu_change_server()}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
@@ -158,7 +161,7 @@ export function AccountMenu({
             ) : (
               <HugeiconsIcon icon={UserIcon} strokeWidth={2} />
             )}
-            Stop impersonating
+            {m.auth_menu_stop_impersonating()}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
@@ -172,7 +175,7 @@ export function AccountMenu({
           ) : (
             <HugeiconsIcon icon={Logout03Icon} strokeWidth={2} />
           )}
-          Sign out
+          {m.auth_menu_sign_out()}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

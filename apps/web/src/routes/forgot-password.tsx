@@ -18,10 +18,10 @@ import { FieldError } from "~/ui/primitives/field";
 import { cn } from "~/ui/utils";
 import { m } from "~/paraglide/messages.js";
 
-// A function, so the messages read in the locale of the page that shows them.
+// Built where used, so its messages read in the page's language.
 const forgotSchema = () =>
   Schema.Struct({
-    email: Schema.String.check(Schema.isMinLength(3, { message: m.app_auth_email_required() })),
+    email: Schema.String.check(Schema.isMinLength(3, { message: m.auth_form_enter_email() })),
   });
 
 export const Route = createFileRoute("/forgot-password")({
@@ -46,7 +46,7 @@ function ForgotPasswordPage() {
         redirectTo: "/reset-password",
       });
       if (error) {
-        setServerError(error.message ?? m.app_forgot_error());
+        setServerError(error.message ?? m.auth_forgot_error());
         return;
       }
       setSentTo(value.email);
@@ -57,9 +57,9 @@ function ForgotPasswordPage() {
     <AuthScreen>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>{sentTo ? m.app_register_check_email() : m.app_forgot_title()}</CardTitle>
+          <CardTitle>{sentTo ? m.auth_forgot_check_email() : m.auth_forgot_title()}</CardTitle>
           {sentTo ? (
-            <CardDescription>{m.app_forgot_sent({ email: sentTo })}</CardDescription>
+            <CardDescription>{m.auth_forgot_sent({ email: sentTo })}</CardDescription>
           ) : null}
         </CardHeader>
         {sentTo ? null : (
@@ -73,19 +73,19 @@ function ForgotPasswordPage() {
             >
               <form.AppField name="email">
                 {(field) => (
-                  <field.TextField label={m.app_auth_email()} type="email" autoComplete="email" />
+                  <field.TextField label={m.auth_form_email()} type="email" autoComplete="email" />
                 )}
               </form.AppField>
               {serverError ? <FieldError>{serverError}</FieldError> : null}
               <form.AppForm>
-                <form.SubmitButton className="w-full">{m.app_forgot_submit()}</form.SubmitButton>
+                <form.SubmitButton className="w-full">{m.auth_forgot_submit()}</form.SubmitButton>
               </form.AppForm>
             </form>
           </CardContent>
         )}
         <CardFooter>
           <Link to="/login" className={cn(buttonVariants({ variant: "link" }), "h-auto p-0")}>
-            {m.app_auth_back_to_sign_in()}
+            {m.auth_back_to_sign_in()}
           </Link>
         </CardFooter>
       </Card>

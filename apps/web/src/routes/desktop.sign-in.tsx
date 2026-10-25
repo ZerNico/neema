@@ -42,10 +42,12 @@ function DesktopSignInRoute() {
       <AuthScreen>
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>{m.app_desktop_sign_in_title()}</CardTitle>
+            <CardTitle>{m.auth_desktop_route_title()}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground text-sm">{m.app_desktop_sign_in_in_browser()}</p>
+            <p className="text-muted-foreground text-sm">
+              {m.auth_desktop_route_open_in_browser()}
+            </p>
           </CardContent>
         </Card>
       </AuthScreen>
