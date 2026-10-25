@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
-import { mayConnectApps, mcpResource } from "~/modules/auth/server/auth.ts";
+import { mcpResource } from "~/modules/auth/server/auth.ts";
 import { requireOwnSession, requireSession } from "~/modules/auth/server/middleware.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { apiKeysAllowed } from "~/modules/mcp-server/server/access.ts";
 import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { MAX_API_KEYS, NewApiKey } from "../schema.ts";
@@ -10,10 +10,7 @@ import { ApiKeys } from "./service.ts";
 
 const standard = Schema.toStandardSchemaV1;
 
-/** A key acts through the MCP endpoint, so it needs both capabilities. */
-const mayUseApiKeys = async (userId: string) =>
-  (await mayConnectApps(userId)) &&
-  runServerFn(Effect.flatMap(FeaturePolicy, (policy) => policy.can(userId, "apiKeys")));
+const mayUseApiKeys = (userId: string) => runServerFn(apiKeysAllowed(userId));
 
 export const listApiKeys = createServerFn({ method: "GET" })
   .middleware([requireSession])

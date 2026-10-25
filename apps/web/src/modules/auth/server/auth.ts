@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { getDb } from "~/db/client.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
+import { connectAppsAllowed } from "~/modules/mcp-server/server/access.ts";
 import { MailService } from "~/modules/notifications/server/mail.ts";
 import { mcpResourceFor } from "~/modules/mcp-server/resource.ts";
 import { fetchClientMetadata } from "~/modules/mcp-server/server/client-metadata-fetch.ts";
@@ -45,13 +45,7 @@ const onDesktopRedeemed = (userId: string, ticketId: string) =>
   );
 
 /** Whether this account may connect an app now: the same check every MCP request makes. */
-export const mayConnectApps = (userId: string) =>
-  runtime.runPromise(
-    Effect.gen(function* () {
-      if (!(yield* accountEligible(userId))) return false;
-      return yield* Effect.flatMap(FeaturePolicy, (policy) => policy.can(userId, "mcp"));
-    }),
-  );
+export const mayConnectApps = (userId: string) => runtime.runPromise(connectAppsAllowed(userId));
 
 /** Tokens are bound to the public address, so there is no MCP server without a secure one. */
 export const mcpResource = () => mcpResourceFor(publicUrl());

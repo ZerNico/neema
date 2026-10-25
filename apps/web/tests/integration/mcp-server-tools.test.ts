@@ -31,6 +31,7 @@ import { IntegrationApprovals } from "~/modules/integrations/server/approvals.ts
 import { MAX_API_KEYS } from "~/modules/api-keys/schema.ts";
 import type { McpScope } from "~/modules/mcp-server/scopes.ts";
 import { ApiKeys } from "~/modules/api-keys/server/service.ts";
+import { apiKeysAllowed } from "~/modules/mcp-server/server/access.ts";
 import { apiKeyGrant } from "~/modules/mcp-server/server/api-key-grant.ts";
 import { ConnectedApps } from "~/modules/mcp-server/server/connected-apps.ts";
 import { mcpEndpoint } from "~/modules/mcp-server/server/endpoint.ts";
@@ -808,6 +809,42 @@ describe("API keys", () => {
       );
     }
     expect(await keyGrant("nma_not-a-key")).toBeNull();
+  });
+
+  it("holds a key to the rule its settings page reads, a ban and the mcp capability included", async () => {
+    const userId = await makeUser();
+    const { secret } = await makeKey(userId, ["chats:read"]);
+    expect(await run(apiKeysAllowed(userId))).toBe(true);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(user).set({ banned: true, banExpires: null }).where(eq(user.id, userId)),
+      ),
+    );
+    expect(await run(apiKeysAllowed(userId))).toBe(false);
+    expect(await keyGrant(secret)).toBeNull();
+    await run(
+      Effect.flatMap(Db, (db) => db.update(user).set({ banned: false }).where(eq(user.id, userId))),
+    );
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(defaultCapabilities)
+          .set({ capabilities: sql`capabilities || '{"mcp":false}'::jsonb` }),
+      ),
+    );
+    try {
+      expect(await run(apiKeysAllowed(userId))).toBe(false);
+      expect(await keyGrant(secret)).toBeNull();
+    } finally {
+      await run(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(defaultCapabilities)
+            .set({ capabilities: sql`capabilities || '{"mcp":true}'::jsonb` }),
+        ),
+      );
+    }
+    expect(await keyGrant(secret)).not.toBeNull();
   });
 
   it("holds a person to the limit on keys", async () => {
