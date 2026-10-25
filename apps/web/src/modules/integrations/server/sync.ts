@@ -5,6 +5,7 @@ import { and, count, eq, inArray, isNull, lte, ne, notExists, or, sql } from "dr
 import { Context, Duration, Effect, Layer, Schedule as EffectSchedule, Semaphore } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
+  integrationConfigs,
   integrationConnections,
   knowledgeCollections,
   knowledgeDocuments,
@@ -30,6 +31,8 @@ import {
   type SourceRoot,
 } from "../schema.ts";
 import { isSelected, type AdapterFailure } from "./adapter.ts";
+import { accountUsability } from "./credentials.ts";
+import { integrationUsableBy } from "./repo.ts";
 import { IntegrationService } from "./service.ts";
 
 const TICK_INTERVAL = Duration.minutes(1);
@@ -144,36 +147,40 @@ function make(background: boolean) {
     ) {
       // Anyone who can read the collection sees where its pages come from;
       // only the owner changes that.
+      const [collection] = yield* db
+        .select({ owner: knowledgeCollections.userId })
+        .from(knowledgeCollections)
+        .where(and(eq(knowledgeCollections.id, collectionId), readableBy("collection", userId)))
+        .pipe(Effect.orDie);
+      if (!collection) return [];
       const rows = yield* db
         .select({
           source: knowledgeSources,
-          status: integrationConnections.status,
-          name: integrationConnections.name,
-          accountLabel: integrationConnections.accountLabel,
-          owner: knowledgeCollections.userId,
+          connection: integrationConnections,
+          config: integrationConfigs,
+          // Whether the sync, which runs as the owner, may use it.
+          access: sql<boolean>`${integrationUsableBy(collection.owner)}`,
         })
         .from(knowledgeSources)
-        .innerJoin(knowledgeCollections, eq(knowledgeCollections.id, knowledgeSources.collectionId))
+        .innerJoin(integrationConfigs, eq(integrationConfigs.id, knowledgeSources.integrationId))
         // The account it syncs as, which is the owner's own.
         .leftJoin(
           integrationConnections,
           and(
             eq(integrationConnections.id, knowledgeSources.connectionId),
-            eq(integrationConnections.userId, knowledgeCollections.userId),
+            eq(integrationConnections.userId, collection.owner),
           ),
         )
-        .where(
-          and(eq(knowledgeSources.collectionId, collectionId), readableBy("collection", userId)),
-        )
+        .where(eq(knowledgeSources.collectionId, collectionId))
         .pipe(Effect.orDie);
+      const owner = collection.owner === userId;
       return rows.map((row) => {
-        const owner = row.owner === userId;
         // Only the owner hears which of their accounts it is.
-        const account =
-          owner && row.accountLabel !== null
-            ? accountName({ name: row.name, accountLabel: row.accountLabel })
-            : null;
-        return toView(row.source, row.status === "active", owner, account);
+        const account = owner && row.connection ? accountName(row.connection) : null;
+        const connected =
+          row.connection !== null &&
+          accountUsability(row.config, Boolean(row.access), row.connection).usable;
+        return toView(row.source, connected, owner, account);
       });
     });
 

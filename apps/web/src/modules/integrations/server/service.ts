@@ -48,7 +48,7 @@ import {
   methodsFor,
   probe,
   verified,
-  wayOpen,
+  accountUsability,
   type ConnectedSession,
 } from "./credentials.ts";
 import { makeOAuthFlow, metadataDocumentOrigin } from "./oauth-flow.ts";
@@ -539,20 +539,10 @@ export class IntegrationService extends Context.Service<
           connection: IntegrationConnectionRow;
           config: IntegrationConfigRow;
         }> = [];
-        for (const row of rows.toSorted((a, b) => byName(a.config, b.config))) {
-          const adapter = findAdapterType(row.config.kind);
-          const manifest = findIntegrationType(row.config.kind);
-          if (!adapter || !manifest || !row.config.enabled || !row.usable) continue;
-          const normalized = adapter.normalizeConfig(row.config.config);
-          if ("error" in normalized) continue;
-          for (const connection of row.connections) {
-            if (connection.status !== "active") continue;
-            if (connection.configFingerprint !== normalized.fingerprint) continue;
-            if (!wayOpen(manifest, adapter, row.config, normalized.config, connection.authKind))
-              continue;
-            usable.push({ connection, config: row.config });
-          }
-        }
+        for (const row of rows.toSorted((a, b) => byName(a.config, b.config)))
+          for (const connection of row.connections)
+            if (accountUsability(row.config, row.usable, connection).usable)
+              usable.push({ connection, config: row.config });
         return usable;
       });
 
@@ -621,10 +611,10 @@ export class IntegrationService extends Context.Service<
           const readsOnly = entry.connections.length
             ? entry.connections.every((connection) => connection.authKind === "shared")
             : methods.open === "shared" && !methods.oauth && !methods.apiKey;
-          const stale = (connection: IntegrationConnectionRow) =>
-            configured &&
-            (connection.configFingerprint !== normalized.fingerprint ||
-              !wayOpen(manifest, adapter, entry.config, normalized.config, connection.authKind));
+          const statusOf = (connection: IntegrationConnectionRow) => {
+            const state = accountUsability(entry.config, entry.usable, connection);
+            return state.usable ? "active" : state.reason;
+          };
           // A shared key only ever reads, so its other tools are not anyone's to set.
           const toolInfo = (tools: ReadonlyArray<OfferedTool>): IntegrationToolInfo[] =>
             tools
@@ -663,7 +653,7 @@ export class IntegrationService extends Context.Service<
                   authKind: connection.authKind,
                   accountLabel: connection.accountLabel,
                   name: connection.name,
-                  status: stale(connection) ? "needs_reauth" : connection.status,
+                  status: statusOf(connection),
                   offerByDefault: connection.offerByDefault,
                   toolPermissions: connection.toolPermissions,
                   scope: connection.scope,

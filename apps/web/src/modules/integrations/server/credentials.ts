@@ -143,6 +143,48 @@ export const wayOpen = (
   return methods.open === kind;
 };
 
+/**
+ * An integration as it may be used now, with its type, adapter and normalized
+ * config, or null. `access` is `integrationUsableBy` for the person.
+ */
+export const integrationUsability = (row: IntegrationConfigRow, access: boolean) => {
+  const manifest = findIntegrationType(row.kind);
+  const adapter = findAdapterType(row.kind);
+  if (!row.enabled || !access || !manifest || !adapter) return null;
+  const normalized = adapter.normalizeConfig(row.config);
+  if ("error" in normalized) return null;
+  return { manifest, adapter, row, ...normalized };
+};
+
+/**
+ * Whether an account works now, or why not: `unavailable` when its
+ * integration is off, unshared or unconfigured, `needs_reauth` when the
+ * account itself needs signing in again (refused, another server, a way in
+ * closed). Settings, the schedule editor and save, a source's list and every
+ * session decide by this alone, so none of them disagrees with a run.
+ */
+export const accountUsability = (
+  row: IntegrationConfigRow,
+  access: boolean,
+  connection: Pick<IntegrationConnectionRow, "status" | "configFingerprint" | "authKind">,
+) => {
+  const integration = integrationUsability(row, access);
+  if (!integration) return { usable: false, reason: "unavailable" } as const;
+  if (
+    connection.status !== "active" ||
+    connection.configFingerprint !== integration.fingerprint ||
+    !wayOpen(
+      integration.manifest,
+      integration.adapter,
+      row,
+      integration.config,
+      connection.authKind,
+    )
+  )
+    return { usable: false, reason: "needs_reauth" } as const;
+  return { usable: true, ...integration } as const;
+};
+
 /** A session for a credential not stored yet, to verify it before saving. */
 export const probe = (
   config: Record<string, string>,
@@ -264,13 +306,9 @@ export const makeCredentials = (deps: {
     /** The integration with its type, adapter and normalized config, or why it cannot be used. */
     const available = Effect.fn(function* (userId: string, integrationId: string) {
       const row = yield* repo.getConfig(integrationId);
-      const manifest = row ? findIntegrationType(row.kind) : null;
-      const adapter = row ? findAdapterType(row.kind) : null;
-      if (!row?.enabled || !manifest || !adapter || !(yield* repo.isUsable(userId, integrationId)))
-        return yield* new IntegrationNotAvailable({ integrationId });
-      const normalized = adapter.normalizeConfig(row.config);
-      if ("error" in normalized) return yield* new IntegrationNotAvailable({ integrationId });
-      return { manifest, adapter, row, ...normalized };
+      const usable = row ? integrationUsability(row, yield* repo.isUsable(userId, row.id)) : null;
+      if (!usable) return yield* new IntegrationNotAvailable({ integrationId });
+      return usable;
     });
 
     // Concurrent callers (a chat and a sync, say) take turns per connection:
@@ -519,16 +557,12 @@ export const makeCredentials = (deps: {
       if (!connection)
         return yield* new IntegrationNotAvailable({ integrationId: null, connectionId });
       const integrationId = connection.integrationId;
-      const { manifest, adapter, row, config, fingerprint } = yield* available(
-        userId,
-        integrationId,
-      );
-      if (
-        connection.status !== "active" ||
-        connection.configFingerprint !== fingerprint ||
-        !wayOpen(manifest, adapter, row, config, connection.authKind)
-      )
-        return yield* new IntegrationNotAvailable({ integrationId });
+      const stored = yield* repo.getConfig(integrationId);
+      const state = stored
+        ? accountUsability(stored, yield* repo.isUsable(userId, integrationId), connection)
+        : null;
+      if (!state?.usable) return yield* new IntegrationNotAvailable({ integrationId });
+      const { manifest, adapter, row, config, fingerprint } = state;
       const session: ConnectedSession = {
         connectionId: connection.id,
         accountEpoch: connection.accountEpoch,

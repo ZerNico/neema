@@ -93,7 +93,8 @@ export interface IntegrationConnectionView {
   accountLabel: string;
   /** The person's own name for it; null shows the account label. */
   name: string | null;
-  status: "active" | "needs_reauth";
+  /** `unavailable`: its integration is off, unshared or unconfigured for this person. */
+  status: "active" | "needs_reauth" | "unavailable";
   offerByDefault: boolean;
   /** Only tools set away from their default. */
   toolPermissions: Record<string, ToolPermission>;

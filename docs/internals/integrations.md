@@ -118,6 +118,11 @@ from.
 - The adapter's config fingerprint (Outline: the normalized base URL) is stored with each
   connection. A different fingerprint reads as `needs_reauth`, and saving a new one marks
   every connection so, since the credentials name another server.
+- Whether an account works now is one rule, `accountUsability`: `unavailable` while its
+  integration is off, not shared with the person or not configured, `needs_reauth` when the
+  service refused it, it names another fingerprint or its way in was closed. Sessions,
+  Settings, the schedule editor and save, and a knowledge source's list all ask it, so none
+  promises an account a run would refuse.
 - A reconnect changes `account_epoch` and `credential_revision`, even on the same server
   and connection row. Refresh changes only the revision. A session captures the epoch, the
   setup it started under (fingerprint and the integration's `revision`, see

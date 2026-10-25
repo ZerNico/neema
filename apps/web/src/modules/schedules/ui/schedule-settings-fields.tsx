@@ -152,7 +152,9 @@ export const ScheduleSettingsFields = withForm({
                     detail:
                       account.status === "active"
                         ? account.accountLabel
-                        : "Not connected: runs will fail until you reconnect.",
+                        : account.status === "unavailable"
+                          ? "Turned off: runs will fail until it is back."
+                          : "Not connected: runs will fail until you reconnect.",
                   }));
                 const lost = grants
                   .filter(

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Effect, Schema } from "effect";
 import {
@@ -12,6 +12,7 @@ import { ownedConversationById } from "~/modules/chat/server/owned-conversation.
 import { findIntegrationType } from "~/modules/integrations/catalog.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { parseMailbox } from "~/modules/integrations/mailbox.ts";
+import { accountUsability } from "~/modules/integrations/server/credentials.ts";
 import { integrationUsableBy } from "~/modules/integrations/server/repo.ts";
 import type { AgentRepo } from "~/modules/agents/server/repo.ts";
 import type { FeaturePolicy } from "~/modules/groups/server/policy.ts";
@@ -170,8 +171,12 @@ export const checkScheduleResources = (
     // integration it names, the way a collection needs to be readable; a fire
     // rechecks it.
     for (const grant of settings.integrationGrants ?? []) {
-      const [connection] = yield* tx
-        .select({ status: integrationConnections.status, kind: integrationConfigs.kind })
+      const [found] = yield* tx
+        .select({
+          connection: integrationConnections,
+          config: integrationConfigs,
+          access: sql<boolean>`${integrationUsableBy(userId)}`,
+        })
         .from(integrationConnections)
         .innerJoin(
           integrationConfigs,
@@ -182,16 +187,20 @@ export const checkScheduleResources = (
             eq(integrationConnections.id, grant.connectionId),
             eq(integrationConnections.userId, userId),
             eq(integrationConnections.integrationId, grant.integrationId),
-            eq(integrationConfigs.enabled, true),
-            integrationUsableBy(userId),
           ),
         )
         .limit(1);
-      if (connection?.status !== "active")
+      const state = found
+        ? accountUsability(found.config, Boolean(found.access), found.connection)
+        : null;
+      if (!state?.usable)
         return yield* new ScheduleRejected({
-          reason: "connect the integration in Settings before letting a schedule use it",
+          reason:
+            state?.reason === "unavailable"
+              ? "an integration this schedule uses is turned off or no longer shared with you"
+              : "connect the integration in Settings before letting a schedule use it",
         });
-      if (undeclaredAllowance(grant, connection.kind))
+      if (undeclaredAllowance(grant, found!.config.kind))
         return yield* new ScheduleRejected({ reason: "unknown integration allowance" });
     }
     // A chosen chat must be the owner's and a plain chat: a work chat needs

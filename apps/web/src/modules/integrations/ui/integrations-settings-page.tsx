@@ -86,6 +86,7 @@ function AccountBadge({ account }: { account: Account }) {
         {usesNoAccount(account.authKind) ? "Paused" : "Signed out"}
       </Badge>
     );
+  if (account.status === "unavailable") return <Badge variant="outline">Turned off</Badge>;
   return <Badge variant="secondary">Connected</Badge>;
 }
 
