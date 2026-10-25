@@ -6,6 +6,7 @@ import {
 } from "~/modules/memory/server/memory-prompt.ts";
 import { fixedFamilySummary } from "~/modules/tools/server/tool-load.ts";
 import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import { BUILTIN_SKILLS, SCHEDULE_AUTHORING_SKILL } from "~/modules/skills/bundled/index.ts";
 import { memoryMessages } from "./conversation-context.ts";
 import { buildFixedPrefix, type FixedPrefixInput } from "./system-prompt.ts";
 
@@ -30,7 +31,7 @@ const allLazy = [...office, ...catalog(["agent-draft", "schedule-draft"])];
 
 const nothing: FixedPrefixInput = {
   lazyFamilies: [],
-  agentAuthoring: false,
+  authoringSkills: [],
   documents: false,
   knowledge: false,
   web: null,
@@ -47,7 +48,7 @@ const configurations: Record<string, FixedPrefixInput> = {
   "plain-chat": {
     ...nothing,
     lazyFamilies: allLazy,
-    agentAuthoring: true,
+    authoringSkills: BUILTIN_SKILLS,
     documents: true,
     web: { search: true, reader: true },
     interactiveUi: { photos: true },
@@ -57,7 +58,7 @@ const configurations: Record<string, FixedPrefixInput> = {
   "project-agent": {
     ...nothing,
     lazyFamilies: allLazy,
-    agentAuthoring: true,
+    authoringSkills: BUILTIN_SKILLS,
     documents: true,
     knowledge: true,
     web: { search: false, reader: true },
@@ -119,6 +120,20 @@ describe("configured instructions", () => {
       text.indexOf("<agent-instructions"),
     );
     expect(text.match(/<\/agent-instructions>/g)).toHaveLength(1);
+  });
+});
+
+describe("the authoring skill pointer", () => {
+  it("names only the authoring skills the offer holds", () => {
+    const text = (authoringSkills: FixedPrefixInput["authoringSkills"]) =>
+      render(buildFixedPrefix({ ...nothing, authoringSkills }));
+    expect(text([SCHEDULE_AUTHORING_SKILL])).toContain(
+      "To create or edit scheduled tasks from chat, load the schedule-authoring skill.",
+    );
+    expect(text([SCHEDULE_AUTHORING_SKILL])).not.toContain("agent-authoring");
+    // The interactive-ui builtin teaches no draft workflow, so it alone adds no pointer.
+    expect(text(BUILTIN_SKILLS.filter((skill) => !skill.unlocks))).toBe(text([]));
+    expect(text([])).not.toContain("authoring");
   });
 });
 

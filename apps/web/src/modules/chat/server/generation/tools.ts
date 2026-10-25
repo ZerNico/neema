@@ -18,6 +18,7 @@ import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
 import { SkillReader } from "~/modules/skills/server/reader.ts";
 import { prepareSkillTools, skillOffer } from "~/modules/skills/server/tools.ts";
 import { SkillToolName } from "~/modules/skills/tool-schema.ts";
+import { findBuiltinSkill } from "~/modules/skills/bundled/index.ts";
 import type { FontFace } from "~/modules/presentations/server/font-file.ts";
 import { sha256Hex } from "~/modules/attachments/server/sha256.ts";
 import {
@@ -858,10 +859,10 @@ export const prepareGenerationTools = (
     ];
     const offeredLazy = lazyCatalog.map((entry) => entry.family);
     const unlockedFamilies = new Set<LoadableToolFamily>();
-    const unlockTool = (name: string) => {
-      const family = lazyFamilyOfTool(name);
+    const unlockFamily = (family: LoadableToolFamily | null | undefined) => {
       if (family && offeredLazy.includes(family)) unlockedFamilies.add(family);
     };
+    const unlockTool = (name: string) => unlockFamily(lazyFamilyOfTool(name));
     const toolLoad = offeredLazy.length
       ? prepareToolLoad({ offered: offeredLazy, unlocked: unlockedFamilies })
       : undefined;
@@ -881,9 +882,9 @@ export const prepareGenerationTools = (
           for (const family of loaded.value.loaded)
             if (offeredLazy.includes(family)) into.add(family);
       } else if (call.toolName === "load_skill") {
-        const skillId = (call.result as { skillId?: unknown } | null)?.skillId;
-        if (skillId === "builtin:agent-authoring") add("draft_agent");
-        if (skillId === "builtin:schedule-authoring") add("draft_schedule");
+        const family = findBuiltinSkill((call.result as { skillId?: unknown } | null)?.skillId)
+          ?.unlocks?.family;
+        if (family && offeredLazy.includes(family)) into.add(family);
       } else add(call.toolName);
     };
     const commonGroups = [
@@ -1085,6 +1086,7 @@ export const prepareGenerationTools = (
       lazyCatalog,
       unlockedFamilies,
       unlockTool,
+      unlockFamily,
       unlockByCall,
       budgetToolkit,
       schemaTokensWith,

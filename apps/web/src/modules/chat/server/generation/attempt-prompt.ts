@@ -1,3 +1,4 @@
+import { offeredBuiltins } from "~/modules/skills/bundled/index.ts";
 import { SKILL_LIMITS } from "~/modules/skills/package.ts";
 import { earlierSkillMessage } from "~/modules/skills/server/tools.ts";
 import { isOfficeFamily, officeFamilyOfFile } from "~/modules/office/families.ts";
@@ -717,7 +718,7 @@ export const prepareAttemptPrompt = (env: {
       lazyFamilies: lazyCatalog,
       images: imageTool !== undefined,
       history: historyTools ? { otherChats: conversationContext.pastChats } : null,
-      agentAuthoring: permissions.agentsCreate,
+      authoringSkills: offeredBuiltins(tools.skillManifest),
       documents: permissions.documents,
       knowledge: !!knowledgeSession,
       web: webTools ? webTools.tools : null,

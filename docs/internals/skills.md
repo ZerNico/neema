@@ -7,8 +7,11 @@ A skill is a SKILL.md package (`src/modules/skills`), not a permission and not a
 - The builtins (`builtin:agent-authoring`, `builtin:schedule-authoring`,
   `builtin:interactive-ui`) are hardcoded constants listed in `src/modules/skills/bundled/`,
   single-file, with no DB rows, blobs, or revisions. They exist so the model loads depth on
-  demand instead of carrying an always-on policy in the prompt prefix. The authoring skills
-  keep a one-line pointer in the fixed prefix. `interactive-ui` carries a short policy there
+  demand instead of carrying an always-on policy in the prompt prefix. Each declares the grant
+  it `requires` and the lazy tool family it `unlocks`; loading one unlocks that family. The
+  authoring skills keep a one-line pointer in the fixed prefix, built from the builtins the
+  attempt's skill offer actually holds, so it never names a skill the model cannot load and
+  stays byte-identical for a given offer. `interactive-ui` carries a short policy there
   while it is offered, naming the kinds of block and teaching the one block, photos, that
   needs no load (see [generative UI](generative-ui.md)).
 - `interactive-ui` lives in `src/modules/genui/skill.ts` beside the language it teaches. Its

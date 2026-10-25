@@ -1,5 +1,4 @@
 import type { Prompt } from "effect/ai";
-import { AGENT_APP_POLICY } from "~/modules/agents/server/authoring-prompt.ts";
 import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
 import { desktopToolsSystemHint } from "~/modules/desktop/tool-schema.ts";
 import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
@@ -11,6 +10,7 @@ import { webToolsSystemHint } from "./search-prompt.ts";
 import { toolLoadPolicy } from "~/modules/tools/server/tool-load.ts";
 import { IMAGE_APP_POLICY } from "~/modules/images/server/policy.ts";
 import type { LoadableToolFamily } from "~/modules/tools/tool-load-schema.ts";
+import { authoringSkillsPolicy, type BuiltinSkill } from "~/modules/skills/bundled/index.ts";
 
 /**
  * Who the model is in this app and what holds in every chat. Only what the
@@ -61,7 +61,8 @@ export interface FixedPrefixInput {
     readonly family: LoadableToolFamily;
     readonly summary: string;
   }>;
-  readonly agentAuthoring: boolean;
+  /** The builtin skills this attempt's skill offer holds; the authoring ones get a pointer. */
+  readonly authoringSkills: ReadonlyArray<BuiltinSkill>;
   readonly documents: boolean;
   readonly knowledge: boolean;
   readonly web: { readonly search: boolean; readonly reader: boolean } | null;
@@ -101,40 +102,47 @@ const system = (content: string): Prompt.MessageEncoded => ({ role: "system", co
  * tool policies, memory, then project and agent instructions. It depends only on what the attempt is offered, so
  * it stays byte-identical across turns and caches with the tool list.
  */
-export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded[] => [
-  system(basePolicy(input)),
-  system(fileReferencesSystemHint),
-  ...(input.lazyFamilies.length ? [system(toolLoadPolicy(input.lazyFamilies))] : []),
-  ...(input.deckFonts?.length
-    ? [
-        system(
-          `Fonts uploaded for this app, usable in presentations beside those the deck tools list: ${input.deckFonts.join(", ")}.`,
-        ),
-      ]
-    : []),
-  ...(input.agentAuthoring ? [system(AGENT_APP_POLICY)] : []),
-  ...(input.documents ? [system(DOCUMENT_APP_POLICY)] : []),
-  ...(input.interactiveUi ? [system(interactiveUiPolicy(input.interactiveUi.photos))] : []),
-  ...(input.knowledge ? [system(KNOWLEDGE_SYSTEM_HINT)] : []),
-  ...(input.web ? [system(webToolsSystemHint(input.web))] : []),
-  ...(input.integrations ? [system(integrationsPolicy(input.integrations))] : []),
-  // After the web hint, so the ranking between them is the last word.
-  ...(input.research ? [system(RESEARCH_APP_POLICY)] : []),
-  ...(input.desktop
-    ? [system(desktopToolsSystemHint(input.desktop.folders, input.desktop.commands))]
-    : []),
-  ...(input.browser ? [system(BROWSER_TOOLS_SYSTEM_HINT)] : []),
-  ...(input.images ? [system(IMAGE_APP_POLICY)] : []),
-  ...(input.history ? [system(historyToolsHint(input.history.otherChats))] : []),
-  ...input.memory,
-  // The project's come first; an agent picked in it refines them.
-  ...(input.project?.instructions.trim() || input.agent?.instructions.trim()
-    ? [system(INSTRUCTIONS_PRECEDENCE)]
-    : []),
-  ...(input.project?.instructions.trim()
-    ? [system(instructions("project-instructions", input.project.name, input.project.instructions))]
-    : []),
-  ...(input.agent?.instructions.trim()
-    ? [system(instructions("agent-instructions", input.agent.name, input.agent.instructions))]
-    : []),
-];
+export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded[] => {
+  const authoring = authoringSkillsPolicy(input.authoringSkills);
+  return [
+    system(basePolicy(input)),
+    system(fileReferencesSystemHint),
+    ...(input.lazyFamilies.length ? [system(toolLoadPolicy(input.lazyFamilies))] : []),
+    ...(input.deckFonts?.length
+      ? [
+          system(
+            `Fonts uploaded for this app, usable in presentations beside those the deck tools list: ${input.deckFonts.join(", ")}.`,
+          ),
+        ]
+      : []),
+    ...(authoring ? [system(authoring)] : []),
+    ...(input.documents ? [system(DOCUMENT_APP_POLICY)] : []),
+    ...(input.interactiveUi ? [system(interactiveUiPolicy(input.interactiveUi.photos))] : []),
+    ...(input.knowledge ? [system(KNOWLEDGE_SYSTEM_HINT)] : []),
+    ...(input.web ? [system(webToolsSystemHint(input.web))] : []),
+    ...(input.integrations ? [system(integrationsPolicy(input.integrations))] : []),
+    // After the web hint, so the ranking between them is the last word.
+    ...(input.research ? [system(RESEARCH_APP_POLICY)] : []),
+    ...(input.desktop
+      ? [system(desktopToolsSystemHint(input.desktop.folders, input.desktop.commands))]
+      : []),
+    ...(input.browser ? [system(BROWSER_TOOLS_SYSTEM_HINT)] : []),
+    ...(input.images ? [system(IMAGE_APP_POLICY)] : []),
+    ...(input.history ? [system(historyToolsHint(input.history.otherChats))] : []),
+    ...input.memory,
+    // The project's come first; an agent picked in it refines them.
+    ...(input.project?.instructions.trim() || input.agent?.instructions.trim()
+      ? [system(INSTRUCTIONS_PRECEDENCE)]
+      : []),
+    ...(input.project?.instructions.trim()
+      ? [
+          system(
+            instructions("project-instructions", input.project.name, input.project.instructions),
+          ),
+        ]
+      : []),
+    ...(input.agent?.instructions.trim()
+      ? [system(instructions("agent-instructions", input.agent.name, input.agent.instructions))]
+      : []),
+  ];
+};

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { readableBy } from "~/modules/sharing/server/resources.ts";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -14,10 +14,16 @@ import type { SkillSource } from "~/db/schema/skills.ts";
 import { collectOrphanedBlobs, lockBlobs } from "~/modules/attachments/server/blob-references.ts";
 import { Db, type DbTx } from "~/server/db.ts";
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
+import type { Capability } from "~/modules/groups/policy.ts";
 import { BUILTIN_SKILLS } from "../bundled/index.ts";
 import { SkillConflict, SkillNotAvailable, SkillRejected } from "../errors.ts";
 import { SKILL_LIMITS, type ValidatedSkillPackage } from "../package.ts";
 import type { SkillManifestEntry, SkillSummary } from "../schema.ts";
+
+/** The grants builtins require, read with skills Use in one query. */
+const BUILTIN_REQUIREMENTS = [
+  ...new Set(BUILTIN_SKILLS.flatMap((skill) => (skill.requires ? [skill.requires] : []))),
+];
 
 type Revision = typeof skillRevisions.$inferSelect;
 export interface StoredSkillFile {
@@ -219,8 +225,9 @@ export class SkillRepo extends Context.Service<
           const [permissions] = yield* db
             .select({
               use: capabilityAllowedSql(userId, "skillsUse"),
-              agents: capabilityAllowedSql(userId, "agentsCreate"),
-              schedules: capabilityAllowedSql(userId, "schedules"),
+              ...(Object.fromEntries(
+                BUILTIN_REQUIREMENTS.map((key) => [key, capabilityAllowedSql(userId, key)]),
+              ) as Partial<Record<Capability, SQL<boolean>>>),
             })
             .from(user)
             .where(eq(user.id, userId))
@@ -246,11 +253,7 @@ export class SkillRepo extends Context.Service<
             ...BUILTIN_SKILLS.filter(
               (skill) =>
                 !exclude.includes(skill.id) &&
-                (skill.id === "builtin:agent-authoring"
-                  ? permissions.agents
-                  : skill.id === "builtin:schedule-authoring"
-                    ? permissions.schedules
-                    : true),
+                (skill.requires === null || permissions[skill.requires] === true),
             ).map((skill) => ({
               skillId: skill.id,
               revisionId: "builtin",

@@ -1,3 +1,4 @@
+import { findBuiltinSkill } from "~/modules/skills/bundled/index.ts";
 import { desktopToolTimeout, unusableDesktopResult } from "~/modules/desktop/tool-schema.ts";
 import {
   ProjectFileToolName,
@@ -329,6 +330,7 @@ export const observePart = (
       knowledgeTools,
       temporary,
       unlockTool,
+      unlockFamily,
     } = tools;
     const { state, sourcesByIndex } = attemptPrompt;
     const {
@@ -439,10 +441,9 @@ export const observePart = (
       case "tool-call": {
         const args = part.params as Record<string, unknown>;
         unlockTool(part.name);
-        if (part.name === "load_skill") {
-          if (args.skillId === "builtin:agent-authoring") unlockTool("draft_agent");
-          if (args.skillId === "builtin:schedule-authoring") unlockTool("draft_schedule");
-        }
+        // An authoring skill brings the tools its workflow drives.
+        if (part.name === "load_skill")
+          unlockFamily(findBuiltinSkill(args.skillId)?.unlocks?.family);
         const family = tools.familyOf(part.name);
         if (!family) return;
         const rowId = uuidv7();

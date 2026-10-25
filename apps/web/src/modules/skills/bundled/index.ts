@@ -5,6 +5,8 @@
  * the app; a replayed old message reads today's text, which is acceptable
  * because instructions are app behaviour, not user data.
  */
+import type { Capability } from "~/modules/groups/policy.ts";
+import type { LazyToolFamily } from "~/modules/tools/tool-load-schema.ts";
 import {
   INTERACTIVE_UI_SKILL_DESCRIPTION,
   INTERACTIVE_UI_SKILL_ID,
@@ -17,11 +19,20 @@ export interface BuiltinSkill {
   description: string;
   /** The single SKILL.md body returned by load_skill. */
   root: string;
+  /** The grant the catalogue checks before offering it; null for none beyond skills Use. */
+  requires: Capability | null;
+  /**
+   * The lazy tool family whose workflow it teaches, loaded with it, and what
+   * that family makes, as the prompt's pointer names it.
+   */
+  unlocks: { family: LazyToolFamily; what: string } | null;
 }
 
 export const AGENT_AUTHORING_SKILL: BuiltinSkill = {
   id: "builtin:agent-authoring",
   name: "agent-authoring",
+  requires: "agentsCreate",
+  unlocks: { family: "agent-draft", what: "agents" },
   description:
     "How to create or edit an agent from chat: the draft workflow, the draft_agent and update_agent_draft tools, and what an agent is in this app.",
   root: `---
@@ -52,6 +63,8 @@ An agent in this app is a reusable chat configuration: name, description, icon, 
 export const SCHEDULE_AUTHORING_SKILL: BuiltinSkill = {
   id: "builtin:schedule-authoring",
   name: "schedule-authoring",
+  requires: "schedules",
+  unlocks: { family: "schedule-draft", what: "scheduled tasks" },
   description:
     "How to create or edit a scheduled task from chat: the draft workflow, natural cadence to cron translation, and choosing a new or continuing chat.",
   root: `---
@@ -98,6 +111,8 @@ export const INTERACTIVE_UI_SKILL: BuiltinSkill = {
   name: "interactive-ui",
   description: INTERACTIVE_UI_SKILL_DESCRIPTION,
   root: INTERACTIVE_UI_SKILL_ROOT,
+  requires: null,
+  unlocks: null,
 };
 
 export const BUILTIN_SKILLS: ReadonlyArray<BuiltinSkill> = [
@@ -105,5 +120,21 @@ export const BUILTIN_SKILLS: ReadonlyArray<BuiltinSkill> = [
   SCHEDULE_AUTHORING_SKILL,
   INTERACTIVE_UI_SKILL,
 ];
-export const findBuiltinSkill = (skillId: string): BuiltinSkill | undefined =>
+export const findBuiltinSkill = (skillId: unknown): BuiltinSkill | undefined =>
   BUILTIN_SKILLS.find((skill) => skill.id === skillId);
+
+/** The builtins among an attempt's skill offer, in catalogue order. */
+export const offeredBuiltins = (offer: ReadonlyArray<{ skillId: string }>) =>
+  offer.flatMap((entry) => findBuiltinSkill(entry.skillId) ?? []);
+
+/**
+ * The fixed prefix's one line pointing at the authoring skills offered, or
+ * null when none is. A function of the offer alone, so it caches with it.
+ */
+export const authoringSkillsPolicy = (offered: ReadonlyArray<BuiltinSkill>): string | null => {
+  const authoring = offered.flatMap((skill) =>
+    skill.unlocks ? [{ name: skill.name, what: skill.unlocks.what }] : [],
+  );
+  if (!authoring.length) return null;
+  return `To create or edit ${authoring.map((skill) => skill.what).join(" or ")} from chat, load the ${authoring.map((skill) => skill.name).join(" or ")} skill.`;
+};
