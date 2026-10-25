@@ -33,8 +33,7 @@ import {
   type ImagePriceKey,
   type ModelSettingsDraft,
 } from "./model-settings-draft.ts";
-
-const QUALITY_LABELS = { low: "Low", medium: "Medium", high: "High" } as const;
+import { m } from "~/paraglide/messages.js";
 
 /**
  * The family is how the model is called; what it may do is clipped to the
@@ -63,7 +62,11 @@ export function ImageModelFields({
       imagePrices: shownImagePrices(draft.imagePrices, merged.qualities, merged.edit !== null),
     });
   };
-  const price = (key: ImagePriceKey, label: string, placeholder = "Not set") => {
+  const price = (
+    key: ImagePriceKey,
+    label: string,
+    placeholder: string = m.admin_image_not_set(),
+  ) => {
     const invalid =
       draft.imagePrices[key].trim() !== "" && parsePrice(draft.imagePrices[key]) === undefined;
     return (
@@ -86,9 +89,9 @@ export function ImageModelFields({
   return (
     <>
       <FieldSet compact disabled={disabled}>
-        <FieldLegend variant="label">Image generation</FieldLegend>
+        <FieldLegend variant="label">{m.admin_image_generation()}</FieldLegend>
         <Field>
-          <FieldLabel htmlFor={`${id}-family`}>Family</FieldLabel>
+          <FieldLabel htmlFor={`${id}-family`}>{m.admin_image_family()}</FieldLabel>
           <Select
             value={draft.imageFamily}
             onValueChange={(value) => {
@@ -107,7 +110,7 @@ export function ImageModelFields({
             items={families.map((item) => ({ value: item.id, label: item.label }))}
           >
             <SelectTrigger id={`${id}-family`} className="w-full">
-              <SelectValue placeholder="Choose a family" />
+              <SelectValue placeholder={m.admin_image_family_placeholder()} />
             </SelectTrigger>
             <SelectContent>
               {families.map((item) => (
@@ -117,9 +120,7 @@ export function ImageModelFields({
               ))}
             </SelectContent>
           </Select>
-          <FieldDescription>
-            How the model is called. Its limits bound the settings below.
-          </FieldDescription>
+          <FieldDescription>{m.admin_image_family_hint()}</FieldDescription>
         </Field>
         {caps && limits ? (
           <>
@@ -127,7 +128,7 @@ export function ImageModelFields({
               <FieldLabel htmlFor={`${id}-generate`}>
                 <Field orientation="horizontal">
                   <FieldContent>
-                    <FieldTitle id={`${id}-generate-title`}>Creates from a prompt</FieldTitle>
+                    <FieldTitle id={`${id}-generate-title`}>{m.admin_image_generate()}</FieldTitle>
                   </FieldContent>
                   <Switch
                     id={`${id}-generate`}
@@ -141,7 +142,9 @@ export function ImageModelFields({
               <FieldLabel htmlFor={`${id}-transparency`}>
                 <Field orientation="horizontal">
                   <FieldContent>
-                    <FieldTitle id={`${id}-transparency-title`}>Transparent backgrounds</FieldTitle>
+                    <FieldTitle id={`${id}-transparency-title`}>
+                      {m.admin_image_transparency()}
+                    </FieldTitle>
                   </FieldContent>
                   <Switch
                     id={`${id}-transparency`}
@@ -155,7 +158,7 @@ export function ImageModelFields({
               <FieldLabel htmlFor={`${id}-edit`}>
                 <Field orientation="horizontal">
                   <FieldContent>
-                    <FieldTitle id={`${id}-edit-title`}>Edits images</FieldTitle>
+                    <FieldTitle id={`${id}-edit-title`}>{m.admin_image_edit()}</FieldTitle>
                   </FieldContent>
                   <Switch
                     id={`${id}-edit`}
@@ -172,7 +175,7 @@ export function ImageModelFields({
                 <FieldLabel htmlFor={`${id}-references`}>
                   <Field orientation="horizontal">
                     <FieldContent>
-                      <FieldTitle>Reference images</FieldTitle>
+                      <FieldTitle>{m.admin_image_references()}</FieldTitle>
                     </FieldContent>
                     <Input
                       id={`${id}-references`}
@@ -197,13 +200,13 @@ export function ImageModelFields({
               ) : null}
             </div>
             <Field>
-              <FieldTitle>Aspect ratios</FieldTitle>
+              <FieldTitle>{m.admin_image_aspect_ratios()}</FieldTitle>
               <ToggleGroup
                 multiple
                 variant="choice"
                 size="sm"
                 className="flex-wrap"
-                aria-label="Aspect ratios"
+                aria-label={m.admin_image_aspect_ratios()}
                 value={[...caps.aspectRatios]}
                 onValueChange={(values) =>
                   setCaps({ aspectRatios: ASPECT_RATIOS.filter((ratio) => values.includes(ratio)) })
@@ -216,17 +219,17 @@ export function ImageModelFields({
                 ))}
               </ToggleGroup>
               {caps.aspectRatios.length === 0 ? (
-                <FieldDescription>Choose at least one.</FieldDescription>
+                <FieldDescription>{m.admin_image_choose_one()}</FieldDescription>
               ) : null}
             </Field>
             {limits.qualities.length > 0 ? (
               <Field>
-                <FieldTitle>Quality levels</FieldTitle>
+                <FieldTitle>{m.admin_image_qualities()}</FieldTitle>
                 <ToggleGroup
                   multiple
                   variant="choice"
                   size="sm"
-                  aria-label="Quality levels"
+                  aria-label={m.admin_image_qualities()}
                   value={[...caps.qualities]}
                   onValueChange={(values) =>
                     setCaps({
@@ -236,14 +239,14 @@ export function ImageModelFields({
                 >
                   {limits.qualities.map((quality) => (
                     <ToggleGroupItem key={quality} value={quality}>
-                      {QUALITY_LABELS[quality]}
+                      {m.admin_image_quality({ quality })}
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>
               </Field>
             ) : null}
             <Field>
-              <FieldLabel htmlFor={`${id}-count`}>Images per call</FieldLabel>
+              <FieldLabel htmlFor={`${id}-count`}>{m.admin_image_count()}</FieldLabel>
               <Input
                 id={`${id}-count`}
                 type="number"
@@ -266,20 +269,26 @@ export function ImageModelFields({
 
       <FieldSet compact disabled={disabled}>
         <FieldLegend variant="label">
-          Pricing <OptionalMark />
+          {m.admin_image_pricing()} <OptionalMark />
         </FieldLegend>
-        <FieldDescription>USD, used when the provider doesn’t report a cost.</FieldDescription>
+        <FieldDescription>{m.admin_image_pricing_hint()}</FieldDescription>
         <div className="grid grid-cols-3 gap-3">
-          {price("textInput", "Text input $/1M")}
-          {price("imageInput", "Image input $/1M")}
-          {price("output", "Output $/1M")}
+          {price("textInput", m.admin_image_price_text_input())}
+          {price("imageInput", m.admin_image_price_image_input())}
+          {price("output", m.admin_image_price_output())}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          {price("default", "Default $/image")}
+          {price("default", m.admin_image_price_default())}
           {caps?.qualities.map((quality) =>
-            price(quality, `${QUALITY_LABELS[quality]} $/image`, "Default price"),
+            price(
+              quality,
+              m.admin_image_price_quality({ quality }),
+              m.admin_image_price_default_placeholder(),
+            ),
           )}
-          {caps?.edit ? price("reference", "Edit fee $/image", "None") : null}
+          {caps?.edit
+            ? price("reference", m.admin_image_price_edit(), m.admin_image_price_none())
+            : null}
         </div>
       </FieldSet>
     </>

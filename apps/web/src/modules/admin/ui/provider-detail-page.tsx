@@ -77,6 +77,8 @@ import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
+import { m } from "~/paraglide/messages.js";
+import { baseUrlLabel, presetLabel } from "../preset-words.ts";
 
 export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const id = useId();
@@ -91,7 +93,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const confirm = useConfirm();
 
   const provider = providers.find((p) => p.id === providerId);
-  const models = allModels.filter((m) => m.providerId === providerId);
+  const models = allModels.filter((model) => model.providerId === providerId);
   const editingModel = models.find((model) => model.id === editingModelId) ?? null;
 
   const invalidate = () =>
@@ -104,7 +106,7 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
   const toggleProvider = useMutation({
     mutationFn: (enabled: boolean) => updateProvider({ data: { providerId, enabled } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not update the provider.", error),
+    onError: (error) => toastError(m.admin_provider_error_update(), error),
   });
 
   const removeProvider = useMutation({
@@ -113,19 +115,23 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       await invalidate();
       await navigate({ to: "/admin/providers" });
     },
-    onError: (error) => toastError("Could not delete the provider.", error),
+    onError: (error) => toastError(m.admin_provider_error_delete(), error),
   });
 
   const removeModel = useMutation({
     mutationFn: (modelId: string) => deleteModel({ data: { modelId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not delete the model.", error),
+    onError: (error) => toastError(m.admin_provider_error_delete_model(), error),
   });
 
   if (!provider) {
     return (
-      <Page title="Provider not found" backTo="/admin/providers" backLabel="Providers">
-        <p className="text-muted-foreground text-sm">This provider does not exist anymore.</p>
+      <Page
+        title={m.admin_provider_not_found()}
+        backTo="/admin/providers"
+        backLabel={m.admin_provider_back()}
+      >
+        <p className="text-muted-foreground text-sm">{m.admin_provider_gone()}</p>
       </Page>
     );
   }
@@ -137,13 +143,13 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
     <Page
       title={provider.name}
       backTo="/admin/providers"
-      backLabel="Providers"
+      backLabel={m.admin_provider_back()}
       actions={
         <>
           {/* oxlint-disable-next-line shadcn/no-restyle -- an inline toggle in the page header, not a stacked form row */}
           <Field orientation="horizontal" className="w-auto gap-2">
             <FieldLabel htmlFor={`${id}-enabled`} className="text-muted-foreground max-sm:sr-only">
-              Enabled
+              {m.admin_provider_enabled()}
             </FieldLabel>
             <Switch
               id={`${id}-enabled`}
@@ -154,24 +160,25 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           </Field>
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" aria-label="Provider actions" />}
+              render={
+                <Button variant="ghost" size="icon-sm" aria-label={m.admin_provider_actions()} />
+              }
             >
               <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setEditing(true)}>
                 <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-                Edit provider
+                {m.admin_provider_edit()}
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onClick={async () => {
                   if (
                     await confirm({
-                      title: `Delete “${provider.name}”?`,
-                      description:
-                        "This removes the provider and all its models. Conversations that used them keep their history but can no longer generate with these models.",
-                      confirmLabel: "Delete provider",
+                      title: m.admin_provider_delete_title({ name: provider.name }),
+                      description: m.admin_provider_delete_description(),
+                      confirmLabel: m.admin_provider_delete(),
                     })
                   ) {
                     removeProvider.mutate();
@@ -179,22 +186,24 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                 }}
               >
                 <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-                Delete provider
+                {m.admin_provider_delete()}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </>
       }
     >
-      <Section title="Connection">
+      <Section title={m.admin_provider_connection()}>
         <ListCard>
           <ListRow>
-            <span className="text-muted-foreground w-24 shrink-0 text-sm">Service</span>
-            <span className="text-sm">{preset.label}</span>
+            <span className="text-muted-foreground w-24 shrink-0 text-sm">
+              {m.admin_provider_service()}
+            </span>
+            <span className="text-sm">{presetLabel(preset)}</span>
           </ListRow>
           <ListRow>
             <span className="text-muted-foreground w-24 shrink-0 text-sm">
-              {baseUrlField(preset).label}
+              {baseUrlLabel(preset)}
             </span>
             <span className="min-w-0 truncate font-mono text-sm">
               {baseUrlField(preset, provider.baseUrl).value}
@@ -203,20 +212,26 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
           {/* Only what the admin chose: fixed values would read as settings. */}
           {can("format") && preset.formats.length > 1 ? (
             <ListRow>
-              <span className="text-muted-foreground w-24 shrink-0 text-sm">API</span>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">
+                {m.admin_provider_api()}
+              </span>
               <span className="text-sm">{FORMAT_LABELS[settings.format]}</span>
             </ListRow>
           ) : null}
           {/* Responses always takes a level; on Chat Completions the provider names its field. */}
           {can("reasoning") && settings.format === "chat-completions" ? (
             <ListRow>
-              <span className="text-muted-foreground w-24 shrink-0 text-sm">Reasoning level</span>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">
+                {m.admin_provider_reasoning_level()}
+              </span>
               <span className="text-sm">{REASONING_LABELS[settings.reasoning]}</span>
             </ListRow>
           ) : null}
           {can("auth") ? (
             <ListRow>
-              <span className="text-muted-foreground w-24 shrink-0 text-sm">Sign in with</span>
+              <span className="text-muted-foreground w-24 shrink-0 text-sm">
+                {m.admin_provider_sign_in_with()}
+              </span>
               <span className="text-sm">{AUTH_LABELS[settings.auth]}</span>
             </ListRow>
           ) : null}
@@ -224,23 +239,23 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
       </Section>
 
       <Section
-        title="Models"
+        title={m.admin_provider_models()}
         actions={
           <Button size="sm" onClick={() => setAddingModel(true)}>
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            Add model
+            {m.admin_provider_add_model()}
           </Button>
         }
       >
         {models.length === 0 ? (
           <EmptyState
             icon={AiBrain01Icon}
-            title="No models yet"
-            description="Add a model from this provider’s catalog to make it selectable in chat."
+            title={m.admin_provider_empty_title()}
+            description={m.admin_provider_empty_description()}
             action={
               <Button size="sm" onClick={() => setAddingModel(true)}>
                 <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                Add model
+                {m.admin_provider_add_model()}
               </Button>
             }
           />
@@ -259,12 +274,18 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                     <CapabilityIcons capabilities={model.capabilities} />
                   </span>
                 </div>
-                <Badge variant="outline">{model.access === "public" ? "Public" : "Private"}</Badge>
-                {!model.enabled ? <Badge variant="outline">Disabled</Badge> : null}
+                <Badge variant="outline">
+                  {model.access === "public"
+                    ? m.admin_provider_public()
+                    : m.admin_provider_private()}
+                </Badge>
+                {!model.enabled ? (
+                  <Badge variant="outline">{m.admin_provider_disabled()}</Badge>
+                ) : null}
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Edit ${model.displayName}`}
+                  aria-label={m.admin_provider_edit_model({ name: model.displayName })}
                   onClick={() => {
                     setEditingModelId(model.id);
                     setEditingModelOpen(true);
@@ -275,15 +296,14 @@ export function ProviderDetailPage({ providerId }: { providerId: string }) {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Delete ${model.displayName}`}
+                  aria-label={m.admin_provider_delete_model_label({ name: model.displayName })}
                   disabled={removeModel.isPending}
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: `Delete “${model.displayName}”?`,
-                        description:
-                          "The model disappears from the chat picker. Existing conversations keep their history.",
-                        confirmLabel: "Delete model",
+                        title: m.admin_provider_delete_model_title({ name: model.displayName }),
+                        description: m.admin_provider_delete_model_description(),
+                        confirmLabel: m.admin_provider_delete_model(),
                       })
                     ) {
                       removeModel.mutate(model.id);
@@ -397,11 +417,9 @@ export function AddModelDialog({
     >
       <DialogContent className={MODEL_DIALOG_CLASS}>
         <DialogHeader>
-          <DialogTitle>Add model</DialogTitle>
+          <DialogTitle>{m.admin_provider_add_model()}</DialogTitle>
           <DialogDescription>
-            {presetId === "azure"
-              ? "Search your resource’s deployments, or type a deployment name."
-              : "Search the provider’s live catalog, or type a model ID if the catalog is unavailable."}
+            {presetId === "azure" ? m.admin_add_model_azure() : m.admin_add_model_catalog()}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -414,12 +432,13 @@ export function AddModelDialog({
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor={`${id}-model`}>
-                {presetId === "azure" ? "Deployment name" : "Model"}
+                {presetId === "azure" ? m.admin_add_model_deployment() : m.admin_add_model_model()}
               </FieldLabel>
               <ModelCombobox
                 inputId={`${id}-model`}
                 providerId={providerId}
                 disabled={add.isPending}
+                // An example deployment name, not words.
                 {...(presetId === "azure" ? { placeholder: "my-gpt-deployment" } : {})}
                 onPick={(picked) => {
                   selectedId.current = picked.id;
@@ -470,9 +489,7 @@ export function AddModelDialog({
               />
               {effective ? (
                 <FieldDescription>
-                  {effective.custom
-                    ? "Custom model. Fill in the settings below."
-                    : "Catalog defaults are filled in below and can be edited."}
+                  {effective.custom ? m.admin_add_model_custom() : m.admin_add_model_defaults()}
                 </FieldDescription>
               ) : null}
             </Field>
@@ -493,7 +510,7 @@ export function AddModelDialog({
 
           <ModelTestResult test={test.resultFor(effective?.id)} />
           <ImageModelTestResult result={imageTest.resultFor(effective?.id, draft.imageFamily)} />
-          {add.isError ? <FieldError>Could not add the model.</FieldError> : null}
+          {add.isError ? <FieldError>{m.admin_add_model_error()}</FieldError> : null}
           <DialogFooter>
             {effective && draft.type === "image" && draft.imageFamily ? (
               <PendingButton
@@ -502,7 +519,7 @@ export function AddModelDialog({
                 disabled={add.isPending}
                 onClick={() => imageTest.run(effective.id, draft.imageFamily!)}
               >
-                Test (1 image)
+                {m.admin_model_test_image()}
               </PendingButton>
             ) : null}
             {effective && draft.type === "chat" ? (
@@ -512,18 +529,18 @@ export function AddModelDialog({
                 disabled={add.isPending}
                 onClick={() => test.run(effective.id, draft.format)}
               >
-                Test
+                {m.admin_model_test()}
               </PendingButton>
             ) : null}
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton
               type="submit"
               pending={add.isPending}
               disabled={effective === null || settings === null}
             >
-              Add model
+              {m.admin_provider_add_model()}
             </PendingButton>
           </DialogFooter>
         </form>
@@ -606,8 +623,8 @@ export function EditProviderDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit provider</DialogTitle>
-          <DialogDescription>Leave credentials empty to keep the current ones.</DialogDescription>
+          <DialogTitle>{m.admin_provider_edit()}</DialogTitle>
+          <DialogDescription>{m.admin_edit_provider_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -618,7 +635,7 @@ export function EditProviderDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+              <FieldLabel htmlFor={`${id}-name`}>{m.admin_edit_provider_name()}</FieldLabel>
               <Input
                 id={`${id}-name`}
                 value={name}
@@ -628,7 +645,7 @@ export function EditProviderDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                {baseUrlField(preset).label} {needsBaseUrl ? null : <OptionalMark />}
+                {baseUrlLabel(preset)} {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
@@ -658,15 +675,15 @@ export function EditProviderDialog({
           </FieldGroup>
           {save.isError ? (
             <FieldError>
-              {readServerError(save.error).reason ?? "Could not save the provider."}
+              {readServerError(save.error).reason ?? m.admin_edit_provider_error()}
             </FieldError>
           ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={save.isPending} disabled={!complete}>
-              Save changes
+              {m.common_save_changes()}
             </PendingButton>
           </DialogFooter>
         </form>

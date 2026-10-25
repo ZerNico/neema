@@ -5,6 +5,7 @@ import { ModelSelect } from "~/modules/providers/ui/model-select.tsx";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { Button } from "~/ui/primitives/button";
 import { getUtilityModel, updateUtilityModel } from "../server/functions.ts";
+import { m } from "~/paraglide/messages.js";
 
 const utilityKey = ["admin", "utility-model"];
 
@@ -23,7 +24,7 @@ export function UtilityModelPicker({
   const current = useQuery({ queryKey: utilityKey, queryFn: () => getUtilityModel() });
   const save = useMutation({
     mutationFn: (modelId: string | null) => updateUtilityModel({ data: { modelId } }),
-    onError: () => toast.error("Could not save the title model. Refresh and try again."),
+    onError: () => toast.error(m.admin_utility_error_save()),
     onSettled: () => queryClient.invalidateQueries({ queryKey: utilityKey }),
   });
   const options = models
@@ -33,32 +34,30 @@ export function UtilityModelPicker({
       displayName: model.displayName,
       providerName:
         providers.find((provider) => provider.id === model.providerId)?.name ??
-        "Unavailable provider",
+        m.admin_utility_unavailable_provider(),
     }));
   const value = save.isPending ? (save.variables ?? null) : (current.data?.modelId ?? null);
   return (
-    <Section title="Chat titles">
+    <Section title={m.admin_utility_section()}>
       <ListCard>
         <ListRow className="flex-wrap">
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-sm font-medium">Title model</span>
-            <span className="text-muted-foreground text-xs">
-              Names new chats. A fast model works best.
-            </span>
+            <span className="text-sm font-medium">{m.admin_utility_label()}</span>
+            <span className="text-muted-foreground text-xs">{m.admin_utility_description()}</span>
           </div>
           <div className="flex w-full gap-2 sm:w-auto">
             <ModelSelect
-              aria-label="Title model"
+              aria-label={m.admin_utility_label()}
               models={options}
               value={value}
               onChange={(id) => save.mutate(id)}
-              placeholder="Each chat’s own model"
+              placeholder={m.admin_utility_placeholder()}
               disabled={current.isPending}
               className="w-full min-w-0 sm:w-64"
             />
             {value ? (
               <Button variant="ghost" onClick={() => save.mutate(null)}>
-                Clear
+                {m.admin_utility_clear()}
               </Button>
             ) : null}
           </div>

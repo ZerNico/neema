@@ -3,6 +3,7 @@ import { useState } from "react";
 import { testChatModel } from "../server/functions.ts";
 import type { ModelFormat } from "~/modules/providers/model-config.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type ModelTestOutcome = Awaited<ReturnType<typeof testChatModel>>;
 
@@ -33,7 +34,7 @@ export function useModelTest(providerId: string, onSwitch?: (format: ModelFormat
       setTested(next);
       if (next.test.switchedTo) onSwitch?.(next.test.switchedTo);
     },
-    onError: (error) => toastError("Could not test the model.", error),
+    onError: (error) => toastError(m.admin_test_error(), error),
   });
   return {
     run: (modelKey: string, format: ModelFormat | null) => mutation.mutate({ modelKey, format }),

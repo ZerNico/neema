@@ -40,6 +40,7 @@ import {
 } from "~/ui/primitives/dialog";
 import { FieldError, FieldGroup } from "~/ui/primitives/field";
 import { MODEL_DIALOG_CLASS } from "./model-dialog.ts";
+import { m } from "~/paraglide/messages.js";
 
 export interface EditableModel {
   id: string;
@@ -170,9 +171,9 @@ function ModelEditForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Edit model</DialogTitle>
+        <DialogTitle>{m.admin_edit_model_title()}</DialogTitle>
         <DialogDescription>
-          Configure how {model.displayName} appears, what it supports, and who can use it.
+          {m.admin_edit_model_description({ name: model.displayName })}
         </DialogDescription>
       </DialogHeader>
       <form
@@ -201,7 +202,7 @@ function ModelEditForm({
 
         <ModelTestResult test={test.resultFor(model.modelKey)} />
         <ImageModelTestResult result={imageTest.resultFor(model.modelKey, draft.imageFamily)} />
-        {save.isError ? <FieldError>Could not save the model.</FieldError> : null}
+        {save.isError ? <FieldError>{m.admin_edit_model_error_save()}</FieldError> : null}
         <DialogFooter>
           {draft.type === "image" && draft.imageFamily ? (
             <PendingButton
@@ -210,7 +211,7 @@ function ModelEditForm({
               disabled={save.isPending}
               onClick={() => imageTest.run(model.modelKey, draft.imageFamily!)}
             >
-              Test (1 image)
+              {m.admin_model_test_image()}
             </PendingButton>
           ) : null}
           {draft.type === "chat" ? (
@@ -220,14 +221,14 @@ function ModelEditForm({
               disabled={save.isPending}
               onClick={() => test.run(model.modelKey, draft.format)}
             >
-              Test
+              {m.admin_model_test()}
             </PendingButton>
           ) : null}
           <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-            Cancel
+            {m.common_cancel()}
           </DialogClose>
           <PendingButton type="submit" pending={save.isPending} disabled={settings === null}>
-            Save changes
+            {m.common_save_changes()}
           </PendingButton>
         </DialogFooter>
       </form>

@@ -37,6 +37,7 @@ import { LimitsSection } from "~/modules/limits/ui/limits-editor.tsx";
 import { StorageQuotaSection } from "~/modules/limits/ui/storage-quota-section.tsx";
 import { GROUP_NAME_MAX } from "../schema.ts";
 import { groupsQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
 
 export function GroupsPage() {
   const { data: groups } = useSuspenseQuery(groupsQuery);
@@ -45,16 +46,16 @@ export function GroupsPage() {
 
   return (
     <Page
-      title="Groups"
-      description="Groups decide which features their members can use and which private models they can reach."
+      title={m.admin_groups_title()}
+      description={m.admin_groups_description()}
       actions={
         <>
           <Button size="sm" variant="outline" onClick={() => setEditingDefaults(true)}>
-            Default access
+            {m.admin_groups_default_access()}
           </Button>
           <Button size="sm" onClick={() => setAdding(true)}>
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            New group
+            {m.admin_groups_new()}
           </Button>
         </>
       }
@@ -62,12 +63,12 @@ export function GroupsPage() {
       {groups.length === 0 ? (
         <EmptyState
           icon={UserGroupIcon}
-          title="No groups yet"
-          description="Create a group, add users to it, and share private models with it."
+          title={m.admin_groups_empty_title()}
+          description={m.admin_groups_empty_description()}
           action={
             <Button size="sm" onClick={() => setAdding(true)}>
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              New group
+              {m.admin_groups_new()}
             </Button>
           }
         />
@@ -87,7 +88,7 @@ export function GroupsPage() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium">{group.name}</span>
                   <span className="text-muted-foreground text-xs">
-                    {group.memberCount === 1 ? "1 member" : `${group.memberCount} members`}
+                    {m.admin_groups_members({ count: group.memberCount })}
                   </span>
                 </div>
                 <HugeiconsIcon
@@ -112,35 +113,32 @@ type Level = "off" | "use" | "create";
 
 /** Shareable resources: using someone else’s is a separate right from making your own. */
 const resourceRows: ReadonlyArray<{
-  label: string;
-  description: string;
+  label: () => string;
+  description: () => string;
   use: Capability;
   create: Capability;
 }> = [
   {
-    label: "Agents",
-    description: "Use picks agents shared with them. Create also builds and shares their own.",
+    label: m.admin_groups_resource_agents,
+    description: m.admin_groups_resource_agents_description,
     use: "agentsUse",
     create: "agentsCreate",
   },
   {
-    label: "Knowledge",
-    description:
-      "Use searches collections shared with them. Create also uploads documents and shares collections.",
+    label: m.admin_groups_resource_knowledge,
+    description: m.admin_groups_resource_knowledge_description,
     use: "knowledgeUse",
     create: "knowledgeCreate",
   },
   {
-    label: "Skills",
-    description:
-      "Use loads skills shared with them. Create also writes, imports and shares skills.",
+    label: m.admin_groups_resource_skills,
+    description: m.admin_groups_resource_skills_description,
     use: "skillsUse",
     create: "skillsCreate",
   },
   {
-    label: "Projects",
-    description:
-      "Use works in projects shared with them. Create also starts projects and invites people.",
+    label: m.admin_groups_resource_projects,
+    description: m.admin_groups_resource_projects_description,
     use: "projectsUse",
     create: "projectsCreate",
   },
@@ -148,63 +146,76 @@ const resourceRows: ReadonlyArray<{
 
 /** Personal features: nothing to share, so there is only on or off. */
 const featureGroups: ReadonlyArray<{
-  title: string;
-  rows: ReadonlyArray<{ label: string; description: string; key: Capability; needs?: Capability }>;
+  title: () => string;
+  rows: ReadonlyArray<{
+    label: () => string;
+    description: () => string;
+    key: Capability;
+    needs?: Capability;
+  }>;
 }> = [
   {
-    title: "In chat",
+    title: m.admin_groups_in_chat,
     rows: [
-      { label: "Web search", description: "Search the web and read pages.", key: "webSearch" },
       {
-        label: "Deep research",
-        description: "Run longer investigations across many sources.",
+        label: m.admin_groups_feature_web_search,
+        description: m.admin_groups_feature_web_search_description,
+        key: "webSearch",
+      },
+      {
+        label: m.admin_groups_feature_research,
+        description: m.admin_groups_feature_research_description,
         key: "deepResearch",
         needs: "webSearch",
       },
       {
-        label: "Attachments",
-        description: "Attach files and images to messages.",
+        label: m.admin_groups_feature_attachments,
+        description: m.admin_groups_feature_attachments_description,
         key: "attachments",
       },
       {
-        label: "Documents",
-        description: "Draft and edit a Markdown document beside the chat.",
+        label: m.admin_groups_feature_documents,
+        description: m.admin_groups_feature_documents_description,
         key: "documents",
       },
-      { label: "Memory", description: "Remember facts about them across chats.", key: "memory" },
       {
-        label: "Custom tools",
-        description: "Call tools an admin has added. Only admins can write them.",
+        label: m.admin_groups_feature_memory,
+        description: m.admin_groups_feature_memory_description,
+        key: "memory",
+      },
+      {
+        label: m.admin_groups_feature_custom_tools,
+        description: m.admin_groups_feature_custom_tools_description,
         key: "customTools",
       },
       {
-        label: "Their own MCP servers",
-        description: "Add public MCP servers for themselves.",
+        label: m.admin_groups_feature_mcp_servers,
+        description: m.admin_groups_feature_mcp_servers_description,
         key: "mcpServers",
       },
     ],
   },
   {
-    title: "Automation",
+    title: m.admin_groups_automation,
     rows: [
       {
-        label: "Schedules",
-        description: "Create prompts that run on their own. Each schedule is private to its owner.",
+        label: m.admin_groups_feature_schedules,
+        description: m.admin_groups_feature_schedules_description,
         key: "schedules",
       },
       {
-        label: "Work",
-        description: "Let the desktop app read and change files on their computer.",
+        label: m.admin_groups_feature_work,
+        description: m.admin_groups_feature_work_description,
         key: "work",
       },
       {
-        label: "Connected apps",
-        description: "Let apps like Claude Desktop use their chats, agents and knowledge.",
+        label: m.admin_groups_feature_connected_apps,
+        description: m.admin_groups_feature_connected_apps_description,
         key: "mcp",
       },
       {
-        label: "API keys",
-        description: "Let them make keys for scripts and services that can’t sign in.",
+        label: m.admin_groups_feature_api_keys,
+        description: m.admin_groups_feature_api_keys_description,
         key: "apiKeys",
       },
     ],
@@ -249,7 +260,7 @@ function CapabilityEditor({ groupId }: { groupId?: string }) {
       groupId
         ? updateGroupCapabilities({ data: { groupId, capabilities } })
         : updateDefaultCapabilities({ data: { capabilities } }),
-    onError: (error) => toastError("Could not update feature access.", error),
+    onError: (error) => toastError(m.admin_groups_error_capabilities(), error),
     onSettled: async () => {
       // A refetch between two queued saves would briefly show the older one.
       if (queryClient.isMutating({ mutationKey }) > 1) return;
@@ -272,9 +283,9 @@ function CapabilityEditor({ groupId }: { groupId?: string }) {
       <ListCard>
         {resourceRows.map((row) => (
           <ListRow key={row.use}>
-            <FeatureText label={row.label} description={row.description} />
+            <FeatureText label={row.label()} description={row.description()} />
             <SegmentedControl
-              aria-label={row.label}
+              aria-label={row.label()}
               value={[levelOf(caps, row)]}
               multiple={false}
               onValueChange={(value) => {
@@ -282,27 +293,29 @@ function CapabilityEditor({ groupId }: { groupId?: string }) {
                 if (level && level !== levelOf(caps, row)) apply(withLevel(caps, row, level));
               }}
             >
-              <SegmentedControlItem value="off">Off</SegmentedControlItem>
-              <SegmentedControlItem value="use">Use</SegmentedControlItem>
-              <SegmentedControlItem value="create">Create</SegmentedControlItem>
+              <SegmentedControlItem value="off">{m.admin_groups_level_off()}</SegmentedControlItem>
+              <SegmentedControlItem value="use">{m.admin_groups_level_use()}</SegmentedControlItem>
+              <SegmentedControlItem value="create">
+                {m.admin_groups_level_create()}
+              </SegmentedControlItem>
             </SegmentedControl>
           </ListRow>
         ))}
       </ListCard>
       {featureGroups.map((group) => (
-        <div key={group.title} className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground text-xs font-medium">{group.title}</h3>
+        <div key={group.rows[0]?.key} className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground text-xs font-medium">{group.title()}</h3>
           <ListCard>
             {group.rows.map((row) => {
               const blocked = row.needs !== undefined && !caps[row.needs];
               return (
                 <ListRow key={row.key}>
                   <FeatureText
-                    label={row.label}
-                    description={blocked ? "Needs web search." : row.description}
+                    label={row.label()}
+                    description={blocked ? m.admin_groups_needs_web_search() : row.description()}
                   />
                   <Switch
-                    aria-label={row.label}
+                    aria-label={row.label()}
                     checked={caps[row.key] && !blocked}
                     disabled={blocked}
                     onCheckedChange={(enabled) => apply({ ...caps, [row.key]: enabled })}
@@ -315,16 +328,19 @@ function CapabilityEditor({ groupId }: { groupId?: string }) {
       ))}
     </div>
   ) : query.isError ? (
-    <ErrorState title="Could not load feature access" onRetry={() => void query.refetch()} />
+    <ErrorState
+      title={m.admin_groups_error_load_capabilities()}
+      onRetry={() => void query.refetch()}
+    />
   ) : (
-    <p className="text-muted-foreground text-sm">Loading feature access…</p>
+    <p className="text-muted-foreground text-sm">{m.admin_groups_loading_capabilities()}</p>
   );
 }
 
 /** A group’s own feature access, shown inline on its detail page. */
 export function CapabilitySettings({ groupId }: { groupId: string }) {
   return (
-    <Section title="Feature access">
+    <Section title={m.admin_groups_feature_access()}>
       <CapabilityEditor groupId={groupId} />
     </Section>
   );
@@ -342,15 +358,12 @@ function DefaultAccessDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Default access</DialogTitle>
-          <DialogDescription>
-            Applies only to people who aren’t in any group. Adding someone to a group replaces this
-            with the group’s settings. Changes save right away.
-          </DialogDescription>
+          <DialogTitle>{m.admin_groups_default_access()}</DialogTitle>
+          <DialogDescription>{m.admin_groups_default_access_description()}</DialogDescription>
         </DialogHeader>
         {open ? <CapabilityEditor /> : null}
         <DialogFooter>
-          <DialogClose render={<Button />}>Done</DialogClose>
+          <DialogClose render={<Button />}>{m.common_done()}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -379,12 +392,12 @@ function AddGroupDialog({
     <NameDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="New group"
-      description="Name it after the people it collects."
+      title={m.admin_groups_new()}
+      description={m.admin_groups_new_description()}
       maxLength={GROUP_NAME_MAX}
-      placeholder="Engineering"
-      submitLabel="Create group"
-      failure="Could not create the group."
+      placeholder={m.admin_groups_new_placeholder()}
+      submitLabel={m.admin_groups_create()}
+      failure={m.admin_groups_error_create()}
       onSubmit={async (name) => {
         const group = await createGroup({ data: { name } });
         await queryClient.invalidateQueries({ queryKey: ["admin"] });

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchProviderCatalog } from "../server/functions.ts";
 import { MODEL_TYPE_LABELS } from "./model-settings-labels.ts";
+import { m } from "~/paraglide/messages.js";
 import type { ImageFamily } from "@chat/model-client/image-families";
 import type {
   ImagePricing,
@@ -75,7 +76,7 @@ export function ModelCombobox({
 
   const items = useMemo<CatalogPick[]>(() => {
     const typed = input.trim();
-    if (!typed || models.some((m) => m.id === typed)) return models;
+    if (!typed || models.some((model) => model.id === typed)) return models;
     // The custom row's label equals the typed text, so it always survives
     // Base UI's own filtering and sits at the end of the matches.
     return [...models, { id: typed, name: typed, type: "chat", contextLength: null, custom: true }];
@@ -99,14 +100,14 @@ export function ModelCombobox({
         placeholder={
           placeholder ??
           (catalog.isLoading
-            ? "Loading models…"
+            ? m.admin_catalog_loading()
             : catalog.data?.ok === false
-              ? "Catalog unavailable, type a model ID"
-              : "Search models or type an ID…")
+              ? m.admin_catalog_unavailable()
+              : m.admin_catalog_search())
         }
       />
       <ComboboxContent>
-        <ComboboxEmpty>Type a model ID to add it.</ComboboxEmpty>
+        <ComboboxEmpty>{m.admin_catalog_empty()}</ComboboxEmpty>
         <ComboboxList>
           {(item: CatalogPick) =>
             item.custom ? (
@@ -117,9 +118,7 @@ export function ModelCombobox({
                     strokeWidth={2}
                     className="text-muted-foreground size-4"
                   />
-                  <span>
-                    Add “<span className="font-medium">{item.id}</span>” as custom model
-                  </span>
+                  <span>{m.admin_catalog_add_custom({ id: item.id })}</span>
                 </span>
               </ComboboxItem>
             ) : (
@@ -129,7 +128,9 @@ export function ModelCombobox({
                   <span>{item.id}</span>
                   <span className="text-muted-foreground text-xs">
                     {item.name}
-                    {item.contextLength ? ` · ${Math.round(item.contextLength / 1000)}k ctx` : ""}
+                    {item.contextLength
+                      ? ` · ${m.admin_catalog_context({ size: Math.round(item.contextLength / 1000) })}`
+                      : ""}
                     {` · ${MODEL_TYPE_LABELS[item.type]}`}
                   </span>
                 </span>

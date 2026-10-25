@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ImageFamily } from "@chat/model-client/image-families";
 import { testImageModel } from "~/modules/images/server/functions.ts";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 export type ImageModelTestOutcome = Awaited<ReturnType<typeof testImageModel>>;
 
@@ -22,7 +23,7 @@ export function useImageModelTest(providerId: string) {
         result,
       })),
     onSuccess: setTested,
-    onError: (error) => toastError("Could not test the image model.", error),
+    onError: (error) => toastError(m.admin_test_error_image(), error),
   });
   return {
     run: (modelKey: string, imageFamily: ImageFamily) => mutation.mutate({ modelKey, imageFamily }),

@@ -8,12 +8,7 @@ import { ModelOrderDialog } from "./model-order.tsx";
 import { UtilityModelPicker } from "./utility-model-picker.tsx";
 import { EmptyState, ListCard, ListRow, Page } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
-import {
-  baseUrlField,
-  getPreset,
-  type PresetId,
-  type ProviderSettings,
-} from "@chat/model-client/presets";
+import { getPreset, type PresetId, type ProviderSettings } from "@chat/model-client/presets";
 import { readServerError } from "~/server-error.ts";
 import { ProviderCredentialFields } from "./provider-credential-fields.tsx";
 import {
@@ -38,6 +33,8 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/u
 import { Input } from "~/ui/primitives/input";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { providersQuery, modelsQuery } from "../client/queries.ts";
+import { m } from "~/paraglide/messages.js";
+import { baseUrlLabel, presetLabel, presetNote } from "../preset-words.ts";
 
 const EMPTY_DRAFT: {
   name: string;
@@ -61,16 +58,16 @@ export function ProvidersPage() {
 
   return (
     <Page
-      title="Providers"
-      description="AI providers this instance can talk to."
+      title={m.admin_providers_title()}
+      description={m.admin_providers_description()}
       actions={
         <>
           <Button size="sm" variant="outline" onClick={() => setEditingOrder(true)}>
-            Model order
+            {m.admin_providers_model_order()}
           </Button>
           <Button size="sm" onClick={() => setAdding(true)}>
             <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-            Add provider
+            {m.admin_providers_add()}
           </Button>
         </>
       }
@@ -78,19 +75,19 @@ export function ProvidersPage() {
       {providers.length === 0 ? (
         <EmptyState
           icon={CloudServerIcon}
-          title="No providers yet"
-          description="Connect a provider like OpenRouter to make models available for chat."
+          title={m.admin_providers_empty_title()}
+          description={m.admin_providers_empty_description()}
           action={
             <Button size="sm" onClick={() => setAdding(true)}>
               <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-              Add provider
+              {m.admin_providers_add()}
             </Button>
           }
         />
       ) : (
         <ListCard>
           {providers.map((provider) => {
-            const modelCount = models.filter((m) => m.providerId === provider.id).length;
+            const modelCount = models.filter((model) => model.providerId === provider.id).length;
             return (
               <Link
                 key={provider.id}
@@ -105,11 +102,13 @@ export function ProvidersPage() {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       {provider.name}
-                      {!provider.enabled ? <Badge variant="outline">Disabled</Badge> : null}
+                      {!provider.enabled ? (
+                        <Badge variant="outline">{m.admin_providers_disabled()}</Badge>
+                      ) : null}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">
-                      {getPreset(provider.preset).label} ·{" "}
-                      {modelCount === 1 ? "1 model" : `${modelCount} models`}
+                      {presetLabel(getPreset(provider.preset))} ·{" "}
+                      {m.admin_providers_model_count({ count: modelCount })}
                     </span>
                   </div>
                   <HugeiconsIcon
@@ -195,10 +194,8 @@ function AddProviderDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add provider</DialogTitle>
-          <DialogDescription>
-            Credentials are encrypted at rest and never shown again.
-          </DialogDescription>
+          <DialogTitle>{m.admin_providers_add()}</DialogTitle>
+          <DialogDescription>{m.admin_providers_add_description()}</DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-6"
@@ -209,7 +206,7 @@ function AddProviderDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-preset`}>Service</FieldLabel>
+              <FieldLabel htmlFor={`${id}-preset`}>{m.admin_providers_service()}</FieldLabel>
               <PresetSelect
                 id={`${id}-preset`}
                 value={draft.preset}
@@ -221,28 +218,31 @@ function AddProviderDialog({
                     settings: {},
                     credentials: EMPTY_CREDENTIALS,
                     name:
-                      d.name === "" || d.name === getPreset(d.preset).label
-                        ? getPreset(next).label
+                      d.name === "" || d.name === presetLabel(getPreset(d.preset))
+                        ? presetLabel(getPreset(next))
                         : d.name,
                   }))
                 }
                 disabled={add.isPending}
               />
-              {preset.note ? <FieldDescription>{preset.note}</FieldDescription> : null}
+              {presetNote(preset) ? (
+                <FieldDescription>{presetNote(preset)}</FieldDescription>
+              ) : null}
             </Field>
             <Field>
-              <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+              <FieldLabel htmlFor={`${id}-name`}>{m.admin_providers_name()}</FieldLabel>
               <Input
                 id={`${id}-name`}
                 value={draft.name}
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                // oxlint-disable-next-line i18n/no-literal-text -- a product name as the example
                 placeholder="OpenRouter"
                 disabled={add.isPending}
               />
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>
-                {baseUrlField(preset).label} {needsBaseUrl ? null : <OptionalMark />}
+                {baseUrlLabel(preset)} {needsBaseUrl ? null : <OptionalMark />}
               </FieldLabel>
               <Input
                 id={`${id}-base-url`}
@@ -271,15 +271,15 @@ function AddProviderDialog({
           </FieldGroup>
           {add.isError ? (
             <FieldError>
-              {readServerError(add.error).reason ?? "Could not add the provider."}
+              {readServerError(add.error).reason ?? m.admin_providers_error_add()}
             </FieldError>
           ) : null}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" disabled={add.isPending} />}>
-              Cancel
+              {m.common_cancel()}
             </DialogClose>
             <PendingButton type="submit" pending={add.isPending} disabled={!complete}>
-              Add provider
+              {m.admin_providers_add()}
             </PendingButton>
           </DialogFooter>
         </form>

@@ -10,6 +10,7 @@ import {
   UsersTable,
 } from "~/modules/analytics/ui/usage-dashboard.tsx";
 import { EmptyState, Page } from "~/ui/page-shell.tsx";
+import { m } from "~/paraglide/messages.js";
 
 export function AnalyticsPage() {
   const [range, setRange] = useState<UsageRangeEncoded>(DEFAULT_USAGE_RANGE);
@@ -23,8 +24,8 @@ export function AnalyticsPage() {
 
   return (
     <Page
-      title="Analytics"
-      description="Tokens, messages and cost for everyone using this app."
+      title={m.admin_analytics_title()}
+      description={m.admin_analytics_description()}
       width="wide"
       actions={<UsageRangePicker range={range} onChange={changeRange} />}
     >
@@ -33,8 +34,8 @@ export function AnalyticsPage() {
         // to 90 days and find history.
         <EmptyState
           icon={Analytics01Icon}
-          title="No usage in this range"
-          description="Tokens, messages and cost appear here once someone chats."
+          title={m.admin_analytics_empty_title()}
+          description={m.admin_analytics_empty_description()}
         />
       ) : (
         <>
@@ -46,7 +47,7 @@ export function AnalyticsPage() {
             window={data.window}
             showActiveUsers
           />
-          <ChartCard title="By user">
+          <ChartCard title={m.admin_analytics_by_user()}>
             <UsersTable byUser={data.byUser} />
           </ChartCard>
         </>

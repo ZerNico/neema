@@ -10,67 +10,88 @@ import {
   WrenchIcon,
   PlugSocketIcon,
 } from "@hugeicons/core-free-icons";
+import { m } from "~/paraglide/messages.js";
 import type { SectionNavItem } from "~/ui/page-shell.tsx";
 
-/** Admin pages, shared by the section nav and search. */
+/** Admin pages, shared by the section nav and search. Labels are read where shown. */
 export const ADMIN_SECTIONS: SectionNavItem[] = [
   {
     to: "/admin/providers",
-    label: "Providers",
+    get label() {
+      return m.admin_section_providers();
+    },
     icon: CloudServerIcon,
     matchPrefix: "/admin/providers",
   },
   {
     to: "/admin/tools",
-    label: "Tools",
+    get label() {
+      return m.admin_section_tools();
+    },
     icon: WrenchIcon,
     matchPrefix: "/admin/tools",
   },
   {
     to: "/admin/custom-tools",
-    label: "Custom tools",
+    get label() {
+      return m.admin_section_custom_tools();
+    },
     icon: CodeIcon,
     matchPrefix: "/admin/custom-tools",
   },
   {
     to: "/admin/integrations",
-    label: "Integrations",
+    get label() {
+      return m.admin_section_integrations();
+    },
     icon: PlugSocketIcon,
     matchPrefix: "/admin/integrations",
   },
   {
     to: "/admin/email",
-    label: "Email",
+    get label() {
+      return m.admin_section_email();
+    },
     icon: Mail01Icon,
     matchPrefix: "/admin/email",
   },
   {
     to: "/admin/documents",
-    label: "Documents",
+    get label() {
+      return m.admin_section_documents();
+    },
     icon: FolderLibraryIcon,
     matchPrefix: "/admin/documents",
   },
   {
     to: "/admin/auth",
-    label: "Sign-in",
+    get label() {
+      return m.admin_section_sign_in();
+    },
     icon: Key01Icon,
     matchPrefix: "/admin/auth",
   },
   {
     to: "/admin/users",
-    label: "Users",
+    get label() {
+      return m.admin_section_users();
+    },
     icon: UserMultipleIcon,
     matchPrefix: "/admin/users",
   },
   {
     to: "/admin/groups",
-    label: "Groups",
+    get label() {
+      return m.admin_section_groups();
+    },
     icon: UserGroupIcon,
     matchPrefix: "/admin/groups",
   },
   {
     to: "/admin/analytics",
-    label: "Analytics",
+    get label() {
+      return m.admin_section_analytics();
+    },
     icon: Analytics01Icon,
     matchPrefix: "/admin/analytics",
   },

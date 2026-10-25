@@ -11,6 +11,7 @@ import { ChoiceField } from "./provider-settings-fields.tsx";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
+import { m } from "~/paraglide/messages.js";
 
 /** How a provider signs in, then the fields that kind needs. */
 export function ProviderCredentialFields({
@@ -34,7 +35,7 @@ export function ProviderCredentialFields({
 }) {
   const auth = effectiveSettings(preset, settings).auth;
   // A saved secret can't be shown: blank keeps it, unless the kind changed.
-  const placeholder = stored === auth ? { placeholder: "Unchanged" } : {};
+  const placeholder = stored === auth ? { placeholder: m.admin_credentials_unchanged() } : {};
   const input = (
     field: keyof CredentialDraft,
     label: string,
@@ -61,8 +62,8 @@ export function ProviderCredentialFields({
       {preset.overridable.includes("auth") ? (
         <ChoiceField
           id={`${id}-auth`}
-          label="Sign in with"
-          about="A Bedrock API key, or an IAM user’s access key, which signs each request."
+          label={m.admin_credentials_sign_in_with()}
+          about={m.admin_credentials_sign_in_about()}
           value={auth}
           labels={AUTH_LABELS}
           options={AUTH_KINDS}
@@ -75,11 +76,16 @@ export function ProviderCredentialFields({
       ) : null}
       {auth === "aws" ? (
         <>
-          {input("accessKeyId", "Access key ID", false)}
-          {input("secretAccessKey", "Secret access key", true)}
+          {input("accessKeyId", m.admin_credentials_access_key_id(), false)}
+          {input("secretAccessKey", m.admin_credentials_secret_access_key(), true)}
         </>
       ) : (
-        input("apiKey", "API key", true, !preset.keyRequired && stored === undefined)
+        input(
+          "apiKey",
+          m.admin_credentials_api_key(),
+          true,
+          !preset.keyRequired && stored === undefined,
+        )
       )}
     </>
   );

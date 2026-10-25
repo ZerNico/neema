@@ -64,6 +64,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { toastError } from "~/ui/error-toast.ts";
 import { LimitsSection } from "~/modules/limits/ui/limits-editor.tsx";
 import { StorageQuotaSection } from "~/modules/limits/ui/storage-quota-section.tsx";
+import { m } from "~/paraglide/messages.js";
 
 interface PickableUser {
   id: string;
@@ -94,13 +95,13 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
   const add = useMutation({
     mutationFn: (userId: string) => addGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not add the member.", error),
+    onError: (error) => toastError(m.admin_group_error_add_member(), error),
   });
 
   const remove = useMutation({
     mutationFn: (userId: string) => removeGroupMember({ data: { groupId, userId } }),
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not remove the member.", error),
+    onError: (error) => toastError(m.admin_group_error_remove_member(), error),
   });
 
   const removeWholeGroup = useMutation({
@@ -109,18 +110,22 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
       await invalidate();
       await navigate({ to: "/admin/groups" });
     },
-    onError: (error) => toastError("Could not delete the group.", error),
+    onError: (error) => toastError(m.admin_group_error_delete(), error),
   });
 
   if (!group) {
     return (
-      <Page title="Group not found" backTo="/admin/groups" backLabel="Groups">
-        <p className="text-muted-foreground text-sm">This group does not exist anymore.</p>
+      <Page
+        title={m.admin_group_not_found()}
+        backTo="/admin/groups"
+        backLabel={m.admin_group_back()}
+      >
+        <p className="text-muted-foreground text-sm">{m.admin_group_gone()}</p>
       </Page>
     );
   }
 
-  const memberIds = new Set((members.data ?? []).map((m) => m.userId));
+  const memberIds = new Set((members.data ?? []).map((member) => member.userId));
   const candidates: PickableUser[] = (users.data ?? [])
     .filter((u) => !memberIds.has(u.id))
     .map((u) => ({ id: u.id, name: u.name, email: u.email }));
@@ -129,28 +134,27 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
     <Page
       title={group.name}
       backTo="/admin/groups"
-      backLabel="Groups"
+      backLabel={m.admin_group_back()}
       actions={
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" size="icon-sm" aria-label="Group actions" />}
+            render={<Button variant="ghost" size="icon-sm" aria-label={m.admin_group_actions()} />}
           >
             <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setRenaming(true)}>
               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-              Rename group
+              {m.admin_group_rename()}
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
               onClick={async () => {
                 if (
                   await confirm({
-                    title: `Delete “${group.name}”?`,
-                    description:
-                      "Members lose access to any model shared only with this group. The users themselves are untouched.",
-                    confirmLabel: "Delete group",
+                    title: m.admin_group_delete_title({ name: group.name }),
+                    description: m.admin_group_delete_description(),
+                    confirmLabel: m.admin_group_delete(),
                   })
                 ) {
                   removeWholeGroup.mutate();
@@ -158,14 +162,14 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
               }}
             >
               <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-              Delete group
+              {m.admin_group_delete()}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }
     >
       <Section
-        title="Members"
+        title={m.admin_group_members()}
         actions={
           <AddMemberPicker
             candidates={candidates}
@@ -175,10 +179,10 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         }
       >
         {members.isLoading ? (
-          <ListSkeleton media="avatar" label="Loading members" />
+          <ListSkeleton media="avatar" label={m.admin_group_loading_members()} />
         ) : members.isError ? (
           <ErrorState
-            title="Could not load members"
+            title={m.admin_group_error_load_members()}
             onRetry={() => {
               void members.refetch();
             }}
@@ -186,8 +190,8 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
         ) : (members.data ?? []).length === 0 ? (
           <EmptyState
             icon={UserGroupIcon}
-            title="No members yet"
-            description="Add users to give them this group’s model access."
+            title={m.admin_group_empty_title()}
+            description={m.admin_group_empty_description()}
           />
         ) : (
           <ListCard>
@@ -202,32 +206,36 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
                 </div>
                 {member.role === "admin" ? (
                   <Tooltip>
-                    <TooltipTrigger render={<Badge />}>Admin</TooltipTrigger>
-                    <TooltipContent>Admins can share anything into any group.</TooltipContent>
+                    <TooltipTrigger render={<Badge />}>
+                      {m.admin_group_admin_badge()}
+                    </TooltipTrigger>
+                    <TooltipContent>{m.admin_group_admin_tooltip()}</TooltipContent>
                   </Tooltip>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
-                    aria-label={`Sharing for ${member.name}: ${sharingSummary(member.sharing)}`}
+                    aria-label={m.admin_group_sharing_label({
+                      name: member.name,
+                      summary: sharingSummary(member.sharing),
+                    })}
                     disabled={remove.isPending || removeWholeGroup.isPending}
                     onClick={() => setSharingFor(member)}
                   >
-                    Sharing: {sharingSummary(member.sharing)}
+                    {m.admin_group_sharing_button({ summary: sharingSummary(member.sharing) })}
                   </Button>
                 )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Remove ${member.name}`}
+                  aria-label={m.admin_group_remove_member_label({ name: member.name })}
                   disabled={remove.isPending || removeWholeGroup.isPending}
                   onClick={async () => {
                     if (
                       await confirm({
-                        title: `Remove ${member.name}?`,
-                        description:
-                          "They lose access to any model shared only with this group. Their account is untouched.",
-                        confirmLabel: "Remove member",
+                        title: m.admin_group_remove_member_title({ name: member.name }),
+                        description: m.admin_group_remove_member_description(),
+                        confirmLabel: m.admin_group_remove_member(),
                       })
                     ) {
                       remove.mutate(member.userId);
@@ -263,20 +271,20 @@ export function GroupDetailPage({ groupId }: { groupId: string }) {
 
 // Single-select combobox that ACTS instead of selecting: picking a user adds
 // them and the field resets, ready for the next addition.
-const sharingKinds: ReadonlyArray<{ key: keyof MemberSharing; label: string }> = [
-  { key: "agents", label: "Agents" },
-  { key: "knowledge", label: "Knowledge" },
-  { key: "skills", label: "Skills" },
-  { key: "projects", label: "Projects" },
+const sharingKinds: ReadonlyArray<{ key: keyof MemberSharing; label: () => string }> = [
+  { key: "agents", label: m.admin_group_sharing_agents },
+  { key: "knowledge", label: m.admin_group_sharing_knowledge },
+  { key: "skills", label: m.admin_group_sharing_skills },
+  { key: "projects", label: m.admin_group_sharing_projects },
 ];
 
 function sharingSummary(sharing: MemberSharing) {
-  const allowed = sharingKinds.filter((kind) => sharing[kind.key]).map((kind) => kind.label);
+  const allowed = sharingKinds.filter((kind) => sharing[kind.key]).map((kind) => kind.label());
   return allowed.length === sharingKinds.length
-    ? "All"
+    ? m.admin_group_sharing_all()
     : allowed.length
       ? allowed.join(", ")
-      : "None";
+      : m.admin_group_sharing_none();
 }
 
 /** Which of their own resources one member may share into this group. */
@@ -327,7 +335,7 @@ function MemberSharingForm({
       await onSaved();
       onClose();
     },
-    onError: (error) => toastError("Could not update sharing permission.", error),
+    onError: (error) => toastError(m.admin_group_error_sharing(), error),
   });
 
   return (
@@ -339,18 +347,15 @@ function MemberSharingForm({
       }}
     >
       <DialogHeader>
-        <DialogTitle>Sharing for {member.name}</DialogTitle>
-        <DialogDescription>
-          What they may share into this group from their own work. Turning something off leaves what
-          they already shared in place.
-        </DialogDescription>
+        <DialogTitle>{m.admin_group_sharing_title({ name: member.name })}</DialogTitle>
+        <DialogDescription>{m.admin_group_sharing_description()}</DialogDescription>
       </DialogHeader>
       <ListCard>
         {sharingKinds.map((kind) => (
           <ListRow key={kind.key}>
-            <span className="min-w-0 flex-1 text-sm font-medium">{kind.label}</span>
+            <span className="min-w-0 flex-1 text-sm font-medium">{kind.label()}</span>
             <Switch
-              aria-label={kind.label}
+              aria-label={kind.label()}
               checked={draft[kind.key]}
               disabled={save.isPending}
               onCheckedChange={(checked) => setDraft({ ...draft, [kind.key]: checked })}
@@ -360,10 +365,10 @@ function MemberSharingForm({
       </ListCard>
       <DialogFooter>
         <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-          Cancel
+          {m.common_cancel()}
         </DialogClose>
         <PendingButton type="submit" pending={save.isPending}>
-          Save
+          {m.common_save()}
         </PendingButton>
       </DialogFooter>
     </form>
@@ -396,12 +401,14 @@ function AddMemberPicker({
       autoHighlight
     >
       <ComboboxTrigger render={<PendingButton size="sm" pending={pending} />} disabled={disabled}>
-        Add member
+        {m.admin_group_add_member()}
       </ComboboxTrigger>
       <ComboboxContent side="bottom" align="end" className="w-72 min-w-72">
-        <ComboboxInput placeholder="Search users…" showTrigger={false} />
+        <ComboboxInput placeholder={m.admin_group_search_users()} showTrigger={false} />
         <ComboboxEmpty>
-          {candidates.length === 0 ? "Everyone is already a member." : "No users match."}
+          {candidates.length === 0
+            ? m.admin_group_everyone_member()
+            : m.admin_group_no_users_match()}
         </ComboboxEmpty>
         <ComboboxList>
           {(user: PickableUser) => (
@@ -432,12 +439,12 @@ function RenameGroupDialog({
     <NameDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Rename group"
-      description="Model access and members stay as they are."
+      title={m.admin_group_rename()}
+      description={m.admin_group_rename_description()}
       initial={currentName}
       maxLength={GROUP_NAME_MAX}
-      submitLabel="Rename"
-      failure="Could not rename the group."
+      submitLabel={m.admin_group_rename_submit()}
+      failure={m.admin_group_error_rename()}
       onSubmit={async (name) => {
         await renameGroup({ data: { groupId, name } });
         await queryClient.invalidateQueries({ queryKey: ["admin"] });

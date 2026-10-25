@@ -23,6 +23,8 @@ import {
 } from "~/ui/primitives/select";
 import { Switch } from "~/ui/primitives/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
+import { m } from "~/paraglide/messages.js";
+import { presetLabel } from "../preset-words.ts";
 
 /** What a setting does and when to change it, behind an icon beside its label. */
 function About({ label, children }: { label: string; children: ReactNode }) {
@@ -30,7 +32,12 @@ function About({ label, children }: { label: string; children: ReactNode }) {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button type="button" variant="ghost" size="icon-xs" aria-label={`About ${label}`} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={m.admin_settings_about({ label })}
+          />
         }
       >
         <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} />
@@ -151,8 +158,8 @@ export function ProviderSettingsFields({
       {can("format") && preset.formats.length > 1 ? (
         <ChoiceField
           id={`${id}-format`}
-          label="API"
-          about="Chat Completions works with almost every server. Responses is OpenAI’s newer API, for servers that offer it."
+          label={m.admin_settings_api()}
+          about={m.admin_settings_api_about()}
           value={effective.format}
           labels={FORMAT_LABELS}
           options={preset.formats}
@@ -163,8 +170,8 @@ export function ProviderSettingsFields({
       {can("reasoning") && chat ? (
         <ChoiceField
           id={`${id}-reasoning`}
-          label="Reasoning level field"
-          about="The request field that carries the reasoning level picked in a chat. Most servers read reasoning_effort, OpenRouter-style gateways reasoning.effort. Not sent hides the level picker."
+          label={m.admin_settings_reasoning()}
+          about={m.admin_settings_reasoning_about()}
           value={effective.reasoning}
           labels={REASONING_LABELS}
           options={Object.keys(REASONING_LABELS) as ReasoningShape[]}
@@ -175,10 +182,9 @@ export function ProviderSettingsFields({
       {can("keyHeader") ? (
         <Field>
           <div className="flex items-center gap-1">
-            <FieldLabel htmlFor={`${id}-key-header`}>Key header</FieldLabel>
-            <About label="Key header">
-              The header the API key goes in. Empty sends it as Authorization: Bearer. Some gateways
-              want api-key or x-api-key.
+            <FieldLabel htmlFor={`${id}-key-header`}>{m.admin_settings_key_header()}</FieldLabel>
+            <About label={m.admin_settings_key_header()}>
+              {m.admin_settings_key_header_about()}
             </About>
           </div>
           <Input
@@ -187,6 +193,7 @@ export function ProviderSettingsFields({
             onChange={(event) =>
               set("keyHeader", event.target.value.trim() ? event.target.value.trim() : undefined)
             }
+            // oxlint-disable-next-line i18n/no-literal-text -- an HTTP header, not words
             placeholder="Authorization: Bearer"
             {...(disabled ? { disabled } : {})}
           />
@@ -195,8 +202,8 @@ export function ProviderSettingsFields({
       {can("sendReasoning") && chat ? (
         <ToggleField
           id={`${id}-send-reasoning`}
-          label="Send reasoning back"
-          about="Gives a model its own reasoning back on the next tool round. DeepSeek, Kimi and GLM need it. Turn off if the server rejects it."
+          label={m.admin_settings_send_reasoning()}
+          about={m.admin_settings_send_reasoning_about()}
           checked={effective.sendReasoning}
           onChange={(sendReasoning) => set("sendReasoning", sendReasoning)}
           disabled={disabled}
@@ -205,8 +212,8 @@ export function ProviderSettingsFields({
       {can("streamUsage") && chat ? (
         <ToggleField
           id={`${id}-stream-usage`}
-          label="Ask for token usage"
-          about="Asks the server to report token counts, for usage and cost. Turn off if it rejects stream_options."
+          label={m.admin_settings_stream_usage()}
+          about={m.admin_settings_stream_usage_about()}
           checked={effective.streamUsage}
           onChange={(streamUsage) => set("streamUsage", streamUsage)}
           disabled={disabled}
@@ -227,7 +234,7 @@ export function PresetSelect({
   onChange: (preset: PresetId) => void;
   disabled?: boolean | undefined;
 }) {
-  const items = PRESETS.map((preset) => ({ value: preset.id, label: preset.label }));
+  const items = PRESETS.map((preset) => ({ value: preset.id, label: presetLabel(preset) }));
   return (
     <Select
       value={value}
@@ -241,7 +248,7 @@ export function PresetSelect({
       <SelectContent>
         {PRESETS.map((preset) => (
           <SelectItem key={preset.id} value={preset.id}>
-            {preset.label}
+            {presetLabel(preset)}
           </SelectItem>
         ))}
       </SelectContent>

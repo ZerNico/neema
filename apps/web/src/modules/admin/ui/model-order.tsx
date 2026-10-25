@@ -23,6 +23,7 @@ import {
 import { moveId } from "~/ui/move-id.ts";
 import { updateDefaultModelOrder } from "../server/functions.ts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
+import { m } from "~/paraglide/messages.js";
 
 type PriorityModel = Pick<
   ModelRow,
@@ -47,17 +48,14 @@ export function ModelOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Model order</DialogTitle>
-          <DialogDescription>
-            Pickers list models in this order, and a chat starts with the first one the person can
-            use. Changes save right away.
-          </DialogDescription>
+          <DialogTitle>{m.admin_order_title()}</DialogTitle>
+          <DialogDescription>{m.admin_order_description()}</DialogDescription>
         </DialogHeader>
         {open && hasImages ? (
           <Tabs defaultValue="chat">
             <TabsList>
-              <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="image">Image</TabsTrigger>
+              <TabsTrigger value="chat">{m.admin_order_tab_chat()}</TabsTrigger>
+              <TabsTrigger value="image">{m.admin_order_tab_image()}</TabsTrigger>
             </TabsList>
             <TabsContent value="chat">
               <ModelOrder models={models} providers={providers} type="chat" />
@@ -70,7 +68,7 @@ export function ModelOrderDialog({
           <ModelOrder models={models} providers={providers} type="chat" />
         ) : null}
         <DialogFooter>
-          <DialogClose render={<Button />}>Done</DialogClose>
+          <DialogClose render={<Button />}>{m.common_done()}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -120,10 +118,7 @@ export function ModelOrder({
     mutationKey,
     scope: { id: mutationKey.join(":") },
     mutationFn: (modelIds: string[]) => updateDefaultModelOrder({ data: { modelIds, type } }),
-    onError: () =>
-      toast.error(
-        "Could not save the model order. Refresh the page if a model was removed, then try again.",
-      ),
+    onError: () => toast.error(m.admin_order_error_save()),
     onSettled: async () => {
       if (queryClient.isMutating({ mutationKey }) > 1) return;
       await Promise.all([
@@ -143,7 +138,7 @@ export function ModelOrder({
   if (order.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        {type === "image" ? "No image models yet." : "No chat models yet."}
+        {type === "image" ? m.admin_order_empty_image() : m.admin_order_empty_chat()}
       </p>
     );
   }
@@ -152,7 +147,7 @@ export function ModelOrder({
       <SortableList onMove={move} className="divide-y">
         {order.map((id, index) => {
           const model = modelOf(id);
-          const providerName = providerOf(model)?.name ?? "Unavailable provider";
+          const providerName = providerOf(model)?.name ?? m.admin_utility_unavailable_provider();
           // Names repeat across providers, so controls say which one.
           const name = `${model.displayName} · ${providerName}`;
           return (
@@ -165,11 +160,13 @@ export function ModelOrder({
                     <span className="truncate" title={model.displayName}>
                       {model.displayName}
                     </span>
-                    {id === firstUsable ? <Badge variant="secondary">Default</Badge> : null}
+                    {id === firstUsable ? (
+                      <Badge variant="secondary">{m.admin_order_default()}</Badge>
+                    ) : null}
                   </span>
                   <span className="text-muted-foreground truncate text-xs">
                     {providerName}
-                    {usable(model) ? "" : " · Disabled, skipped"}
+                    {usable(model) ? "" : ` · ${m.admin_order_skipped()}`}
                   </span>
                 </div>
                 <div className="flex shrink-0 gap-1">

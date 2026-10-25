@@ -12,7 +12,11 @@ import {
 } from "@chat/model-client";
 import { encodeAwsKeys, type AwsKeys } from "~/modules/providers/aws-keys.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
+import { type Localized } from "~/i18n/localized.ts";
+import { m } from "~/paraglide/messages.js";
+import { getLocale, type Locale } from "~/paraglide/runtime.js";
 import { refusal } from "~/server/refusal.ts";
+import { presetLabel } from "../preset-words.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import {
@@ -40,15 +44,25 @@ export const listProviders = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .handler(() => runServerFn(ProviderRepo.use((repo) => repo.listProviders())));
 
-const needsBaseUrl = (preset: Preset) =>
-  refusal(
-    400,
-    preset.baseUrlLabel
-      ? `${preset.label} needs a ${preset.baseUrlLabel.toLowerCase()}.`
-      : `${preset.label} needs the base URL of your server.`,
-  );
+/** A refusal naming the preset, in whichever locale reads it. */
+const refused = (
+  preset: Preset,
+  message: (inputs: { provider: string }, options: { locale: Locale }) => string,
+) => {
+  const reason: Localized = (locale) =>
+    message({ provider: presetLabel(preset, locale) }, { locale });
+  return refusal(400, reason);
+};
 
-const refused = (reason: string) => refusal(400, reason);
+/** A probe's answer when its provider is gone, worded while the request's locale is known. */
+const providerNotFound = (locale: Locale) => ({
+  ok: false as const,
+  error: m.admin_error_provider_not_found({}, { locale }),
+});
+
+// The only labelled base URL is Bedrock's region.
+const needsBaseUrl = (preset: Preset) =>
+  refused(preset, preset.baseUrlLabel ? m.admin_error_needs_region : m.admin_error_needs_base_url);
 
 /**
  * The one secret a provider stores, of the kind it signs in with: a key, or
@@ -60,15 +74,15 @@ const storedSecret = (
   input: { readonly apiKey?: string; readonly awsKeys?: AwsKeys },
 ) => {
   if (auth === "aws") {
-    if (input.apiKey?.trim()) throw refused(`${preset.label} is set to sign with an access key.`);
+    if (input.apiKey?.trim()) throw refused(preset, m.admin_error_uses_access_key);
     return input.awsKeys ? encodeAwsKeys(input.awsKeys) : undefined;
   }
-  if (input.awsKeys) throw refused(`${preset.label} is set to use an API key.`);
+  if (input.awsKeys) throw refused(preset, m.admin_error_uses_api_key);
   return input.apiKey?.trim() || undefined;
 };
 
 const missingSecret = (preset: Preset, auth: AuthKind) =>
-  refused(`${preset.label} needs ${auth === "aws" ? "an access key" : "an API key"}.`);
+  refused(preset, auth === "aws" ? m.admin_error_needs_access_key : m.admin_error_needs_api_key);
 
 export const createProvider = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
@@ -128,17 +142,18 @@ export const deleteProvider = createServerFn({ method: "POST" })
 export const fetchProviderCatalog = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
   .validator(standard(ProviderIdInput))
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    const locale = getLocale();
+    return runServerFn(
       AiGateway.use((gateway) => gateway.fetchCatalog(data.providerId)).pipe(
         Effect.map((models) => ({ ok: true as const, models })),
         Effect.catchTags({
           ProviderUnreachable: (e) => Effect.succeed({ ok: false as const, error: e.message }),
-          ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found" }),
+          ModelNotFound: () => Effect.succeed(providerNotFound(locale)),
         }),
       ),
-    ),
-  );
+    );
+  });
 
 export const listModels = createServerFn({ method: "GET" })
   .middleware([requireAdmin])
@@ -322,18 +337,19 @@ export const listModelAccess = createServerFn({ method: "GET" })
 export const probeEmbeddingDimensions = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(ProbeModelInput))
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    const locale = getLocale();
+    return runServerFn(
       AiGateway.use((gateway) => gateway.probeEmbeddingDimensions(data)).pipe(
         Effect.map((result) => ({ ok: true as const, dimensions: result.dimensions })),
         Effect.catchTags({
           ProviderUnreachable: (error) =>
             Effect.succeed({ ok: false as const, error: error.message }),
-          ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found." }),
+          ModelNotFound: () => Effect.succeed(providerNotFound(locale)),
         }),
       ),
-    ),
-  );
+    );
+  });
 
 /**
  * One short request to a chat model before it is saved, so a wrong model ID
@@ -342,8 +358,9 @@ export const probeEmbeddingDimensions = createServerFn({ method: "POST" })
 export const testChatModel = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(ProbeModelInput))
-  .handler(({ data }) =>
-    runServerFn(
+  .handler(({ data }) => {
+    const locale = getLocale();
+    return runServerFn(
       Effect.gen(function* () {
         const started = Date.now();
         const { reply, format } = yield* (yield* AiGateway).probeChatModel(data);
@@ -359,8 +376,8 @@ export const testChatModel = createServerFn({ method: "POST" })
             Effect.succeed({ ok: false as const, error: error.message }),
           ProviderContextOverflow: (error) =>
             Effect.succeed({ ok: false as const, error: error.message }),
-          ModelNotFound: () => Effect.succeed({ ok: false as const, error: "Provider not found." }),
+          ModelNotFound: () => Effect.succeed(providerNotFound(locale)),
         }),
       ),
-    ),
-  );
+    );
+  });

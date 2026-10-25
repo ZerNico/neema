@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
+import { m } from "~/paraglide/messages.js";
 
 // Group badges shown per row before collapsing into a "+N more" badge.
 const MAX_GROUP_BADGES = 2;
@@ -49,7 +50,7 @@ export function UsersPage() {
         if (error) throw new Error(error.message);
       }, "/");
     },
-    onError: (error) => toastError("Could not impersonate the user.", error),
+    onError: (error) => toastError(m.admin_users_error_impersonate(), error),
   });
 
   const setRole = useMutation({
@@ -58,7 +59,7 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not change the role.", error),
+    onError: (error) => toastError(m.admin_users_error_role(), error),
   });
 
   const ban = useMutation({
@@ -68,9 +69,9 @@ export function UsersPage() {
     },
     onSuccess: async () => {
       await invalidate();
-      toast.success("User banned.");
+      toast.success(m.admin_users_banned_toast());
     },
-    onError: (error) => toastError("Could not ban the user.", error),
+    onError: (error) => toastError(m.admin_users_error_ban(), error),
   });
 
   const unban = useMutation({
@@ -79,7 +80,7 @@ export function UsersPage() {
       if (error) throw new Error(error.message);
     },
     onSuccess: invalidate,
-    onError: (error) => toastError("Could not unban the user.", error),
+    onError: (error) => toastError(m.admin_users_error_unban(), error),
   });
 
   const verify = useMutation({
@@ -89,23 +90,23 @@ export function UsersPage() {
         invalidate(),
         queryClient.invalidateQueries({ queryKey: ["admin", "pending-accounts"] }),
       ]),
-    onError: (error) => toastError("Could not mark the email verified.", error),
+    onError: (error) => toastError(m.admin_users_error_verify(), error),
   });
 
   return (
-    <Page title="Users" description="Everyone with an account here.">
+    <Page title={m.admin_users_title()} description={m.admin_users_description()}>
       <PendingAccounts />
       {users.isLoading ? (
-        <ListSkeleton media="avatar" label="Loading users" />
+        <ListSkeleton media="avatar" label={m.admin_users_loading()} />
       ) : users.isError ? (
         <ErrorState
-          title="Could not load users"
+          title={m.admin_users_error_load()}
           onRetry={() => {
             void users.refetch();
           }}
         />
       ) : (
-        <Section title="Accounts">
+        <Section title={m.admin_users_accounts()}>
           <ListCard>
             {users.data?.map((user) => {
               const isSelf = user.id === identity?.userId;
@@ -123,7 +124,9 @@ export function UsersPage() {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <span className="min-w-0 truncate">{user.name}</span>
-                      {isSelf ? <span className="text-muted-foreground text-xs">(you)</span> : null}
+                      {isSelf ? (
+                        <span className="text-muted-foreground text-xs">{m.admin_users_you()}</span>
+                      ) : null}
                     </span>
                     <span className="text-muted-foreground truncate text-xs">{user.email}</span>
                   </div>
@@ -137,22 +140,24 @@ export function UsersPage() {
                       variant="secondary"
                       title={groupNames.slice(MAX_GROUP_BADGES).join(", ")}
                     >
-                      +{hiddenGroups} more
+                      {m.admin_users_more_groups({ count: hiddenGroups })}
                     </Badge>
                   ) : null}
                   {authSettings?.verificationRequired && !user.emailVerified ? (
-                    <Badge variant="outline">Unverified</Badge>
+                    <Badge variant="outline">{m.admin_users_unverified()}</Badge>
                   ) : null}
-                  {user.banned ? <Badge variant="destructive">Banned</Badge> : null}
+                  {user.banned ? (
+                    <Badge variant="destructive">{m.admin_users_banned()}</Badge>
+                  ) : null}
                   {/* Only "Admin" carries information: every row here is a user. */}
-                  {isAdmin ? <Badge>Admin</Badge> : null}
+                  {isAdmin ? <Badge>{m.admin_users_admin()}</Badge> : null}
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Actions for ${user.name}`}
+                          aria-label={m.admin_users_actions({ name: user.name })}
                           disabled={isSelf || impersonate.isPending}
                         />
                       }
@@ -166,16 +171,18 @@ export function UsersPage() {
                           onClick={async () => {
                             if (
                               await confirm({
-                                title: `Impersonate ${user.name}?`,
-                                description: `You will have access to ${user.name}’s private data. All actions, including model requests, run as this user. The session lasts up to one hour.`,
-                                confirmLabel: "Impersonate user",
+                                title: m.admin_users_impersonate_title({ name: user.name }),
+                                description: m.admin_users_impersonate_description({
+                                  name: user.name,
+                                }),
+                                confirmLabel: m.admin_users_impersonate(),
                                 destructive: false,
                               })
                             )
                               impersonate.mutate(user.id);
                           }}
                         >
-                          Impersonate user
+                          {m.admin_users_impersonate()}
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
@@ -183,29 +190,28 @@ export function UsersPage() {
                           setRole.mutate({ userId: user.id, role: isAdmin ? "user" : "admin" })
                         }
                       >
-                        {isAdmin ? "Remove admin" : "Make admin"}
+                        {isAdmin ? m.admin_users_remove_admin() : m.admin_users_make_admin()}
                       </DropdownMenuItem>
                       {user.emailVerified ? null : (
                         <DropdownMenuItem
                           onClick={async () => {
                             if (
                               await confirm({
-                                title: `Mark ${user.email} verified?`,
-                                description:
-                                  "Do this only if you know the address is theirs. Others can then find them by it, and a waiting account in a listed domain is let in.",
-                                confirmLabel: "Mark verified",
+                                title: m.admin_users_verify_title({ email: user.email }),
+                                description: m.admin_users_verify_description(),
+                                confirmLabel: m.admin_users_verify_confirm(),
                                 destructive: false,
                               })
                             )
                               verify.mutate(user.id);
                           }}
                         >
-                          Mark email verified
+                          {m.admin_users_verify()}
                         </DropdownMenuItem>
                       )}
                       {user.banned ? (
                         <DropdownMenuItem onClick={() => unban.mutate(user.id)}>
-                          Unban user
+                          {m.admin_users_unban()}
                         </DropdownMenuItem>
                       ) : (
                         <DropdownMenuItem
@@ -213,17 +219,16 @@ export function UsersPage() {
                           onClick={async () => {
                             if (
                               await confirm({
-                                title: `Ban ${user.name}?`,
-                                description:
-                                  "They are signed out everywhere and cannot sign in again until unbanned. Their data stays.",
-                                confirmLabel: "Ban user",
+                                title: m.admin_users_ban_title({ name: user.name }),
+                                description: m.admin_users_ban_description(),
+                                confirmLabel: m.admin_users_ban(),
                               })
                             ) {
                               ban.mutate(user.id);
                             }
                           }}
                         >
-                          Ban user
+                          {m.admin_users_ban()}
                         </DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
