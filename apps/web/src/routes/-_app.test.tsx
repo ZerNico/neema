@@ -8,6 +8,12 @@ import { getMe } from "~/modules/auth/server/functions.ts";
 vi.mock("~/modules/auth/server/functions.ts", () => ({ getMe: vi.fn() }));
 vi.mock("~/modules/auth/server/signup-functions.ts", () => ({ getNeedsSetup: vi.fn() }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
+// The app layout aligns the page with the account's language first; this one follows the browser.
+vi.mock("~/modules/language/server/functions.ts", () => ({
+  getLanguage: vi.fn().mockResolvedValue({ chosen: null }),
+  chooseLanguage: vi.fn(),
+  noteBrowserLanguage: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("~/modules/chat/ui/app-sidebar.tsx", () => ({
   AppSidebar: ({ user, impersonating }: { user: { name: string }; impersonating?: boolean }) => (
     <div data-testid="sidebar-user" data-impersonating={impersonating}>

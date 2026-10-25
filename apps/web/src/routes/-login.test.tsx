@@ -25,6 +25,12 @@ vi.mock("~/modules/auth/server/signup-functions.ts", () => ({
   getSignInOptions: vi.fn(),
 }));
 vi.mock("~/modules/chat/server/functions.ts", () => ({ listConversations: vi.fn() }));
+// The app layout aligns the page with the account's language first; this one follows the browser.
+vi.mock("~/modules/language/server/functions.ts", () => ({
+  getLanguage: vi.fn().mockResolvedValue({ chosen: null }),
+  chooseLanguage: vi.fn(),
+  noteBrowserLanguage: vi.fn().mockResolvedValue(undefined),
+}));
 // Better Auth's client is a proxy spyOn cannot patch; only the calls this page makes.
 vi.mock("~/modules/auth/client.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/modules/auth/client.ts")>()),
