@@ -10,7 +10,7 @@ SET "family" = CASE
   WHEN "tool_name" IN ('inspect_spreadsheet', 'edit_spreadsheet') THEN 'spreadsheet'
   WHEN "tool_name" IN ('inspect_word_file', 'edit_word_file') THEN 'word'
   WHEN "tool_name" IN ('draft_agent', 'read_agent_draft', 'list_agent_options', 'update_agent_draft') THEN 'agent-draft'
-  WHEN "tool_name" IN ('draft_schedule', 'read_schedule_draft', 'update_schedule_draft') THEN 'schedule-draft'
+  WHEN "tool_name" IN ('draft_schedule', 'read_schedule_draft', 'list_schedule_options', 'update_schedule_draft') THEN 'schedule-draft'
   WHEN "tool_name" IN ('create_document', 'edit_document', 'read_chat_document', 'list_chat_documents', 'comment_on_document') THEN 'document'
   WHEN "tool_name" IN ('list_project_files', 'save_project_file') THEN 'project-file'
   WHEN "tool_name" IN ('list_knowledge_documents', 'search_knowledge', 'read_knowledge_document', 'knowledge_context') THEN 'knowledge'

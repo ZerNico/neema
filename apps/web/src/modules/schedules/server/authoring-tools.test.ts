@@ -1,5 +1,7 @@
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
+import { type AiError, type Tool } from "effect/ai";
 import { describe, expect, it, vi } from "vitest";
+import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import {
   EMPTY_SCHEDULE_DRAFT,
   type PatchScheduleDraftInput,
@@ -10,7 +12,7 @@ import { prepareScheduleDraftTools, type ScheduleAuthoringServices } from "./aut
 const unexpected = () => Effect.die(new Error("Unexpected service call"));
 const writeGuard = () => Effect.void;
 
-async function setup(timeZone?: string) {
+async function setup(timeZone?: string, settings: Partial<ScheduleDraft["settings"]> = {}) {
   let draft: ScheduleDraft = {
     id: "draft-one",
     conversationId: "authoring-chat",
@@ -20,6 +22,7 @@ async function setup(timeZone?: string) {
       name: "Daily reminder",
       chatMode: "same",
       chatId: "target-chat",
+      ...settings,
     },
     revision: 1,
     targetId: "schedule-one",
@@ -70,6 +73,16 @@ async function setup(timeZone?: string) {
       setModelFormat: unexpected,
       deleteModel: unexpected,
     },
+    // Only what the options tool reads; anything else would be a surprise here.
+    agents: {
+      list: () =>
+        Effect.succeed([
+          { id: "agent-own", name: "Researcher", description: "Mine", canEdit: true },
+          { id: "agent-shared", name: "Shared", description: "Not mine", canEdit: false },
+        ]),
+    } as never,
+    skills: { list: unexpected } as never,
+    knowledge: { listCollections: unexpected } as never,
   };
   const prepared = await Effect.runPromise(
     prepareScheduleDraftTools({
@@ -87,8 +100,42 @@ async function setup(timeZone?: string) {
   const draftSchedule = prepared.group.handlers.draft_schedule as (
     raw: unknown,
   ) => Effect.Effect<unknown>;
-  return { update, patch, open, draftSchedule };
+  // Through the merged toolkit, so every result is encoded as a provider would get it.
+  const call = (name: string, params: unknown) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const toolkit = (yield* mergeToolGroups([prepared.group]))!;
+        // An untyped toolkit reports unknown services; its handlers' were provided when merged.
+        const stream = yield* toolkit.handle(name as never, params as never) as Effect.Effect<
+          Stream.Stream<Tool.HandlerResult<Tool.Any>, AiError.AiError, never>,
+          AiError.AiError,
+          never
+        >;
+        return [...(yield* Stream.runCollect(stream))].at(-1)!.result;
+      }),
+    );
+  return { update, patch, open, draftSchedule, call };
 }
+
+describe("an unfinished schedule draft", () => {
+  it("reads back with blank text, as the person left it", async () => {
+    const { call } = await setup(undefined, { name: "", cron: "", prompt: "" });
+    expect(await call("read_schedule_draft", { draftId: "draft-one" })).toMatchObject({
+      outcome: "read",
+      draft: { settings: { name: "", cron: "", prompt: "" } },
+    });
+  });
+});
+
+describe("list_schedule_options", () => {
+  it("lists only the person's own agents, since a schedule runs only those", async () => {
+    const { call } = await setup();
+    expect(await call("list_schedule_options", { kind: "agent" })).toEqual({
+      outcome: "options",
+      options: [{ id: "agent-own", name: "Researcher", description: "Mine" }],
+    });
+  });
+});
 
 describe("schedule draft id aliases", () => {
   it.each(["draft_id", "draft", "id"])("reads a top-level %s as the draftId", async (key) => {

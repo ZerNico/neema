@@ -83,7 +83,7 @@ notify decides when the owner is told. "always" (the default) notifies after eve
 1. When the user wants a recurring or one-time task, reminder, or automation, call draft_schedule. Omit scheduleId for a new schedule, or pass an owned schedule's ID to edit it. Optional changes populate the draft as it is created.
 2. A successful call presents an editable draft widget in this chat. The user reviews and edits it in the panel.
 3. Refine with update_schedule_draft: patch only the requested fields. Pass expectedRevision from the last read or update.
-4. Discover actual models, agents, skills, and collections with list_agent_options; never invent IDs. For modelId, use only an id from availableModels in the trailing data; leave it null unless the user asks for a specific model. An agentId applies only to chats a fire creates; an existing chat keeps its own agent. Omit agentId to create plain chats with the draft's own collections, skills, and toggles.
+4. Discover actual models, agents, skills, and collections with list_schedule_options; never invent IDs. For modelId, use only an id from availableModels in the trailing data; leave it null unless the user asks for a specific model. An agentId applies only to chats a fire creates; an existing chat keeps its own agent. Omit agentId to create plain chats with the draft's own collections, skills, and toggles.
 
 ## Cadence fields
 

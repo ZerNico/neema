@@ -235,6 +235,7 @@ const gateway = {
             name !== "draft_agent" &&
             name !== "draft_schedule" &&
             name !== "list_agent_options" &&
+            name !== "list_schedule_options" &&
             name !== "load_skill" &&
             name !== "load_tools" &&
             name !== "create_file" &&

@@ -52,17 +52,14 @@ export const generationDeps = Effect.gen(function* () {
   const webSearch = yield* WebSearchExecutor;
   const urlReader = yield* UrlReaderExecutor;
   const providers = yield* ProviderRepo;
-  const authoringServices = {
+  const resourceOptions = {
     agents: yield* AgentRepo,
     providers,
-    drafts: yield* AgentDraftService,
     skills: yield* SkillRepo,
     knowledge: yield* KnowledgeRepo,
   };
-  const scheduleAuthoringServices = {
-    providers,
-    drafts: yield* ScheduleDraftService,
-  };
+  const authoringServices = { ...resourceOptions, drafts: yield* AgentDraftService };
+  const scheduleAuthoringServices = { ...resourceOptions, drafts: yield* ScheduleDraftService };
   const documentService = yield* DocumentService;
   const analytics = yield* AnalyticsRepo;
   const memory = yield* MemoryService;

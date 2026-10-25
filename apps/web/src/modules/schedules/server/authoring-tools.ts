@@ -1,7 +1,14 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit, type Prompt } from "effect/ai";
-import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { makeDraftSession } from "~/modules/drafts/server/authoring-tools.ts";
+import {
+  OptionKind,
+  OptionsParams,
+  ResourceOption,
+  makeResourceOptions,
+  normalizeOptionKind,
+  type ResourceOptionServices,
+} from "~/modules/drafts/server/resource-options.ts";
 import { EntityId } from "~/entity-id.ts";
 import { advertisedAs, type ToolGroup } from "~/modules/tools/server/toolset.ts";
 import {
@@ -93,7 +100,9 @@ const Result = Schema.Struct({
   ...ScheduleDraftActivityResult.fields,
   message: Schema.optionalKey(Schema.String),
   draft: Schema.optionalKey(DraftState),
+  options: Schema.optionalKey(Schema.Array(ResourceOption)),
   drafts: Schema.optionalKey(Schema.Array(DraftSummary)),
+  nextCursor: Schema.optionalKey(Schema.String),
 });
 type Result = typeof Result.Type;
 
@@ -112,6 +121,16 @@ const readTool = Tool.make("read_schedule_draft", {
   parameters: Schema.Struct({ draftId: advertisedAs(EntityId) }),
   success: Result,
 });
+const optionsTool = Tool.make("list_schedule_options", {
+  description:
+    "Find the person's own agents, or accessible models, skills (including manual-only), or knowledge collections to put in a schedule draft. Returns up to 20 metadata entries; pass nextCursor to continue. Does not load resource contents or change the draft.",
+  parameters: Schema.Struct({
+    kind: advertisedAs(OptionKind),
+    query: advertisedAs(OptionsParams.fields.query),
+    cursor: advertisedAs(OptionsParams.fields.cursor),
+  }),
+  success: Result,
+});
 const updateTool = Tool.make("update_schedule_draft", {
   description:
     "Patch one schedule draft at its current expectedRevision. draftId may be omitted only when this chat has exactly one schedule draft; with several, pass the draftId of the one you mean. Only supplied settings change; an empty array clears that selection, and null clears modelId, agentId, imageModelId, endAt, or chatId. Never change unrelated fields. The cron field must be a valid 5-field cron expression interpreted in the draft's timezone. A conflict means someone edited the draft; read its current values instead of overwriting their changes. This updates only the draft, not the saved schedule.",
@@ -123,9 +142,8 @@ const updateTool = Tool.make("update_schedule_draft", {
   success: Result,
 });
 
-export type ScheduleAuthoringServices = {
+export type ScheduleAuthoringServices = ResourceOptionServices & {
   drafts: ScheduleDraftService["Service"];
-  providers: ProviderRepo["Service"];
 };
 
 const summary = (draft: ScheduleDraft): typeof DraftSummary.Type => ({
@@ -163,7 +181,9 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       state,
       fieldAliases: DRAFT_FIELD_ALIASES,
       changes: ScheduleModelPatch,
+      normalize: normalizeOptionKind,
     });
+    const resources = makeResourceOptions(input.services, input.userId);
     // The models this user can pick, marked with the one answering right now.
     let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];
     let availableImageModels: ReadonlyArray<{ id: string; name: string; description?: string }> =
@@ -231,6 +251,17 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
       session.remember(result.draft);
       return { outcome: result.outcome, ...session.reference(result.draft) };
     });
+    const options = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
+      const decoded = yield* session.decode(
+        "list_schedule_options",
+        OptionsParams,
+        raw,
+        "Choose agents, models, skills, or collections and an optional search query/cursor.",
+      );
+      if (!decoded.ok) return decoded.result;
+      const { kind, query, cursor } = decoded.value;
+      return { outcome: "options", ...(yield* resources.page(kind, query, cursor)) };
+    });
     const update = Effect.fn(function* (raw: unknown): Effect.fn.Return<Result> {
       const decoded = yield* session.decode(
         "update_schedule_draft",
@@ -269,10 +300,11 @@ export const prepareScheduleDraftTools = Effect.fn("schedules.prepareAuthoringTo
     });
     const group: ToolGroup = {
       family: "schedule-draft",
-      toolkit: Toolkit.make(draftTool, readTool, updateTool),
+      toolkit: Toolkit.make(draftTool, readTool, optionsTool, updateTool),
       handlers: {
         draft_schedule: (raw: unknown) => session.bounded(open(raw)),
         read_schedule_draft: (raw: unknown) => session.bounded(session.read(raw, refresh)),
+        list_schedule_options: (raw: unknown) => session.bounded(options(raw)),
         update_schedule_draft: (raw: unknown) => session.bounded(update(raw)),
       },
     };

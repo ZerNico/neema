@@ -12,6 +12,13 @@ import {
   OpenAgentDraftInput,
   type AgentDraft,
 } from "../draft-schema.ts";
+import {
+  OptionKind,
+  OptionsParams,
+  ResourceOption,
+  makeResourceOptions,
+  normalizeOptionKind,
+} from "~/modules/drafts/server/resource-options.ts";
 import { AgentDraftActivityResult } from "../tool-schema.ts";
 import { AGENT_AUTHORING_POLICY } from "./authoring-prompt.ts";
 import type { AgentDraftService } from "./draft-service.ts";
@@ -29,7 +36,6 @@ const DraftState = Schema.Struct({
   ...DraftSummary.fields,
   settings: DraftSettings,
 });
-const OptionKind = Schema.Literals(["agents", "models", "skills", "collections"]);
 // Names a model reaches for when it has read the field list once and then
 // paraphrases it. The advertised schema is the source of truth; these only
 // spare a correction round trip for the common near misses.
@@ -62,31 +68,6 @@ const DRAFT_FIELD_ALIASES: Record<string, string> = {
   knowledgeCollectionIds: "collectionIds",
   title: "name",
 };
-// Singular and near-miss spellings a model writes for the same category.
-const OPTION_KIND_ALIASES: Record<string, typeof OptionKind.Type> = {
-  agent: "agents",
-  agents: "agents",
-  model: "models",
-  models: "models",
-  skill: "skills",
-  skills: "skills",
-  collection: "collections",
-  collections: "collections",
-  knowledge: "collections",
-  "knowledge collections": "collections",
-  knowledge_collections: "collections",
-  documents: "collections",
-};
-const ResourceOption = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  description: Schema.String,
-});
-const OptionsParams = Schema.Struct({
-  kind: OptionKind,
-  query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
-  cursor: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(128))),
-});
 const OpenParams = Schema.Struct({
   agentId: OpenAgentDraftInput.fields.agentId,
   changes: OpenAgentDraftInput.fields.changes,
@@ -106,10 +87,6 @@ const Result = Schema.Struct({
 });
 type Result = typeof Result.Type;
 
-const normalize = (key: string, value: unknown) =>
-  key === "kind" && typeof value === "string"
-    ? (OPTION_KIND_ALIASES[value.trim().toLowerCase()] ?? value)
-    : value;
 const draftTool = Tool.make("draft_agent", {
   description:
     "Start one editable agent draft and show its widget in this chat. Omit agentId for a new agent, or pass an owned agent's ID to edit that agent. Optional changes populate the draft as it is created. Call this once per agent you are preparing, then use the returned draftId with update_agent_draft; calling it again for the same agent, or while an empty unedited draft exists, returns that draft instead of making another. Never creates or saves a live agent.",
@@ -176,7 +153,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
   currentModelId?: string | undefined;
   writeGuard: (tx: DbTx) => Effect.Effect<unknown>;
 }) {
-  const { drafts, agents, providers, skills, knowledge } = input.services;
+  const { drafts, providers } = input.services;
   const session = makeDraftSession({
     noun: "agent",
     plural: "drafts",
@@ -186,18 +163,18 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
     state,
     fieldAliases: DRAFT_FIELD_ALIASES,
     changes: AgentDraftPatch,
-    normalize,
+    normalize: normalizeOptionKind,
   });
   const inspected = new Map<
-    typeof OptionKind.Type,
+    OptionKind,
     {
       query: string;
       cursor: string;
-      options: ReadonlyArray<typeof ResourceOption.Type>;
+      options: ReadonlyArray<ResourceOption>;
       nextCursor?: string;
     }
   >();
-  let selected: Partial<Record<typeof OptionKind.Type, ReadonlyArray<typeof ResourceOption.Type>>> =
+  let selected: Partial<Record<OptionKind, ReadonlyArray<ResourceOption>>> =
     {};
   // The models this user can pick, marked with the one answering right now.
   // Short and already visible in the composer's picker, so a draft can name a
@@ -205,47 +182,7 @@ export const prepareAgentDraftTools = Effect.fn("agents.prepareAuthoringTools")(
   let availableModels: ReadonlyArray<{ id: string; name: string; current?: true }> = [];
   // The image models the user can pick, in the admin's order, the same way.
   let availableImageModels: ReadonlyArray<{ id: string; name: string; description?: string }> = [];
-  const list = Effect.fn(function* (kind: typeof OptionKind.Type) {
-    const rows =
-      kind === "agents"
-        ? (yield* agents.list(input.userId))
-            .filter((agent) => agent.canEdit)
-            .map(({ id, name, description }) => ({ id, name, description }))
-        : kind === "models"
-          ? (yield* providers.listChatModelsFor(input.userId)).map((model) => ({
-              id: model.id,
-              name: model.displayName,
-              description: "",
-            }))
-          : kind === "skills"
-            ? (yield* skills.list(input.userId)).map(({ id, name, description }) => ({
-                id,
-                name,
-                description,
-              }))
-            : (yield* knowledge.listCollections(input.userId)).map(({ id, name, description }) => ({
-                id,
-                name,
-                description,
-              }));
-    return rows.map((row) => ({ ...row, description: row.description.slice(0, 500) }));
-  });
-  const optionPage = Effect.fn(function* (kind: typeof OptionKind.Type, query = "", cursor = "") {
-    const rows = yield* list(kind);
-    const matches = rows
-      .filter(
-        (row) =>
-          !query ||
-          `${row.name} ${row.description}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-      )
-      .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .filter((row) => !cursor || row.id > cursor);
-    const page = matches.slice(0, 20);
-    return {
-      options: page,
-      ...(matches.length > page.length ? { nextCursor: page.at(-1)!.id } : {}),
-    };
-  });
+  const { list, page: optionPage } = makeResourceOptions(input.services, input.userId);
   const refresh = Effect.fn(function* () {
     yield* session.sync();
     selected = {};

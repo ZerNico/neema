@@ -3,8 +3,13 @@ import { ScheduleDraftSettings } from "./draft-schema.ts";
 
 const schema = defineDraftToolSchema({
   family: "schedule-draft",
-  toolNames: ["draft_schedule", "read_schedule_draft", "update_schedule_draft"],
-  extraOutcomes: [],
+  toolNames: [
+    "draft_schedule",
+    "read_schedule_draft",
+    "list_schedule_options",
+    "update_schedule_draft",
+  ],
+  extraOutcomes: ["options"],
   settings: ScheduleDraftSettings,
 });
 

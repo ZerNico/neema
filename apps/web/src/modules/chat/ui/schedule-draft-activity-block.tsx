@@ -9,11 +9,14 @@ import { DraftWidget } from "./draft-widget.tsx";
 function scheduleDraftActivityLabel(activity: ScheduleDraftToolActivity) {
   if (activity.status === "running") {
     if (activity.name === "draft_schedule") return "Preparing the schedule draft";
-    return activity.name === "update_schedule_draft"
-      ? "Updating the schedule draft"
+    if (activity.name === "update_schedule_draft") return "Updating the schedule draft";
+    return activity.name === "list_schedule_options"
+      ? "Checking schedule settings"
       : "Checking schedule drafts";
   }
-  return "Couldn’t update the schedule draft";
+  return activity.result?.outcome === "options"
+    ? "Checked available options"
+    : "Couldn’t update the schedule draft";
 }
 
 export function ScheduleDraftWidget({ draftId }: { draftId: string }) {
@@ -30,7 +33,13 @@ export function ScheduleDraftActivityBlock({ activity }: { activity: ScheduleDra
       <ActivityFace
         icon={Calendar03Icon}
         label={scheduleDraftActivityLabel(activity)}
-        status={activity.status === "running" ? "running" : "failed"}
+        status={
+          activity.status === "running"
+            ? "running"
+            : activity.result?.outcome === "options"
+              ? "done"
+              : "failed"
+        }
       />
     </div>
   );
