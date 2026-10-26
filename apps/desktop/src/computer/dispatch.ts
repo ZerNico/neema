@@ -19,6 +19,7 @@ import type { Guest } from "./hypervisor.ts";
 import { place, WORKSPACE, type Mount } from "./paths.ts";
 import { AGENT_VSOCK_PORT, type ChatKey, type ChatSetup, type ChatVms } from "./vms.ts";
 import type { SentFiles } from "./sent-files.ts";
+import { hostFileOf, stampOf, type SeenFiles } from "./seen-files.ts";
 
 /** A call as the machine received it, its deadline already on this machine's clock. */
 export interface ComputerCall {
@@ -42,6 +43,8 @@ export interface DispatchDeps {
   readonly setup: (key: ChatKey) => Promise<ChatSetup>;
   /** Which sent files are already in the chat's workspace, placed once each. */
   readonly sentFiles: Pick<SentFiles, "placed" | "record">;
+  /** What the model last saw of each file, so a file changed since is not replaced unseen. */
+  readonly seen: Pick<SeenFiles, "note" | "changedSince">;
   /** Downloads one of the chat's attachments with the machine's own session. */
   readonly attachment: (
     key: ChatKey,
@@ -224,6 +227,22 @@ async function run(
   mounts: readonly Mount[],
   args: Readonly<Record<string, unknown>>,
 ): Promise<ToolResult> {
+  const chat = call.key.conversationId;
+  const stampAt = (path: string) => {
+    const hostFile = hostFileOf(path, mounts);
+    return hostFile ? stampOf(hostFile) : Promise.resolve(null);
+  };
+  const saw = async (path: string) => deps.seen.note(chat, path, await stampAt(path));
+  /** A refusal when the folder file at `path` changed since the model last read or wrote it. */
+  const changedSinceSeen = async (path: string) => {
+    const placed = place(path, mounts);
+    if (!placed.ok) return null;
+    if (!deps.seen.changedSince(chat, placed.path, await stampAt(placed.path))) return null;
+    return failure(
+      "The file changed since it was read",
+      `${placed.path} changed since you last read it, perhaps saved by the user. Read it again and make your change on top of what is there now; writing now would undo their change.`,
+    );
+  };
   switch (call.name) {
     case "list_folder": {
       const listing = await listFolder(guest, mounts, str(args.path));
@@ -250,6 +269,7 @@ async function run(
       const extension = posix.extname(path).toLowerCase();
       if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"].includes(extension)) {
         const file = await readBinaryFile(guest, mounts, path, "view");
+        await saw(file.path);
         return {
           ...ok(`Read ${file.path}`, `${file.mediaType}, ${sizeOf(file.bytes.length)}`),
           file: {
@@ -260,6 +280,7 @@ async function run(
         };
       }
       const file = await readTextFile(guest, mounts, path, line(args.offset), line(args.limit));
+      await saw(file.path);
       const first = file.startLine;
       const last = (file.nextLine ?? (file.lineCount ?? first) + 1) - 1;
       const summary =
@@ -276,6 +297,7 @@ async function run(
     }
     case "copy_from_computer": {
       const file = await readBinaryFile(guest, mounts, str(args.path), "import");
+      await saw(file.path);
       return {
         ...ok(`Imported ${file.path}`, `${file.mediaType}, ${sizeOf(file.bytes.length)}`),
         file: { mediaType: file.mediaType, base64: file.bytes.toString("base64"), name: file.path },
@@ -301,7 +323,10 @@ async function run(
       );
     }
     case "write_file": {
+      const stale = await changedSinceSeen(str(args.path));
+      if (stale) return stale;
       const receipt = await writeTextFile(guest, mounts, str(args.path), str(args.text));
+      await saw(receipt.path);
       return ok(
         `${receipt.created ? "Created" : "Updated"} ${receipt.path}`,
         `${receipt.bytes} bytes written.`,
@@ -314,6 +339,8 @@ async function run(
         new: str(args.new),
         all: args.all === true,
       });
+      // An edit applies to the file as it is now, so it needs no check, but it is now seen.
+      await saw(receipt.path);
       return ok(
         `Edited ${receipt.path}${receipt.replacements > 1 ? ` (${receipt.replacements} places)` : ""}`,
         receipt.diff,
@@ -349,12 +376,15 @@ async function run(
           "That attachment is not in this chat, or the user cannot read it.",
         );
       const path = str(args.path);
+      const stale = path ? await changedSinceSeen(path) : null;
+      if (stale) return stale;
       const receipt = await saveBytes(
         guest,
         mounts,
         path ? { path } : { folder: WORKSPACE, name: file.name },
         file.bytes,
       );
+      await saw(receipt.path);
       return ok(`Saved ${receipt.path}`, `${receipt.path}\n${sizeOf(receipt.bytes)} written.`);
     }
     case "run_command":

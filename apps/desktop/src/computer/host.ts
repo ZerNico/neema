@@ -1,3 +1,4 @@
+import { SeenFiles } from "./seen-files.ts";
 import type { AgentAnswer } from "./dialogs.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -83,6 +84,7 @@ export class ComputerHost {
   private readonly vms: ChatVms;
   private readonly client: MachineClient;
   private readonly sentFiles: SentFiles;
+  private readonly seen = new SeenFiles();
   private readonly calls = new Map<
     string,
     { abort: AbortController; result: Promise<ToolResult>; settled: boolean }
@@ -229,6 +231,7 @@ export class ComputerHost {
             vms: this.vms,
             egress: this.policy,
             sentFiles: this.sentFiles,
+            seen: this.seen,
             setup: async (key) => ({
               workspace: await this.options.workspace(key.conversationId),
               mounts: await this.options.folders(key.conversationId),
@@ -307,6 +310,7 @@ export class ComputerHost {
     const key = this.key(conversationId);
     try {
       await this.vms.discard(key);
+      this.seen.forget(conversationId);
       if (!everything) return;
       await this.options.discardWorkspace(conversationId);
       await this.sentFiles.forget(conversationId);

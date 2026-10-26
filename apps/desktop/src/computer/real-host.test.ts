@@ -209,6 +209,32 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     });
   }, 120_000);
 
+  test("a file the person changed since the model read it is not replaced unseen", async () => {
+    const onHost = join(root, "notes", "plan.md");
+    await writeFile(onHost, "first draft\n");
+    expect(await call("s1", "read_file", { path: "/folders/notes/plan.md" })).toMatchObject({
+      ok: true,
+    });
+    // The person saves their own change on the Mac while the model works.
+    await writeFile(onHost, "first draft, with the person's fix\n");
+    const stale = await call("s2", "write_file", {
+      path: "/folders/notes/plan.md",
+      text: "the model's rewrite\n",
+    });
+    expect(stale).toMatchObject({ ok: false, summary: "The file changed since it was read" });
+    expect(await readFile(onHost, "utf8")).toBe("first draft, with the person's fix\n");
+    // Read again, the rewrite goes through.
+    await call("s3", "read_file", { path: "/folders/notes/plan.md" });
+    expect(
+      await call("s4", "write_file", { path: "/folders/notes/plan.md", text: "merged\n" }),
+    ).toMatchObject({ ok: true });
+    expect(await readFile(onHost, "utf8")).toBe("merged\n");
+    // Its own writes are what it last saw, so writing again needs no new read.
+    expect(
+      await call("s5", "write_file", { path: "/folders/notes/plan.md", text: "merged twice\n" }),
+    ).toMatchObject({ ok: true });
+  }, 120_000);
+
   test("asking for a folder or the agent needs no VM and answers in the model's words", async () => {
     expect(await call("c7", "request_folder", {})).toMatchObject({
       ok: false,

@@ -219,6 +219,12 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   chat" is kept in memory per chat and kind, until the server restarts, and skips the review
   too. The level is changed in the strip under the composer on the chat's own machine, where
   its work shows, and in the computer chip anywhere else.
+- **A folder file changed since the model read it is not replaced.** `write_file`, and
+  `copy_to_computer` to a path, refuse when the file's time or size on the host differs from
+  what the model last read or wrote (`seen-files.ts`), so a save in Excel or a sync is not
+  silently undone; the model reads again. Asked on the host, since the guest caches a file's
+  details. `edit_file` applies to the file as it is, so it needs no check, and the workspace is
+  the model's alone. Kept in memory: after a restart a write goes through as before.
 - **The review** (`review.ts`) shows a model the action and which folders are the person's,
   and reads RUN, or ASK with a reason the approval card then shows in the person's language.
   It runs on the admin's review model, else the answer's own. Anything that keeps it from

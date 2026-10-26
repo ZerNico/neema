@@ -127,7 +127,8 @@ export const writeFileTool = Tool.make("write_file", {
   description:
     "Create or replace a text file on this chat's computer by its absolute path. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
-    "creating it. The user is asked before it happens and may refuse.",
+    "creating it. A file in an attached folder that changed since you read it is not replaced: " +
+    "read it again and redo your change. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ path: Path, text: Schema.String }),
   success: DesktopToolResult,
   failureMode: "return",
