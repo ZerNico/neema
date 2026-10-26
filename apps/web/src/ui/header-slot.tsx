@@ -25,12 +25,11 @@ export function HeaderSlot() {
       if (!element) return;
       // Where the slot would start with no offset: the stylesheet pushes it to
       // the page's edge while the desktop sidebar is open, never over the buttons.
+      // Its own edge less its margin, since the controls before it are `display:
+      // contents` and have no box to measure.
       const measure = () => {
-        const previous = element.previousElementSibling;
-        const gap = Number.parseFloat(getComputedStyle(element.parentElement ?? element).columnGap);
-        const start = previous
-          ? previous.getBoundingClientRect().right + (Number.isNaN(gap) ? 0 : gap)
-          : element.getBoundingClientRect().left;
+        const margin = Number.parseFloat(getComputedStyle(element).marginLeft);
+        const start = element.getBoundingClientRect().left - (Number.isNaN(margin) ? 0 : margin);
         element.style.setProperty("--header-slot-start", `${start}px`);
       };
       measure();
