@@ -21,7 +21,7 @@ const callSiteMayDo = [
 
 export default defineConfig({
   plugins: ["typescript", "react", "import", "unicorn", "oxc"],
-  jsPlugins: ["eslint-plugin-slop", "@shadcn/lint"],
+  jsPlugins: ["eslint-plugin-slop", "@shadcn/lint", "./apps/web/lint/i18n.mjs"],
   categories: { correctness: "error", suspicious: "warn", perf: "warn" },
   env: { browser: true, node: true, es2024: true },
   rules: {
@@ -77,6 +77,15 @@ export default defineConfig({
     ...slop("warn", "prefer-jsdoc"),
   },
   overrides: [
+    {
+      // Words a person reads come from messages. See docs/internals/i18n.md.
+      files: ["apps/web/src/**/*.tsx", "apps/web/src/**/*.ts"],
+      rules: { "i18n/no-literal-text": "error" },
+    },
+    {
+      files: ["**/*.test.ts", "**/*.test.tsx"],
+      rules: { "i18n/no-literal-text": "off" },
+    },
     {
       // Tests and scripts keep helpers beside the cases that use them.
       files: ["**/*.test.ts", "**/*.test.tsx", "**/tests/**", "**/scripts/**", "scripts/**"],
