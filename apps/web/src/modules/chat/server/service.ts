@@ -1,4 +1,5 @@
 import { MachineHub } from "~/modules/computer/server/hub.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { m } from "~/paraglide/messages.js";
 import { localized } from "~/i18n/localized.ts";
@@ -425,6 +426,7 @@ function makeChatService() {
     const providers = yield* ProviderRepo;
     const sync = yield* SyncBus;
     const machines = yield* MachineHub;
+    const computers = yield* ComputerRepo;
     // A new answer is a new message that is streaming: lists move the chat up
     // and mark it generating from these two, without re-reading every page.
     const announceStarted = (userId: string, conversationId: string, messageId: string) =>
@@ -537,14 +539,19 @@ function makeChatService() {
           : { ...turnFields, content: input.content },
       );
       // A chat started in the desktop app may already have folders there, picked before it
-      // existed; the machine reports them now that there is a chat to report them for.
+      // existed. The page names them, so the first answer knows them; the machine reports them
+      // too, and its word stands.
       if (input.conversation.kind === "new") {
         const machineId = yield* machines.machineOfSession(input.userId, input.deviceSessionId);
-        if (machineId)
+        if (machineId) {
+          const named = input.conversation.folders ?? [];
+          if (named.length > 0)
+            yield* computers.setFolders(input.userId, machineId, input.conversation.id, named);
           yield* machines.send(input.userId, machineId, {
             type: "folders",
             conversationId: input.conversation.id,
           });
+        }
       }
 
       return yield* startTurn({

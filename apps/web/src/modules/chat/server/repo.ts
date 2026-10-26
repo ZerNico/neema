@@ -260,6 +260,8 @@ export type ConversationReference =
       readonly id: string;
       readonly temporary?: boolean | undefined;
       readonly projectId?: string | undefined;
+      /** The desktop app's folders for it, picked before it existed; the service records them. */
+      readonly folders?: ReadonlyArray<{ name: string; readOnly: boolean }> | undefined;
     }
   | { readonly kind: "existing"; readonly id: string };
 

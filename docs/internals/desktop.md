@@ -239,9 +239,10 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   (`folder-access.ts`), judged by where links lead. A folder may be attached read-only.
 - **A folder is a use of the machine.** Folders are offered only where the chat's computer is
   this machine or none yet, and the first one binds a chat without a computer to it. A new chat
-  has its id before its first message, so the machine holds a folder picked for it. Creating the
-  chat from that machine's session asks the machine for its folders, and the names reach the
-  server then. A draft never sent leaves a grant whose chat does not exist, which the machine's
+  has its id before its first message, so the machine holds a folder picked for it. The first
+  message carries the names the composer shows, so its answer knows them; asking the machine
+  would land after the answer had read the chat. Creating the chat from that machine's session
+  still asks the machine, whose report has the last word. A draft never sent leaves a grant whose chat does not exist, which the machine's
   check for gone chats removes on its next start.
 
 ## A VM per chat

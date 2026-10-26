@@ -93,6 +93,18 @@ export const ConversationReference = Schema.Union([
     temporary: Schema.optionalKey(Schema.Boolean),
     /** Starts the chat inside a project; authorized in the attempt that creates it. */
     projectId: Schema.optionalKey(EntityId),
+    /**
+     * Folders the desktop app holds for the chat, picked before it existed, so its first answer
+     * knows them; the machine's own report follows and has the last word.
+     */
+    folders: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          name: Schema.String.check(Schema.isMaxLength(200)),
+          readOnly: Schema.Boolean,
+        }),
+      ).check(Schema.isMaxLength(50)),
+    ),
   }),
   Schema.Struct({ kind: Schema.Literals(["existing"]), id: Schema.String }),
 ]);

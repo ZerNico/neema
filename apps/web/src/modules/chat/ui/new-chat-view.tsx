@@ -120,6 +120,9 @@ export function NewChatView({
             id: conversationId,
             ...(temporary && !projectId ? { temporary: true } : {}),
             ...(projectId ? { projectId } : {}),
+            ...(folders?.items.length
+              ? { folders: folders.items.map(({ name, readOnly }) => ({ name, readOnly })) }
+              : {}),
           },
           modelId: modelId!,
           ...(imageModelId ? { imageModelId } : {}),

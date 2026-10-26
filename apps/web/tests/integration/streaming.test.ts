@@ -9092,6 +9092,53 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
+  it("tells a new chat's first answer the folders its page named", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const chat = await runtime.runPromise(
+        Effect.gen(function* () {
+          const hub = yield* MachineHub;
+          const repo = yield* ComputerRepo;
+          const hello = {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin" as const,
+            computer: { status: "ready" as const },
+            remote: true,
+          };
+          yield* repo.saveMachine(seed.userId, hello);
+          yield* hub.connect(seed.userId, hello, "laptop-session");
+          const id = uuidv7();
+          const sent = yield* (yield* ChatService).sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id, folders: [{ name: "site", readOnly: true }] },
+            modelId: textModelId,
+            content: "Look at my site",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            deviceSessionId: "laptop-session",
+          });
+          yield* Stream.runDrain((yield* StreamEngine).subscribe(sent.assistantMessageId, 0));
+          return yield* repo.chat(seed.userId, id);
+        }).pipe(Effect.scoped),
+      );
+      // Before the machine's own report could land: the answer read the page's names.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain("/folders/site");
+      expect(chat).toMatchObject({ machineId: "laptop", folders: [{ name: "site", readOnly: true }] });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("runs a queued message's calls as sent from the machine that queued it", async () => {
     const seed = await runtime.runPromise(desktopChat);
     let round = 0;
