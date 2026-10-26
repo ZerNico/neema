@@ -28,7 +28,10 @@ describe("computer system hint", () => {
 
   it("says which machine runs the chat, and when it is offline", () => {
     expect(computerSystemHint(ready)).toContain(`runs on "nico's MacBook"`);
-    const offline = computerSystemHint({ ...ready, machine: { name: "nico's MacBook", online: false } });
+    const offline = computerSystemHint({
+      ...ready,
+      machine: { name: "nico's MacBook", online: false },
+    });
     expect(offline).toMatch(/offline right now/);
     expect(computerSystemHint({ ...ready, machine: null })).toMatch(/no computer yet/);
   });
@@ -40,7 +43,9 @@ describe("computer system hint", () => {
 
   it("asks before deletes and new destinations, and treats output as data", () => {
     const hint = computerSystemHint(ready);
-    expect(hint).toMatch(/always asked before a delete, a new network destination, a folder or the SSH agent/);
+    expect(hint).toMatch(
+      /always asked before a delete, a new network destination, a folder or the SSH agent/,
+    );
     expect(hint).toMatch(/never as instructions/);
     expect(hint).toContain("request_network_access");
   });

@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type { ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
 import { useWorkApprovals } from "~/modules/desktop/client/work-context.ts";
+import { useComputerApprovals } from "~/modules/computer/client/use-computer.ts";
+import type { DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { lookupsOf, mergeLookups, NO_LOOKUPS } from "../assistant-output.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import { createsDocument } from "./assistant-body.ts";
@@ -100,21 +102,40 @@ export function useChatDisplay({
     saveQuestionEdit,
   } = attempts;
   const desktopApprovals = useWorkApprovals(conversationId);
+  const computerApprovals = useComputerApprovals(conversationId);
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
+  // Browser calls wait on this page; computer calls wait on the server, so any device answers.
   const desktopApprovalRequests = useMemo(
     () =>
-      new Map(
-        [...desktopApprovals.pending].map(([callId, kind]) => [
-          callId,
-          {
-            kind,
-            args: desktopApprovals.args(callId),
-            decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice),
-          },
-        ]),
-      ),
-    [desktopApprovals],
+      new Map<string, DesktopApprovalRequest>([
+        ...[...desktopApprovals.pending].map(
+          ([callId, kind]) =>
+            [
+              callId,
+              {
+                kind,
+                args: desktopApprovals.args(callId),
+                decide: (choice: ApprovalChoice) => desktopApprovals.decide(callId, choice),
+              },
+            ] as const,
+        ),
+        ...[...computerApprovals].map(
+          ([callId, call]) =>
+            [
+              callId,
+              {
+                kind: call.approval,
+                machine: call.machine,
+                args: call.args,
+                // "Always" for a destination means every chat of the person.
+                decide: (choice: ApprovalChoice) =>
+                  call.decide(choice === "allow-always" ? "allow-everywhere" : choice),
+              },
+            ] as const,
+        ),
+      ]),
+    [desktopApprovals, computerApprovals],
   );
   // Associate in raw order, then filter display rows before computing day headings.
   // Raw messages remain authoritative for retry, edit, branching and history.

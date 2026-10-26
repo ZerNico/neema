@@ -6,7 +6,8 @@ export { approvalKind, type ApprovalKind } from "../tool-schema.ts";
 export type { PermissionLevel };
 /** `allow-chat` and `allow-always` answer a site or network request, for this chat or this desktop. */
 export type ApprovalChoice = "allow" | "deny" | "allow-rest" | "allow-chat" | "allow-always";
-export type PendingKind = ApprovalKind | "read";
+/** `bind` asks which machine an unbound chat's computer runs on. */
+export type PendingKind = ApprovalKind | "read" | "bind";
 
 /**
  * Kinds a person may allow for the rest of a chat. Reads never ask, and

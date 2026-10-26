@@ -289,7 +289,9 @@ export class ComputerCalls extends Context.Service<
           const now = yield* Clock.currentTimeMillis;
           yield* Effect.forkIn(
             Effect.gen(function* () {
-              yield* Effect.sleep(Duration.millis(Math.max(0, entry.deadlineAt - now - DEADLINE_MARGIN_MS)));
+              yield* Effect.sleep(
+                Duration.millis(Math.max(0, entry.deadlineAt - now - DEADLINE_MARGIN_MS)),
+              );
               if (entry.state.kind !== "preparing") return;
               const presence = yield* hub.presence(entry.userId, machineId);
               const progress =

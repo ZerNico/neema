@@ -326,6 +326,7 @@ export function ChatView({
               temporary={data.conversation.temporary}
               archived={!!data.conversation.archivedAt}
               project={data.project}
+              computer={data.computer}
             />
             <div className="min-h-0 flex-1">
               <ResearchPanelOwner messages={display} />

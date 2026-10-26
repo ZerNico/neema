@@ -317,7 +317,9 @@ describe("ComputerCalls", () => {
 
   it.effect("a call still waiting near its deadline hears how far the download got", () =>
     Effect.gen(function* () {
-      const { open, connect } = yield* setup(fakeRepo({ machineId: "laptop", permissionLevel: "allow" }));
+      const { open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
       yield* connect("laptop", { computer: { status: "preparing", progress: 0.64 } });
       const { waiting } = yield* open("call-1", "list_folder", { path: "." }, "laptop");
       yield* TestClock.adjust(Duration.seconds(56));

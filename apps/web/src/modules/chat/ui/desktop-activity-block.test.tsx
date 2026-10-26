@@ -81,7 +81,7 @@ describe("DesktopActivityBlock", () => {
     ).toBeInTheDocument();
   });
 
-  it("asks for network access for this answer, this chat or every chat", async () => {
+  it("asks for network access for this chat or every chat", async () => {
     const decide = vi.fn();
     show(
       <DesktopActivityBlock
@@ -94,8 +94,8 @@ describe("DesktopActivityBlock", () => {
     );
     expect(screen.getByText("Allow network access on this computer")).toBeInTheDocument();
     expect(screen.getByText("github.com:22")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow for this answer" })).toBeNull();
     for (const [name, choice] of [
-      ["Allow for this answer", "allow"],
       ["Allow in this chat", "allow-chat"],
       ["Always allow", "allow-always"],
       ["Deny", "deny"],
@@ -103,6 +103,19 @@ describe("DesktopActivityBlock", () => {
       await userEvent.click(screen.getByRole("button", { name }));
       expect(decide).toHaveBeenLastCalledWith(choice);
     }
+  });
+
+  it("asks which machine an unbound chat's computer runs on", async () => {
+    const decide = vi.fn();
+    show(
+      <DesktopActivityBlock
+        activity={running({ name: "list_folder", args: { path: "." } })}
+        approval={{ kind: "bind", machine: "Nico's MacBook", decide }}
+      />,
+    );
+    expect(screen.getByText("Use Nico's MacBook for this chat?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+    expect(decide).toHaveBeenLastCalledWith("allow");
   });
 
   it("names a private network request as one", () => {

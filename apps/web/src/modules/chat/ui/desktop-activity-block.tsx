@@ -262,8 +262,10 @@ const approvalTitle = (
   activity: DesktopToolActivity,
   kind: PendingKind,
   roots: ReadonlyArray<{ name: string; path: string }>,
+  machine?: string,
 ) => {
   if (kind === "site") return m.chat_desktop_ask_site();
+  if (kind === "bind") return m.chat_computer_bind({ machine: machine ?? "" });
   if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask();
   switch (kind) {
     case "read":
@@ -330,23 +332,29 @@ function DeletePathList({
   );
 }
 
-/** A site is allowed once, for this chat, or for this desktop, never by a blanket grant. */
-/** Once, for this chat, or for every chat: the scopes a site or a network destination takes. */
+/**
+ * The scopes a site or a network destination takes: a site once, for this chat or for this
+ * desktop; a destination for this chat or for every chat, never by a blanket grant.
+ */
 function ScopeChoices({
   decide,
   once,
+  note,
 }: {
   decide: (choice: ApprovalChoice) => void;
-  once: string;
+  once?: string;
+  note: string;
 }) {
   return (
     <>
-      <p className="text-muted-foreground text-xs">{m.chat_desktop_always_note()}</p>
+      <p className="text-muted-foreground text-xs">{note}</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => decide("allow")}>
-          {once}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => decide("allow-chat")}>
+        {once ? (
+          <Button size="sm" onClick={() => decide("allow")}>
+            {once}
+          </Button>
+        ) : null}
+        <Button size="sm" variant={once ? "outline" : "default"} onClick={() => decide("allow-chat")}>
           {m.chat_desktop_allow_chat()}
         </Button>
         <Button size="sm" variant="outline" onClick={() => decide("allow-always")}>
@@ -369,6 +377,8 @@ const blanketLabel = (kind: PendingKind) =>
 
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
+  /** For `bind`: the machine the chat's computer would run on. */
+  readonly machine?: string | undefined;
   /** The live call's arguments, which may hold what the transcript never stores. */
   readonly args?: Readonly<Record<string, unknown>> | null;
   readonly decide: (choice: ApprovalChoice) => void;
@@ -410,9 +420,13 @@ function ApprovalCard({
             className="size-4 shrink-0"
             aria-hidden
           />
-          <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind, roots)}</span>
+          <span className="min-w-0 truncate">
+            {approvalTitle(activity, approval.kind, roots, approval.machine)}
+          </span>
         </div>
-        {listed.length > 1 ? (
+        {approval.kind === "bind" ? (
+          <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
+        ) : listed.length > 1 ? (
           <DeletePathList paths={listed} roots={roots} />
         ) : what ? (
           <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
@@ -420,9 +434,13 @@ function ApprovalCard({
           </pre>
         ) : null}
         {approval.kind === "site" ? (
-          <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_once()} />
+          <ScopeChoices
+            decide={approval.decide}
+            once={m.chat_desktop_allow_once()}
+            note={m.chat_desktop_always_note()}
+          />
         ) : approval.kind === "network" ? (
-          <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_answer()} />
+          <ScopeChoices decide={approval.decide} note={m.chat_computer_network_note()} />
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>

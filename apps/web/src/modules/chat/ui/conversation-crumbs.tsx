@@ -21,6 +21,7 @@ import { Badge } from "~/ui/primitives/badge";
 import { agentIcon } from "./agent-icons.ts";
 import { ConversationTitle } from "./conversation-title.tsx";
 import { createTitleRevealRegistry } from "./title-reveal-registry.ts";
+import { ComputerTag, type ChatComputer } from "~/modules/computer/ui/computer-tag.tsx";
 
 interface ScheduleOrigin {
   scheduleId: string;
@@ -45,8 +46,11 @@ export function ConversationCrumbs({
   temporary = false,
   archived = false,
   project,
+  computer,
 }: {
   conversationId: string;
+  /** The chat's computer; shown once the chat has one. */
+  computer?: ChatComputer | undefined;
   /** The project this chat works in; a null role means access was lost. */
   project?: { id: string; name: string; role: string | null } | null | undefined;
   /** Hidden from lists and without memory until kept. */
@@ -67,6 +71,9 @@ export function ConversationCrumbs({
           <ConversationTitle conversationId={conversationId} title={title} registry={registry} />
         </h1>
         {project ? <ProjectTag project={project} /> : null}
+        {computer?.machineId ? (
+          <ComputerTag conversationId={conversationId} computer={computer} />
+        ) : null}
         {agent ? <AgentTag agent={agent} /> : null}
         {schedule ? <ScheduleTag schedule={schedule} /> : null}
         {branchedFrom ? (

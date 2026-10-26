@@ -237,6 +237,7 @@ function ConversationRow({
             browsing={browsing}
             branched={!!conversation.branchedFrom}
             scheduled={conversation.scheduled}
+            computer={conversation.machineId !== null}
             unread={conversation.unread}
             conversationId={conversation.id}
             title={conversation.title}

@@ -218,6 +218,9 @@ export function useSync(
         case "desktop.work.changed":
           refreshWork();
           break;
+        case "computer.changed":
+          void queryClient.invalidateQueries({ queryKey: ["computer"] });
+          break;
         case "draft.changed":
           void queryClient.invalidateQueries({ queryKey: ["drafts", event.kind, event.draftId] });
           // A tool can create the draft after this chat’s loader snapshot.
