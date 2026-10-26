@@ -315,8 +315,24 @@ and an explicit Quit asks while work is active. See [the embedded browser](brows
 
 - **One image for every chat's computer** (`infra/sandbox-image`): Ubuntu 26.04 LTS with
   Python 3.14 and the document packages, Node, uv, LibreOffice, pandoc, tesseract, ffmpeg,
-  ImageMagick, poppler, git and build tools. CI smoke-tests and publishes it per architecture,
-  and the desktop pins it by digest (`computer/image.ts`), so a new image ships with a release.
+  ImageMagick, poppler, git and build tools.
+- **An image is named by its sources.** CI tags it `tree-<hash>` of `infra/sandbox-image` and
+  its workflow, and reuses an existing tag instead of rebuilding. Rebuilding the same sources
+  would still give a new image, since apt is not pinned, and every new image resets each chat's
+  installs. So the image changes only when its sources do.
+- **A release boots the image of its own commit.** Its sandbox job resolves or builds that tag
+  and hands `name:tag@digest` to the desktop build, which bakes it in (`__SANDBOX_IMAGE__`).
+  The digest is what is pulled, so a published release cannot be moved to other bytes. Other
+  builds follow `edge`, which main moves.
+- **Updates come once a month, together.** Renovate groups the base image digests and the
+  Python lock refresh on the first of the month, which is when chats lose their installs. The
+  guest kernel is not in the image: it ships with microsandbox's `libkrunfw`, updated with the
+  app. A guest flaw reaches no more than the model already can, so monthly is enough.
+- **The model hears of a reset once.** The first call after a chat's disk was made over for a
+  new image starts with a note that earlier installs are gone and files are kept, so the model
+  reinstalls instead of puzzling over a missing package.
+- **Layers are ordered by how often they change:** system packages first, Python last, so a
+  refresh that leaves the base alone downloads only the top layers.
 - **Our own image** because the hint promises what is installed, and because the image carries
   what the computer relies on: the agent bridge, apt over HTTPS and git trusting mounted
   folders owned by the host account.

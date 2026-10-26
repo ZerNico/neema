@@ -28,6 +28,13 @@ const buildStamp = () => {
   return `${sha} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
 };
 
+/**
+ * The guest image chats' VMs boot, as `name:tag@digest`. A release passes the one its
+ * sandbox job resolved for this commit (.github/workflows/release.yml), so the app always
+ * boots the image built from its own infra/sandbox-image. Other builds follow `edge`.
+ */
+const sandboxImage = () => process.env.SANDBOX_IMAGE_REF || "ghcr.io/zernico/neema-sandbox:edge";
+
 export const buildOptions = () => ({
   entryPoints: ["src/main.ts", "src/preload.ts", "src/connect-preload.ts"],
   outdir: "dist",
@@ -40,7 +47,10 @@ export const buildOptions = () => ({
   outExtension: { ".js": ".cjs" },
   sourcemap: true,
   external: ["electron", "microsandbox"],
-  define: { __BUILD_STAMP__: JSON.stringify(buildStamp()) },
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+    __SANDBOX_IMAGE__: JSON.stringify(sandboxImage()),
+  },
 });
 
 // Run directly: one build. Imported by dev.mjs: the options only.

@@ -8,10 +8,19 @@ name: Desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      sandbox-image:
+        description: Guest image as name:tag@digest. Empty follows edge.
+        type: string
+        required: false
   workflow_call:
     inputs:
       version:
         description: App version without the leading v.
+        type: string
+        required: true
+      sandbox-image:
+        description: Guest image as name:tag@digest, from sandbox-image.yml.
         type: string
         required: true
 
@@ -59,7 +68,17 @@ jobs:
         run: pnpm install --frozen-lockfile --cpu=x64 --cpu=arm64
 
       - name: Build shell
-        run: pnpm --filter @chat/desktop build
+        shell: bash
+        env:
+          SANDBOX_IMAGE_REF: ${{ inputs.sandbox-image }}
+          RELEASE: ${{ inputs.version }}
+        run: |
+          # A release must boot exactly the image built for it, never whatever edge is.
+          if [[ -n "$RELEASE" && "$SANDBOX_IMAGE_REF" != *@sha256:* ]]; then
+            echo "::error::A release needs the sandbox image by digest, got '$SANDBOX_IMAGE_REF'"
+            exit 1
+          fi
+          pnpm --filter @chat/desktop build
 
       - name: Package
         shell: bash

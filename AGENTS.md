@@ -410,8 +410,8 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
   platform package ships the native addon, `msb` and `libkrunfw`, and `msb` needs the hypervisor
   entitlement on macOS, restored after signing by `after-sign.mjs`. On a bump, run the opt-in
   real-VM tests (`NEEMA_VM_IMAGE=… pnpm --filter @chat/desktop test src/computer`) on each OS,
-  since the unit tests use a fake hypervisor. The guest image is pinned in
-  `apps/desktop/src/computer/image.ts`. See [desktop](docs/internals/desktop.md).
+  since the unit tests use a fake hypervisor. The guest image is not a pin: a release builds
+  the desktop with the image of its own sources. See [desktop](docs/internals/desktop.md#the-image).
 - `rolldown` needs no override since 1.2.7 and follows the release cooldown like any other
   package. Re-pin only if the production module check fails again, and then add it to
   `minimumReleaseAgeExclude`.
