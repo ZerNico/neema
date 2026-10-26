@@ -13,8 +13,7 @@ on:
   pull_request:
     paths: ["infra/sandbox-image/**", ".github/workflows/sandbox-image.yml"]
   push:
-    # TEMPORARY: the branch, so the image under its new tag publishes before the merge.
-    branches: [main, t3/microvm-sandbox]
+    branches: [main]
     paths: ["infra/sandbox-image/**", ".github/workflows/sandbox-image.yml"]
   workflow_dispatch:
   workflow_call:
