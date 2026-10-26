@@ -51,6 +51,9 @@ test("a glob matches at any depth without a slash, and through a matching folder
     "src/a/b.test.ts",
   );
   expect(matchedPrefix(globToRegExp("{a,b}.md"), "docs/b.md")).toBe("docs/b.md");
+  // The rest of an absolute pattern is matched from its root, not at any depth.
+  expect(matchedPrefix(globToRegExp("*.md", true), "docs/b.md")).toBeUndefined();
+  expect(matchedPrefix(globToRegExp("*.md", true), "b.md")).toBe("b.md");
 });
 
 test("output keeps its start and end within the limit", () => {

@@ -379,13 +379,24 @@ export async function deletePaths(
 
 /** Files and folders matching a glob across every root, newest first. */
 export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern: string) {
+  // Models write the root into the pattern (`/folders/site/**/*.ts`): that names the root to
+  // search, and the rest is matched from it.
+  const absolute = pattern.startsWith("/");
+  const all = roots(mounts).filter(
+    (root) => !absolute || pattern === root.path || pattern.startsWith(`${root.path}/`),
+  );
+  if (absolute && all.length === 0)
+    throw new Refusal(
+      "outside",
+      `${pattern} is outside this chat's folders. list_folder "." lists the ones it can reach.`,
+    );
+  const relative = absolute ? pattern.slice(all[0]!.path.length + 1) || "**" : pattern;
   let matcher: RegExp;
   try {
-    matcher = globToRegExp(pattern);
+    matcher = globToRegExp(relative, absolute);
   } catch {
     throw new Refusal("bad-pattern", `Could not read ${pattern}.`);
   }
-  const all = roots(mounts);
   // Each root answers for itself; the cap applies to the union so a big first folder cannot
   // hide the second entirely.
   const perRoot = Math.max(1, Math.floor(LIMITS.foundPaths / all.length));

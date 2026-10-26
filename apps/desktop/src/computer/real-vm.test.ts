@@ -105,6 +105,9 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
       expect((await findFiles(guest, mounts(), "*.md")).paths).toEqual(
         expect.arrayContaining(["/workspace/today.md", "/folders/refs/notes.md"]),
       );
+      expect((await findFiles(guest, mounts(), "/folders/refs/**/*")).paths).toEqual([
+        "/folders/refs/notes.md",
+      ]);
       const search = await searchFiles(guest, mounts(), "answer = \\d+");
       expect(search.matches).toEqual([
         { path: "/folders/site/app.ts", line: 1, text: "export const answer = 42;" },
