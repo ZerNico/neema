@@ -2,7 +2,7 @@ import { m } from "~/paraglide/messages.js";
 import * as motion from "motion/react-m";
 import { useState } from "react";
 import type { ComponentProps } from "react";
-import { Calendar03Icon, File02Icon, GitBranchIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon, GitBranchIcon, Globe02Icon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ConversationTitle } from "./conversation-title.tsx";
 import { MotionSwap } from "~/ui/motion.tsx";
@@ -98,7 +98,7 @@ export function ConversationStatusTitle({
             />
           ) : computer ? (
             <HugeiconsIcon
-              icon={File02Icon}
+              icon={LaptopIcon}
               strokeWidth={2}
               className="size-4"
               aria-label={m.chat_status_computer()}
