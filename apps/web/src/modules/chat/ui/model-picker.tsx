@@ -1,4 +1,5 @@
 import { m } from "~/paraglide/messages.js";
+import { getLocale } from "~/paraglide/runtime.js";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CapabilityIcons } from "~/modules/providers/ui/capability-icons.tsx";
@@ -126,12 +127,14 @@ export function ModelPicker({
 /** "Available again at 14:00", or on another day "Available again Monday 1 Dec". */
 const availableAgain = (iso: string) => {
   const at = new Date(iso);
-  const today = new Date().toDateString() === at.toDateString();
-  return `Available again ${
-    today
-      ? `at ${at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
-      : at.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })
-  }`;
+  const locale = getLocale();
+  return new Date().toDateString() === at.toDateString()
+    ? m.chat_models_available_at({
+        time: at.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }),
+      })
+    : m.chat_models_available_on({
+        day: at.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" }),
+      });
 };
 
 function ModelRow({

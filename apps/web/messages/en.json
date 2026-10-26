@@ -1655,6 +1655,8 @@
   "chat_mention_skills": "Local skills",
   "chat_message_edited": "edited",
   "chat_message_via": "via {client}",
+  "chat_models_available_at": "Available again at {time}",
+  "chat_models_available_on": "Available again {day}",
   "chat_models_loading": "Loading models…",
   "chat_models_no_match": "No models match",
   "chat_models_search": "Search models…",
