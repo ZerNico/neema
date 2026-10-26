@@ -320,7 +320,6 @@ describe("loadConversationDetail", () => {
         expect(detail.branchedFrom).toBeNull();
         expect(detail.conversation.fileReferenceAliases).toEqual({
           attachments: {},
-          workspaceAncestors: [source.conversationId],
         });
       }),
     );

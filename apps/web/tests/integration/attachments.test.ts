@@ -1023,7 +1023,6 @@ describe("generated assistant image transactions", () => {
         expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
         expect(branch.fileReferenceAliases).toEqual({
           attachments: { [image.attachment.id]: clonedImage.attachment.id },
-          workspaceAncestors: [turn.conversation.id],
         });
         expect(clonedImage).toEqual({
           ...image,
