@@ -110,15 +110,6 @@ export const editLocalFileTool = Tool.make("edit_local_file", {
   failureMode: "return",
 });
 
-export const moveLocalFileTool = Tool.make("move_local_file", {
-  description:
-    "Rename or move a file or folder by absolute paths, anywhere inside /workspace and the attached folders. " +
-    "Never overwrites an existing path. The user is asked before it happens and may refuse.",
-  parameters: Schema.Struct({ from: Path, to: Path }),
-  success: DesktopToolResult,
-  failureMode: "return",
-});
-
 export const deleteLocalFileTool = Tool.make("delete_local_file", {
   description:
     "Delete files or folders by absolute path, and everything inside a folder, within " +
@@ -281,7 +272,6 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     writeLocalFileTool,
     saveToWorkspaceTool,
     editLocalFileTool,
-    moveLocalFileTool,
     deleteLocalFileTool,
   ] as const;
   // Offered whenever the person may use a computer, machine online or not, so the prompt's
@@ -304,7 +294,6 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       write_local_file: handle("write_local_file"),
       save_to_workspace: handle("save_to_workspace"),
       edit_local_file: handle("edit_local_file"),
-      move_local_file: handle("move_local_file"),
       delete_local_file: handle("delete_local_file"),
       run_command: handle("run_command"),
       request_network_access: handle("request_network_access"),

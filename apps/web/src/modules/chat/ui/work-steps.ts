@@ -116,7 +116,6 @@ export function stepLabel(step: WorkStep): string {
           if (
             call.name === "write_local_file" ||
             call.name === "edit_local_file" ||
-            call.name === "move_local_file" ||
             call.name === "delete_local_file"
           )
             return m.chat_work_editing_files();
@@ -194,7 +193,6 @@ const pastClauses = (step: WorkStep): Clause[] => {
           if (
             call.name === "write_local_file" ||
             call.name === "edit_local_file" ||
-            call.name === "move_local_file" ||
             call.name === "delete_local_file"
           )
             return [clause(m.chat_work_past_edited_files())];

@@ -25,7 +25,6 @@ export const DESKTOP_TOOL_NAMES = [
   "write_local_file",
   "save_to_workspace",
   "edit_local_file",
-  "move_local_file",
   "delete_local_file",
   "run_command",
   "request_network_access",
@@ -56,7 +55,6 @@ export const approvalKind = (
   switch (name) {
     case "write_local_file":
     case "edit_local_file":
-    case "move_local_file":
       return "edit";
     case "delete_local_file":
       return "delete";
@@ -239,7 +237,6 @@ const TOOL_TIMEOUTS: Record<DesktopToolName, "quick" | "command"> = {
   // A download plus a write; nobody is asked, but the bytes take time.
   save_to_workspace: "command",
   edit_local_file: "command",
-  move_local_file: "command",
   delete_local_file: "command",
   run_command: "command",
   request_network_access: "command",

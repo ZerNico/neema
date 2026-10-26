@@ -272,16 +272,7 @@ describe("a work file row on the desktop", () => {
     );
   });
 
-  it("follows a move to where the file now is, and ignores a row with no file", async () => {
-    const moved = {
-      ...wrote("unused", "move_local_file"),
-      args: { from: "site/old.md", to: "site/notes.md" },
-    } satisfies DesktopToolActivity;
-    show(moved);
-    await click(moved);
-    expect(await screen.findByText("still here")).toBeTruthy();
-    expect(asked).toEqual([{ tag: "readFile", path: "site/notes.md" }]);
-
+  it("ignores a row with no file", () => {
     show({ ...wrote("site/notes.md", "run_command"), args: { command: "ls" } });
     expect(screen.queryByRole("button", { name: /Wrote site\/notes\.md/ })).toBeNull();
   });

@@ -8,7 +8,6 @@ import {
   editTextFile,
   findFiles,
   listFolder,
-  movePath,
   readBinaryFile,
   readTextFile,
   Refusal,
@@ -313,10 +312,6 @@ async function run(
         receipt.diff,
         receipt.truncated,
       );
-    }
-    case "move_local_file": {
-      const receipt = await movePath(guest, mounts, str(args.from), str(args.to));
-      return ok(`Moved ${receipt.from} to ${receipt.to}`, `${receipt.from} is now ${receipt.to}.`);
     }
     case "delete_local_file": {
       const paths = Array.isArray(args.paths)

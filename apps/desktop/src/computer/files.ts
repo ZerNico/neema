@@ -329,30 +329,6 @@ export async function editTextFile(
   };
 }
 
-export async function movePath(guest: Guest, mounts: readonly Mount[], from: string, to: string) {
-  const source = writable(from, mounts);
-  if (isRoot(source.path, mounts))
-    throw new Refusal("outside", "A folder of this chat itself cannot be moved.");
-  const destination = writable(to, mounts);
-  await existing(guest, source.path);
-  if (await guest.stat(destination.path))
-    throw new Refusal(
-      "already-exists",
-      `${destination.path} already exists. Delete it first if you mean to replace it.`,
-    );
-  const { code, stderr } = await sh(
-    guest,
-    `mkdir -p "$(dirname "$2")" && mv -n -- "$1" "$2"`,
-    source.path,
-    destination.path,
-  );
-  if (code !== 0)
-    throw /read-only/i.test(stderr.toString())
-      ? new Refusal("read-only", `${destination.path} is in a folder attached read-only.`)
-      : new Refusal("failed", `Could not move ${source.path} to ${destination.path}.`);
-  return { from: source.path, to: destination.path };
-}
-
 export async function deletePaths(
   guest: Guest,
   mounts: readonly Mount[],

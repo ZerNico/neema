@@ -72,7 +72,6 @@ const approvalFor = (
   switch (name) {
     case "write_local_file":
     case "edit_local_file":
-    case "move_local_file":
       return "edit";
     // Into the workspace under a fresh name nothing is overwritten; to a chosen path it is a write.
     case "save_to_workspace":

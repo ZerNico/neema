@@ -9,7 +9,6 @@ import {
   File01Icon,
   Folder01Icon,
   FolderSearchIcon,
-  FolderTransferIcon,
   NoInternetIcon,
   Key01Icon,
   PencilEdit02Icon,
@@ -50,7 +49,6 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   write_local_file: PencilEdit02Icon,
   save_to_workspace: Download04Icon,
   edit_local_file: Edit02Icon,
-  move_local_file: FolderTransferIcon,
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
@@ -76,8 +74,6 @@ const argText = (activity: DesktopToolActivity) => {
     case "find_files":
     case "search_files":
       return text(args.pattern);
-    case "move_local_file":
-      return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
     case "delete_local_file":
       return deletePathsOf(args).join("\n");
     default:
@@ -85,10 +81,7 @@ const argText = (activity: DesktopToolActivity) => {
   }
 };
 
-/**
- * The file a finished row leaves behind, when there is one to look at. A move
- * names its destination: the source is the path that no longer exists.
- */
+/** The file a finished row leaves behind, when there is one to look at. */
 const previewablePath = (activity: DesktopToolActivity): string | null => {
   if (activity.status !== "complete") return null;
   const args = activity.args ?? {};
@@ -99,8 +92,6 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
     case "edit_local_file":
     case "save_to_workspace":
       return text(args.path) || null;
-    case "move_local_file":
-      return text(args.to) || null;
     default:
       return null;
   }
@@ -147,7 +138,6 @@ const FAILED: Partial<
   write_local_file: { bare: m.chat_desktop_failed_write, path: m.chat_desktop_failed_write_path },
   save_to_workspace: { bare: m.chat_desktop_failed_save, path: m.chat_desktop_failed_save_path },
   edit_local_file: { bare: m.chat_desktop_failed_edit, path: m.chat_desktop_failed_edit_path },
-  move_local_file: { bare: m.chat_desktop_failed_move },
   delete_local_file: { bare: m.chat_desktop_failed_delete },
   run_command: { bare: m.chat_desktop_failed_run },
 };
@@ -186,8 +176,6 @@ const runningLabel = (
       return what ? m.chat_desktop_saving_path({ path: what }) : m.chat_desktop_saving();
     case "edit_local_file":
       return what ? m.chat_desktop_editing_path({ path: what }) : m.chat_desktop_editing();
-    case "move_local_file":
-      return what ? m.chat_desktop_moving_path({ path: what }) : m.chat_desktop_moving();
     case "delete_local_file": {
       const listed = deletePathsOf(activity.args);
       if (listed.length === 1) return m.chat_desktop_deleting_path({ path: listed[0]! });
@@ -290,11 +278,9 @@ const approvalTitle = (
         : m.chat_desktop_ask_delete_count({ count: listed.length });
     }
     default:
-      return activity.name === "move_local_file"
-        ? m.chat_desktop_ask_move()
-        : activity.name === "write_local_file"
-          ? m.chat_desktop_ask_write()
-          : m.chat_desktop_ask_change();
+      return activity.name === "write_local_file"
+        ? m.chat_desktop_ask_write()
+        : m.chat_desktop_ask_change();
   }
 };
 

@@ -9,7 +9,6 @@ import {
   editTextFile,
   findFiles,
   listFolder,
-  movePath,
   readTextFile,
   searchFiles,
   writeTextFile,
@@ -100,8 +99,7 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
         new: "42",
       });
       expect(edit.replacements).toBe(1);
-      await writeTextFile(guest, mounts(), "/workspace/notes/today.md", "# Today\n");
-      await movePath(guest, mounts(), "/workspace/notes/today.md", "/workspace/today.md");
+      await writeTextFile(guest, mounts(), "/workspace/today.md", "# Today\n");
       expect((await findFiles(guest, mounts(), "*.md")).paths).toEqual(
         expect.arrayContaining(["/workspace/today.md", "/folders/refs/notes.md"]),
       );
