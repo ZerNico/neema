@@ -355,21 +355,22 @@ export async function deletePaths(
 
 /** Files and folders matching a glob across every root, newest first. */
 export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern: string) {
-  // Models write the root into the pattern (`/folders/site/**/*.ts`): that names the root to
-  // search, and the rest is matched from it.
+  // Models write roots into patterns (`/folders/site/**/*.ts`, `/folders/**/*.md`): an absolute
+  // one is matched against whole paths, in each root its fixed start can reach.
   const absolute = pattern.startsWith("/");
+  const fixed = absolute ? pattern.slice(0, pattern.search(/[*?{]|$/)) : "";
   const all = roots(mounts).filter(
-    (root) => !absolute || pattern === root.path || pattern.startsWith(`${root.path}/`),
+    (root) =>
+      !absolute || `${root.path}/`.startsWith(fixed) || fixed.startsWith(`${root.path}/`),
   );
-  if (absolute && all.length === 0)
+  if (all.length === 0)
     throw new Refusal(
       "outside",
       `${pattern} is outside this chat's folders. list_folder "." lists the ones it can reach.`,
     );
-  const rest = absolute ? pattern.slice(all[0]!.path.length + 1) || "**" : pattern;
   let matcher: RegExp;
   try {
-    matcher = globToRegExp(rest, absolute);
+    matcher = globToRegExp(pattern, absolute);
   } catch {
     throw new Refusal("bad-pattern", `Could not read ${pattern}.`);
   }
@@ -400,13 +401,15 @@ export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern:
     const found: string[] = [];
     const folders = new Set<string>();
     for (const relative of listed) {
-      const prefix = matchedPrefix(matcher, relative);
+      const path = `${root.path}/${relative}`;
+      const prefix = matchedPrefix(matcher, absolute ? path : relative);
       if (prefix === undefined) continue;
-      if (prefix !== relative && !folders.has(prefix)) {
-        folders.add(prefix);
-        found.push(`${root.path}/${prefix}/`);
+      const folder = absolute ? prefix : `${root.path}/${prefix}`;
+      if (folder !== path && !folders.has(folder)) {
+        folders.add(folder);
+        found.push(`${folder}/`);
       }
-      found.push(`${root.path}/${relative}`);
+      found.push(path);
     }
     paths.push(...found.slice(0, perRoot));
     truncated ||= found.length > perRoot;

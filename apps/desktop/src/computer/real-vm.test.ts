@@ -106,6 +106,11 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
       expect((await findFiles(guest, mounts(), "/folders/refs/**/*")).paths).toEqual([
         "/folders/refs/notes.md",
       ]);
+      // A pattern across the roots searches each one it reaches, and only those.
+      expect((await findFiles(guest, mounts(), "/folders/**/*.md")).paths).toEqual([
+        "/folders/refs/notes.md",
+      ]);
+      await expect(findFiles(guest, mounts(), "/etc/*")).rejects.toThrow(/outside/);
       const search = await searchFiles(guest, mounts(), "answer = \\d+");
       expect(search.matches).toEqual([
         { path: "/folders/site/app.ts", line: 1, text: "export const answer = 42;" },

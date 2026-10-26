@@ -2,7 +2,7 @@
  * Glob to regular expression, the subset every agent's find tool speaks:
  * `**` any depth, `*` within a segment, `?` one character, `{a,b}` choice.
  * A pattern with no slash matches at any depth, as it would in `.gitignore`, unless it is
- * anchored: the rest of an absolute pattern after its root.
+ * anchored, as an absolute one is.
  */
 export const globToRegExp = (pattern: string, anchored = false): RegExp => {
   const anywhere = !anchored && !pattern.includes("/");
