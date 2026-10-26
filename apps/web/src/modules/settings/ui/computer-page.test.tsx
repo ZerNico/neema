@@ -177,7 +177,8 @@ describe("the list of computers", () => {
       },
     ];
     renderPage();
-    expect(await screen.findByText("· This computer")).toBeInTheDocument();
+    expect(await screen.findByText("MacBook Pro")).toBeInTheDocument();
+    expect(screen.getAllByText("This computer").length).toBeGreaterThan(1);
     await userEvent.click(screen.getByRole("button", { name: "Rename MacBook Pro" }));
     const field = screen.getByRole("textbox", { name: "Name" });
     await userEvent.clear(field);

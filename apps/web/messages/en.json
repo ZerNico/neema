@@ -6364,6 +6364,7 @@
   "settings_computer_agent_placeholder": "Default agent",
   "settings_computer_machines_title": "Your computers",
   "settings_computer_rename": "Rename {name}",
+  "settings_computer_rename_button": "Rename",
   "settings_computer_name": "Name",
   "settings_computer_rename_failed": "Couldn’t rename the computer",
   "chat_status_computer": "Has a computer",

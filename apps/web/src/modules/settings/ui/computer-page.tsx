@@ -1,4 +1,4 @@
-import { Globe02Icon, InternetIcon, LaptopIcon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
+import { Globe02Icon, InternetIcon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
@@ -314,6 +314,15 @@ function MachineRow({
     if (draft !== null && draft.trim() !== machine.name) rename.mutate(draft);
     setDraft(null);
   };
+  const status = machine.online
+    ? m.computer_status_online()
+    : m.computer_status_offline_since({
+        time: new Date(machine.lastSeenAt).toLocaleString(formatLocale(), {
+          dateStyle: "short",
+          timeStyle: "short",
+        }),
+      });
+  // Laid out like a device on the Devices page: name and mark, then its state, then actions.
   return (
     <ListRow>
       <HugeiconsIcon
@@ -321,51 +330,41 @@ function MachineRow({
         strokeWidth={2}
         className="text-muted-foreground size-5 shrink-0"
       />
-      {draft === null ? (
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="truncate text-sm font-medium">
-            {rename.isPending ? rename.variables : machine.name}
-          </span>
-          {here ? (
-            <span className="text-muted-foreground shrink-0 text-xs">
-              · {m.settings_section_computer()}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {draft === null ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">
+              {rename.isPending ? rename.variables : machine.name}
             </span>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={m.settings_computer_rename({ name: machine.name })}
-            onClick={() => setDraft(machine.name)}
-          >
-            <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
-          </Button>
-        </span>
-      ) : (
-        <Input
-          // oxlint-disable-next-line jsx-a11y/no-autofocus -- opened by the rename button for typing
-          autoFocus
-          aria-label={m.settings_computer_name()}
-          value={draft}
-          maxLength={60}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={finish}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") finish();
-            if (event.key === "Escape") setDraft(null);
-          }}
-          className="min-w-0 flex-1"
-        />
-      )}
-      <Badge variant={machine.online ? "secondary" : "outline"}>
-        {machine.online
-          ? m.computer_status_online()
-          : m.computer_status_offline_since({
-              time: new Date(machine.lastSeenAt).toLocaleString(formatLocale(), {
-                dateStyle: "short",
-                timeStyle: "short",
-              }),
-            })}
-      </Badge>
+            {here ? <Badge variant="secondary">{m.settings_section_computer()}</Badge> : null}
+          </div>
+        ) : (
+          <Input
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- opened by the rename button for typing
+            autoFocus
+            aria-label={m.settings_computer_name()}
+            value={draft}
+            maxLength={60}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={finish}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") finish();
+              if (event.key === "Escape") setDraft(null);
+            }}
+          />
+        )}
+        <span className="text-muted-foreground text-xs">{status}</span>
+      </div>
+      {draft === null ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={m.settings_computer_rename({ name: machine.name })}
+          onClick={() => setDraft(machine.name)}
+        >
+          {m.settings_computer_rename_button()}
+        </Button>
+      ) : null}
     </ListRow>
   );
 }

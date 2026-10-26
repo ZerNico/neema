@@ -6358,6 +6358,7 @@
   "settings_computer_agent_placeholder": "Standard-Agent",
   "settings_computer_machines_title": "Deine Computer",
   "settings_computer_rename": "{name} umbenennen",
+  "settings_computer_rename_button": "Umbenennen",
   "settings_computer_name": "Name",
   "settings_computer_rename_failed": "Der Computer konnte nicht umbenannt werden",
   "chat_status_computer": "Hat einen Computer",
