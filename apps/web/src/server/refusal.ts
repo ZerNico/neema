@@ -285,10 +285,10 @@ export const refusal = (status: number, body: Localized) =>
 
 /** A refusal decided inside an effect, rendered by `refusing` once the request's locale is known. */
 class PendingRefusal {
-  constructor(readonly refusal: Refusal) {}
+  constructor(readonly decided: Refusal) {}
   /** What a log shows if one escapes `refusing`. */
   toString() {
-    return `Refused ${this.refusal.status}: ${english(this.refusal.body)}`;
+    return `Refused ${this.decided.status}: ${english(this.decided.body)}`;
   }
 }
 
@@ -313,6 +313,6 @@ export const refusing = <A, E extends Refusable, R>(
   effect.pipe(
     Effect.catch((error) => Effect.die(new PendingRefusal(refusalOf(error, overrides)))),
     Effect.catchDefect((defect) =>
-      Effect.die(defect instanceof PendingRefusal ? responseOf(defect.refusal, locale) : defect),
+      Effect.die(defect instanceof PendingRefusal ? responseOf(defect.decided, locale) : defect),
     ),
   );

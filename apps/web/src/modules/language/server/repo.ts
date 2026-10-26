@@ -5,6 +5,9 @@ import { baseLocale, isLocale, type Locale } from "~/paraglide/runtime.js";
 import { Db } from "~/server/db.ts";
 import type { LanguageChoice, LanguageSetting } from "../schema.ts";
 
+// A locale this build no longer ships reads as none.
+const known = (value: string | null | undefined) => (isLocale(value) ? value : null);
+
 export class LanguageRepo extends Context.Service<
   LanguageRepo,
   {
@@ -29,8 +32,6 @@ export class LanguageRepo extends Context.Service<
             Effect.map(([found]) => found),
             Effect.orDie,
           );
-      // A locale this build no longer ships reads as none.
-      const known = (value: string | null | undefined) => (isLocale(value) ? value : null);
       const upsert = (userId: string, set: { chosen?: LanguageChoice; browser?: Locale }) =>
         db
           .insert(languageSettings)
