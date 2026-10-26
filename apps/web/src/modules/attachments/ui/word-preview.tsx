@@ -185,10 +185,11 @@ function Paragraph({ block }: { block: Extract<Block, { type: "paragraph" }> }) 
 
 function Contents({ block }: { block: Extract<Block, { type: "tableOfContents" }> }) {
   return (
-    <nav aria-label={m.attachments_word_toc()} className="bg-paper-foreground/5 space-y-1 rounded-md p-3">
-      <p className="text-paper-foreground/60 text-xs">
-        {m.attachments_word_toc_note()}
-      </p>
+    <nav
+      aria-label={m.attachments_word_toc()}
+      className="bg-paper-foreground/5 space-y-1 rounded-md p-3"
+    >
+      <p className="text-paper-foreground/60 text-xs">{m.attachments_word_toc_note()}</p>
       {block.entries.length ? (
         block.entries.map((entry, index) => (
           <p
@@ -211,10 +212,7 @@ export function WordPreview({ source }: { source: OfficeFile }) {
   const url = `/api/word/${source.kind}/${encodeURIComponent(source.id)}`;
   const state = usePreviewJson(url, decodePreview);
 
-  if (state.status === "error")
-    return (
-      <FieldError>{m.attachments_word_load_failed()}</FieldError>
-    );
+  if (state.status === "error") return <FieldError>{m.attachments_word_load_failed()}</FieldError>;
   const preview = state.status === "ready" ? state.preview : null;
   const hidden =
     preview?.blocks.reduce(
@@ -236,7 +234,10 @@ export function WordPreview({ source }: { source: OfficeFile }) {
         ) : preview.blocks.length === 0 ? (
           <p className="text-paper-foreground/60 text-sm">{m.attachments_word_empty()}</p>
         ) : (
-          <article aria-label={m.attachments_word_preview()} className="space-y-2 text-sm leading-relaxed">
+          <article
+            aria-label={m.attachments_word_preview()}
+            className="space-y-2 text-sm leading-relaxed"
+          >
             {preview.blocks.map((block, index) =>
               block.type === "tableOfContents" ? (
                 // oxlint-disable-next-line react/no-array-index-key -- blocks are a fixed, ordered snapshot

@@ -72,7 +72,8 @@ export function AttachmentChip({
 }) {
   const status = item.status ?? "complete";
   const uploading = status === "uploading" || status === "importing";
-  const problem = status === "error" ? (item.error ?? m.attachments_chip_upload_failed()) : (warning ?? null);
+  const problem =
+    status === "error" ? (item.error ?? m.attachments_chip_upload_failed()) : (warning ?? null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const subtitle =
     problem ??

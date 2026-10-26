@@ -206,8 +206,7 @@ export class PresentationFonts extends Context.Service<
           );
         const info = yield* Effect.try({
           try: () => readFontFile(bytes),
-          catch: (error) =>
-            new FontRejected({ reason: fontRefusal(error) }),
+          catch: (error) => new FontRejected({ reason: fontRefusal(error) }),
         });
         const [usage] = yield* db
           .select({
@@ -239,8 +238,7 @@ export class PresentationFonts extends Context.Service<
         // crashes the renderer fails here and costs only that worker.
         yield* Effect.tryPromise({
           try: () => workers.run({ kind: "font", path }),
-          catch: () =>
-            new FontRejected({ reason: localized(m.presentations_font_error_render) }),
+          catch: () => new FontRejected({ reason: localized(m.presentations_font_error_render) }),
         }).pipe(
           Effect.tapError(() =>
             fresh ? Effect.promise(() => rm(path, { force: true })) : Effect.void,

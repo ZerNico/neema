@@ -74,15 +74,15 @@ export function PresentationPreview({ source }: { source: PresentationSource }) 
     return (
       <SlideFrame
         aspectRatio={16 / 9}
-        footer={<span className="text-muted-foreground text-xs">{m.attachments_slides_loading()}</span>}
+        footer={
+          <span className="text-muted-foreground text-xs">{m.attachments_slides_loading()}</span>
+        }
       >
         <Spinner aria-label={m.attachments_slides_loading_label()} className={centered} />
       </SlideFrame>
     );
   if (state.status === "error")
-    return (
-      <FieldError>{m.attachments_slides_load_failed()}</FieldError>
-    );
+    return <FieldError>{m.attachments_slides_load_failed()}</FieldError>;
   if (count === 0)
     return <p className="text-muted-foreground text-sm">{m.attachments_slides_empty()}</p>;
   const image = `${base}?slide=${state.slideIds[selected]!}`;

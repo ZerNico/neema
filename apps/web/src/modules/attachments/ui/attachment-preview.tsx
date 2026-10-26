@@ -298,7 +298,9 @@ function TextPreview({
   }, [url]);
 
   if (state.status === "loading") {
-    return <Spinner aria-label={m.attachments_preview_loading()} className="text-muted-foreground" />;
+    return (
+      <Spinner aria-label={m.attachments_preview_loading()} className="text-muted-foreground" />
+    );
   }
   if (state.status === "error") {
     return <FieldError>{m.attachments_preview_load_failed()}</FieldError>;
@@ -310,7 +312,11 @@ function TextPreview({
   const markdown = language === "markdown" && state.text.length <= RENDER_CHAR_CAP;
 
   const toggle = markdown ? (
-    <ViewToggle preview={rendered} sourceLabel={m.attachments_preview_source()} onChange={setRendered} />
+    <ViewToggle
+      preview={rendered}
+      sourceLabel={m.attachments_preview_source()}
+      onChange={setRendered}
+    />
   ) : null;
 
   return (

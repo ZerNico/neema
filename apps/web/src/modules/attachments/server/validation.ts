@@ -120,7 +120,9 @@ export const validateAttachment = Effect.fn("attachments.validateAttachment")(fu
   if (input.bytes.length > MAX_ATTACHMENT_BYTES) {
     return yield* new AttachmentRejected({
       cause: "size",
-      reason: localized(m.attachments_error_too_large, { size: MAX_ATTACHMENT_BYTES / (1024 * 1024) }),
+      reason: localized(m.attachments_error_too_large, {
+        size: MAX_ATTACHMENT_BYTES / (1024 * 1024),
+      }),
     });
   }
 

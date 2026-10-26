@@ -72,9 +72,7 @@ export function SpreadsheetPreview({
   const visible = sheets.filter((each) => !each.hidden);
 
   if (state.status === "error" && sheets.length === 0)
-    return (
-      <FieldError>{m.spreadsheets_preview_load_failed()}</FieldError>
-    );
+    return <FieldError>{m.spreadsheets_preview_load_failed()}</FieldError>;
   return (
     <div className="flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2">
       <div className="paper bg-background text-foreground relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border">

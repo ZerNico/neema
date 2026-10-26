@@ -55,9 +55,7 @@ function FontItem({ font }: { font: Font }) {
       />
       <span className="truncate">{font.family}</span>
       <span className="text-muted-foreground truncate text-xs">
-        {(font.embeddable
-          ? m.presentations_fonts_meta
-          : m.presentations_fonts_meta_no_embedding)({
+        {(font.embeddable ? m.presentations_fonts_meta : m.presentations_fonts_meta_no_embedding)({
           style: styleLabel(font),
           size: formatFileSize(font.byteSize, getLocale()),
         })}
@@ -69,7 +67,10 @@ function FontItem({ font }: { font: Font }) {
             checked={embed.isPending ? embed.variables : font.embed}
             disabled={embed.isPending}
             onCheckedChange={(next) => embed.mutate(next)}
-            aria-label={m.presentations_fonts_embed_label({ family: font.family, style: styleLabel(font) })}
+            aria-label={m.presentations_fonts_embed_label({
+              family: font.family,
+              style: styleLabel(font),
+            })}
           />
         </div>
       ) : null}
@@ -77,7 +78,10 @@ function FontItem({ font }: { font: Font }) {
         variant="ghost"
         size="icon-sm"
         className={font.embeddable ? undefined : "ml-auto"}
-        aria-label={m.presentations_fonts_remove_label({ family: font.family, style: styleLabel(font) })}
+        aria-label={m.presentations_fonts_remove_label({
+          family: font.family,
+          style: styleLabel(font),
+        })}
         pending={remove.isPending}
         onClick={() => {
           void confirm({

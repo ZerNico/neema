@@ -40,7 +40,12 @@ const printable = (text: string) =>
 const invalid = (message: string, code: FontRefusal = "invalid_font"): never => {
   throw new PresentationError(code, message);
 };
-export type FontRefusal = "invalid_font" | "not_a_font" | "font_collection" | "web_font" | "variable_font";
+export type FontRefusal =
+  | "invalid_font"
+  | "not_a_font"
+  | "font_collection"
+  | "web_font"
+  | "variable_font";
 
 /**
  * Reads the name, OS/2 and head tables of a single TrueType or OpenType font.

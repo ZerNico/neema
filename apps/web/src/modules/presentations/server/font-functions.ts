@@ -26,7 +26,8 @@ export const uploadPresentationFont = createServerFn({ method: "POST" })
   .validator((data: FormData) => data)
   .handler(async ({ data, context }) => {
     const file = data.get("file");
-    if (!(file instanceof File)) throw refusal(400, localized(m.presentations_font_error_expected_file));
+    if (!(file instanceof File))
+      throw refusal(400, localized(m.presentations_font_error_expected_file));
     if (file.size > FONT_LIMITS.fileBytes)
       throw refusal(
         413,
