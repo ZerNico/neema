@@ -180,6 +180,35 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 120_000);
 
+  test("a Stop before the command started means it never runs", async () => {
+    for (const when of ["before", "racing"] as const) {
+      const controller = new AbortController();
+      if (when === "before") controller.abort();
+      const outcome = await use(async (guest) => {
+        const running = runCommand(guest, {
+          command: `touch /workspace/ran-${when}`,
+          cwd: "/workspace",
+          timeoutMs: 60_000,
+          signal: controller.signal,
+          outputLimit: 1_000,
+        });
+        // In the same tick: the kill reaches the guest before the wrapper made its group.
+        controller.abort();
+        return running;
+      });
+      expect(outcome.stopped).toBe(true);
+      const ran = await use((guest) =>
+        runCommand(guest, {
+          command: `test -e /workspace/ran-${when} && echo ran || echo never`,
+          cwd: "/workspace",
+          timeoutMs: 60_000,
+          outputLimit: 1_000,
+        }),
+      );
+      expect(ran.output.trim()).toBe("never");
+    }
+  }, 120_000);
+
   test("installs survive a folder change, which recreates the VM", async () => {
     await use((guest) =>
       runCommand(guest, {

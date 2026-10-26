@@ -71,14 +71,21 @@ const wrapper = (group: string) =>
   ].join("\n");
 
 export async function runCommand(guest: Guest, run: CommandRun): Promise<CommandOutcome> {
+  if (run.signal?.aborted)
+    return { exitCode: 130, output: "", truncated: false, timedOut: false, stopped: true };
   const group = `/sys/fs/cgroup/cmd-${randomUUID()}`;
   const collector = outputCollector(run.outputLimit);
   let timedOut = false;
   let stopped = false;
   let killing: Promise<unknown> | undefined;
+  // A kill may reach the guest before the wrapper made its group. Making the group first then
+  // fails the wrapper's own mkdir, so it exits before running anything: whichever comes first,
+  // nothing runs after a kill.
   const kill = () =>
     (killing ??= guest
-      .run({ argv: ["/bin/sh", "-c", `echo 1 > ${group}/cgroup.kill`] })
+      .run({
+        argv: ["/bin/sh", "-c", `mkdir ${group} 2>/dev/null; echo 1 > ${group}/cgroup.kill`],
+      })
       .catch(() => {}));
   const deadline = setTimeout(() => {
     timedOut = true;
@@ -88,8 +95,7 @@ export async function runCommand(guest: Guest, run: CommandRun): Promise<Command
     stopped = true;
     void kill();
   };
-  if (run.signal?.aborted) abort();
-  else run.signal?.addEventListener("abort", abort, { once: true });
+  run.signal?.addEventListener("abort", abort, { once: true });
   let exitCode: number;
   try {
     exitCode = await guest.stream(
