@@ -26,7 +26,7 @@ const apiRoutesAreNeverAssets = (): Plugin => ({
   },
 });
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   server: {
     port: Number(process.env.PORT ?? 3000),
     host: "127.0.0.1",
@@ -50,7 +50,7 @@ export default defineConfig({
   worker: { format: "es" },
   plugins: [
     apiRoutesAreNeverAssets(),
-    paraglide(),
+    paraglide(command),
     customToolRuntimeWorker(),
     tanstackStart({ spa: { enabled: true } }),
     nitro({
@@ -90,4 +90,4 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
-});
+}));

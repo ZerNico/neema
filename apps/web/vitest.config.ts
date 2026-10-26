@@ -10,7 +10,8 @@ export default defineConfig({
   // themselves are not: their harnesses rerender with fakes that read mutable state.
   plugins: [
     customToolRuntimeWorker(),
-    paraglide(),
+    // Dev's layout: tests share the output folder with a running dev server.
+    paraglide("serve"),
     babel({
       presets: [reactCompilerPreset()],
       exclude: [/[/\\]node_modules[/\\]/, /\.test\.tsx?$/],

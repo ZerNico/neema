@@ -10,11 +10,21 @@ const options = {
   outdir: "./src/paraglide",
   strategy: ["custom-chosen", "preferredLanguage", "baseLocale"],
   emitTsDeclarations: true,
+  // A module per locale, not per message: dev serves modules unbundled, and one per message
+  // was some 4,300 requests on every page load.
+  outputStructure: "locale-modules",
 } satisfies CompilerOptions;
 
-export const paraglide = () => paraglideVitePlugin(options);
+/** A production build takes a module per message, so the client bundle drops unused ones. */
+export const paraglide = (command: "serve" | "build") =>
+  paraglideVitePlugin(
+    command === "build" ? { ...options, outputStructure: "message-modules" } : options,
+  );
 
-/** The same compile without Vite, for `tsc`, which reads the output but cannot write it. */
+/**
+ * The same compile without Vite, for `tsc`, which reads the output but cannot write it. It
+ * writes where the dev server reads, so it uses dev's layout and does not unsettle a running one.
+ */
 export const compileMessages = () => compile(options);
 
 /**
