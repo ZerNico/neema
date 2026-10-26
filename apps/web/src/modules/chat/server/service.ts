@@ -166,9 +166,8 @@ export class ChatService extends Context.Service<
       ConversationNotFound | QueueEntryNotFound | NoActiveGeneration | AttachmentUnsupported
     >;
     /**
-     * Starts the next queued message. A Work chat's entry needs `desktop`: the
-     * fresh report of the app dispatching it. Without one it waits, since the
-     * server cannot name a live machine on its own.
+     * Starts the next queued message. `desktop` is the fresh report of the app
+     * dispatching it, when one does.
      */
     dispatchQueuedMessage(input: {
       userId: string;

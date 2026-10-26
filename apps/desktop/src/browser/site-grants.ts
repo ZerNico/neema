@@ -26,7 +26,7 @@ export function siteOf(url: string): string | null {
 }
 
 type Store = {
-  /** Sites allowed in every Work chat, per server origin. */
+  /** Sites allowed in every chat, per server origin. */
   always: Record<string, string[]>;
   /** Sites allowed in one chat, per server origin and conversation. */
   chats: Record<string, Record<string, string[]>>;

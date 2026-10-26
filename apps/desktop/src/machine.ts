@@ -4,9 +4,8 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 
 /**
- * This machine's stable identity, stamped onto every work attempt so the site
- * can tell "this chat last worked elsewhere" from "this chat last worked
- * here".
+ * This machine's stable identity, which the server binds chats to and routes
+ * their computer calls by.
  *
  * Persisted, not derived: a hardware-derived id would change under the user
  * (new Mac, same apps), and a fresh one per launch would make every restart

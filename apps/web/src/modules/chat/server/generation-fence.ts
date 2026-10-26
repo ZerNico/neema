@@ -97,7 +97,7 @@ export const ensureGenerationLive = (tx: DbTx, fence: GenerationIdentity) =>
 /**
  * How often the chat service looks for queues a restart left waiting; `null`
  * turns the sweep off. Tests that assert queue state turn it off rather than
- * racing a background start, or hiding from it in Work chats.
+ * racing a background start.
  */
 export const QueueSweepInterval = Context.Reference<Duration.Duration | null>(
   "chat/QueueSweepInterval",

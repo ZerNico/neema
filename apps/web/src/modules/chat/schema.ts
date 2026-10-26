@@ -226,7 +226,7 @@ export const ReplaceQueueEntryInput = Schema.Struct({
 
 /**
  * Starts the next queued message. `force` is a person asking, which may start
- * after a stop; `desktop` is how a Work chat's entry gets a machine.
+ * after a stop; `desktop` is the dispatching app's report, when one dispatches.
  */
 export const DispatchQueueInput = Schema.Struct({
   conversationId: Schema.String,
