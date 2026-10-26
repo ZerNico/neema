@@ -56,29 +56,12 @@ describe("DesktopActivityBlock", () => {
     expect(decide).toHaveBeenCalledWith("allow");
   });
 
-  it("offers a blanket grant naming only its own kind", async () => {
+  it("offers to allow the rest of the call's kind in this chat", async () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Let it run programs for this chat" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
     expect(decide).toHaveBeenCalledWith("allow-rest");
-
-    decide.mockClear();
-    show(
-      <DesktopActivityBlock
-        activity={running({
-          callId: "call-2",
-          name: "write_local_file",
-          args: { path: "src/index.ts" },
-        })}
-        approval={{ kind: "edit", decide }}
-      />,
-    );
-    expect(
-      screen.getByRole("button", { name: "Let it change files for this chat" }),
-    ).toBeInTheDocument();
   });
 
   it("asks for network access for this chat or every chat", async () => {
@@ -163,7 +146,7 @@ describe("DesktopActivityBlock", () => {
       "old.zip",
     ]);
     expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow in this chat" })).not.toBeInTheDocument();
   });
 
   it("groups a mixed-folder delete under each folder name", () => {

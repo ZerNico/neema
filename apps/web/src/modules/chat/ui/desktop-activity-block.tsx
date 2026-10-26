@@ -372,13 +372,6 @@ function ScopeChoices({
   );
 }
 
-const blanketLabel = (kind: PendingKind) =>
-  kind === "command"
-    ? m.chat_desktop_blanket_command()
-    : kind === "browser-action"
-      ? m.chat_desktop_blanket_browser()
-      : m.chat_desktop_blanket_files();
-
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
   /** For `bind`: the machine the chat's computer would run on. */
@@ -450,15 +443,16 @@ function ApprovalCard({
             <Button size="sm" onClick={() => approval.decide("allow")}>
               {m.chat_desktop_allow()}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
-              {m.chat_desktop_deny()}
-            </Button>
-            {/* Deletes and network destinations are always asked about individually. */}
+            {/* Deletes are always asked about one by one. The title says which kind the chat
+                is allowed, so the button needn't. */}
             {allowsBlanket(approval.kind) ? (
-              <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
-                {blanketLabel(approval.kind)}
+              <Button size="sm" variant="outline" onClick={() => approval.decide("allow-rest")}>
+                {m.chat_desktop_allow_chat()}
               </Button>
             ) : null}
+            <Button size="sm" variant="ghost" onClick={() => approval.decide("deny")}>
+              {m.chat_desktop_deny()}
+            </Button>
           </div>
         )}
       </CardContent>

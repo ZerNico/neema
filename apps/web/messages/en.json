@@ -1336,9 +1336,6 @@
   "chat_desktop_ask_search": "Search this computer",
   "chat_desktop_ask_site": "Open this site in the browser",
   "chat_desktop_ask_write": "Write this file",
-  "chat_desktop_blanket_browser": "Let it use the browser for this chat",
-  "chat_desktop_blanket_command": "Let it run programs for this chat",
-  "chat_desktop_blanket_files": "Let it change files for this chat",
   "chat_desktop_deleting": "Deleting files",
   "chat_desktop_deleting_count": [
     {

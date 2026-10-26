@@ -1335,9 +1335,6 @@
   "chat_desktop_ask_search": "Diesen Computer durchsuchen",
   "chat_desktop_ask_site": "Diese Seite im Browser öffnen",
   "chat_desktop_ask_write": "Diese Datei schreiben",
-  "chat_desktop_blanket_browser": "Browser in diesem Chat erlauben",
-  "chat_desktop_blanket_command": "Programme in diesem Chat erlauben",
-  "chat_desktop_blanket_files": "Dateiänderungen in diesem Chat erlauben",
   "chat_desktop_deleting": "Löscht Dateien",
   "chat_desktop_deleting_count": [
     {
