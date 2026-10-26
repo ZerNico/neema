@@ -1,22 +1,17 @@
 import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import { Context, Effect, Layer, Predicate, Schedule } from "effect";
-import { english } from "~/i18n/localized.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { IntegrationService } from "~/modules/integrations/server/service.ts";
 import { ScheduleRepo, type ScheduleRow } from "./repo.ts";
 import { ScheduleSettlement } from "./settle.ts";
-import { type Localized, localized, verbatim } from "~/i18n/localized.ts";
+import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 
 /** Started, or why not: skipped for a cause that passes, error for one to fix. */
 export type FireOutcome =
   | { conversationId: string }
   | { conversationId: null; status: "error" | "skipped"; reason: Localized };
-
-// MIGRATION: other modules' reasons may still be plain English strings.
-const words = (reason: Localized | string) =>
-  typeof reason === "string" ? verbatim(reason) : reason;
 
 /**
  * A chat that is still answering is waited on rather than skipped at once:
@@ -148,7 +143,7 @@ export class ScheduleFire extends Context.Service<
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: words(error.reason),
+                  reason: error.reason,
                 }),
               KnowledgeNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
@@ -160,7 +155,7 @@ export class ScheduleFire extends Context.Service<
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: words(error.reason),
+                  reason: error.reason,
                 }),
               SkillNotAvailable: () =>
                 Effect.succeed<FireOutcome>({
@@ -172,14 +167,14 @@ export class ScheduleFire extends Context.Service<
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: words(error.reason),
+                  reason: error.reason,
                 }),
               // An error, not a skip, so the person hears that it did not run.
               UsageLimitReached: (error) =>
                 Effect.succeed<FireOutcome>({
                   conversationId: null,
                   status: "error",
-                  reason: words(error.reason),
+                  reason: error.reason,
                 }),
               ConversationBusy: () =>
                 Effect.succeed<FireOutcome>({

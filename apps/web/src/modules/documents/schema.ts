@@ -1,11 +1,6 @@
 import { Schema } from "effect";
 import { EntityId } from "~/entity-id.ts";
-import {
-  type Localized as LocalizedText,
-  Localized,
-  localized,
-  verbatim,
-} from "~/i18n/localized.ts";
+import { Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 
 export const DOCUMENT_LIMITS = {
@@ -223,6 +218,3 @@ export class DocumentNotAvailable extends Schema.TaggedError<DocumentNotAvailabl
 export class DocumentRejected extends Schema.TaggedError<DocumentRejected>()("DocumentRejected", {
   reason: Localized,
 }) {}
-/** A reason another module gave, worded already or still an English string. */
-export const foreignReason = (reason: LocalizedText | string): LocalizedText =>
-  typeof reason === "string" ? verbatim(reason) : reason;

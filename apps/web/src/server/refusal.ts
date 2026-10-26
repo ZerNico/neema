@@ -167,12 +167,10 @@ export type RefusalOverrides = Partial<RefusalTable>;
 const notFound = (): Refusal => ({ status: 404, body: verbatim(NOT_FOUND) });
 const because =
   (status: number) =>
-  (error: { readonly reason: Localized | string }): Refusal => ({
+  (error: { readonly reason: Localized }): Refusal => ({
     status,
-    body: words(error.reason),
+    body: error.reason,
   });
-// MIGRATION: modules still pass English strings; removed once every module is translated.
-const words = (body: Localized | string) => (typeof body === "string" ? verbatim(body) : body);
 
 const refusals: RefusalTable = {
   AccountIneligible: (error) =>
@@ -186,11 +184,11 @@ const refusals: RefusalTable = {
   AttachmentBusy: () => ({ status: 409, body: localized(m.chat_error_attachment_busy) }),
   AttachmentRejected: (error) => ({
     status: error.cause === "size" ? 413 : 415,
-    body: words(error.reason),
+    body: error.reason,
   }),
   AttachmentUnsupported: (error) => ({
     status: 400,
-    body: (locale) => `${error.fileName}: ${words(error.reason)(locale)}`,
+    body: (locale) => `${error.fileName}: ${error.reason(locale)}`,
   }),
   BranchNotAllowed: because(409),
   CapabilitiesRejected: because(400),
@@ -232,7 +230,8 @@ const refusals: RefusalTable = {
   ProjectNotAvailable: notFound,
   ProjectRejected: because(400),
   ProjectFileConflict: because(409),
-  PushRejected: because(400),
+  // About a subscription the browser made itself; the page logs it and shows nothing.
+  PushRejected: (error) => ({ status: 400, body: verbatim(error.reason) }),
   QuestionUnavailable: () => ({
     status: 409,
     body: localized(m.chat_error_question_unavailable),
@@ -281,8 +280,8 @@ const responseOf = ({ body, ...init }: Refusal, locale: Locale) => new Response(
  * Start answers a thrown Response as it is, and `reportUnexpectedFailures`
  * lets it pass.
  */
-export const refusal = (status: number, body: Localized | string) =>
-  responseOf({ status, body: words(body) }, getLocale());
+export const refusal = (status: number, body: Localized) =>
+  responseOf({ status, body }, getLocale());
 
 /** A refusal decided inside an effect, rendered by `refusing` once the request's locale is known. */
 class PendingRefusal {
@@ -294,8 +293,8 @@ class PendingRefusal {
 }
 
 /** The same refusal inside an effect. */
-export const refuse = (status: number, body: Localized | string) =>
-  Effect.die(new PendingRefusal({ status, body: words(body) }));
+export const refuse = (status: number, body: Localized) =>
+  Effect.die(new PendingRefusal({ status, body }));
 
 /** An error channel typed `any` meets every constraint, so it is refused outright. */
 export type TypedErrors<E> = 0 extends 1 & E ? "the error channel is any" : unknown;
