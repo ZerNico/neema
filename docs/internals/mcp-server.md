@@ -172,9 +172,9 @@ its agent, so its defaults apply to every send.
   what never rests on headings a quoted page could imitate. A `ui` block stays as source behind
   a note, since the data the prose points to often lives only there; links into this instance
   are made absolute outside such blocks.
-- **A Work chat is read, never continued.** Its next answer needs the desktop app that runs
-  its machine tools, so a send or retry over MCP is refused as one without a desktop executor
-  is in the app. Listings mark it, so an app need not learn this by being refused.
+- **A chat with a computer continues like any other.** Its local calls go to its machine,
+  wherever the message came from, so they fail while the machine is offline. Listings mark such
+  a chat, so an app knows before it sends.
 - **Retry, branch, keep, archive, rename are the app's own.** Each goes through the service
   call the chat view makes. A retry over MCP rewinds as one in the app does and is accepted as
   uninterruptibly as a send. It is not attributed: provenance belongs to the person's message,

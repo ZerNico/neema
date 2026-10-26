@@ -58,9 +58,8 @@ the authoring depth in the `builtin:schedule-authoring` skill ([skills](skills.m
   would be the whole answer. A person's retry or edit in the run chat is theirs and is.
 - In `same` mode an agent cannot change after a
   chat's creation, so an existing chat keeps its own agent and the schedule's `agentId` only
-  applies to chats a fire creates. Work chats run their tools in the desktop app, which an
-  unattended fire never has, so they are refused at save (`checkScheduleResources`) and
-  again by `runScheduledTurn` itself. A chat that is still answering is waited
+  applies to chats a fire creates. A chat with a computer may be picked: its local calls go to
+  its machine, and one offline at the fire is answered as offline. A chat that is still answering is waited
   on, every 15 seconds for up to five minutes, then the run is recorded as skipped: the
   owner may be mid-conversation in it. A picked chat that was [deleted](deleted-chats.md) is not
   found, so the fire starts a new chat and adopts it (`adoptChat`). It adopts only while the
