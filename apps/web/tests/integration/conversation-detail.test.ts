@@ -33,7 +33,7 @@ import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
-import { DESKTOP_TOOL_NAMES } from "~/modules/desktop/tool-schema.ts";
+import { BROWSER_TOOL_NAMES } from "~/modules/browser/tool-schema.ts";
 import { DocumentToolName } from "~/modules/documents/tool-schema.ts";
 import { MAP_ROUTE_TOOL } from "~/modules/genui/map-tool-schema.ts";
 import { IMAGE_TOOL } from "~/modules/images/tool-schema.ts";
@@ -879,10 +879,24 @@ describe("loadConversationDetail", () => {
       ...ProjectFileToolName.literals.map((name) => [name, "project-file"] as const),
       ...KnowledgeToolName.literals.map((name) => [name, "knowledge"] as const),
       ...SkillToolName.literals.map((name) => [name, "skill"] as const),
-      // request_folder came after the backfill, so every row of it already names its family.
-      ...DESKTOP_TOOL_NAMES.filter((name) => name !== "request_folder").map(
-        (name) => [name, "desktop"] as const,
-      ),
+      // The desktop names as they stood at the backfill: tools added or renamed since wrote
+      // their family from the start.
+      ...[
+        "list_folder",
+        "find_files",
+        "search_files",
+        "read_local_file",
+        "import_local_file",
+        "write_local_file",
+        "save_to_workspace",
+        "edit_local_file",
+        "move_local_file",
+        "delete_local_file",
+        "run_command",
+        "request_network_access",
+        "request_ssh_agent",
+        ...BROWSER_TOOL_NAMES,
+      ].map((name) => [name, "desktop"] as const),
       [IMAGE_TOOL, "image"],
       ["deep_research", "research"],
       ["ask_user", "ask"],
