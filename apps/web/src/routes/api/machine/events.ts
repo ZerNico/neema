@@ -32,6 +32,7 @@ export const Route = createFileRoute("/api/machine/events")({
                 const events = yield* hub.connect(userId, hello);
                 yield* Effect.addFinalizer(() => repo.touchMachine(userId, hello.machineId));
                 yield* calls.pushPolicy(userId, hello.machineId);
+                yield* calls.machineChanged(userId, hello.machineId);
                 return events;
               }),
             ).pipe(Stream.interruptWhen(ended));

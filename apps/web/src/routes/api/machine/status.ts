@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
 import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { machineRequest } from "~/modules/computer/server/machine-route.ts";
 import { ComputerRepo } from "~/modules/computer/server/repo.ts";
@@ -16,7 +17,10 @@ export const Route = createFileRoute("/api/machine/status")({
         const connected = await runtime.runPromise(
           Effect.gen(function* () {
             yield* (yield* ComputerRepo).saveMachine(machine.userId, machine.hello);
-            return yield* (yield* MachineHub).update(machine.userId, machine.hello);
+            const connected = yield* (yield* MachineHub).update(machine.userId, machine.hello);
+            // Calls held while it downloaded its environment run once it is ready.
+            yield* (yield* ComputerCalls).machineChanged(machine.userId, machine.hello.machineId);
+            return connected;
           }),
         );
         return Response.json({ connected });

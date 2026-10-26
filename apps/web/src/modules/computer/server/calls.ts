@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, type Scope } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Scope } from "effect";
 import type { ToolResult } from "@chat/desktop-rpc";
 import { canonicalHost } from "@chat/egress-proxy";
 import { desktopFailure, type DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
@@ -34,6 +34,8 @@ interface Entry {
   readonly deadlineAt: number;
   /** The machine the sender typed on, when the sender is a desktop app. */
   readonly sender: string | undefined;
+  /** The call's own scope: what runs for it ends with it. */
+  readonly scope: Scope.Scope;
   state:
     | { readonly kind: "deciding" }
     | {
@@ -42,8 +44,13 @@ interface Entry {
         readonly machine?: { id: string; name: string };
       }
     | { readonly kind: "sent"; readonly machineId: string }
+    /** Held until the machine has its environment; the model is not answered meanwhile. */
+    | { readonly kind: "preparing"; readonly machineId: string }
     | { readonly kind: "done" };
 }
+
+/** How long before a call's deadline a held call is answered, so the model hears why. */
+const DEADLINE_MARGIN_MS = 5_000;
 
 /** Tools the server answers itself: approving them is the whole of what they do. */
 const SERVER_TOOLS = new Set(["request_network_access"]);
@@ -118,6 +125,8 @@ export class ComputerCalls extends Context.Service<
       callId: string,
       result: ToolResult,
     ): Effect.Effect<boolean>;
+    /** A machine connected or reported a new status: calls held for it go on. */
+    machineChanged(userId: string, machineId: string): Effect.Effect<void>;
     /** Sends the person's grants to one machine, or to all of theirs. */
     pushPolicy(userId: string, machineId?: string): Effect.Effect<void>;
   }
@@ -220,16 +229,18 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           const status = presence.hello.computer;
-          if (status.status !== "ready") {
+          if (status.status === "unavailable") {
             yield* finish(
               entry,
               desktopFailure(
                 `${presence.hello.name} is not ready`,
-                status.status === "preparing"
-                  ? `${presence.hello.name} is still downloading its environment (${Math.round(status.progress * 100)}%). Try again in a few minutes.`
-                  : `${presence.hello.name} cannot run this chat's computer: ${status.reason}`,
+                `${presence.hello.name} cannot run this chat's computer: ${status.reason}`,
               ),
             );
+            return;
+          }
+          if (status.status === "preparing") {
+            yield* hold(entry, chat.machineId);
             return;
           }
           if (entry.sender !== chat.machineId && !presence.hello.remote) {
@@ -262,6 +273,40 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           yield* send(entry, chat.machineId);
+        });
+
+      /**
+       * Waits for the machine to finish its environment instead of answering the model with a
+       * half-ready computer it might try to work around. `machineChanged` resumes the call; just
+       * before its deadline it is answered with how far the download got.
+       */
+      const hold = (entry: Entry, machineId: string) =>
+        Effect.gen(function* () {
+          const already = entry.state.kind === "preparing";
+          entry.state = { kind: "preparing", machineId };
+          yield* changed(entry.userId);
+          if (already) return;
+          const now = yield* Clock.currentTimeMillis;
+          yield* Effect.forkIn(
+            Effect.gen(function* () {
+              yield* Effect.sleep(Duration.millis(Math.max(0, entry.deadlineAt - now - DEADLINE_MARGIN_MS)));
+              if (entry.state.kind !== "preparing") return;
+              const presence = yield* hub.presence(entry.userId, machineId);
+              const progress =
+                presence?.hello.computer.status === "preparing"
+                  ? ` (${Math.round(presence.hello.computer.progress * 100)}%)`
+                  : "";
+              const name = presence?.hello.name ?? "The computer";
+              yield* finish(
+                entry,
+                desktopFailure(
+                  `${name} is still getting ready`,
+                  `${name} is still downloading its environment${progress}, so nothing ran. Tell the user, and try again in a few minutes.`,
+                ),
+              );
+            }),
+            entry.scope,
+          );
         });
 
       const send = (entry: Entry, machineId: string) =>
@@ -322,6 +367,7 @@ export class ComputerCalls extends Context.Service<
               args: input.args,
               deadlineAt: (yield* Clock.currentTimeMillis) + input.timeoutMs,
               sender: input.sender,
+              scope: yield* Effect.scope,
               state: { kind: "deciding" },
             };
             entries.set(input.callId, entry);
@@ -405,6 +451,17 @@ export class ComputerCalls extends Context.Service<
             return yield* finish(entry, result);
           }),
         pushPolicy,
+        machineChanged: (userId, machineId) =>
+          Effect.forEach(
+            [...entries.values()].filter(
+              (entry) =>
+                entry.userId === userId &&
+                entry.state.kind === "preparing" &&
+                entry.state.machineId === machineId,
+            ),
+            advance,
+            { discard: true },
+          ),
       });
     }),
   );

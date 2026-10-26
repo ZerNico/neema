@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Duration, Effect, Exit, Fiber, Layer, Option, Queue, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import type { MachineEvent, MachineHello } from "@chat/desktop-rpc";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
@@ -131,7 +132,7 @@ const setup = (repo: ReturnType<typeof fakeRepo>) =>
         yield* Effect.forkChild(Stream.runForEach(events, (event) => Queue.offer(queue, event)));
         return { scope, queue };
       });
-    return { calls, open, connect, repo };
+    return { calls, open, connect, repo, hub };
   }).pipe(
     Effect.provide(
       ComputerCalls.layer.pipe(
@@ -295,6 +296,35 @@ describe("ComputerCalls", () => {
       expect(yield* nextCall(laptop.queue)).toMatchObject({
         callId: "call-2",
         name: "request_ssh_agent",
+      });
+    }),
+  );
+
+  it.effect("a call waits while the machine downloads its environment, then runs", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect, hub } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
+      const laptop = yield* connect("laptop", { computer: { status: "preparing", progress: 0.4 } });
+      yield* open("call-1", "run_command", { command: "ls" }, "laptop");
+      yield* Effect.yieldNow;
+      expect(Option.isNone(yield* Queue.poll(laptop.queue))).toBe(true);
+      yield* hub.update(USER, hello("laptop"));
+      yield* calls.machineChanged(USER, "laptop");
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ type: "call", callId: "call-1" });
+    }),
+  );
+
+  it.effect("a call still waiting near its deadline hears how far the download got", () =>
+    Effect.gen(function* () {
+      const { open, connect } = yield* setup(fakeRepo({ machineId: "laptop", permissionLevel: "allow" }));
+      yield* connect("laptop", { computer: { status: "preparing", progress: 0.64 } });
+      const { waiting } = yield* open("call-1", "list_folder", { path: "." }, "laptop");
+      yield* TestClock.adjust(Duration.seconds(56));
+      expect(yield* Fiber.join(waiting)).toMatchObject({
+        ok: false,
+        summary: "Laptop is still getting ready",
+        detail: expect.stringContaining("(64%)"),
       });
     }),
   );
