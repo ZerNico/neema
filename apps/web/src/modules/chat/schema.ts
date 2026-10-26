@@ -30,14 +30,12 @@ export const OpenDocument = Schema.Struct({
 export type OpenDocument = typeof OpenDocument.Type;
 const OpenDocumentField = Schema.optionalKey(OpenDocument);
 /**
- * What the desktop app adds to a submission sent from it. Absent from a browser. Not where a
- * chat's computer is decided: that is the chat's bound machine (docs/internals/desktop.md).
+ * What the desktop app adds to a submission sent from it. Absent from a browser. Never which
+ * machine sent it: the server knows that from the session (docs/internals/desktop.md).
  */
 export const DesktopSubmission = Schema.Struct({
   /** The app's execution session, which runs this attempt's browser calls in its pages. */
   executorId: EntityId,
-  /** The machine sending, offered first when the chat has no computer yet. */
-  machineId: Schema.optionalKey(EntityId),
   /** Whether the app can drive embedded pages, which offers the browser tools. */
   browser: Schema.Boolean,
 });

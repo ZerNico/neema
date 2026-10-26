@@ -113,7 +113,8 @@ const setup = (repo: ReturnType<typeof fakeRepo>) =>
             name,
             args,
             timeoutMs: 60_000,
-            sender,
+            // A machine's own page shares its session; see `connect` below.
+            senderSession: sender === undefined ? undefined : `session:${sender}`,
           })
           .pipe(Scope.provide(scope));
         const waiting = yield* Effect.forkChild(
@@ -126,7 +127,7 @@ const setup = (repo: ReturnType<typeof fakeRepo>) =>
       Effect.gen(function* () {
         const scope = yield* Scope.make();
         const events = yield* hub
-          .connect(USER, hello(machineId, overrides))
+          .connect(USER, hello(machineId, overrides), `session:${machineId}`)
           .pipe(Scope.provide(scope));
         const queue = yield* Queue.unbounded<MachineEvent>();
         yield* Effect.forkChild(Stream.runForEach(events, (event) => Queue.offer(queue, event)));
@@ -279,6 +280,22 @@ describe("ComputerCalls", () => {
         ok: false,
         summary: "Laptop does not allow remote use",
       });
+    }),
+  );
+
+  it.effect("a page is the machine only through the machine's own session", () =>
+    Effect.gen(function* () {
+      const { open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
+      yield* connect("laptop", { remote: false });
+      // Another session of the person, whatever machine its request named, is remote.
+      const other = yield* open("call-1", "list_folder", { path: "." }, "browser-tab");
+      expect(yield* Fiber.join(other.waiting)).toMatchObject({
+        summary: "Laptop does not allow remote use",
+      });
+      const dialog = yield* open("call-2", "request_folder", {}, "browser-tab");
+      expect(yield* Fiber.join(dialog.waiting)).toMatchObject({ ok: false });
     }),
   );
 

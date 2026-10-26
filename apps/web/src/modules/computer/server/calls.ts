@@ -32,8 +32,8 @@ interface Entry {
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly deadlineAt: number;
-  /** The machine the sender typed on, when the sender is a desktop app. */
-  readonly sender: string | undefined;
+  /** The session the message came from; which machine that is, the hub says (`senderOf`). */
+  readonly senderSession: string | undefined;
   /** The call's own scope: what runs for it ends with it. */
   readonly scope: Scope.Scope;
   state:
@@ -114,7 +114,8 @@ export class ComputerCalls extends Context.Service<
       name: string;
       args: Readonly<Record<string, unknown>>;
       timeoutMs: number;
-      sender?: string | undefined;
+      /** From the request's session, never its body. */
+      senderSession?: string | undefined;
     }): Effect.Effect<void, never, Scope.Scope>;
     decide(userId: string, callId: string, choice: ComputerChoice): Effect.Effect<boolean>;
     pending(userId: string): Effect.Effect<ReadonlyArray<PendingCall>>;
@@ -183,6 +184,8 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           const approval = approvalFor(entry.name, entry.args);
+          // Asked now rather than at open: the machine's stream may have reconnected since.
+          const sender = yield* hub.machineOfSession(entry.userId, entry.senderSession);
           if (SERVER_TOOLS.has(entry.name)) {
             if (entry.name === "request_network_access" && !requestedDestination(entry.args)) {
               yield* finish(
@@ -200,8 +203,7 @@ export class ComputerCalls extends Context.Service<
           if (!chat.machineId) {
             const online = yield* hub.online(entry.userId);
             const ready = online.filter((presence) => presence.hello.computer.status === "ready");
-            const candidate =
-              ready.find((presence) => presence.machineId === entry.sender) ?? ready[0];
+            const candidate = ready.find((presence) => presence.machineId === sender) ?? ready[0];
             if (!candidate) {
               yield* finish(
                 entry,
@@ -243,7 +245,7 @@ export class ComputerCalls extends Context.Service<
             yield* hold(entry, chat.machineId);
             return;
           }
-          if (entry.sender !== chat.machineId && !presence.hello.remote) {
+          if (sender !== chat.machineId && !presence.hello.remote) {
             yield* finish(
               entry,
               desktopFailure(
@@ -253,7 +255,7 @@ export class ComputerCalls extends Context.Service<
             );
             return;
           }
-          if (AT_MACHINE.has(entry.name) && entry.sender !== chat.machineId) {
+          if (AT_MACHINE.has(entry.name) && sender !== chat.machineId) {
             yield* finish(
               entry,
               desktopFailure(
@@ -368,7 +370,7 @@ export class ComputerCalls extends Context.Service<
               name: input.name,
               args: input.args,
               deadlineAt: (yield* Clock.currentTimeMillis) + input.timeoutMs,
-              sender: input.sender,
+              senderSession: input.senderSession,
               scope: yield* Effect.scope,
               state: { kind: "deciding" },
             };

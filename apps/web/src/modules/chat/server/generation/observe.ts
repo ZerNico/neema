@@ -588,7 +588,7 @@ export const observePart = (
               name: part.name,
               args,
               timeoutMs,
-              sender: input.desktop?.machineId,
+              senderSession: input.deviceSessionId,
             });
           yield* Deferred.succeed(ready, {
             rowId,

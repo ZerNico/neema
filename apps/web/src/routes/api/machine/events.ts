@@ -29,7 +29,7 @@ export const Route = createFileRoute("/api/machine/events")({
             yield* repo.saveMachine(userId, hello);
             return Stream.unwrap(
               Effect.gen(function* () {
-                const events = yield* hub.connect(userId, hello);
+                const events = yield* hub.connect(userId, hello, session.session.id);
                 yield* Effect.addFinalizer(() => repo.touchMachine(userId, hello.machineId));
                 yield* calls.pushPolicy(userId, hello.machineId);
                 yield* calls.machineChanged(userId, hello.machineId);

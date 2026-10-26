@@ -801,13 +801,17 @@ describe("branching a conversation", () => {
           .update(conversationsTable)
           .set({ machineId: "laptop" })
           .where(eq(conversationsTable.id, source.conversation.id));
-        const events = yield* hub.connect(userId, {
-          machineId: "laptop",
-          name: "Laptop",
-          platform: "darwin",
-          computer: { status: "ready" },
-          remote: true,
-        });
+        const events = yield* hub.connect(
+          userId,
+          {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin",
+            computer: { status: "ready" },
+            remote: true,
+          },
+          "laptop-session",
+        );
         const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
         const [event] = yield* Stream.take(events, 1).pipe(Stream.runCollect);
         return {

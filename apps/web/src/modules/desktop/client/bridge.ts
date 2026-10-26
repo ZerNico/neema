@@ -61,7 +61,6 @@ export const desktopAttemptFields = async (): Promise<{ desktop?: DesktopSubmiss
   return {
     desktop: {
       executorId: session.id,
-      machineId: session.machineId,
       // A shell that can show pages but not drive them gets no browser tools.
       browser: readDesktopBrowser()?.agent !== undefined,
     },

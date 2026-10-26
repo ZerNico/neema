@@ -7,6 +7,8 @@ export interface Presence {
   readonly userId: string;
   readonly machineId: string;
   readonly hello: MachineHello;
+  /** The desktop session the stream was opened with: the one the machine's own page holds. */
+  readonly sessionId: string;
   readonly connectedAt: number;
 }
 
@@ -29,6 +31,7 @@ export class MachineHub extends Context.Service<
     connect(
       userId: string,
       hello: MachineHello,
+      sessionId: string,
     ): Effect.Effect<Stream.Stream<MachineEvent>, never, Scope.Scope>;
     /** A new hello from a connected machine; false when it is not connected. */
     update(userId: string, hello: MachineHello): Effect.Effect<boolean>;
@@ -38,6 +41,11 @@ export class MachineHub extends Context.Service<
     broadcast(userId: string, event: MachineEvent): Effect.Effect<void>;
     presence(userId: string, machineId: string): Effect.Effect<Presence | null>;
     online(userId: string): Effect.Effect<ReadonlyArray<Presence>>;
+    /**
+     * The connected machine whose stream holds this session, if any. A request's own claim to
+     * come from a machine proves nothing: any session of the person could make it.
+     */
+    machineOfSession(userId: string, sessionId: string | undefined): Effect.Effect<string | null>;
   }
 >()("chat/computer/MachineHub") {
   static readonly layer = Layer.effect(
@@ -48,7 +56,7 @@ export class MachineHub extends Context.Service<
       const changed = (userId: string) => bus.publish(userId, { type: "computer.changed" });
       const presenceOf = ({ queue: _, ...presence }: Connection): Presence => presence;
       return MachineHub.of({
-        connect: (userId, hello) =>
+        connect: (userId, hello, sessionId) =>
           Effect.gen(function* () {
             const id = key(userId, hello.machineId);
             const previous = connections.get(id);
@@ -58,6 +66,7 @@ export class MachineHub extends Context.Service<
               userId,
               machineId: hello.machineId,
               hello,
+              sessionId,
               connectedAt: yield* Clock.currentTimeMillis,
               queue,
             };
@@ -107,6 +116,14 @@ export class MachineHub extends Context.Service<
               .filter((connection) => connection.userId === userId)
               .map(presenceOf),
           ),
+        machineOfSession: (userId, sessionId) =>
+          Effect.sync(() => {
+            if (sessionId === undefined) return null;
+            for (const connection of connections.values())
+              if (connection.userId === userId && connection.sessionId === sessionId)
+                return connection.machineId;
+            return null;
+          }),
       });
     }),
   );

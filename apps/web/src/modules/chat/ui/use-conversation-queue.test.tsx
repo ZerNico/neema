@@ -172,7 +172,7 @@ describe("useConversationQueue", () => {
     vi.mocked(sendQueuedNow).mockResolvedValue({ started: true });
     vi.mocked(dispatchQueuedMessage).mockResolvedValue({ started: true });
     const fields = {
-      desktop: { executorId: "exec-1", machineId: "machine-1", browser: false },
+      desktop: { executorId: "exec-1", browser: false },
     };
     const { result } = render({ attemptFields: async () => fields });
     act(() => result.current.queue.onSendNow("a"));

@@ -215,6 +215,11 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
     system's ([languages](i18n.md)).
 - **Remote control** is the machine's switch (on by default): with it off, calls run only for
   messages sent from that machine.
+- **Which machine a message came from is the session's, never the request's.** A machine's
+  event stream and its own page share one desktop session, so a call counts as sent from the
+  machine whose stream holds the sending session. A request naming a machine would prove
+  nothing: any session of the person could make it. It is asked when the call is decided, so
+  a reconnect in between changes nothing.
 - **Attaching a folder yourself** happens in the desktop app on that machine, through the
   native picker, and refuses a folder that is a disk root, the home folder itself, the app's
   own data, or holds or lies inside credentials (`folder-access.ts`), judged by where links
