@@ -253,7 +253,7 @@ export class ComputerHost {
             key: this.key(event.conversationId),
             name: event.name,
             args: event.args,
-            remainingMs,
+            deadline,
             ...(event.attachments ? { attachments: event.attachments } : {}),
             signal: abort.signal,
           },

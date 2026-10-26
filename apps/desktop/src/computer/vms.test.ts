@@ -217,6 +217,18 @@ test("a new image starts the chat over on a fresh disk, and the next use is told
   expect(await second.use(KEY, plain, async (_, info) => info.reset)).toBe(false);
 });
 
+test("a chat's calls run in the order they came, however long each takes to know its setup", async () => {
+  const { vms } = await setup();
+  const order: string[] = [];
+  let release: () => void = () => {};
+  const slowSetup = new Promise<typeof plain>((resolve) => (release = () => resolve(plain)));
+  const first = vms.use(KEY, () => slowSetup, async () => void order.push("first"));
+  const second = vms.use(KEY, async () => plain, async () => void order.push("second"));
+  release();
+  await Promise.all([first, second]);
+  expect(order).toEqual(["first", "second"]);
+});
+
 test("discard removes the VM and its disk", async () => {
   const { vms, hv, disks } = await setup();
   await vms.use(KEY, plain, async () => {});

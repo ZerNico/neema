@@ -27,8 +27,11 @@ export interface ComputerCall {
   readonly key: ChatKey;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
-  /** Milliseconds left until the server stops waiting for the answer. */
-  readonly remainingMs: number;
+  /**
+   * When the server stops waiting for the answer, on this machine's clock. Read when the work
+   * starts, since a call may first wait behind the chat's earlier ones or a VM boot.
+   */
+  readonly deadline: number;
   readonly attachments?: ReadonlyArray<{ id: string; path: string }>;
   readonly signal: AbortSignal;
 }
@@ -176,16 +179,17 @@ async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<Too
           "Commands in this chat may now sign in with the user's SSH agent. Retry the command.",
         )
       : failure("You declined that", "The user declined. Do not retry it or work around it.");
-  const setup = await deps.setup(call.key);
-  const { mounts } = setup;
   const args = call.args;
   let reset = false;
+  // Joins the chat's queue before anything is awaited, so its calls run in the order they came;
+  // the folders are read in its turn, as they are then.
   const result = await deps.vms
     .use(
       call.key,
-      setup,
+      () => deps.setup(call.key),
       async (guest, info) => {
         reset = info.reset;
+        const { mounts } = info.setup;
         await copyAttachments(deps, call, guest, mounts);
         return await run(deps, call, guest, mounts, args);
       },
@@ -360,13 +364,13 @@ async function run(
 
 async function command(deps: DispatchDeps, call: ComputerCall, guest: Guest, text: string) {
   const violations: string[] = [];
-  // A slow approval has already eaten into the server's wait; what is left, minus the trip back,
-  // is all the command may take.
-  const timeoutMs = Math.min(COMMAND_MS, call.remainingMs - DELIVERY_MARGIN_MS);
+  // A slow approval, earlier calls of the chat and the VM's boot have eaten into the server's
+  // wait; what is left now, minus the trip back, is all the command may take.
+  const timeoutMs = Math.min(COMMAND_MS, call.deadline - Date.now() - DELIVERY_MARGIN_MS);
   if (timeoutMs <= 0)
     return failure(
       "Not started",
-      "Approval came too late for the command to finish in time. Ask again to run it.",
+      "Too little of the call's time was left by the time the command could start. Ask again to run it.",
     );
   const agent = deps.agentAllowed(call.key);
   // The bridge runs outside any command's cgroup, so it outlives the command that started it.

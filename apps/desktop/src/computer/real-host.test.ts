@@ -244,6 +244,17 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     expect(answer.detail).toMatch(/stopped/);
   }, 120_000);
 
+  test("time spent waiting behind the chat's earlier call counts against a command", async () => {
+    const first = call("c-slow", "run_command", { command: "sleep 3" });
+    // 17 s on arrival, 15 s of which are kept for the answer's trip back: gone after the wait.
+    const second = call("c-late", "run_command", { command: "echo ran" }, {
+      deadlineAt: 17_000,
+      sentAt: 0,
+    } as Partial<MachineEvent>);
+    await first;
+    expect(await second).toMatchObject({ ok: false, summary: "Not started" });
+  }, 120_000);
+
   test("a call that cannot even start is still answered", async () => {
     const answer = await call("c-unreadable", "list_folder", { path: "." }, {
       conversationId: "unreadable",

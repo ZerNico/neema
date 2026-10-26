@@ -70,10 +70,12 @@ interface Slot {
   reset?: boolean;
 }
 
-/** What the VM's first use after a change should tell the model. */
+/** What a use of the VM learns besides the guest. */
 export interface UseInfo {
   /** The chat's disk started over from a new image: earlier installs are gone, files are not. */
   readonly reset: boolean;
+  /** What the VM shows this time. */
+  readonly setup: ChatSetup;
 }
 
 /**
@@ -94,10 +96,13 @@ export class ChatVms {
     };
   }
 
-  /** Runs `fn` with this chat's VM showing exactly `setup`, after the chat's earlier work. */
+  /**
+   * Runs `fn` with this chat's VM showing exactly `setup`, after the chat's earlier work. A
+   * function is read in this use's turn, so a caller can join the queue before it knows.
+   */
   use<A>(
     key: ChatKey,
-    setup: ChatSetup,
+    setup: ChatSetup | (() => Promise<ChatSetup>),
     fn: (guest: Guest, info: UseInfo) => Promise<A>,
     signal?: AbortSignal,
   ): Promise<A> {
@@ -108,12 +113,13 @@ export class ChatVms {
       if (slot.idle !== undefined) this.timers.clearTimeout(slot.idle);
       slot.idle = undefined;
       try {
-        const guest = await this.ensure(key, slot, setup);
+        const current = typeof setup === "function" ? await setup() : setup;
+        const guest = await this.ensure(key, slot, current);
         signal?.throwIfAborted();
         // Told once: the call that sees it carries the news to the model.
         const reset = slot.reset === true;
         slot.reset = false;
-        return await fn(guest, { reset });
+        return await fn(guest, { reset, setup: current });
       } finally {
         this.armIdle(key, slot);
       }
