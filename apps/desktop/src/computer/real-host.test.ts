@@ -23,6 +23,8 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
   const hellos: unknown[] = [];
   const results = new Map<string, ToolResult>();
   const discarded: string[] = [];
+  const reportedFolders: unknown[] = [];
+  let folderReport: () => void = () => {};
   let discardedOne: () => void = () => {};
   const firstDiscard = new Promise<void>((resolve) => (discardedOne = resolve));
   const waiters = new Map<string, (result: ToolResult) => void>();
@@ -72,6 +74,12 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
         const answer = (await body(request)) as ToolResult;
         results.set(result[1]!, answer);
         waiters.get(result[1]!)?.(answer);
+        response.end("{}");
+        return;
+      }
+      if (request.url === "/api/machine/folders") {
+        reportedFolders.push(await body(request));
+        folderReport();
         response.end("{}");
         return;
       }
@@ -197,6 +205,16 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     });
     expect(await call("c9", "request_ssh_agent", {})).toMatchObject({ ok: true });
   }, 60_000);
+
+  test("a branch hears its folders from the machine once they are copied", async () => {
+    const reported = new Promise<void>((resolve) => (folderReport = resolve));
+    send({ type: "clone", from: CHAT, to: "branch-1" });
+    await reported;
+    expect(reportedFolders.at(-1)).toEqual({
+      conversationId: "branch-1",
+      folders: [{ name: "notes", readOnly: false }],
+    });
+  });
 
   test("a chat purged while the machine was offline is removed once it asks", async () => {
     await firstDiscard;

@@ -142,8 +142,10 @@ and of `process.argv` on a cold start; both are read.
 - **Switching computers** (`switchChatComputer`) points the chat at another machine and clears
   its folder names, which belonged to the old one. Nothing is copied between machines.
 - **A branch keeps the source's computer.** The server sends that machine a `clone` event and
-  it copies the workspace's files into the branch's, within the copy limits. Installs stay on
-  the source's disk. A machine offline at that moment leaves the branch's workspace empty.
+  it copies the workspace's files into the branch's, within the copy limits, and gives the branch
+  the source's folders. Installs stay on the source's disk. The branch starts with no folder
+  names on the server and hears them from the machine once copied, so a machine offline at that
+  moment leaves it with an empty workspace and no folders, never folders it cannot mount.
 - **Purging a chat** sends its machine a `discard` event: the VM, its disk, its workspace, its
   folder grants, its SSH agent allowance and its browser sites go. A machine offline then
   misses it, so on start it asks `/api/machine/gone` which of the chats it holds anything for

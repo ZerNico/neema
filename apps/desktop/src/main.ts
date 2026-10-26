@@ -261,8 +261,24 @@ const startComputer = (origin: string) => {
     // A refused copy (too large, or the branch already has files) leaves the branch's empty.
     cloneWorkspace: (from, to) =>
       runtime.runPromise(
-        Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.clone(from, to)).pipe(
-          Effect.ignore,
+        Effect.all(
+          [
+            Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.clone(from, to)).pipe(
+              Effect.ignore,
+            ),
+            // The same person's folders on the same machine: the branch's history works in them.
+            Effect.flatMap(GrantStore, (grants) =>
+              Effect.flatMap(grants.lookup({ origin, conversationId: from }), (folders) =>
+                Effect.forEach(
+                  folders,
+                  (folder) =>
+                    grants.remember({ origin, conversationId: to }, folder.path, folder.readOnly),
+                  { discard: true },
+                ),
+              ),
+            ),
+          ],
+          { discard: true },
         ),
       ),
     // The chat is gone for good: nothing this machine kept for it outlives it.

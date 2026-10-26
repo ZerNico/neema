@@ -790,7 +790,7 @@ describe("branching a conversation", () => {
     expect(result.remaining).toBe(0);
   });
 
-  it("keeps the chat's computer and asks its machine to copy the workspace", async () => {
+  it("keeps the chat's computer, asks its machine to copy it, and waits for its folders", async () => {
     const result = await run(
       Effect.gen(function* () {
         const db = yield* Db;
@@ -799,7 +799,7 @@ describe("branching a conversation", () => {
         const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
         yield* db
           .update(conversationsTable)
-          .set({ machineId: "laptop" })
+          .set({ machineId: "laptop", computerFolders: [{ name: "proj", readOnly: false }] })
           .where(eq(conversationsTable.id, source.conversation.id));
         const events = yield* hub.connect(
           userId,
@@ -814,15 +814,22 @@ describe("branching a conversation", () => {
         );
         const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
         const [event] = yield* Stream.take(events, 1).pipe(Stream.runCollect);
+        const [copy] = yield* db
+          .select({ folders: conversationsTable.computerFolders })
+          .from(conversationsTable)
+          .where(eq(conversationsTable.id, forked.conversation.id));
         return {
           machineId: forked.conversation.machineId,
           event,
           branchId: forked.conversation.id,
+          folders: copy!.folders,
         };
       }).pipe(Effect.scoped),
     );
     expect(result.machineId).toBe("laptop");
     expect(result.event).toMatchObject({ type: "clone", to: result.branchId });
+    // The machine names them once it has copied them; until then the branch has none.
+    expect(result.folders).toEqual([]);
   });
 
   it("records the immediate parent and copies a title that already resolved", async () => {

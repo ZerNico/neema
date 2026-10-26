@@ -158,9 +158,11 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 imageModelId: source.imageModelId,
                 // The branch keeps the computer: its history is full of
                 // workspace activity the continuation has to match, and the
-                // machine clones the workspace. Its settings go with it.
+                // machine clones the workspace and folders. The folder names
+                // come from the machine once it has, so an offline one never
+                // leaves the branch naming folders it cannot mount.
                 machineId: source.machineId,
-                computerFolders: source.computerFolders,
+                computerFolders: [],
                 permissionLevel: source.permissionLevel,
                 // A copy of a temporary chat must not outlive it in the
                 // sidebar; it gets its own day from now.

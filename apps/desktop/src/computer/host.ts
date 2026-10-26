@@ -25,7 +25,10 @@ export interface ComputerHostOptions {
   readonly discardWorkspace: (conversationId: string) => Promise<void>;
   /** Chats of this server with something kept here: a workspace or an attached folder. */
   readonly localChats: () => Promise<readonly string[]>;
-  /** Copies a chat's workspace into its branch's; nothing when too large or already there. */
+  /**
+   * Copies a chat's workspace into its branch's (nothing when too large or already there), and
+   * gives the branch the chat's folders.
+   */
   readonly cloneWorkspace: (from: string, to: string) => Promise<void>;
   /** The SSH agent to relay to, looked up when a connection opens. */
   readonly agentSocket: () => string | null;
@@ -271,9 +274,14 @@ export class ComputerHost {
         this.policy.setGrants(this.options.origin, event.grants);
         return;
       case "clone":
-        void this.options.cloneWorkspace(event.from, event.to).catch((error: unknown) => {
-          this.options.log(`computer: copying a branch's workspace failed: ${String(error)}`);
-        });
+        // The branch starts with no folder names on the server; it hears them from here, so it
+        // never names a folder this machine does not mount.
+        void this.options
+          .cloneWorkspace(event.from, event.to)
+          .then(() => this.foldersChanged(event.to))
+          .catch((error: unknown) => {
+            this.options.log(`computer: copying a branch's workspace failed: ${String(error)}`);
+          });
         return;
       case "discard":
         void this.discardChat(event.conversationId, event.workspace);
