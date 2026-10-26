@@ -91,8 +91,9 @@ export function ComputerTag({
           />
         }
       >
-        <span className="relative flex">
-          <HugeiconsIcon icon={ComputerIcon} strokeWidth={2} aria-hidden />
+        {/* Wrapped for the status dot, so the badge's own icon size doesn't reach it. */}
+        <span className="relative flex shrink-0">
+          <HugeiconsIcon icon={ComputerIcon} strokeWidth={2} className="size-3" aria-hidden />
           <span
             className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${online ? "bg-success" : "bg-muted-foreground"}`}
             aria-hidden
