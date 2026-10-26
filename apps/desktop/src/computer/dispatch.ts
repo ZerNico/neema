@@ -19,6 +19,7 @@ import {
 import type { Guest } from "./hypervisor.ts";
 import { place, WORKSPACE, type Mount } from "./paths.ts";
 import { AGENT_VSOCK_PORT, type ChatKey, type ChatSetup, type ChatVms } from "./vms.ts";
+import type { SentFiles } from "./sent-files.ts";
 
 /** A call as the machine received it, its deadline already on this machine's clock. */
 export interface ComputerCall {
@@ -37,6 +38,8 @@ export interface DispatchDeps {
   readonly egress: EgressPolicy;
   /** The chat's workspace and attached folders on this machine. */
   readonly setup: (key: ChatKey) => Promise<ChatSetup>;
+  /** Which sent files are already in the chat's workspace, placed once each. */
+  readonly sentFiles: Pick<SentFiles, "placed" | "record">;
   /** Downloads one of the chat's attachments with the machine's own session. */
   readonly attachment: (
     key: ChatKey,
@@ -106,8 +109,9 @@ const sizeOf = (bytes: number) =>
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /**
- * Copies the chat's attachments into the guest where the server said they live, once each:
- * a file already at its path stays, so an edit the model made is never put back.
+ * Copies the chat's attachments into the guest where the server said they live, once each
+ * (`SentFiles`): a file already at its path stays, so an edit the model made is never put
+ * back, and one it deleted or moved does not come back on the next call.
  */
 const copyAttachments = async (
   deps: DispatchDeps,
@@ -115,14 +119,23 @@ const copyAttachments = async (
   guest: Guest,
   mounts: readonly Mount[],
 ) => {
+  const conversationId = call.key.conversationId;
+  const already = await deps.sentFiles.placed(conversationId);
+  const done: string[] = [];
   for (const attachment of call.attachments ?? []) {
+    if (already.has(attachment.id)) continue;
     const placed = place(attachment.path, mounts);
-    if (!placed.ok || placed.readOnly || (await guest.stat(placed.path))) continue;
-    const file = await deps.attachment(call.key, attachment.id).catch(() => null);
-    if (!file) continue;
-    await guest.run({ argv: ["/bin/mkdir", "-p", posix.dirname(placed.path)] });
-    await guest.write(placed.path, file.bytes).catch(() => {});
+    if (!placed.ok || placed.readOnly) continue;
+    if (!(await guest.stat(placed.path))) {
+      // Not recorded when it could not be fetched: the next call tries again.
+      const file = await deps.attachment(call.key, attachment.id).catch(() => null);
+      if (!file) continue;
+      await guest.run({ argv: ["/bin/mkdir", "-p", posix.dirname(placed.path)] });
+      if (!(await guest.write(placed.path, file.bytes).then(() => true, () => false))) continue;
+    }
+    done.push(attachment.id);
   }
+  await deps.sentFiles.record(conversationId, done);
 };
 
 /** Runs one call in the chat's VM and words the answer the model reads. */

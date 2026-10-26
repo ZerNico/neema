@@ -70,7 +70,7 @@ export const MachineEvent = Schema.Union([
     sentAt: Schema.Number,
     /**
      * The chat's attachments and the guest path the server named each, so the model and the
-     * machine agree on names. The machine copies one only when nothing is at its path yet.
+     * machine agree on names. The machine places each once, and never over a file at its path.
      */
     attachments: Schema.optionalKey(
       Schema.Array(Schema.Struct({ id: Id, path: Schema.String.check(Schema.isMaxLength(1024)) })),

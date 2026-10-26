@@ -157,6 +157,18 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     expect(await readFile(join(root, "workspace", "sales.csv"), "utf8")).toContain("jan,3");
   }, 300_000);
 
+  test("a sent file the model deleted stays deleted", async () => {
+    const sent = { attachments: [{ id: "att-1", path: "/workspace/sales.csv" }] };
+    await call("c1-rm", "run_command", { command: "rm /workspace/sales.csv" }, sent);
+    const answer = await call(
+      "c1-ls",
+      "run_command",
+      { command: "test -e /workspace/sales.csv && echo back || echo gone" },
+      sent,
+    );
+    expect(answer.detail).toContain("gone");
+  }, 120_000);
+
   test("a refused destination is named, with what to ask for", async () => {
     const answer = await call("c2", "run_command", {
       command: "curl -sS -m 5 https://example.com -o /dev/null",

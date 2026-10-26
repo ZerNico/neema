@@ -278,7 +278,8 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
 - **A file sent in a chat is an attachment,** whatever the device. Its path on the computer
   is decided by the server from the chat's files in order: `/workspace/<name>`, numbered when
   an earlier file took the name. Every call carries the list, and the machine copies a file
-  only when nothing is at its path yet, so an edit the model made is never put back. The hint
+  once, and never over a file already at its path: an edit the model made is never put back, and
+  a file it deleted or moved stays gone. The machine remembers what it placed, per chat. The hint
   names the paths.
 - **`save_to_workspace`** downloads a file the chat holds with the machine's own session and
   lands it in the workspace, or exactly at a path the person approves.

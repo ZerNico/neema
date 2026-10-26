@@ -8,6 +8,7 @@ import { EgressPolicy } from "./egress.ts";
 import type { Hypervisor } from "./hypervisor.ts";
 import { MachineClient } from "./machine-client.ts";
 import type { Mount } from "./paths.ts";
+import { SentFiles } from "./sent-files.ts";
 import { ChatVms, originLabel, type ChatKey } from "./vms.ts";
 
 export interface ComputerHostOptions {
@@ -79,6 +80,7 @@ export class ComputerHost {
   private readonly agent: AgentRelay;
   private readonly vms: ChatVms;
   private readonly client: MachineClient;
+  private readonly sentFiles: SentFiles;
   private readonly calls = new Map<
     string,
     { abort: AbortController; result: Promise<ToolResult>; settled: boolean }
@@ -93,6 +95,9 @@ export class ComputerHost {
       log: (_level, message) => options.log(message),
     });
     this.agent = new AgentRelay(options.agentSocket);
+    this.sentFiles = new SentFiles(
+      join(options.directory, `sent-files-${originLabel(options.origin)}.json`),
+    );
     this.vms = new ChatVms({
       hypervisor: options.hypervisor,
       egress: this.proxy,
@@ -221,6 +226,7 @@ export class ComputerHost {
           {
             vms: this.vms,
             egress: this.policy,
+            sentFiles: this.sentFiles,
             setup: async (key) => ({
               workspace: await this.options.workspace(key.conversationId),
               mounts: await this.options.folders(key.conversationId),
@@ -296,6 +302,7 @@ export class ComputerHost {
       await this.vms.discard(key);
       if (!everything) return;
       await this.options.discardWorkspace(conversationId);
+      await this.sentFiles.forget(conversationId);
       if (this.agent.isAllowed(key)) {
         this.agent.forget(key);
         await this.saveAgentChats();
