@@ -2,7 +2,6 @@ import { m } from "~/paraglide/messages.js";
 import { Cancel01Icon, ComputerIcon, Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Effect } from "effect";
 import { setPermissionLevel } from "~/modules/chat/server/functions.ts";
 import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { formatLocale } from "~/i18n/formats.ts";
@@ -26,7 +25,6 @@ import {
   useComputerSnapshot,
   useNetworkGrants,
 } from "../client/use-computer.ts";
-import { desktopFoldersKey } from "../client/use-composer-folders.ts";
 
 /** What the conversation detail says about the chat's computer. */
 export interface ChatComputer {
@@ -128,7 +126,7 @@ function ComputerPanel({
   const queryClient = useQueryClient();
   const desktop = useDesktop();
   const here = useLocalMachineId();
-  // Folders are attached in the desktop app on the chat's own machine, never from elsewhere.
+  // The chat's own machine, in its desktop app: there the composer's strip has the folders.
   const local = desktop !== null && here === computer.machineId;
   const actions = useComputerActions(conversationId);
   const confirm = useConfirm();
@@ -140,17 +138,10 @@ function ComputerPanel({
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
       queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY }),
-      // The composer's folder chips read the machine directly.
-      queryClient.invalidateQueries({ queryKey: desktopFoldersKey(conversationId) }),
     ]);
   const level = useMutation({
     mutationFn: (permissionLevel: "ask" | "allow") =>
       setPermissionLevel({ data: { conversationId, permissionLevel } }),
-    onSettled: refreshChat,
-  });
-  const detach = useMutation({
-    mutationFn: (folder: string) =>
-      Effect.runPromise(desktop!.detachFolder({ conversationId, name: folder })),
     onSettled: refreshChat,
   });
   const reset = async () => {
@@ -169,7 +160,9 @@ function ComputerPanel({
         <p className="truncate font-medium">{name}</p>
         <p className="text-muted-foreground shrink-0 text-xs">{statusLabel(machine)}</p>
       </div>
-      {computer.folders.length > 0 || !local ? (
+      {/* On the chat's own machine, its folders and how much it asks are in the strip under the
+          composer, beside the work they govern; here they are only told. */}
+      {local ? null : (
         <section className="flex flex-col gap-1">
           <p className={sectionTitle}>{m.computer_folders()}</p>
           {computer.folders.map((folder) => (
@@ -186,27 +179,13 @@ function ComputerPanel({
                   <span className="text-muted-foreground"> · {m.computer_folder_read_only()}</span>
                 ) : null}
               </span>
-              {local ? (
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={m.computer_folder_remove({ name: folder.name })}
-                  onClick={() => detach.mutate(folder.name)}
-                >
-                  <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-                </Button>
-              ) : null}
             </div>
           ))}
-          {/* Here, folders are attached from the composer's plus menu. */}
-          {local ? null : (
-            <p className="text-muted-foreground text-xs">
-              {m.computer_attach_elsewhere({ machine: name })}
-            </p>
-          )}
+          <p className="text-muted-foreground text-xs">
+            {m.computer_attach_elsewhere({ machine: name })}
+          </p>
         </section>
-      ) : null}
-      {/* On the chat's own machine this is under the composer, beside the work it governs. */}
+      )}
       {local ? null : (
         <label className="flex items-center justify-between gap-3">
           <span>{m.computer_ask()}</span>

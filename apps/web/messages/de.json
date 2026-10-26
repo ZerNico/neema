@@ -6322,8 +6322,6 @@
   "computer_status_unavailable": "Kann keine Chat-Computer ausführen",
   "computer_folders": "Ordner",
   "computer_folder_read_only": "schreibgeschützt",
-  "computer_folder_remove": "{name} entfernen",
-  "computer_attach": "Ordner anhängen",
   "computer_attach_elsewhere": "Ordner fügst du in der Desktop-App auf {machine} hinzu",
   "computer_destinations": "Netzwerkzugriff",
   "computer_destination_remove": "{destination} entfernen",
@@ -6351,5 +6349,6 @@
   "chat_composer_folder_refused": "Dieser Ordner kann keinem Chat gegeben werden",
   "computer_folder_lost": "Dieser Ordner ist nicht mehr dort, wo er war.",
   "computer_folder_choose_again": "Erneut auswählen",
-  "computer_folder_detach": "{name} trennen"
+  "computer_folder_detach": "{name} trennen",
+  "computer_folder_detach_failed": "Der Ordner konnte nicht getrennt werden"
 }

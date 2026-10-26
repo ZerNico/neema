@@ -6328,8 +6328,6 @@
   "computer_status_unavailable": "Can’t run chat computers",
   "computer_folders": "Folders",
   "computer_folder_read_only": "read-only",
-  "computer_folder_remove": "Remove {name}",
-  "computer_attach": "Attach folder",
   "computer_attach_elsewhere": "Attach folders in the desktop app on {machine}",
   "computer_destinations": "Network access",
   "computer_destination_remove": "Remove {destination}",
@@ -6357,5 +6355,6 @@
   "chat_composer_folder_refused": "That folder can’t be given to a chat",
   "computer_folder_lost": "This folder is no longer where it was.",
   "computer_folder_choose_again": "Choose it again",
-  "computer_folder_detach": "Detach {name}"
+  "computer_folder_detach": "Detach {name}",
+  "computer_folder_detach_failed": "Couldn’t detach the folder"
 }

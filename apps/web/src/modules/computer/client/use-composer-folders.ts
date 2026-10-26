@@ -30,8 +30,9 @@ export interface ComposerFolders {
   };
 }
 
+/** Under the computer's key, so `computer.changed` (a folder the model asked for, a rebind) refreshes it. */
 export const desktopFoldersKey = (conversationId: string) =>
-  ["desktop-folders", conversationId] as const;
+  [...COMPUTER_QUERY_KEY, "folders", conversationId] as const;
 
 /**
  * Folders are picked at the machine, so the composer offers them only in the desktop app, and
@@ -82,6 +83,7 @@ export function useComposerFolders(
     mutationFn: (name: string) =>
       Effect.runPromise(desktop!.detachFolder({ conversationId, name })),
     onSuccess: settle,
+    onError: () => toast.error(m.computer_folder_detach_failed()),
   });
   const level = useMutation({
     mutationFn: (permissionLevel: PermissionLevel) =>
@@ -90,11 +92,7 @@ export function useComposerFolders(
   });
   if (!usable) return undefined;
   return {
-    items: (status.data?.folders ?? []).map(({ name, readOnly, alive }) => ({
-      name,
-      readOnly,
-      alive,
-    })),
+    items: status.data?.folders ?? [],
     onAdd: () => add.mutate(undefined),
     onChooseAgain: (name) => add.mutate(name),
     onRemove: (name) => remove.mutate(name),
