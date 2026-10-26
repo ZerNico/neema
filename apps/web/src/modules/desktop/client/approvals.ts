@@ -1,5 +1,4 @@
 import type { PermissionLevel } from "~/modules/chat/schema.ts";
-import { m } from "~/paraglide/messages.js";
 import type { ApprovalKind } from "../tool-schema.ts";
 
 export { approvalKind, type ApprovalKind } from "../tool-schema.ts";
@@ -39,20 +38,3 @@ export const firstDecision = (
       return level === "allow" || granted ? "run" : "ask";
   }
 };
-
-export const PERMISSION_LEVELS: ReadonlyArray<{
-  value: PermissionLevel;
-  label: () => string;
-  description: () => string;
-}> = [
-  {
-    value: "ask",
-    label: m.desktop_permission_ask,
-    description: m.desktop_permission_ask_description,
-  },
-  {
-    value: "allow",
-    label: m.desktop_permission_allow,
-    description: m.desktop_permission_allow_description,
-  },
-];

@@ -1,11 +1,10 @@
 import { m } from "~/paraglide/messages.js";
-import { ComputerIcon, Delete02Icon, FolderAddIcon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, ComputerIcon, Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { setPermissionLevel } from "~/modules/chat/server/functions.ts";
 import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
-import { PERMISSION_LEVELS } from "~/modules/desktop/client/approvals.ts";
 import { formatLocale } from "~/i18n/formats.ts";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
@@ -18,6 +17,8 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Separator } from "~/ui/primitives/separator";
+import { Switch } from "~/ui/primitives/switch";
+import { useConfirm } from "~/ui/confirm-context.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import {
   COMPUTER_QUERY_KEY,
@@ -57,10 +58,6 @@ const statusLabel = (machine: MachineStatus | undefined) => {
 };
 
 const sectionTitle = "text-muted-foreground text-xs font-medium";
-
-/** Guest paths, the same the model uses: not words to translate. */
-const WORKSPACE_PATH = "/workspace";
-const folderPath = (name: string) => `/folders/${name}`;
 
 /**
  * The chat's computer in the header: which machine it runs on and whether that is online, its
@@ -134,6 +131,7 @@ function ComputerPanel({
   // Folders are attached in the desktop app on the chat's own machine, never from elsewhere.
   const local = desktop !== null && here === computer.machineId;
   const actions = useComputerActions(conversationId);
+  const confirm = useConfirm();
   const { grants, remove } = useNetworkGrants();
   const chatGrants = (grants.data?.grants ?? []).filter(
     (grant) => grant.conversationId === conversationId,
@@ -150,109 +148,93 @@ function ComputerPanel({
       setPermissionLevel({ data: { conversationId, permissionLevel } }),
     onSettled: refreshChat,
   });
-  const attach = useMutation({
-    mutationFn: () => Effect.runPromise(desktop!.chooseFolder({ conversationId })),
-    onSettled: refreshChat,
-  });
   const detach = useMutation({
     mutationFn: (folder: string) =>
       Effect.runPromise(desktop!.detachFolder({ conversationId, name: folder })),
     onSettled: refreshChat,
   });
+  const reset = async () => {
+    const confirmed = await confirm({
+      title: m.computer_reset_title(),
+      description: m.computer_reset_note(),
+      confirmLabel: m.computer_reset(),
+    });
+    if (confirmed) actions.reset.mutate();
+  };
   return (
     <div className="flex flex-col gap-3 text-sm">
-      <div>
-        <p className="font-medium">{name}</p>
-        <p className="text-muted-foreground text-xs">{statusLabel(machine)}</p>
+      <div className="flex min-w-0 items-baseline justify-between gap-2">
+        <p className="truncate font-medium">{name}</p>
+        <p className="text-muted-foreground shrink-0 text-xs">{statusLabel(machine)}</p>
       </div>
-      <Separator />
-      <section className="flex flex-col gap-1.5">
-        <p className={sectionTitle}>{m.computer_folders()}</p>
-        <p className="text-muted-foreground font-mono text-xs">{WORKSPACE_PATH}</p>
-        {computer.folders.map((folder) => (
-          <div key={folder.name} className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">
-              {folderPath(folder.name)}
-              {folder.readOnly ? ` · ${m.computer_folder_read_only()}` : ""}
-            </span>
-            {local ? (
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={m.computer_folder_remove({ name: folder.name })}
-                onClick={() => detach.mutate(folder.name)}
-              >
-                <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-              </Button>
-            ) : null}
-          </div>
-        ))}
-        {local ? (
-          <PendingButton
-            size="sm"
-            variant="outline"
-            pending={attach.isPending}
-            onClick={() => attach.mutate()}
-          >
-            <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
-            {m.computer_attach()}
-          </PendingButton>
-        ) : (
-          <p className="text-muted-foreground text-xs">
-            {m.computer_attach_elsewhere({ machine: name })}
-          </p>
-        )}
-      </section>
-      <Separator />
-      <section className="flex flex-col gap-1.5">
-        <p className={sectionTitle}>{m.computer_permission()}</p>
-        <Select
-          value={computer.permissionLevel}
-          items={PERMISSION_LEVELS.map((option) => ({
-            value: option.value,
-            label: option.label(),
-          }))}
-          onValueChange={(value) => level.mutate(value as "ask" | "allow")}
-        >
-          <SelectTrigger aria-label={m.computer_permission()} className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PERMISSION_LEVELS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label()}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </section>
-      <Separator />
-      <section className="flex flex-col gap-1.5">
-        <p className={sectionTitle}>{m.computer_destinations()}</p>
-        {chatGrants.length === 0 ? (
-          <p className="text-muted-foreground text-xs">{m.computer_destinations_none()}</p>
-        ) : (
-          chatGrants.map((grant) => (
-            <div key={grant.id} className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                {grant.host}:{grant.port}
+      {computer.folders.length > 0 || !local ? (
+        <section className="flex flex-col gap-1">
+          <p className={sectionTitle}>{m.computer_folders()}</p>
+          {computer.folders.map((folder) => (
+            <div key={folder.name} className="flex min-w-0 items-center gap-2">
+              <HugeiconsIcon
+                icon={Folder01Icon}
+                strokeWidth={2}
+                className="text-muted-foreground size-3.5 shrink-0"
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 truncate">
+                {folder.name}
+                {folder.readOnly ? (
+                  <span className="text-muted-foreground"> · {m.computer_folder_read_only()}</span>
+                ) : null}
               </span>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label={m.computer_destination_remove({
-                  destination: `${grant.host}:${grant.port}`,
-                })}
-                onClick={() => remove.mutate(grant.id)}
-              >
-                <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-              </Button>
+              {local ? (
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={m.computer_folder_remove({ name: folder.name })}
+                  onClick={() => detach.mutate(folder.name)}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                </Button>
+              ) : null}
             </div>
-          ))
-        )}
-      </section>
+          ))}
+          {/* Here, folders are attached from the composer's plus menu. */}
+          {local ? null : (
+            <p className="text-muted-foreground text-xs">
+              {m.computer_attach_elsewhere({ machine: name })}
+            </p>
+          )}
+        </section>
+      ) : null}
+      <label className="flex items-center justify-between gap-3">
+        <span>{m.computer_ask()}</span>
+        <Switch
+          checked={computer.permissionLevel === "ask"}
+          disabled={level.isPending}
+          onCheckedChange={(checked) => level.mutate(checked ? "ask" : "allow")}
+        />
+      </label>
+      {chatGrants.length > 0 ? (
+        <section className="flex flex-col gap-1">
+          <p className={sectionTitle}>{m.computer_destinations()}</p>
+          {chatGrants.map((grant) => {
+            const destination = grant.port === 443 ? grant.host : `${grant.host}:${grant.port}`;
+            return (
+              <div key={grant.id} className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate">{destination}</span>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={m.computer_destination_remove({ destination })}
+                  onClick={() => remove.mutate(grant.id)}
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+                </Button>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
       <Separator />
-      <section className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5">
         {others.length > 0 ? (
           <Select
             value=""
@@ -273,15 +255,14 @@ function ComputerPanel({
         ) : null}
         <PendingButton
           size="sm"
-          variant="outline"
+          variant="ghost"
           pending={actions.reset.isPending}
           disabled={!machine?.online}
-          onClick={() => actions.reset.mutate()}
+          onClick={() => void reset()}
         >
           {m.computer_reset()}
         </PendingButton>
-        <p className="text-muted-foreground text-xs">{m.computer_reset_note()}</p>
-      </section>
+      </div>
     </div>
   );
 }
