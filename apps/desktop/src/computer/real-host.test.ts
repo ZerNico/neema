@@ -96,10 +96,12 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       workspace: () => workspace,
       folders: async () => [{ name: "notes", hostPath: folder, readOnly: false }],
       discardWorkspace: async () => {},
+      cloneWorkspace: async () => {},
       agentSocket: () => null,
       remote: () => true,
       ask: {
-        folder: async ({ path }) => (path ? { hostPath: path } : { refused: "The user picked no folder." }),
+        folder: async ({ path }) =>
+          path ? { hostPath: path } : { refused: "The user picked no folder." },
         agent: async () => true,
       },
       attach: async (_conversationId, hostPath) => ({ name: hostPath.split("/").pop()! }),

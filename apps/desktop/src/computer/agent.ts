@@ -38,7 +38,9 @@ export class AgentRelay {
 
   /** The whole list of chats allowed the agent on one server, as the server sent it. */
   setAllowed(origin: string, conversationIds: ReadonlyArray<string>) {
-    const next = new Set([...this.allowedChats].filter((entry) => !entry.startsWith(`${origin}\u0000`)));
+    const next = new Set(
+      [...this.allowedChats].filter((entry) => !entry.startsWith(`${origin}\u0000`)),
+    );
     for (const id of conversationIds) next.add(keyOf(origin, id));
     for (const [entry, sockets] of this.open)
       if (!next.has(entry)) for (const socket of sockets) socket.destroy();

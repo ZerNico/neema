@@ -35,7 +35,10 @@ export const computerDialogs = (input: {
           message: m.computer_folder_message({ path: checked.path }, { locale }),
           // The reason is the model's own words, shown as they came.
           detail: reason ? `${reason}\n\n${detail}` : detail,
-          buttons: [m.computer_dialog_cancel({}, { locale }), m.computer_dialog_allow({}, { locale })],
+          buttons: [
+            m.computer_dialog_cancel({}, { locale }),
+            m.computer_dialog_allow({}, { locale }),
+          ],
           defaultId: 1,
           cancelId: 0,
           checkboxLabel: m.computer_folder_remember({}, { locale }),
@@ -67,7 +70,10 @@ export const computerDialogs = (input: {
         title: m.computer_agent_title({}, { locale }),
         message: m.computer_agent_message({}, { locale }),
         detail: m.computer_agent_detail({}, { locale }),
-        buttons: [m.computer_dialog_cancel({}, { locale }), m.computer_dialog_allow({}, { locale })],
+        buttons: [
+          m.computer_dialog_cancel({}, { locale }),
+          m.computer_dialog_allow({}, { locale }),
+        ],
         defaultId: 1,
         cancelId: 0,
       });

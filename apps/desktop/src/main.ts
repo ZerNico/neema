@@ -252,6 +252,13 @@ const startComputer = (origin: string) => {
           Effect.flatMap(GrantStore, (grants) => grants.lookup({ origin, conversationId })),
         ),
       ),
+    // A refused copy (too large, or the branch already has files) leaves the branch's empty.
+    cloneWorkspace: (from, to) =>
+      runtime.runPromise(
+        Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.clone(from, to)).pipe(
+          Effect.ignore,
+        ),
+      ),
     // The chat is gone for good: nothing this machine kept for it outlives it.
     discardWorkspace: async (conversationId) => {
       await runtime.runPromise(

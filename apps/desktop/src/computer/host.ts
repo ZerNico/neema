@@ -22,6 +22,8 @@ export interface ComputerHostOptions {
   readonly workspace: (conversationId: string) => string;
   readonly folders: (conversationId: string) => Promise<readonly Mount[]>;
   readonly discardWorkspace: (conversationId: string) => Promise<void>;
+  /** Copies a chat's workspace into its branch's; nothing when too large or already there. */
+  readonly cloneWorkspace: (from: string, to: string) => Promise<void>;
   /** The SSH agent to relay to, looked up when a connection opens. */
   readonly agentSocket: () => string | null;
   /** Whether calls sent from the person's other devices may run here. */
@@ -253,6 +255,11 @@ export class ComputerHost {
         return;
       case "grants":
         this.policy.setGrants(this.options.origin, event.grants);
+        return;
+      case "clone":
+        void this.options.cloneWorkspace(event.from, event.to).catch((error: unknown) => {
+          this.options.log(`computer: copying a branch's workspace failed: ${String(error)}`);
+        });
         return;
       case "discard":
         void this.vms

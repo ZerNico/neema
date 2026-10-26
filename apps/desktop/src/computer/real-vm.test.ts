@@ -151,7 +151,8 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
   test("commands get the image's Python, and pip installs into it", async () => {
     const outcome = await use((guest) =>
       runCommand(guest, {
-        command: "command -v python3 && pip install -q six && python3 -c 'import six; print(six.__file__)'",
+        command:
+          "command -v python3 && pip install -q six && python3 -c 'import six; print(six.__file__)'",
         cwd: "/workspace",
         timeoutMs: 120_000,
         outputLimit: 4_000,

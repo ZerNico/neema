@@ -25,6 +25,7 @@ import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
 import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -45,6 +46,7 @@ let database: TestDatabase;
 type Services =
   | ChatRepo
   | ComputerRepo
+  | MachineHub
   | ChatService
   | CustomToolRepo
   | AttachmentRepo
@@ -786,6 +788,37 @@ describe("branching a conversation", () => {
     expect(result.survives).toBe(1);
     expect(result.afterSourceDelete).toEqual([result.storageKey]);
     expect(result.remaining).toBe(0);
+  });
+
+  it("keeps the chat's computer and asks its machine to copy the workspace", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const hub = yield* MachineHub;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
+        yield* db
+          .update(conversationsTable)
+          .set({ machineId: "laptop" })
+          .where(eq(conversationsTable.id, source.conversation.id));
+        const events = yield* hub.connect(userId, {
+          machineId: "laptop",
+          name: "Laptop",
+          platform: "darwin",
+          computer: { status: "ready" },
+          remote: true,
+        });
+        const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
+        const [event] = yield* Stream.take(events, 1).pipe(Stream.runCollect);
+        return {
+          machineId: forked.conversation.machineId,
+          event,
+          branchId: forked.conversation.id,
+        };
+      }).pipe(Effect.scoped),
+    );
+    expect(result.machineId).toBe("laptop");
+    expect(result.event).toMatchObject({ type: "clone", to: result.branchId });
   });
 
   it("records the immediate parent and copies a title that already resolved", async () => {

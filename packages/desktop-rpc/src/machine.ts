@@ -80,6 +80,8 @@ export const MachineEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("cancel"), callId: Id }),
   /** Every network grant of the person, whole each time it changes. */
   Schema.Struct({ type: Schema.Literal("grants"), grants: Schema.Array(DestinationGrant) }),
+  /** A branch of a chat on this machine: its workspace files are copied, its installs are not. */
+  Schema.Struct({ type: Schema.Literal("clone"), from: Id, to: Id }),
   /** A chat is gone or its environment was reset: its VM and disk go, and its workspace if gone. */
   Schema.Struct({
     type: Schema.Literal("discard"),

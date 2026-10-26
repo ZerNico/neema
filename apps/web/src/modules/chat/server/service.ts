@@ -1,3 +1,4 @@
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { m } from "~/paraglide/messages.js";
 import { localized } from "~/i18n/localized.ts";
@@ -424,6 +425,7 @@ function makeChatService() {
     const repo = yield* ChatRepo;
     const providers = yield* ProviderRepo;
     const sync = yield* SyncBus;
+    const machines = yield* MachineHub;
     // A new answer is a new message that is streaming: lists move the chat up
     // and mark it generating from these two, without re-reading every page.
     const announceStarted = (userId: string, conversationId: string, messageId: string) =>
@@ -1058,6 +1060,13 @@ function makeChatService() {
         type: "conversation.created",
         conversationId: branch.id,
       });
+      // The branch keeps the chat's computer; its machine copies the workspace if it is online.
+      if (branch.machineId)
+        yield* machines.send(input.userId, branch.machineId, {
+          type: "clone",
+          from: input.conversationId,
+          to: branch.id,
+        });
 
       // Branching a chat whose title has not resolved yet would otherwise
       // leave the copy stuck on the placeholder forever. The source's own

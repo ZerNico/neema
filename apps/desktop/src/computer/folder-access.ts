@@ -49,7 +49,9 @@ export async function checkFolder(
   const realData = await realpath(appData).catch(() => appData);
   if (path === parse(path).root) return { refused: "A whole disk cannot be given to a chat." };
   if (path === realHome || inside(path, realHome))
-    return { refused: "The home folder as a whole cannot be given to a chat; pick a folder inside it." };
+    return {
+      refused: "The home folder as a whole cannot be given to a chat; pick a folder inside it.",
+    };
   if (inside(realData, path) || inside(path, realData))
     return { refused: "The app's own data cannot be given to a chat." };
   for (const entry of CREDENTIALS) {
@@ -71,7 +73,10 @@ export class RememberedFolders {
   private all() {
     return (this.loaded ??= readFile(this.file, "utf8")
       .then((text) => JSON.parse(text) as unknown)
-      .then((list) => new Set(Array.isArray(list) ? list.filter((item) => typeof item === "string") : []))
+      .then(
+        (list) =>
+          new Set(Array.isArray(list) ? list.filter((item) => typeof item === "string") : []),
+      )
       .catch(() => new Set<string>()));
   }
 
