@@ -760,7 +760,7 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
 
 /* With the sidebar open, the chat's title starts where the page does; it slides
    back beside the buttons with the sidebar as it collapses. */
-.desktop-header [data-header-slot] {
+.desktop-header [data-header-slot][data-settled] {
   transition: margin-left 200ms linear;
 }
 

@@ -34,11 +34,19 @@ export function HeaderSlot() {
         element.style.setProperty("--header-slot-start", `${start}px`);
       };
       measure();
+      // The slot glides with the sidebar, but not into place on load: the server's page paints
+      // before hydration sets the sidebar's state, so the glide waits a frame past that.
+      const settle = requestAnimationFrame(() => {
+        element.dataset.settled = "";
+      });
       // A control appearing beside it, or the window resizing, changes the slot's
       // width; its own offset does too, but leaves the measurement as it was.
       const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
       observer?.observe(element);
-      return () => observer?.disconnect();
+      return () => {
+        cancelAnimationFrame(settle);
+        observer?.disconnect();
+      };
     },
     [setTarget],
   );
