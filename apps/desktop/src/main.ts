@@ -14,6 +14,7 @@ import {
 } from "electron";
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -205,9 +206,14 @@ const settings = () => {
 let computer: { origin: string; host: ComputerHost } | null = null;
 const hypervisor = microsandbox(
   async () => {
-    // Images, VM records and logs live with the app's own data, not in ~/.microsandbox, so a
-    // dev profile and an installed app never share VMs. Read once, when the SDK first loads.
-    process.env.MSB_HOME ??= join(app.getPath("userData"), "computer", "runtime");
+    // A folder per profile, so a dev profile and an installed app never share VMs. VM sockets
+    // sit about 50 bytes below it and macOS caps a socket path at 104, so off Windows it is a
+    // short one in the home folder, like ~/.lima. Read at SDK load.
+    const profile = app.getPath("userData");
+    process.env.MSB_HOME ??=
+      process.platform === "win32"
+        ? join(profile, "computer", "runtime")
+        : join(homedir(), ".neema", createHash("sha256").update(profile).digest("hex").slice(0, 8));
     return import("microsandbox");
   },
   { insecureRegistry: SANDBOX_INSECURE_REGISTRY },

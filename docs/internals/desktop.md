@@ -267,8 +267,10 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   its own, the wrapper steps back out of the group and kills it too, so a server left running
   in the background ends with its command instead of holding the output open (measured both).
 - **Resources:** 2 vCPUs and 2 GB of memory per VM. Freed guest memory goes back to the host.
-- **microsandbox keeps its data** under `<userData>/computer/runtime` (`MSB_HOME`), so a dev
-  profile and an installed app never share VMs.
+- **microsandbox keeps its data** in a folder per profile (`MSB_HOME`), so a dev profile and an
+  installed app never share VMs. Off Windows that is `~/.neema/<hash of userData>`, not under
+  userData: each VM's sockets sit about 50 bytes below it and macOS caps a socket path at 104,
+  which `~/Library/Application Support/...` already overruns.
 
 ## Addresses
 
