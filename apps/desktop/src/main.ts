@@ -282,6 +282,15 @@ const startComputer = (origin: string) => {
         console.error("[desktop] forgetting a chat's sites failed", error),
       );
     },
+    localChats: async () => {
+      const [workspaced, attached] = await runtime.runPromise(
+        Effect.all([
+          Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.chats()),
+          Effect.flatMap(GrantStore, (grants) => grants.chats(origin)),
+        ]),
+      );
+      return [...new Set([...workspaced, ...attached])];
+    },
     agentSocket: () => settings().agentSocket(),
     remote: () => settings().get().remote,
     ask: dialogs,

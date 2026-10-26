@@ -45,7 +45,7 @@ export interface ChatVmsOptions {
 
 /** Guest port the SSH agent relay is reached on; `ssh-agent-bridge` in the image listens there. */
 export const AGENT_VSOCK_PORT = 5000;
-/** Labels every chat VM carries, so a sweep finds the ones nobody owns anymore. */
+/** Labels every chat VM carries, so one can be traced to its server. */
 export const LABEL = "neema";
 export const ORIGIN_LABEL = "neema-origin";
 
@@ -155,19 +155,6 @@ export class ChatVms {
         await this.halt(null, slot, name);
       }),
     );
-  }
-
-  /** Removes VMs of this server whose chat is not among `live`, records and disks alike. */
-  async sweep(origin: string, live: readonly ChatKey[]): Promise<void> {
-    const keep = new Set(live.map(vmName));
-    const names = await this.options.hypervisor.named(ORIGIN_LABEL, originLabel(origin));
-    for (const name of names.filter((candidate) => !keep.has(candidate))) {
-      if (this.slots.has(name)) continue;
-      await this.options.hypervisor.destroy(name).catch(() => {});
-      const disk = join(this.options.disks, `${name}.img`);
-      await rm(disk, { force: true });
-      await rm(`${disk}.json`, { force: true });
-    }
   }
 
   running(key: ChatKey) {

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import {
   MACHINE_HELLO_HEADER,
   MACHINE_ROUTES,
+  MachineChats,
   MachineEvent,
   type MachineFolders,
   type MachineHello,
@@ -9,6 +10,7 @@ import {
 } from "@chat/desktop-rpc";
 
 const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(MachineEvent));
+const decodeGone = Schema.decodeUnknownOption(MachineChats);
 
 export interface MachineClientOptions {
   readonly origin: string;
@@ -76,6 +78,19 @@ export class MachineClient {
 
   async postStatus() {
     await this.post(MACHINE_ROUTES.status, {}).catch(() => {});
+  }
+
+  /** Which of these chats the server no longer has; none when it cannot be asked now. */
+  async gone(conversationIds: readonly string[]): Promise<readonly string[]> {
+    if (conversationIds.length === 0) return [];
+    try {
+      const response = await this.post(MACHINE_ROUTES.gone, { conversationIds });
+      if (!response.ok) return [];
+      const body = decodeGone(await response.json());
+      return body._tag === "Some" ? body.value.conversationIds : [];
+    } catch {
+      return [];
+    }
   }
 
   private headers(): Record<string, string> {

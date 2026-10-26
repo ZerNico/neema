@@ -47,6 +47,8 @@ export interface Workspaces {
   ): Effect.Effect<LandedFile, DesktopError>;
   clone(fromConversationId: string, toConversationId: string): Effect.Effect<void, DesktopError>;
   discard(conversationId: string): Effect.Effect<void, DesktopError>;
+  /** Chats with a workspace here. */
+  chats(): Effect.Effect<ReadonlyArray<string>>;
   /** Best-effort cleanup of interrupted copies and what older versions left behind. */
   sweepTransient(): Effect.Effect<void>;
 }
@@ -232,6 +234,15 @@ const makeWorkspaces = (root: string): Workspaces => {
           cause instanceof DesktopError ? cause : failed("Could not remove the workspace."),
       }),
 
+    chats: () =>
+      Effect.promise(async () => {
+        const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+        // Staging, journals and partial copies start with a dot; a workspace is named by its chat.
+        return entries
+          .filter((entry) => entry.isDirectory() && Schema.is(WorkspaceId)(entry.name))
+          .map((entry) => entry.name);
+      }),
+
     sweepTransient: () =>
       Effect.promise(async () => {
         // Composer staging and its promotion journals: gone with local drops.
@@ -271,6 +282,7 @@ export class WorkspaceRegistry extends Context.Service<WorkspaceRegistry, Worksp
           forOrigin().landFile(conversationId, fileName, bytes, signal),
         clone: (from, to) => forOrigin().clone(from, to),
         discard: (conversationId) => forOrigin().discard(conversationId),
+        chats: () => forOrigin().chats(),
         sweepTransient: () => forOrigin().sweepTransient(),
       });
     });

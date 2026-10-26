@@ -22,6 +22,9 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
   let stream: ServerResponse | undefined;
   const hellos: unknown[] = [];
   const results = new Map<string, ToolResult>();
+  const discarded: string[] = [];
+  let discardedOne: () => void = () => {};
+  const firstDiscard = new Promise<void>((resolve) => (discardedOne = resolve));
   const waiters = new Map<string, (result: ToolResult) => void>();
   const send = (event: MachineEvent) =>
     stream?.write(`event: machine\ndata: ${JSON.stringify(event)}\n\n`);
@@ -72,6 +75,13 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
         response.end("{}");
         return;
       }
+      if (request.url === "/api/machine/gone") {
+        const { conversationIds } = (await body(request)) as { conversationIds: string[] };
+        response.end(
+          JSON.stringify({ conversationIds: conversationIds.filter((id) => id === "purged") }),
+        );
+        return;
+      }
       if (request.url === "/api/files/att-1") {
         response.writeHead(200, { "content-disposition": 'attachment; filename="sales.csv"' });
         response.end("month,total\njan,3\n");
@@ -97,7 +107,11 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
         return join(root, "workspace");
       },
       folders: async () => [{ name: "notes", hostPath: folder, readOnly: false }],
-      discardWorkspace: async () => {},
+      discardWorkspace: async (conversationId) => {
+        discarded.push(conversationId);
+        discardedOne();
+      },
+      localChats: async () => ["chat-1", "purged"],
       cloneWorkspace: async () => {},
       agentSocket: () => null,
       remote: () => true,
@@ -183,6 +197,19 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     });
     expect(await call("c9", "request_ssh_agent", {})).toMatchObject({ ok: true });
   }, 60_000);
+
+  test("a chat purged while the machine was offline is removed once it asks", async () => {
+    await firstDiscard;
+    expect(discarded).toEqual(["purged"]);
+  });
+
+  test("a call the server no longer waits on stops when the machine reconnects", async () => {
+    const pending = call("c-unwanted", "run_command", { command: "sleep 120" });
+    setTimeout(() => send({ type: "running", callIds: [] }), 1_500);
+    const answer = await pending;
+    expect(answer.ok).toBe(false);
+    expect(answer.detail).toMatch(/stopped/);
+  }, 120_000);
 
   test("a cancel stops the command it names", async () => {
     const pending = call("c6", "run_command", { command: "sleep 120" });

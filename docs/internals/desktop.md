@@ -145,7 +145,11 @@ and of `process.argv` on a cold start; both are read.
   it copies the workspace's files into the branch's, within the copy limits. Installs stay on
   the source's disk. A machine offline at that moment leaves the branch's workspace empty.
 - **Purging a chat** sends its machine a `discard` event: the VM, its disk, its workspace, its
-  folder grants, its SSH agent allowance and its browser sites go.
+  folder grants, its SSH agent allowance and its browser sites go. A machine offline then
+  misses it, so on start it asks `/api/machine/gone` which of the chats it holds anything for
+  no longer exist, and discards those. Only a chat whose row is gone for everyone counts: a
+  machine may hold another account's chats, and a chat without a computer may still have
+  browser downloads in its workspace.
 - **The tools are offered** to people who may use a computer (the `work` feature) and have
   connected a desktop app at least once, from any device and whether the machine is online or
   not. The offer is stable per person, so the cached prompt prefix is too, and nobody without
@@ -176,6 +180,10 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   gets the same answer, not a second run.
 - **Stop, a lost lease and the deadline** end the call's scope on the server, which sends the
   machine a `cancel` for a call still running there.
+- **A reconnect loses what the old stream had not delivered,** calls and cancels alike. So each
+  new stream starts with `running`, the calls the server still waits on from this machine, and
+  each of them again. The machine stops any other call it is running and answers a repeated one
+  from what it has.
 - **The page is not in the execution path.** Closing, reloading or never opening the window
   changes nothing for computer calls.
 
@@ -250,8 +258,7 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   in the background ends with its command instead of holding the output open (measured both).
 - **Resources:** 2 vCPUs and 2 GB of memory per VM. Freed guest memory goes back to the host.
 - **microsandbox keeps its data** under `<userData>/computer/runtime` (`MSB_HOME`), so a dev
-  profile and an installed app never share VMs. VMs labelled for a server whose chats no longer
-  exist are swept.
+  profile and an installed app never share VMs.
 
 ## Addresses
 

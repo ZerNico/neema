@@ -68,8 +68,8 @@ what a failed one left.
   and gets it back.
 - A chat's computer (VM, disk, workspace, folder grants, SSH agent allowance, browser sites)
   lives on its machine and must outlive the delete, or Undo would bring back a chat without
-  them. The purge sends the machine a `discard`. A machine offline at that moment keeps them,
-  since nothing redelivers it, and its sweep later removes VMs of chats that no longer exist.
+  them. The purge sends the machine a `discard`. A machine offline at that moment asks on its next
+  start which of its chats are gone ([desktop](desktop.md#a-chat-may-have-a-computer)).
 
 ## The client
 

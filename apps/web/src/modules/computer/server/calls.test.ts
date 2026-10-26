@@ -56,6 +56,7 @@ const fakeRepo = (
         }),
       machines: () => Effect.succeed([]),
       forgetMachine: () => Effect.void,
+      gone: () => Effect.succeed([]),
       chat: () => Effect.succeed({ ...chat }),
       bind: (_userId, _id, machineId) =>
         Effect.sync(() => {
@@ -379,6 +380,22 @@ describe("ComputerCalls", () => {
       // Events arrive in order: had call-1 reached the machine, it would come first.
       yield* open("call-2", "list_folder", { path: "." }, "laptop");
       expect(yield* nextCall(laptop.queue)).toMatchObject({ type: "call", callId: "call-2" });
+    }),
+  );
+
+  it.effect("a reconnecting machine hears which calls are wanted, and gets each again", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
+      const before = yield* connect("laptop");
+      yield* open("call-1", "run_command", { command: "make" }, "laptop");
+      expect(yield* nextCall(before.queue)).toMatchObject({ callId: "call-1" });
+      // The old stream died with whatever it had not delivered yet.
+      const after = yield* connect("laptop");
+      yield* calls.machineConnected(USER, "laptop");
+      expect(yield* Queue.take(after.queue)).toEqual({ type: "running", callIds: ["call-1"] });
+      expect(yield* nextCall(after.queue)).toMatchObject({ type: "call", callId: "call-1" });
     }),
   );
 

@@ -203,8 +203,8 @@ export const makeConversationLifecycle = Effect.gen(function* () {
       const purged = yield* repo.purgeExpired(id);
       if (!purged) continue;
       yield* attachmentService.deleteBlobs(purged.keys);
-      // The machine holds the chat's VM and workspace. Sent once: a machine offline now
-      // keeps them, since nothing redelivers this.
+      // The machine holds the chat's VM and workspace. One offline now asks on its next start
+      // which of its chats are gone (/api/machine/gone).
       if (purged.machineId !== null)
         yield* machines.send(purged.userId, purged.machineId, {
           type: "discard",

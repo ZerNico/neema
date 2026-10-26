@@ -56,7 +56,6 @@ const fakeHypervisor = () => {
     destroy: async (name) => {
       destroyed.push(name);
     },
-    named: async () => [vmName(KEY), "chat-orphan"],
     formatDisk: async (path) => {
       formatted.push(path);
     },
@@ -218,14 +217,12 @@ test("a new image starts the chat over on a fresh disk, and the next use is told
   expect(await second.use(KEY, plain, async (_, info) => info.reset)).toBe(false);
 });
 
-test("discard removes the VM and its disk; a sweep removes only unowned VMs", async () => {
+test("discard removes the VM and its disk", async () => {
   const { vms, hv, disks } = await setup();
   await vms.use(KEY, plain, async () => {});
   await vms.discard(KEY);
   expect(hv.destroyed).toEqual([vmName(KEY)]);
   await expect(stat(join(disks, `${vmName(KEY)}.img`))).rejects.toThrow(/ENOENT/);
-  await vms.sweep(KEY.origin, [KEY]);
-  expect(hv.destroyed).toEqual([vmName(KEY), "chat-orphan"]);
 });
 
 test("after stopAll nothing new starts", async () => {

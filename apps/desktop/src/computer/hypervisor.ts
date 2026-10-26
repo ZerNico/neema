@@ -58,8 +58,6 @@ export interface Hypervisor {
   start(spec: VmSpec): Promise<Guest>;
   /** Removes a VM's record; its root disk is the caller's. Missing is not an error. */
   destroy(name: string): Promise<void>;
-  /** Names of VMs carrying this label, running or not. */
-  named(label: string, value: string): Promise<string[]>;
   /** Puts an empty ext4 filesystem in a sparse file, using a throwaway VM of the image. */
   formatDisk(path: string, image: string): Promise<void>;
   /**
@@ -189,20 +187,6 @@ export const microsandbox = (
       return guestOf(await builder.create());
     },
     destroy: remove,
-    async named(label, value) {
-      const { Sandbox } = await sdk();
-      const names: string[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await Sandbox.listWith((list) => {
-          const labelled = list.label(label, value).limit(100);
-          return cursor ? labelled.cursor(cursor) : labelled;
-        });
-        names.push(...page.sandboxes.map((sandbox) => sandbox.name));
-        cursor = page.nextCursor;
-      } while (cursor);
-      return names;
-    },
     async prepare(image, onProgress) {
       const { Image, Sandbox, MiB } = await sdk();
       const present = await Image.get(image).then(

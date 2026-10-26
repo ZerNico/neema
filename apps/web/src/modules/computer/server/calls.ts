@@ -126,8 +126,13 @@ export class ComputerCalls extends Context.Service<
       callId: string,
       result: ToolResult,
     ): Effect.Effect<boolean>;
-    /** A machine connected or reported a new status: calls held for it go on. */
+    /** A machine reported a new status: calls held for it go on. */
     machineChanged(userId: string, machineId: string): Effect.Effect<void>;
+    /**
+     * A machine's stream opened. Events queued for its old stream died with it, so it hears which
+     * calls are still wanted and gets each again; it answers a call it already has from that.
+     */
+    machineConnected(userId: string, machineId: string): Effect.Effect<void>;
     /** Sends the person's grants to one machine, or to all of theirs. */
     pushPolicy(userId: string, machineId?: string): Effect.Effect<void>;
   }
@@ -371,6 +376,18 @@ export class ComputerCalls extends Context.Service<
           });
         });
 
+      const advanceHeld = (userId: string, machineId: string) =>
+        Effect.forEach(
+          [...entries.values()].filter(
+            (entry) =>
+              entry.userId === userId &&
+              entry.state.kind === "preparing" &&
+              entry.state.machineId === machineId,
+          ),
+          advance,
+          { discard: true },
+        );
+
       return ComputerCalls.of({
         open: (input) =>
           Effect.gen(function* () {
@@ -466,17 +483,22 @@ export class ComputerCalls extends Context.Service<
             return yield* finish(entry, result);
           }),
         pushPolicy,
-        machineChanged: (userId, machineId) =>
-          Effect.forEach(
-            [...entries.values()].filter(
+        machineConnected: (userId, machineId) =>
+          Effect.gen(function* () {
+            const sent = [...entries.values()].filter(
               (entry) =>
                 entry.userId === userId &&
-                entry.state.kind === "preparing" &&
+                entry.state.kind === "sent" &&
                 entry.state.machineId === machineId,
-            ),
-            advance,
-            { discard: true },
-          ),
+            );
+            yield* hub.send(userId, machineId, {
+              type: "running",
+              callIds: sent.map((entry) => entry.callId),
+            });
+            yield* Effect.forEach(sent, (entry) => send(entry, machineId), { discard: true });
+            yield* advanceHeld(userId, machineId);
+          }),
+        machineChanged: (userId, machineId) => advanceHeld(userId, machineId),
       });
     }),
   );

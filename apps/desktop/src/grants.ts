@@ -39,6 +39,8 @@ export interface Grants {
   forget(key: GrantKey, path: string): Effect.Effect<void>;
   /** Removes every path under a key. */
   forgetAll(key: GrantKey): Effect.Effect<void>;
+  /** Chats of this server with a folder attached. */
+  chats(origin: string): Effect.Effect<ReadonlyArray<string>>;
 }
 
 /** A chat's folders as its computer mounts them, at `/folders/<name>`. */
@@ -96,6 +98,12 @@ const makeStore = (
       state.delete(encodeKey(key));
       return persist;
     }),
+  chats: (origin) =>
+    Effect.sync(() =>
+      [...state.keys()]
+        .filter((id) => id.startsWith(`${origin} `))
+        .map((id) => id.slice(origin.length + 1)),
+    ),
 });
 
 export class GrantStore extends Context.Service<GrantStore, Grants>()("desktop/GrantStore") {

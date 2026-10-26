@@ -23,6 +23,8 @@ export interface ComputerHostOptions {
   readonly workspace: (conversationId: string) => Promise<string>;
   readonly folders: (conversationId: string) => Promise<readonly Mount[]>;
   readonly discardWorkspace: (conversationId: string) => Promise<void>;
+  /** Chats of this server with something kept here: a workspace or an attached folder. */
+  readonly localChats: () => Promise<readonly string[]>;
   /** Copies a chat's workspace into its branch's; nothing when too large or already there. */
   readonly cloneWorkspace: (from: string, to: string) => Promise<void>;
   /** The SSH agent to relay to, looked up when a connection opens. */
@@ -76,7 +78,7 @@ export class ComputerHost {
   private readonly client: MachineClient;
   private readonly calls = new Map<
     string,
-    { abort: AbortController; result: Promise<ToolResult> }
+    { abort: AbortController; result: Promise<ToolResult>; settled: boolean }
   >();
 
   constructor(private readonly options: ComputerHostOptions) {
@@ -147,6 +149,9 @@ export class ComputerHost {
       );
     await this.proxy.listen();
     this.client.start();
+    void this.forgetGone().catch((error: unknown) => {
+      this.options.log(`computer: removing purged chats failed: ${String(error)}`);
+    });
     let reported = 0;
     try {
       await this.options.hypervisor.prepare(this.options.image, (fraction) => {
@@ -244,8 +249,10 @@ export class ComputerHost {
             signal: abort.signal,
           },
         );
-        this.calls.set(event.callId, { abort, result });
+        const entry = { abort, result, settled: false };
+        this.calls.set(event.callId, entry);
         void result.then(async (answer) => {
+          entry.settled = true;
           await this.client.postResult(event.callId, answer, deadline);
           setTimeout(() => this.calls.delete(event.callId), KEPT_MS).unref();
         });
@@ -254,6 +261,12 @@ export class ComputerHost {
       case "cancel":
         this.calls.get(event.callId)?.abort.abort();
         return;
+      case "running": {
+        const wanted = new Set(event.callIds);
+        for (const [callId, call] of this.calls)
+          if (!call.settled && !wanted.has(callId)) call.abort.abort();
+        return;
+      }
       case "grants":
         this.policy.setGrants(this.options.origin, event.grants);
         return;
@@ -263,13 +276,35 @@ export class ComputerHost {
         });
         return;
       case "discard":
-        void this.vms
-          .discard(this.key(event.conversationId))
-          .then(() =>
-            event.workspace ? this.options.discardWorkspace(event.conversationId) : undefined,
-          );
+        void this.discardChat(event.conversationId, event.workspace);
         return;
     }
+  }
+
+  /** A chat is gone, or only its environment: its VM and disk go, and with the chat all it had. */
+  private async discardChat(conversationId: string, everything: boolean) {
+    const key = this.key(conversationId);
+    try {
+      await this.vms.discard(key);
+      if (!everything) return;
+      await this.options.discardWorkspace(conversationId);
+      if (this.agent.isAllowed(key)) {
+        this.agent.forget(key);
+        await this.saveAgentChats();
+      }
+    } catch (error) {
+      this.options.log(`computer: discarding a chat failed: ${String(error)}`);
+    }
+  }
+
+  /** Chats purged while this machine was offline missed their discard; it is done now. */
+  private async forgetGone() {
+    const local = new Set([
+      ...(await this.options.localChats()),
+      ...this.agent.allowed(this.options.origin),
+    ]);
+    for (const conversationId of await this.client.gone([...local]))
+      await this.discardChat(conversationId, true);
   }
 
   private async attachment(key: ChatKey, id: string) {

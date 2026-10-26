@@ -78,6 +78,12 @@ export const MachineEvent = Schema.Union([
   }),
   /** Stop a call: Stop, a lost lease or the deadline. */
   Schema.Struct({ type: Schema.Literal("cancel"), callId: Id }),
+  /**
+   * Sent first on every connect: the calls the server still waits on from this machine, sent
+   * again right after. Any other call still running here is over, its cancel lost with the old
+   * stream.
+   */
+  Schema.Struct({ type: Schema.Literal("running"), callIds: Schema.Array(Id) }),
   /** Every network grant of the person, whole each time it changes. */
   Schema.Struct({ type: Schema.Literal("grants"), grants: Schema.Array(DestinationGrant) }),
   /** A branch of a chat on this machine: its workspace files are copied, its installs are not. */
@@ -100,11 +106,19 @@ export const MachineFolders = Schema.Struct({
 });
 export type MachineFolders = typeof MachineFolders.Type;
 
+/** Chats this machine holds something for; the server answers which of them no longer exist. */
+export const MachineChats = Schema.Struct({
+  conversationIds: Schema.Array(Id).check(Schema.isMaxLength(10_000)),
+});
+export type MachineChats = typeof MachineChats.Type;
+
 /** Routes, relative to the server's origin. */
 export const MACHINE_ROUTES = {
   events: "/api/machine/events",
   result: (callId: string) => `/api/machine/calls/${encodeURIComponent(callId)}/result`,
   folders: "/api/machine/folders",
+  /** Which of the machine's chats are gone: purged while it was offline, so no discard came. */
+  gone: "/api/machine/gone",
   /** A new hello while connected: the image finished downloading, remote control changed. */
   status: "/api/machine/status",
 } as const;

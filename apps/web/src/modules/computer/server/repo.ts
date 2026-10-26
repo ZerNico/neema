@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import type { DestinationGrant, MachineHello } from "@chat/desktop-rpc";
 import {
@@ -45,6 +45,11 @@ export class ComputerRepo extends Context.Service<
     machines(userId: string): Effect.Effect<ReadonlyArray<MachineRecord>>;
     forgetMachine(userId: string, machineId: string): Effect.Effect<void>;
     chat(userId: string, conversationId: string): Effect.Effect<ChatComputer | null>;
+    /**
+     * Which of these chats no longer exist for anyone. A machine may hold chats of another
+     * account that signed in on it, and those must not look gone.
+     */
+    gone(conversationIds: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>>;
     /** Binds an unbound chat; false when it already has a machine or is not the person's. */
     bind(userId: string, conversationId: string, machineId: string): Effect.Effect<boolean>;
     /** Points the chat at another machine; its folders belong to the old one and go. */
@@ -122,6 +127,17 @@ export class ComputerRepo extends Context.Service<
             .delete(machines)
             .where(and(eq(machines.userId, userId), eq(machines.id, machineId)))
             .pipe(Effect.orDie, Effect.asVoid),
+        gone: (conversationIds) =>
+          Effect.gen(function* () {
+            if (conversationIds.length === 0) return [];
+            const found = yield* db
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(inArray(conversations.id, [...conversationIds]))
+              .pipe(Effect.orDie);
+            const existing = new Set(found.map((row) => row.id));
+            return conversationIds.filter((id) => !existing.has(id));
+          }),
         chat: (userId, conversationId) =>
           db
             .select({
