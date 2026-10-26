@@ -1,3 +1,4 @@
+import { english } from "~/i18n/localized.ts";
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, ManagedRuntime, Redacted, Stream, Duration } from "effect";
 import { eq, inArray } from "drizzle-orm";
@@ -338,18 +339,14 @@ describe("portable skill storage and ACLs", () => {
     expect(current.revision).toBeGreaterThan(0);
     await seed(60 * MiB, [other]);
     const before = blobs.size;
-    expect(
-      await run(
-        Effect.flip(
-          Effect.flatMap(SkillService, (service) =>
-            service.save(owner, { files: files("Over the quota") }),
-          ),
+    const overQuota = await run(
+      Effect.flip(
+        Effect.flatMap(SkillService, (service) =>
+          service.save(owner, { files: files("Over the quota") }),
         ),
       ),
-    ).toMatchObject({
-      _tag: "SkillRejected",
-      reason: expect.stringContaining("quota"),
-    });
+    );
+    expect(overQuota._tag === "SkillRejected" && english(overQuota.reason)).toContain("quota");
     expect(blobs.size).toBe(before);
   });
   it("keeps a revision referenced by history readable after the skill is soft deleted", async () => {
@@ -947,22 +944,23 @@ describe("binary files in skills", () => {
     expect(await openPreviewFile(owner, "skill-file", `${id}:not-a-hash`)).toBeNull();
 
     // A hash this skill never stored cannot be kept.
-    expect(
-      await run(
-        Effect.flip(
-          Effect.flatMap(SkillService, (service) =>
-            service.save(owner, {
-              skillId: id,
-              expectedRevision: detail.revision + 1,
-              files: [
-                root,
-                { path: "x.bin", binary: { size: 1, mediaType: "x", sha256: "e".repeat(64) } },
-              ],
-            }),
-          ),
+    const unknownHash = await run(
+      Effect.flip(
+        Effect.flatMap(SkillService, (service) =>
+          service.save(owner, {
+            skillId: id,
+            expectedRevision: detail.revision + 1,
+            files: [
+              root,
+              { path: "x.bin", binary: { size: 1, mediaType: "x", sha256: "e".repeat(64) } },
+            ],
+          }),
         ),
       ),
-    ).toMatchObject({ _tag: "SkillRejected", reason: expect.stringContaining("upload it again") });
+    );
+    expect(unknownHash._tag === "SkillRejected" && english(unknownHash.reason)).toContain(
+      "upload it again",
+    );
 
     // Removing the skill releases the bytes.
     const key = (

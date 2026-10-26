@@ -1,3 +1,4 @@
+import { english } from "~/i18n/localized.ts";
 import { PgClient } from "@effect/sql-pg";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
@@ -372,9 +373,8 @@ describe("custom tool access", () => {
     );
 
     expect(result.memberAgent).toEqual(expect.any(String));
-    expect(result.outsiderAttach).toMatchObject({
-      reason: "a selected custom tool is unavailable",
-    });
+    expect(result.outsiderAttach).toMatchObject({ _tag: "AgentRejected" });
+    expect(english(result.outsiderAttach.reason)).toBe("a selected custom tool is unavailable");
     expect(result.before).toEqual({
       member: 1,
       outsider: 0,

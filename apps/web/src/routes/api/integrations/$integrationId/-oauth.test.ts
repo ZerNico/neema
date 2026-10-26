@@ -1,3 +1,4 @@
+import { verbatim } from "~/i18n/localized.ts";
 import { Effect } from "effect";
 import type { IntegrationService } from "~/modules/integrations/server/service.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -246,7 +247,7 @@ describe("finishing an OAuth connection", () => {
   });
 
   it("reports the service's refusal back on the settings page", async () => {
-    mocks.complete.mockReturnValue(Effect.fail({ reason: "The sign-in has expired." }));
+    mocks.complete.mockReturnValue(Effect.fail({ reason: verbatim("The sign-in has expired.") }));
     const response = await call(Callback, callback, `${cookies.state}=s-123`);
     expect(response.headers.get("location")).toBe(
       "/settings/integrations/wiki?error=The+sign-in+has+expired.",
@@ -272,7 +273,7 @@ describe("finishing an OAuth connection", () => {
   });
 
   it("answers a garbled landing cookie with Settings, not a crash", async () => {
-    mocks.complete.mockReturnValue(Effect.fail({ reason: "The sign-in has expired." }));
+    mocks.complete.mockReturnValue(Effect.fail({ reason: verbatim("The sign-in has expired.") }));
     const response = await call(
       Callback,
       callback,
@@ -285,7 +286,9 @@ describe("finishing an OAuth connection", () => {
 
   it("shows the outcome, good or bad, on the page the sign-in asked for", async () => {
     const back = `${cookies.back}=${encodeURIComponent("/integrations/connected?attempt=a-1")}`;
-    mocks.complete.mockReturnValue(Effect.fail({ reason: "Atlassian refused this site." }));
+    mocks.complete.mockReturnValue(
+      Effect.fail({ reason: verbatim("Atlassian refused this site.") }),
+    );
     const refused = await call(Callback, callback, `${cookies.state}=s-123; ${back}`);
     expect(refused.headers.get("location")).toBe(
       "/integrations/connected?attempt=a-1&error=Atlassian+refused+this+site.",
