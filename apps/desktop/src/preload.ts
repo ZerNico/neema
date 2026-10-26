@@ -5,6 +5,7 @@ import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
 import { makeNetworkBridge } from "./network-preload.ts";
 import { makeBrowserBridge } from "./browser-preload.ts";
 import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
+import { systemLocaleFromArgv } from "./system-locale.ts";
 
 declare const location: { readonly protocol: string };
 
@@ -21,6 +22,7 @@ if (location.protocol === "file:") {
   contextBridge.exposeInMainWorld(BRIDGE_KEY, {
     protocolVersion: PROTOCOL_VERSION,
     build: __BUILD_STAMP__,
+    systemLocale: systemLocaleFromArgv(process.argv),
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
     network: makeNetworkBridge(ipcRenderer),

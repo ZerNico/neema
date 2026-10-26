@@ -28,6 +28,8 @@ export interface DesktopChannel {
   readonly protocolVersion: number;
   /** Short git sha and build time of the shell, for the reader and for bug reports. */
   readonly build?: string;
+  /** The operating system's region format, such as "en-DE", which the page's languages lack. */
+  readonly systemLocale?: string;
   readonly chrome?: DesktopChrome;
   /** Stages a real dropped File without exposing its host path to the page. */
   stageDroppedFile(file: File, payload: unknown): Promise<BridgeReply | null>;

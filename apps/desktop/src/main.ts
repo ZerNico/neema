@@ -86,6 +86,7 @@ import {
   ticketFromDeepLink,
   userAgentToken,
 } from "./sign-in-link.ts";
+import { SYSTEM_LOCALE_ARGUMENT } from "./system-locale.ts";
 
 // Bundled to CJS, because an Electron preload must be CJS while `sandbox: true`.
 // `import.meta.url` is empty under that format; `__dirname` is the real thing.
@@ -411,6 +412,7 @@ const openMainWindow = (origin: string) => {
       // named here too, since it belongs to this origin.
       additionalArguments: [
         `${BROWSER_PROFILE_ARGUMENT}=${profile}`,
+        `${SYSTEM_LOCALE_ARGUMENT}=${app.getSystemLocale()}`,
         ...(devOrigin === null ? [] : [FIXED_SERVER_ARGUMENT]),
       ],
     },
