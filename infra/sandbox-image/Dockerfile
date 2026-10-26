@@ -1,0 +1,59 @@
+# The Linux guest every chat's computer runs in (docs/internals/desktop.md). Commands run as
+# root: the VM is the boundary, not users inside it. The desktop pins a published build by
+# digest, so a change here ships with a desktop release.
+
+FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS node
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    IS_SANDBOX=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+
+# The nogui LibreOffice packages convert and render documents headless without pulling in a
+# desktop. The fonts cover Office documents' usual faces (Carlito and Caladea are metric
+# matches for Calibri and Cambria).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget git openssh-client socat procps less file \
+      unzip zip xz-utils jq sqlite3 ripgrep tzdata \
+      build-essential pkg-config \
+      python3 python3-pip python3-venv python3-dev \
+      pandoc poppler-utils qpdf ghostscript imagemagick ffmpeg \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
+      libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
+      fonts-liberation fonts-dejavu-core fonts-noto-core \
+      fonts-crosextra-carlito fonts-crosextra-caladea \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+COPY --from=uv /uv /uvx /usr/local/bin/
+
+# The model installs with plain `pip install` as root; Debian's externally-managed marker
+# would refuse that, and there is no system Python of ours to protect in a per-chat VM.
+COPY requirements.txt /tmp/requirements.txt
+RUN rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED \
+ && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
+ && rm /tmp/requirements.txt
+
+# Mounted folders belong to the person's host account, not root, and git refuses a repository
+# owned by someone else. First contact with a new SSH host is trusted, per chat VM.
+RUN git config --system --add safe.directory '*' \
+ && git config --system init.defaultBranch main \
+ && printf 'Host *\n  StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-sandbox.conf
+
+COPY ssh-agent-bridge /usr/local/bin/ssh-agent-bridge
+COPY smoke.sh /usr/local/share/sandbox/smoke.sh
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

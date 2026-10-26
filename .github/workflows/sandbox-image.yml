@@ -1,0 +1,170 @@
+name: Sandbox image
+
+# The Linux guest of every chat's computer (infra/sandbox-image). Pull requests build and smoke
+# test amd64 without pushing. main publishes `edge` and the commit sha, each architecture on its
+# own native runner pushed by digest, then joined under the tags; a manual run from a branch
+# publishes under the branch name. The desktop pins the joined
+# digest by hand, since a new image ships with a desktop release. The package must be public:
+# desktops pull it without credentials.
+
+on:
+  pull_request:
+    paths: ["infra/sandbox-image/**", ".github/workflows/sandbox-image.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/sandbox-image/**", ".github/workflows/sandbox-image.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-image-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PUSH: ${{ github.event_name != 'pull_request' }}
+  TAGS: |
+    type=edge,branch=main
+    type=sha,enable=${{ github.ref == 'refs/heads/main' }}
+    type=ref,event=pr
+    type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"arch":"amd64","runner":"ubuntu-24.04"}]' || '[{"arch":"amd64","runner":"ubuntu-24.04"},{"arch":"arm64","runner":"ubuntu-24.04-arm"}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Image name
+        id: image
+        # GHCR requires a lowercase repository path.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/neema-sandbox" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: ${{ env.TAGS }}
+          flavor: latest=false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Built into the local engine first so the smoke test runs the exact layers the push
+      # below reuses from the cache.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: infra/sandbox-image
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: sandbox-smoke:local
+          cache-from: type=gha,scope=sandbox-image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=sandbox-image-${{ matrix.arch }}
+          provenance: false
+
+      - name: Smoke test
+        run: docker run --rm --network none sandbox-smoke:local sh /usr/local/share/sandbox/smoke.sh
+
+      - name: Image size
+        run: docker image inspect sandbox-smoke:local --format '{{.Size}}' | numfmt --to=iec
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        if: env.PUSH == 'true'
+        with:
+          context: infra/sandbox-image
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=sandbox-image-${{ matrix.arch }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Export digest
+        if: env.PUSH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: env.PUSH == 'true'
+        with:
+          name: sandbox-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: sandbox-digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/neema-sandbox" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: ${{ env.TAGS }}
+          flavor: latest=false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          args=()
+          while IFS= read -r tag; do args+=(--tag "$tag"); done \
+            < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          while IFS= read -r annotation; do args+=(--annotation "$annotation"); done \
+            < <(jq -r '.annotations[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for digest in *; do args+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${args[@]}"
+
+      - name: Digest to pin
+        run: |
+          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digest=$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "Pin in the desktop: ${tag%:*}@$digest" | tee -a "$GITHUB_STEP_SUMMARY"

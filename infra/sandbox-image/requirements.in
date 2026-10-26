@@ -1,0 +1,25 @@
+# Python packages preinstalled in the sandbox image. Edit this file, then regenerate the lock:
+#   uv pip compile requirements.in --python-version 3.12 --universal --generate-hashes -o requirements.txt
+# Tables and numbers
+numpy
+pandas
+scipy
+# Office files
+openpyxl
+xlsxwriter
+python-docx
+python-pptx
+# PDFs
+pypdf
+pdfplumber
+reportlab
+# Charts and images
+matplotlib
+pillow
+# Web and text
+requests
+beautifulsoup4
+lxml
+pyyaml
+jinja2
+tabulate
