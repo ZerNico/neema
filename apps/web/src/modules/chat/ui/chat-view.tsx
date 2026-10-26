@@ -331,8 +331,14 @@ export function ChatView({
             <div className="min-h-0 flex-1">
               <ResearchPanelOwner messages={display} />
               <SourcesPanelOwner messages={display} />
-              {/* No workspace root yet: a local path resolves once the chat's machine names one. */}
-              <LocalFileConversationProvider conversationId={conversationId}>
+              <LocalFileConversationProvider
+                conversationId={
+                  data.conversation.machineId !== null &&
+                  data.conversation.machineId === localMachineId
+                    ? conversationId
+                    : null
+                }
+              >
                 <WritableChatProjectProvider
                   project={
                     data.project && projectCan.edit(data.project.role)

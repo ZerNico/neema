@@ -484,8 +484,8 @@ export function DesktopActivityBlock({
   const running = activity.status === "running";
   const failed = activity.status === "error";
   const [open, setOpen] = useState(false);
-  // Null in a browser, which is what keeps a Work chat readable there without
-  // offering a machine it cannot reach. Nothing is read until this is called.
+  // Null in a browser or on another machine, which keeps the chat readable there
+  // without offering files it cannot reach. Nothing is read until this is called.
   const preview = useLocalFilePreview(previewablePath(activity));
   if (running && approval)
     return (
