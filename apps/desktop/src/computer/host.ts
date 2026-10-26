@@ -19,7 +19,8 @@ export interface ComputerHostOptions {
   readonly machine: { readonly id: string; readonly name: string };
   /** A fetch carrying the desktop session's cookies for `origin`. */
   readonly fetch: (url: string, init?: RequestInit) => Promise<Response>;
-  readonly workspace: (conversationId: string) => string;
+  /** The chat's workspace on the host, created when missing: the VM mounts it as /workspace. */
+  readonly workspace: (conversationId: string) => Promise<string>;
   readonly folders: (conversationId: string) => Promise<readonly Mount[]>;
   readonly discardWorkspace: (conversationId: string) => Promise<void>;
   /** Copies a chat's workspace into its branch's; nothing when too large or already there. */
@@ -213,7 +214,7 @@ export class ComputerHost {
             vms: this.vms,
             egress: this.policy,
             setup: async (key) => ({
-              workspace: this.options.workspace(key.conversationId),
+              workspace: await this.options.workspace(key.conversationId),
               mounts: await this.options.folders(key.conversationId),
             }),
             attachment: (key, id) => this.attachment(key, id),

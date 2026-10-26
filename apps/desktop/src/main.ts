@@ -249,8 +249,8 @@ const startComputer = (origin: string) => {
     machine,
     fetch: (url, init) => session.defaultSession.fetch(url, init),
     workspace: (conversationId) =>
-      runtime.runSync(
-        Effect.map(WorkspaceRegistry, (workspaces) => workspaces.path(conversationId)),
+      runtime.runPromise(
+        Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.ensure(conversationId)),
       ),
     folders: async (conversationId) =>
       mountsOf(

@@ -52,9 +52,7 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
 
   beforeAll(async () => {
     root = await realpath(await mkdtemp(join(tmpdir(), "real-host-")));
-    const workspace = join(root, "workspace");
     const folder = join(root, "notes");
-    await mkdir(workspace, { recursive: true });
     await mkdir(folder, { recursive: true });
     await writeFile(join(folder, "todo.md"), "- ship it\n");
     server = createServer(async (request, response) => {
@@ -93,7 +91,11 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       }),
       machine: { id: "machine-1", name: "Test Mac" },
       fetch: (url, init) => fetch(url, init),
-      workspace: () => workspace,
+      // Like main's `ensure`: a chat's first call finds no workspace folder yet.
+      workspace: async () => {
+        await mkdir(join(root, "workspace"), { recursive: true });
+        return join(root, "workspace");
+      },
       folders: async () => [{ name: "notes", hostPath: folder, readOnly: false }],
       discardWorkspace: async () => {},
       cloneWorkspace: async () => {},
