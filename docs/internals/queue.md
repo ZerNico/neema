@@ -14,7 +14,7 @@ A message sent while an answer is generating becomes a queue entry instead of be
 
 ## Chats with a computer
 
-- A queued message in a chat with a computer starts like any other, from the server, wherever it was queued. Its local calls go to the chat's machine when they run, so a machine offline by then answers them as offline. Queue entries store no machine state, since it can be stale by the time an entry reaches the front.
+- A queued message in a chat with a computer starts like any other, from the server, wherever it was queued. Its local calls go to the chat's machine when they run, so a machine offline by then answers them as offline. Queue entries store no machine state, since it can be stale by the time an entry reaches the front. They keep the session that queued them, so a message typed at a machine that refuses remote use still runs there when the server starts it ([desktop](desktop.md#approvals-and-permissions)).
 - Files sent with a queued message are attachments like any other and land in the workspace when a call first runs after promotion ([desktop](desktop.md#files-into-and-out-of-the-chat)).
 
 ## Steering

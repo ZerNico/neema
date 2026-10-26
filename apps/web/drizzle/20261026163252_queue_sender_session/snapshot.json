@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "08c3c5d4-cbec-48ae-8d36-36bcae71bb78",
+  "prevIds": [
+    "036e76e9-dcf6-4104-b185-85bfbcb03123"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversation_queue_entries",
+        "sender_session_id"
+      ],
+      "writes": [
+        "s|col|public.conversation_queue_entries.sender_session_id",
+        "n|col|public.conversation_queue_entries.sender_session_id",
+        "e|col|public.conversation_queue_entries.sender_session_id"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_queue_entries",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_queue_entries",
+        "name": "sender_session_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

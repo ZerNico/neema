@@ -256,6 +256,11 @@ export const conversationQueueEntries = pgTable(
     }),
     steerGenerationId: text("steer_generation_id"),
     lastError: text("last_error"),
+    /**
+     * The session that queued or last rewrote it. When the server starts it, this says whether
+     * it came from the chat's machine (docs/internals/desktop.md): no request is there to ask.
+     */
+    senderSessionId: text("sender_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

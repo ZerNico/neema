@@ -31,6 +31,8 @@ export type QueueSubmission = {
   input: QueuedTurnInput;
   /** Present when queued from the desktop app. */
   desktop?: DesktopSubmission | undefined;
+  /** From the request's session, never its body. */
+  senderSessionId?: string | undefined;
 };
 
 export type QueueSubmissionError =
@@ -133,6 +135,7 @@ export const makeQueueService = (deps: {
         content: input.content.trim(),
         attachmentIds: input.attachmentIds,
         input: input.input,
+        senderSessionId: input.senderSessionId,
       });
       yield* queueChanged(input.userId, input.conversationId);
       // The answer it was queued behind may have finished while this request
@@ -152,6 +155,7 @@ export const makeQueueService = (deps: {
         content: input.content.trim(),
         attachmentIds: input.attachmentIds,
         input: input.input,
+        senderSessionId: input.senderSessionId,
       });
       yield* attachmentService.deleteBlobs(orphaned);
       yield* queueChanged(input.userId, input.conversationId);
@@ -268,7 +272,8 @@ export const makeQueueService = (deps: {
           timeZone: outcome.entry.input.timeZone,
           openDocument: outcome.entry.input.openDocument,
           desktop: input.desktop,
-          deviceSessionId: input.deviceSessionId,
+          // Started by the server, no request says where it came from; the entry does.
+          deviceSessionId: input.deviceSessionId ?? outcome.entry.senderSessionId ?? undefined,
         });
         return { started: true };
       }).pipe(

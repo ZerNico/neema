@@ -151,6 +151,7 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
                 userId: input.userId,
                 content: input.content,
                 input: input.input,
+                senderSessionId: input.senderSessionId ?? null,
               })
               .returning()
               .pipe(Effect.orDie);
@@ -176,6 +177,7 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
               .set({
                 content: input.content,
                 input: input.input,
+                senderSessionId: input.senderSessionId ?? null,
                 revision: sql`${conversationQueueEntries.revision} + 1`,
                 steerMessageId: null,
                 steerGenerationId: null,

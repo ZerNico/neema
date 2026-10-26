@@ -9032,6 +9032,99 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
+  it("runs a queued message's calls as sent from the machine that queued it", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      // The first answer settles the chat, so the queue may move; the queued one lists.
+      if (round === 2) return authoringTool(input, "list_folder", { path: "." });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const delivered = await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* (yield* ComputerRepo).saveMachine(seed.userId, {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin",
+            computer: { status: "ready" },
+            remote: false,
+          });
+          yield* db
+            .update(conversations)
+            .set({ machineId: "laptop", permissionLevel: "allow" })
+            .where(eq(conversations.id, seed.conversation.id));
+          const engine = yield* StreamEngine;
+          const first = yield* (yield* ChatService).sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Hello",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          yield* Stream.runDrain(engine.subscribe(first.assistantMessageId, 0));
+          // Remote use is off: only the machine's own session may run its calls.
+          const events = yield* (yield* MachineHub).connect(
+            seed.userId,
+            {
+              machineId: "laptop",
+              name: "Laptop",
+              platform: "darwin",
+              computer: { status: "ready" },
+              remote: false,
+            },
+            "laptop-session",
+          );
+          // The chat is idle, so the server starts the entry itself, with no request to ask.
+          yield* (yield* ChatService).queueMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "What is in the workspace?",
+            attachmentIds: [],
+            input: { modelId: textModelId, searchEnabled: false, researchEnabled: false },
+            senderSessionId: "laptop-session",
+          });
+          const [event] = yield* Stream.filter(events, (next) => next.type === "call").pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          );
+          if (event?.type !== "call") throw new Error("no call reached the machine");
+          yield* (yield* ExternalCompletion).complete(event.callId, {
+            v: 1,
+            ok: true,
+            summary: "Listed .",
+            detail: "/workspace/",
+            truncated: false,
+          });
+          // The queued message's answer: the newest one.
+          const answers = yield* db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.conversationId, seed.conversation.id),
+                eq(messages.role, "assistant"),
+              ),
+            )
+            .orderBy(messages.createdAt);
+          expect(answers).toHaveLength(2);
+          yield* Stream.runDrain(engine.subscribe(answers.at(-1)!.id, 0));
+          return event;
+        }).pipe(Effect.scoped),
+      );
+      expect(delivered).toMatchObject({ type: "call", name: "list_folder" });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("offers the browser only to an app that can drive one, vouching for the user's own addresses", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const offered: string[][] = [];

@@ -155,9 +155,10 @@ export const sendMessage = createServerFn({ method: "POST" })
 /** The fields a queued submission carries, shared by queueing and editing. */
 const queueSubmission = (
   data: typeof QueueMessageInput.Type,
-  session: { user: { id: string } },
+  session: { user: { id: string }; session: { id: string } },
 ) => ({
   userId: session.user.id,
+  senderSessionId: session.session.id,
   conversationId: data.conversationId,
   content: data.content,
   attachmentIds: data.attachmentIds,

@@ -229,7 +229,8 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   event stream and its own page share one desktop session, so a call counts as sent from the
   machine whose stream holds the sending session. A request naming a machine would prove
   nothing: any session of the person could make it. It is asked when the call is decided, so
-  a reconnect in between changes nothing.
+  a reconnect in between changes nothing. A queued message the server starts has no request,
+  so it counts as sent from the session that queued it, kept on the entry.
 - **Attaching a folder yourself** happens in the desktop app on that machine, through the
   native picker, and refuses a folder that is a disk root, the home folder itself, the app's
   own data, or holds or lies inside credentials (`folder-access.ts`), judged by where links

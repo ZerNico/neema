@@ -586,6 +586,8 @@ export class ChatRepo extends Context.Service<
       content: string;
       input: QueuedTurnInput;
       attachmentIds: ReadonlyArray<string>;
+      /** Absent when no session queued it; such an entry never counts as sent from a machine. */
+      senderSessionId?: string | undefined;
     }): Effect.Effect<QueueEntry, ConversationNotFound | QueueFull | AttachmentNotAvailable>;
     /**
      * Rewrites a queued message in place, keeping its id and so its position.
@@ -600,6 +602,8 @@ export class ChatRepo extends Context.Service<
       content: string;
       input: QueuedTurnInput;
       attachmentIds: ReadonlyArray<string>;
+      /** Absent when no session queued it; such an entry never counts as sent from a machine. */
+      senderSessionId?: string | undefined;
     }): Effect.Effect<
       ReadonlyArray<string>,
       ConversationNotFound | QueueEntryNotFound | AttachmentNotAvailable
