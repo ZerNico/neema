@@ -1,3 +1,4 @@
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import type { DestinationGrant, MachineHello } from "@chat/desktop-rpc";
@@ -17,7 +18,7 @@ export interface ChatComputer {
   readonly conversationId: string;
   readonly machineId: string | null;
   readonly folders: ReadonlyArray<{ name: string; readOnly: boolean }>;
-  readonly permissionLevel: "ask" | "allow";
+  readonly permissionLevel: PermissionLevel;
 }
 
 export interface MachineRecord {
@@ -71,7 +72,7 @@ export class ComputerRepo extends Context.Service<
     setPermissionLevel(
       userId: string,
       conversationId: string,
-      level: "ask" | "allow",
+      level: PermissionLevel,
     ): Effect.Effect<boolean>;
     grants(userId: string): Effect.Effect<ReadonlyArray<DestinationGrant>>;
     addGrant(

@@ -122,6 +122,9 @@ export class ProviderRepo extends Context.Service<
     /** The model side generations prefer, or null to use each chat's own. */
     getUtilityModelId(): Effect.Effect<string | null>;
     setUtilityModelId(modelId: string | null): Effect.Effect<void, InvalidUtilityModel>;
+    /** The model that checks computer calls under "ask when risky", or null for the chat's own. */
+    getReviewModelId(): Effect.Effect<string | null>;
+    setReviewModelId(modelId: string | null): Effect.Effect<void, InvalidUtilityModel>;
     /**
      * The model row when this user may use it as `type` right now, else null:
      * the listing's own predicate, so a listed model always passes and an
@@ -213,6 +216,43 @@ export class ProviderRepo extends Context.Service<
                 family: settings.imageFamily ?? "",
               }),
             });
+        });
+
+      /** One of the instance's model choices; see `modelSettings`. */
+      const modelSetting = (column: "utilityModelId" | "reviewModelId") =>
+        db
+          .select({ id: modelSettings[column] })
+          .from(modelSettings)
+          .where(eq(modelSettings.id, MODEL_SETTINGS_ID))
+          .pipe(
+            Effect.orDie,
+            Effect.map((rows) => rows[0]?.id ?? null),
+          );
+      /** Sets one, refusing a model that is not a chat model; null clears it. */
+      const setModelSetting = (
+        column: "utilityModelId" | "reviewModelId",
+        modelId: string | null,
+      ) =>
+        Effect.gen(function* () {
+          if (modelId !== null) {
+            const rows = yield* db
+              .select({ type: models.type })
+              .from(models)
+              .where(eq(models.id, modelId))
+              .pipe(Effect.orDie);
+            if (rows[0]?.type !== "chat")
+              return yield* new InvalidUtilityModel({
+                reason: localized(m.providers_error_utility_not_chat),
+              });
+          }
+          yield* db
+            .insert(modelSettings)
+            .values({ id: MODEL_SETTINGS_ID, [column]: modelId })
+            .onConflictDoUpdate({
+              target: modelSettings.id,
+              set: { [column]: modelId, updatedAt: new Date() },
+            })
+            .pipe(Effect.orDie);
         });
 
       return ProviderRepo.of({
@@ -432,34 +472,19 @@ export class ProviderRepo extends Context.Service<
         }),
 
         getUtilityModelId: Effect.fn("ProviderRepo.getUtilityModelId")(function* () {
-          const rows = yield* db
-            .select({ id: modelSettings.utilityModelId })
-            .from(modelSettings)
-            .where(eq(modelSettings.id, MODEL_SETTINGS_ID))
-            .pipe(Effect.orDie);
-          return rows[0]?.id ?? null;
+          return yield* modelSetting("utilityModelId");
         }),
 
         setUtilityModelId: Effect.fn("ProviderRepo.setUtilityModelId")(function* (modelId) {
-          if (modelId !== null) {
-            const rows = yield* db
-              .select({ type: models.type })
-              .from(models)
-              .where(eq(models.id, modelId))
-              .pipe(Effect.orDie);
-            if (rows[0]?.type !== "chat")
-              return yield* new InvalidUtilityModel({
-                reason: localized(m.providers_error_utility_not_chat),
-              });
-          }
-          yield* db
-            .insert(modelSettings)
-            .values({ id: MODEL_SETTINGS_ID, utilityModelId: modelId })
-            .onConflictDoUpdate({
-              target: modelSettings.id,
-              set: { utilityModelId: modelId, updatedAt: new Date() },
-            })
-            .pipe(Effect.orDie);
+          yield* setModelSetting("utilityModelId", modelId);
+        }),
+
+        getReviewModelId: Effect.fn("ProviderRepo.getReviewModelId")(function* () {
+          return yield* modelSetting("reviewModelId");
+        }),
+
+        setReviewModelId: Effect.fn("ProviderRepo.setReviewModelId")(function* (modelId) {
+          yield* setModelSetting("reviewModelId", modelId);
         }),
 
         usableModel: Effect.fn("ProviderRepo.usableModel")(function* (userId, modelId, type) {

@@ -47,6 +47,16 @@ describe("DesktopActivityBlock", () => {
     expect(screen.getByText("Couldn’t read image.png")).toBeInTheDocument();
   });
 
+  it("shows why the reviewer asked", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({ args: { command: "git push --force" } })}
+        approval={{ kind: "command", reason: "It rewrites the remote history.", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("Checked first: It rewrites the remote history.")).toBeInTheDocument();
+  });
+
   it("still draws a stored row of a tool since removed", () => {
     const removed: string = "move_local_file";
     show(

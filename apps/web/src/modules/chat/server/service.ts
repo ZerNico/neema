@@ -4,7 +4,7 @@ import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { m } from "~/paraglide/messages.js";
 import { localized } from "~/i18n/localized.ts";
 import { IntegrationRepo } from "~/modules/integrations/server/repo.ts";
-import type { DesktopSubmission, OpenDocument } from "../schema.ts";
+import type { DesktopSubmission, OpenDocument, PermissionLevel } from "../schema.ts";
 import type { SkillNotAvailable, SkillRejected } from "~/modules/skills/errors.ts";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
@@ -346,7 +346,7 @@ export class ChatService extends Context.Service<
     setPermissionLevel(input: {
       userId: string;
       conversationId: string;
-      permissionLevel: "ask" | "allow";
+      permissionLevel: PermissionLevel;
     }): Effect.Effect<void, ConversationNotFound>;
     renameConversation(input: {
       userId: string;

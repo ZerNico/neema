@@ -367,6 +367,8 @@ export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
   /** For `bind`: the machine the chat's computer would run on. */
   readonly machine?: string | undefined;
+  /** Why the reviewer asked, under "ask when risky". */
+  readonly reason?: string | undefined;
   /** The live call's arguments, which may hold what the transcript never stores. */
   readonly args?: Readonly<Record<string, unknown>> | null;
   readonly decide: (choice: ApprovalChoice) => void;
@@ -412,6 +414,11 @@ function ApprovalCard({
             {approvalTitle(activity, approval.kind, roots, approval.machine)}
           </span>
         </div>
+        {approval.reason ? (
+          <p className="text-muted-foreground text-xs">
+            {m.chat_desktop_review_reason({ reason: approval.reason })}
+          </p>
+        ) : null}
         {approval.kind === "bind" ? (
           <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
         ) : listed.length > 1 ? (

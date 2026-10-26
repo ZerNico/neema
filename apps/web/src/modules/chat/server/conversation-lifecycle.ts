@@ -1,3 +1,4 @@
+import type { PermissionLevel } from "../schema.ts";
 import { Duration, Effect, Schedule } from "effect";
 import { ConversationNotFound, MessageNotFound } from "~/modules/chat/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -114,7 +115,7 @@ export const makeConversationLifecycle = Effect.gen(function* () {
   const setPermissionLevel = Effect.fn("ChatService.setPermissionLevel")(function* (input: {
     userId: string;
     conversationId: string;
-    permissionLevel: "ask" | "allow";
+    permissionLevel: PermissionLevel;
   }) {
     const updated = yield* computers.setPermissionLevel(
       input.userId,

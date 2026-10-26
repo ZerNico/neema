@@ -58,7 +58,7 @@ export const conversations = pgTable(
       .default([]),
     // How much the computer asks before acting. A fact about the chat, so every device honours
     // the same choice. Deletes and network destinations always ask.
-    permissionLevel: text("permission_level", { enum: ["ask", "allow"] })
+    permissionLevel: text("permission_level", { enum: ["ask", "review", "allow"] })
       .notNull()
       .default("ask"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

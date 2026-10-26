@@ -114,7 +114,8 @@ function PermissionPicker({
         <DropdownMenuRadioGroup
           value={level}
           onValueChange={(value) => {
-            if (value === "ask" || value === "allow") onChange(value);
+            const chosen = PERMISSION_LEVELS.find((option) => option.value === value);
+            if (chosen) onChange(chosen.value);
           }}
         >
           {PERMISSION_LEVELS.map((option) => (

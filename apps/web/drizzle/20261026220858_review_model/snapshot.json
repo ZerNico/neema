@@ -1,0 +1,90 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "e04ba4da-fdef-41fc-b183-36ec7ab89cf1",
+  "prevIds": [
+    "08c3c5d4-cbec-48ae-8d36-36bcae71bb78"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "model_settings",
+        "review_model_id"
+      ],
+      "writes": [
+        "s|col|public.model_settings.review_model_id",
+        "n|col|public.model_settings.review_model_id",
+        "e|col|public.model_settings.review_model_id"
+      ],
+      "reads": [
+        "n|tbl|public.model_settings",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "model_settings"
+      ],
+      "writes": [
+        "s|fk|public.model_settings.model_settings_review_model_id_models_id_fkey",
+        "n|fk|public.model_settings.model_settings_review_model_id_models_id_fkey",
+        "e|fk|public.model_settings.model_settings_review_model_id_models_id_fkey",
+        "n|con|public.model_settings.model_settings_review_model_id_models_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.model_settings",
+        "n|sch|public",
+        "n|tbl|public.models",
+        "n|sch|public",
+        "n|col|public.model_settings.review_model_id",
+        "n|col|public.models.id",
+        "e|uniqueness|public.models.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_settings",
+        "name": "review_model_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "model_settings",
+        "name": "model_settings_review_model_id_models_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "review_model_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "models",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    }
+  ]
+}

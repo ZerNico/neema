@@ -7,6 +7,7 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { MachineHub } from "./hub.ts";
 import { sentFilePaths } from "./files.ts";
 import { ComputerRepo } from "./repo.ts";
+import { CommandReviewer } from "./review.ts";
 
 /** What a call asks before it runs. `bind` chooses the chat's machine. */
 export type ComputerApproval = "bind" | "edit" | "command" | "delete" | "network";
@@ -23,6 +24,8 @@ export interface PendingCall {
   readonly approval: ComputerApproval;
   /** For `bind`: the machine the chat would use. */
   readonly machine?: { readonly id: string; readonly name: string };
+  /** Why the reviewer asked, under "ask when risky", in the person's language. */
+  readonly reason?: string;
 }
 
 interface Entry {
@@ -34,6 +37,8 @@ interface Entry {
   readonly deadlineAt: number;
   /** The session the message came from; which machine that is, the hub says (`senderOf`). */
   readonly senderSession: string | undefined;
+  /** The answer's model, which reviews the call when the admin chose no reviewer. */
+  readonly modelId: string | undefined;
   /** The call's own scope: what runs for it ends with it. */
   readonly scope: Scope.Scope;
   /** It already waited once for a machine to come back, so an absent one is now an answer. */
@@ -44,6 +49,7 @@ interface Entry {
         readonly kind: "waiting";
         readonly approval: ComputerApproval;
         readonly machine?: { id: string; name: string };
+        readonly reason?: string;
       }
     | { readonly kind: "sent"; readonly machineId: string }
     /**
@@ -128,6 +134,8 @@ export class ComputerCalls extends Context.Service<
       timeoutMs: number;
       /** From the request's session, never its body. */
       senderSession?: string | undefined;
+      /** The answer's model; see `Entry.modelId`. */
+      modelId?: string | undefined;
     }): Effect.Effect<void, never, Scope.Scope>;
     decide(userId: string, callId: string, choice: ComputerChoice): Effect.Effect<boolean>;
     pending(userId: string): Effect.Effect<ReadonlyArray<PendingCall>>;
@@ -155,6 +163,7 @@ export class ComputerCalls extends Context.Service<
       const hub = yield* MachineHub;
       const repo = yield* ComputerRepo;
       const external = yield* ExternalCompletion;
+      const reviewer = yield* CommandReviewer;
       const bus = yield* SyncBus;
       const entries = new Map<string, Entry>();
       const startedAt = yield* Clock.currentTimeMillis;
@@ -198,13 +207,16 @@ export class ComputerCalls extends Context.Service<
       const wait = (
         entry: Entry,
         approval: ComputerApproval,
-        machine?: { id: string; name: string },
+        extra: { machine?: { id: string; name: string }; reason?: string | null } = {},
       ) =>
         Effect.gen(function* () {
           if (ended(entry)) return;
-          entry.state = machine
-            ? { kind: "waiting", approval, machine }
-            : { kind: "waiting", approval };
+          entry.state = {
+            kind: "waiting",
+            approval,
+            ...(extra.machine ? { machine: extra.machine } : {}),
+            ...(extra.reason ? { reason: extra.reason } : {}),
+          };
           yield* changed(entry.userId);
         });
 
@@ -263,7 +275,9 @@ export class ComputerCalls extends Context.Service<
               );
               return;
             }
-            yield* wait(entry, "bind", { id: candidate.machineId, name: candidate.hello.name });
+            yield* wait(entry, "bind", {
+              machine: { id: candidate.machineId, name: candidate.hello.name },
+            });
             return;
           }
           const presence = yield* hub.presence(entry.userId, chat.machineId);
@@ -318,14 +332,27 @@ export class ComputerCalls extends Context.Service<
             );
             return;
           }
-          if (
-            approval === "delete" ||
-            ((approval === "edit" || approval === "command") &&
-              chat.permissionLevel === "ask" &&
-              !blanket.has(`${entry.conversationId}\u0000${approval}`))
-          ) {
+          const changes = approval === "edit" || approval === "command";
+          const allowedHere = blanket.has(`${entry.conversationId}\u0000${approval}`);
+          if (approval === "delete" || (changes && chat.permissionLevel === "ask" && !allowedHere)) {
             yield* wait(entry, approval);
             return;
+          }
+          if (changes && chat.permissionLevel === "review" && !allowedHere) {
+            const verdict = yield* reviewer.review({
+              userId: entry.userId,
+              conversationId: entry.conversationId,
+              modelId: entry.modelId,
+              name: entry.name,
+              args: entry.args,
+              folders: chat.folders,
+            });
+            // The review takes seconds; Stop may have ended the call meanwhile.
+            if (ended(entry)) return;
+            if (!verdict.run) {
+              yield* wait(entry, approval, { reason: verdict.reason });
+              return;
+            }
           }
           yield* send(entry, chat.machineId);
         });
@@ -459,6 +486,7 @@ export class ComputerCalls extends Context.Service<
               args: input.args,
               deadlineAt: (yield* Clock.currentTimeMillis) + input.timeoutMs,
               senderSession: input.senderSession,
+              modelId: input.modelId,
               scope: yield* Effect.scope,
               state: { kind: "deciding" },
             };
@@ -526,6 +554,7 @@ export class ComputerCalls extends Context.Service<
                       args: entry.args,
                       approval: entry.state.approval,
                       ...(entry.state.machine ? { machine: entry.state.machine } : {}),
+                      ...(entry.state.reason ? { reason: entry.state.reason } : {}),
                     },
                   ]
                 : [],

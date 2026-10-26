@@ -51,6 +51,11 @@ export const PERMISSION_LEVELS: ReadonlyArray<{
     description: m.desktop_permission_ask_description,
   },
   {
+    value: "review",
+    label: m.desktop_permission_review,
+    description: m.desktop_permission_review_description,
+  },
+  {
     value: "allow",
     label: m.desktop_permission_allow,
     description: m.desktop_permission_allow_description,

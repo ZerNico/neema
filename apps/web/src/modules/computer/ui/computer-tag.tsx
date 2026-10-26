@@ -1,3 +1,4 @@
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
 import { m } from "~/paraglide/messages.js";
 import { Cancel01Icon, Folder01Icon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -16,8 +17,8 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { Separator } from "~/ui/primitives/separator";
-import { Switch } from "~/ui/primitives/switch";
 import { useConfirm } from "~/ui/confirm-context.ts";
+import { PERMISSION_LEVELS } from "~/modules/desktop/client/approvals.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import {
   COMPUTER_QUERY_KEY,
@@ -31,7 +32,7 @@ export interface ChatComputer {
   readonly machineId: string | null;
   readonly machineName: string | null;
   readonly folders: ReadonlyArray<{ name: string; readOnly: boolean }>;
-  readonly permissionLevel: "ask" | "allow";
+  readonly permissionLevel: PermissionLevel;
 }
 
 type MachineStatus = NonNullable<
@@ -140,7 +141,7 @@ function ComputerPanel({
       queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY }),
     ]);
   const level = useMutation({
-    mutationFn: (permissionLevel: "ask" | "allow") =>
+    mutationFn: (permissionLevel: PermissionLevel) =>
       setPermissionLevel({ data: { conversationId, permissionLevel } }),
     onSettled: refreshChat,
   });
@@ -187,14 +188,31 @@ function ComputerPanel({
         </section>
       )}
       {local ? null : (
-        <label className="flex items-center justify-between gap-3">
-          <span>{m.computer_ask()}</span>
-          <Switch
-            checked={computer.permissionLevel === "ask"}
-            disabled={level.isPending}
-            onCheckedChange={(checked) => level.mutate(checked ? "ask" : "allow")}
-          />
-        </label>
+        <section className="flex flex-col gap-1">
+          <p className={sectionTitle}>{m.computer_permission()}</p>
+          <Select
+            value={computer.permissionLevel}
+            items={PERMISSION_LEVELS.map((option) => ({
+              value: option.value,
+              label: option.label(),
+            }))}
+            onValueChange={(value) => {
+              const chosen = PERMISSION_LEVELS.find((option) => option.value === value);
+              if (chosen) level.mutate(chosen.value);
+            }}
+          >
+            <SelectTrigger aria-label={m.computer_permission()} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERMISSION_LEVELS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </section>
       )}
       {chatGrants.length > 0 ? (
         <section className="flex flex-col gap-1">

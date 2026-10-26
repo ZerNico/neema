@@ -127,6 +127,7 @@ export function useChatDisplay({
               {
                 kind: call.approval,
                 machine: call.machine,
+                reason: call.reason,
                 args: call.args,
                 // "Always" for a destination means every chat of the person.
                 decide: (choice: ApprovalChoice) =>

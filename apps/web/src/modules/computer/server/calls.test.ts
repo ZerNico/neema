@@ -19,6 +19,7 @@ import { ComputerCalls } from "./calls.ts";
 import { sentFilePaths } from "./files.ts";
 import { MachineHub } from "./hub.ts";
 import { ComputerRepo, type ChatComputer } from "./repo.ts";
+import { CommandReviewer, type ReviewInput, type ReviewVerdict } from "./review.ts";
 
 const USER = "u";
 const CHAT = "c";
@@ -107,7 +108,11 @@ const owner = {
 };
 
 /** One call through the whole path, its wait parked like a tool handler's. */
-const setup = (repo: ReturnType<typeof fakeRepo>) =>
+const setup = (
+  repo: ReturnType<typeof fakeRepo>,
+  /** The reviewer's answer under "ask when risky", and what it was asked. */
+  review: (input: ReviewInput) => ReviewVerdict = () => ({ run: false, reason: null }),
+) =>
   Effect.gen(function* () {
     const external = yield* ExternalCompletion;
     const hub = yield* MachineHub;
@@ -156,6 +161,12 @@ const setup = (repo: ReturnType<typeof fakeRepo>) =>
   }).pipe(
     Effect.provide(
       ComputerCalls.layer.pipe(
+        Layer.provideMerge(
+          Layer.succeed(
+            CommandReviewer,
+            CommandReviewer.of({ review: (input) => Effect.sync(() => review(input)) }),
+          ),
+        ),
         Layer.provideMerge(MachineHub.layer),
         Layer.provideMerge(ExternalCompletion.layer),
         Layer.provideMerge(repo.layer),
@@ -272,6 +283,58 @@ describe("ComputerCalls", () => {
       yield* connect("laptop");
       yield* open("call-1", "delete_files", { paths: ["/workspace/a"] }, "laptop");
       expect((yield* calls.pending(USER)).map((call) => call.approval)).toEqual(["delete"]);
+    }),
+  );
+
+  it.effect("ask when risky runs what the reviewer clears and asks with its reason", () =>
+    Effect.gen(function* () {
+      const reviewed: ReviewInput[] = [];
+      const { calls, open, connect } = yield* setup(
+        fakeRepo({
+          machineId: "laptop",
+          permissionLevel: "review",
+          folders: [{ name: "site", readOnly: false }],
+        }),
+        (input) => {
+          reviewed.push(input);
+          return String(input.args.command).startsWith("rm")
+            ? { run: false, reason: "It deletes files in your folder." }
+            : { run: true };
+        },
+      );
+      const laptop = yield* connect("laptop");
+      yield* open("call-1", "run_command", { command: "pnpm test" }, "laptop");
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ callId: "call-1" });
+      yield* open("call-2", "run_command", { command: "rm -rf /folders/site" }, "laptop");
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({
+          callId: "call-2",
+          approval: "command",
+          reason: "It deletes files in your folder.",
+        }),
+      ]);
+      // The reviewer sees the action and which folders are the person's.
+      expect(reviewed[0]).toMatchObject({
+        name: "run_command",
+        folders: [{ name: "site", readOnly: false }],
+      });
+    }),
+  );
+
+  it.effect("ask when risky never reviews a delete: it asks", () =>
+    Effect.gen(function* () {
+      let asked = 0;
+      const { calls, open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "review" }),
+        () => {
+          asked += 1;
+          return { run: true };
+        },
+      );
+      yield* connect("laptop");
+      yield* open("call-1", "delete_files", { paths: ["/workspace/a"] }, "laptop");
+      expect((yield* calls.pending(USER)).map((call) => call.approval)).toEqual(["delete"]);
+      expect(asked).toBe(0);
     }),
   );
 

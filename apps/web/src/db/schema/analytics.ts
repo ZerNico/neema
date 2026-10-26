@@ -38,6 +38,7 @@ export const usageEvents = pgTable(
         "chat",
         "title",
         "compaction",
+        "review",
         "embedding_document",
         "embedding_query",
         "ocr",

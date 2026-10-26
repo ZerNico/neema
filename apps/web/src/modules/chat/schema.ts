@@ -315,7 +315,7 @@ export const EditMessageInput = Schema.Union([
 ]);
 
 /** How much a chat's computer asks before acting; deletes and network always ask. */
-export const PermissionLevel = Schema.Literals(["ask", "allow"]);
+export const PermissionLevel = Schema.Literals(["ask", "review", "allow"]);
 export type PermissionLevel = typeof PermissionLevel.Type;
 
 export const SetPermissionLevelInput = Schema.Struct({
