@@ -60,6 +60,7 @@ const fakeHypervisor = () => {
     formatDisk: async (path) => {
       formatted.push(path);
     },
+    prepare: async () => {},
   };
   return { hypervisor, started, stopped, destroyed, formatted, tokenSeen };
 };

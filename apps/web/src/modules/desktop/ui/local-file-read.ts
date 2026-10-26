@@ -55,9 +55,7 @@ export const readLocalFile = async (
   const extension = fileExtension(path);
   const imageType = IMAGE_MEDIA_TYPES[extension];
   if (imageType !== undefined || extension === "pdf") {
-    const file = await run(
-      client.readBinary({ conversationId, path, callId: crypto.randomUUID(), purpose: "view" }),
-    );
+    const file = await run(client.readBinary({ conversationId, path }));
     return {
       fileName,
       size: file.bytes,
@@ -66,7 +64,7 @@ export const readLocalFile = async (
     };
   }
   try {
-    const file = await run(client.readFile({ conversationId, path, callId: crypto.randomUUID() }));
+    const file = await run(client.readFile({ conversationId, path }));
     // An SVG is markup, so the desktop hands it over as text, never as bytes.
     // `<img>` is what makes it safe: secure static mode runs no script and
     // fetches nothing. A half-read one holds no picture, so it falls back to
@@ -84,9 +82,7 @@ export const readLocalFile = async (
     // A binary file is still worth opening: the dialog shows the "no preview"
     // body with its actions, which beats a bare toast.
     if (error instanceof DesktopError && error.reason === "not-text") {
-      const info = await run(
-        client.fileInfo({ conversationId, path, callId: crypto.randomUUID() }),
-      );
+      const info = await run(client.fileInfo({ conversationId, path }));
       return {
         fileName,
         size: info.bytes,

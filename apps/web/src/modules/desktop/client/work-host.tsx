@@ -170,9 +170,9 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     return () => {
       window.removeEventListener("pagehide", pagehide);
       controller.dispose();
-      void Effect.runPromise(
-        client.setWorkState({ active: 0, needsApproval: 0, attempts: [] }),
-      ).catch((error) => console.error("Could not clear work status", error));
+      void Effect.runPromise(client.setWorkState({ active: 0, needsApproval: 0 })).catch((error) =>
+        console.error("Could not clear work status", error),
+      );
     };
   }, [controller, client]);
 
@@ -205,10 +205,6 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     void Effect.runPromise(
       client.setWorkState({
         active: work.data?.attempts.length ?? 0,
-        attempts: (work.data?.attempts ?? []).map(({ conversationId, generationId }) => ({
-          conversationId,
-          generationId,
-        })),
         needsApproval: host.controller?.attention().reduce((n, item) => n + item.pending, 0) ?? 0,
       }),
     ).catch((error) => console.error("Could not update desktop work status", error));

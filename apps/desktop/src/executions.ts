@@ -1,40 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { refusalReply, type BridgeReply } from "@chat/desktop-rpc";
 
-/** Calls the model makes, keyed by the server's call id. Anything else runs as asked. */
-const MODEL_OPERATIONS = new Set([
-  "listDirectory",
-  "readFile",
-  "readBinary",
-  "writeFile",
-  "saveToWorkspace",
-  "editFile",
-  "movePath",
-  "deletePath",
-  "findFiles",
-  "searchFiles",
-  "runCommand",
-  "requestNetworkAccess",
-  "requestPathAccess",
-  "requestCapability",
-]);
-
-/** Operations whose result must be kept for a while: running them twice is a second edit. */
-const SIDE_EFFECTS = new Set([
-  "writeFile",
-  "saveToWorkspace",
-  "editFile",
-  "movePath",
-  "deletePath",
-  "runCommand",
-  "requestNetworkAccess",
-  "requestPathAccess",
-  "requestCapability",
-]);
-
-// Workspace staging, promotion, cloning, grants, and cleanup deliberately stay
-// out of both sets: they are user actions like chooseFolder, so they carry no
-// callId or model-operation ledger entry.
+/**
+ * Calls the model makes through the page, keyed by the server's call id: saving a file a browser
+ * call fetched. Running one twice lands the file twice. Everything else runs as asked.
+ */
+const MODEL_OPERATIONS = new Set(["saveToWorkspace"]);
 
 interface Entry {
   readonly callId: string;
@@ -47,14 +18,13 @@ const cancelled = () => refusalReply("failed", "This desktop call was cancelled.
 
 /**
  * Joins a renderer that reloaded mid-call onto the work its predecessor
- * started, so a page refresh never runs a write or a command twice.
+ * started, so a page refresh never saves a file twice.
  *
- * In-flight calls are shared by call id. A finished side effect is retained
- * for as long as the server would still accept its result, so a late replay
- * gets the answer instead of a second execution; a finished read is dropped
- * at once, since reading twice costs nothing and its result may be large.
- * A cancellation is remembered for the same window, so a request that
- * arrives after its Stop is refused rather than started.
+ * In-flight calls are shared by call id. A finished one is retained for as
+ * long as the server would still accept its result, so a late replay gets the
+ * answer instead of a second execution. A cancellation is remembered for the
+ * same window, so a request that arrives after its Stop is refused rather than
+ * started.
  */
 export const makeExecutions = (
   run: (tag: string, payload: unknown, signal: AbortSignal) => Promise<BridgeReply>,
@@ -64,7 +34,7 @@ export const makeExecutions = (
   const entries = new Map<string, Entry>();
   const cancellations = new Map<string, number>();
   const now = options.now ?? Date.now;
-  // The server waits at most ten minutes for a command; a replay after that
+  // The server waits at most ten minutes for a call; a replay after that
   // meets a handler that has already given up, so keeping more buys nothing.
   const retentionMs = options.retentionMs ?? 10 * 60 * 1_000;
   let closed = false;
@@ -105,7 +75,6 @@ export const makeExecutions = (
       )
       .then((reply) => {
         entry.completedAt = now();
-        if (!SIDE_EFFECTS.has(tag)) entries.delete(key);
         return reply;
       });
     return entry.promise;

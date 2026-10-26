@@ -1,13 +1,14 @@
 import { execSync } from "node:child_process";
 import { build } from "esbuild";
+import { compileMessages } from "./paraglide.ts";
 
 /**
  * Electron loads plain JS, and the sources import with explicit `.ts`
  * extensions, so the three entry points are bundled rather than emitted.
  *
- * `electron` is provided by the runtime. `@microsoft/mxc-sdk` stays external
- * because it loads its native library and executor binaries from paths inside
- * its own package; bundling would leave those behind and no command could run.
+ * `electron` is provided by the runtime. `microsandbox` stays external because it
+ * loads its native addon, VM runner and libkrunfw from paths inside its own
+ * package; bundling would leave those behind and no chat VM could start.
  */
 
 /**
@@ -38,11 +39,12 @@ export const buildOptions = () => ({
   // ESM and `require` would be undefined. The output really is CommonJS.
   outExtension: { ".js": ".cjs" },
   sourcemap: true,
-  external: ["electron", "@microsoft/mxc-sdk"],
+  external: ["electron", "microsandbox"],
   define: { __BUILD_STAMP__: JSON.stringify(buildStamp()) },
 });
 
 // Run directly: one build. Imported by dev.mjs: the options only.
 if (import.meta.main) {
+  await compileMessages();
   await build(buildOptions());
 }

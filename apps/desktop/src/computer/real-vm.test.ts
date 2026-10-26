@@ -148,6 +148,20 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
     expect(left.output.trim()).toBe("none");
   }, 300_000);
 
+  test("commands get the image's Python, and pip installs into it", async () => {
+    const outcome = await use((guest) =>
+      runCommand(guest, {
+        command: "command -v python3 && pip install -q six && python3 -c 'import six; print(six.__file__)'",
+        cwd: "/workspace",
+        timeoutMs: 120_000,
+        outputLimit: 4_000,
+      }),
+    );
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.output).toContain("/opt/venv/bin/python3");
+    expect(outcome.output).toContain("/opt/venv/lib/python3.14/site-packages/six.py");
+  }, 300_000);
+
   test("Stop ends a command and everything it started", async () => {
     const controller = new AbortController();
     const started = Date.now();

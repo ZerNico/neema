@@ -12,6 +12,8 @@ import {
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
+import { createHash } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -39,29 +41,8 @@ import {
 import { guardWindowPermissions } from "./window-permissions.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
-import { Effect, Layer, ManagedRuntime, Result, Schema } from "effect";
-import {
-  DROPPED_FILE_CHANNEL,
-  NETWORK_LIST,
-  NETWORK_REVOKE,
-  PATHS_LIST,
-  PATHS_REVOKE,
-  LOCAL_GET,
-  LOCAL_ALLOW,
-  LOCAL_REVOKE,
-  AGENT_GET,
-  AGENT_CHOOSE,
-  AGENT_FORGET_KEYS,
-  AgentChoicePayload,
-  DesktopTheme,
-  NetworkGrant,
-  NoPayload,
-  PathRevokePayload,
-  type AgentChoiceReply,
-  makeDesktopResponder,
-  refusalReply,
-} from "@chat/desktop-rpc";
-import { makeDroppedFileHandler } from "./dropped-file.ts";
+import { Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { DesktopTheme, NoPayload, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
 import { attachBrowserGuests } from "./browser/guests.ts";
 import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import { browserProfile } from "./browser/profile.ts";
@@ -71,14 +52,17 @@ import { registerBrowserIpc } from "./browser/ipc.ts";
 import { makeExecutions } from "./executions.ts";
 import { makeLifecycle } from "./lifecycle.ts";
 import { DEV_RESTART } from "./dev-reloader.ts";
-import { disposeOwnedProcesses } from "./process.ts";
-import { grantsFile, GrantStore } from "./grants.ts";
+import { grantsFile, GrantStore, mountsOf } from "./grants.ts";
 import { makeHandlers, type Shell } from "./handlers.ts";
 import { loadMachineIdentity, type MachineIdentity } from "./machine.ts";
-import { networkGrantsDirectory } from "./egress-grants.ts";
 import { pageHandler } from "./page-ipc.ts";
-import { Sandbox } from "./sandbox.ts";
 import { WorkspaceRegistry } from "./workspaces.ts";
+import { ComputerSettings, computerSettingsFile } from "./computer-settings.ts";
+import { ComputerHost } from "./computer/host.ts";
+import { microsandbox } from "./computer/hypervisor.ts";
+import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
+import { computerDialogs } from "./computer/dialogs.ts";
+import { RememberedFolders } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
   SIGN_IN_TICKET,
@@ -156,24 +140,6 @@ let tray: Tray | undefined;
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
-/** Asked once, before the person's key files first go into their SSH agent. */
-const confirmKeys = async (keys: readonly string[]) => {
-  const names = keys.map((key) => basename(key)).join(", ");
-  const { response } = await dialog.showMessageBox({
-    type: "question",
-    buttons: ["Cancel", keys.length === 1 ? "Add key" : "Add keys"],
-    defaultId: 1,
-    cancelId: 0,
-    title: "Add your SSH key?",
-    message: `Add ${names} to your SSH agent?`,
-    detail:
-      keys.length === 1
-        ? "Work chats you allow to sign in with SSH can use it but can’t read it. It’s added again after a restart."
-        : "Work chats you allow to sign in with SSH can use them but can’t read them. They’re added again after a restart.",
-  });
-  return response === 1;
-};
-
 const runExecution = (tag: string, payload: unknown, signal: AbortSignal) =>
   runtime.runPromise(respond(tag, payload), { signal });
 // Replaced on a server switch: a disposed instance refuses every later call.
@@ -197,8 +163,8 @@ const lifecycle = makeLifecycle({
     return response === 1;
   },
   dispose: async () => {
+    await stopComputer();
     await executions.dispose();
-    await disposeOwnedProcesses();
     await runtime.dispose();
     tray?.destroy();
   },
@@ -207,7 +173,7 @@ const lifecycle = makeLifecycle({
     console.error("[desktop] shutdown failed", cause);
     dialog.showErrorBox(
       "Could not stop desktop work",
-      "Owned process cleanup failed. Check the desktop logs before quitting again.",
+      "Stopping chats’ computers failed. Check the desktop logs before quitting again.",
     );
   },
 });
@@ -219,16 +185,126 @@ const runtime = ManagedRuntime.make(
       if (serverOrigin === null) throw new Error("No server is configured.");
       return serverOrigin;
     }, app.getPath("userData")),
-    Sandbox.layerAt(networkGrantsDirectory(app.getPath("userData")), confirmKeys),
   ),
 );
 
 // Placeholder until whenReady loads the real one; nothing can call
 // executionSession before the handlers exist, and those wait for whenReady.
 let machine: MachineIdentity = { id: "unknown", name: "Unknown machine" };
+// Loaded with the app, before the computer starts or the page can ask.
+let computerSettings: ComputerSettings | null = null;
+const settings = () => {
+  if (computerSettings === null) throw new Error("Settings are not loaded yet.");
+  return computerSettings;
+};
+
+/**
+ * This machine's computer for the connected server: chats' VMs and the connection their calls
+ * arrive on. One per server; replaced on a switch, stopped on quit (docs/internals/desktop.md).
+ */
+let computer: { origin: string; host: ComputerHost } | null = null;
+const hypervisor = microsandbox(() => import("microsandbox"), {
+  insecureRegistry: SANDBOX_INSECURE_REGISTRY,
+});
+const stopComputer = async () => {
+  const current = computer;
+  computer = null;
+  await current?.host.stop();
+};
+/** The person's language for the shell's own words: their choice in the page, else the system's. */
+const shellLocale = async (origin: string): Promise<"en" | "de"> => {
+  const [chosen] = await session.defaultSession.cookies
+    .get({ url: origin, name: "language" })
+    .catch(() => []);
+  const language = chosen?.value ?? app.getPreferredSystemLanguages()[0] ?? "en";
+  return language.toLowerCase().startsWith("de") ? "de" : "en";
+};
+const startComputer = (origin: string) => {
+  if (computer?.origin === origin) return;
+  void stopComputer();
+  const userData = app.getPath("userData");
+  const dialogs = computerDialogs({
+    window: () => mainWindow,
+    locale: () => shellLocale(origin),
+    appData: userData,
+    remembered: new RememberedFolders(
+      join(
+        userData,
+        "computer",
+        `remembered-folders-${createHash("sha256").update(origin).digest("hex").slice(0, 16)}.json`,
+      ),
+    ),
+  });
+  const host = new ComputerHost({
+    origin,
+    directory: join(app.getPath("userData"), "computer"),
+    image: SANDBOX_IMAGE,
+    hypervisor,
+    machine,
+    fetch: (url, init) => session.defaultSession.fetch(url, init),
+    workspace: (conversationId) =>
+      runtime.runSync(
+        Effect.map(WorkspaceRegistry, (workspaces) => workspaces.path(conversationId)),
+      ),
+    folders: async (conversationId) =>
+      mountsOf(
+        await runtime.runPromise(
+          Effect.flatMap(GrantStore, (grants) => grants.lookup({ origin, conversationId })),
+        ),
+      ),
+    // The chat is gone for good: nothing this machine kept for it outlives it.
+    discardWorkspace: async (conversationId) => {
+      await runtime.runPromise(
+        Effect.all(
+          [
+            Effect.flatMap(WorkspaceRegistry, (workspaces) =>
+              workspaces.discard(conversationId).pipe(Effect.ignore),
+            ),
+            Effect.flatMap(GrantStore, (grants) => grants.forgetAll({ origin, conversationId })),
+          ],
+          { discard: true },
+        ),
+      );
+      await forgetChatSites(origin, conversationId).catch((error: unknown) =>
+        console.error("[desktop] forgetting a chat's sites failed", error),
+      );
+    },
+    agentSocket: () => settings().agentSocket(),
+    remote: () => settings().get().remote,
+    ask: dialogs,
+    attach: async (conversationId, hostPath) => {
+      const key = { origin, conversationId };
+      const attached = await runtime.runPromise(
+        Effect.flatMap(GrantStore, (grants) => grants.lookup(key)),
+      );
+      const name = basename(hostPath);
+      if (attached.some((folder) => folder.path === hostPath)) return { name };
+      // A folder is addressed by its name in the chat, so two may not share one.
+      if (attached.some((folder) => basename(folder.path) === name))
+        return { refused: `A folder named ${name} is already attached to this chat.` };
+      await runtime.runPromise(
+        Effect.flatMap(GrantStore, (grants) => grants.remember(key, hostPath)),
+      );
+      return { name };
+    },
+    log: (message) => console.log(`[desktop] ${message}`),
+  });
+  computer = { origin, host };
+  void host.start().catch((error: unknown) => console.error("[desktop] computer failed", error));
+};
+/** Folder attach and detach happen in the page; the server hears the chat's new folder names. */
+const FOLDER_CHANGES = new Set(["chooseFolder", "detachFolder"]);
+
+/** Forgets the sites one chat's browser was allowed, and its in-memory browser profile. */
+const forgetChatSites = async (origin: string, conversationId: string) => {
+  await siteGrants?.forgetChat(origin, conversationId);
+  // A temporary chat's in-memory browser profile would otherwise live as long as the app.
+  const browser = mainWindow && windowBrowsers.get(mainWindow);
+  await browser?.releaseChat(conversationId);
+};
 
 const desktopShell: Shell = {
-  networkGrantsDirectory: networkGrantsDirectory(app.getPath("userData")),
+  appData: app.getPath("userData"),
   // Requests only arrive from the configured origin's page (`isPageSender`),
   // so by the time a handler runs there is one.
   serverOrigin: () => {
@@ -243,12 +319,12 @@ const desktopShell: Shell = {
     machineName: machine.name,
   }),
   cancelCall: (callId) => executions.cancelCall(callId),
-  forgetChatSites: async (conversationId) => {
-    if (serverOrigin !== null) await siteGrants?.forgetChat(serverOrigin, conversationId);
-    // A temporary chat's in-memory browser profile would otherwise live as long as the app.
-    const browser = mainWindow && windowBrowsers.get(mainWindow);
-    await browser?.releaseChat(conversationId);
+  computer: () =>
+    computer?.host.status() ?? { status: "unavailable", reason: "No server is connected." },
+  get settings() {
+    return settings();
   },
+  remoteChanged: () => computer?.host.remoteChanged(),
   setWorkState: (state) => {
     workState = state;
     const status =
@@ -320,9 +396,9 @@ const openConnectWindow = (current: string | null) => {
 };
 
 /**
- * Abandoned staging, temp files and interrupted clone directories accumulate.
+ * Interrupted copies and what older versions left in the workspaces root accumulate.
  * Cleanup runs once the origin-scoped root is known, both at startup and after
- * switching servers. Promotion journals survive until authenticated recovery.
+ * switching servers.
  */
 const sweepTransientWorkspaces = () => {
   if (serverOrigin === null) return;
@@ -353,12 +429,12 @@ const connectFlow = makeConnectFlow({
     });
     return response === 1;
   },
-  // Executions and owned processes belong to the server that started them.
-  // The runtime (sandbox, grants) is per machine and stays up; grants are
+  // The computer and browser executions belong to the server that started them.
+  // The runtime (folders, workspaces) is per machine and stays up; both are
   // keyed by origin, so nothing from this server is visible on the next.
   disposeWork: async () => {
+    await stopComputer();
     await executions.dispose();
-    await disposeOwnedProcesses();
     executions = makeExecutions(runExecution);
     desktopShell.setWorkState({ active: 0, needsApproval: 0 });
   },
@@ -384,6 +460,7 @@ const connectFlow = makeConnectFlow({
     serverOrigin = origin;
     sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
+    startComputer(origin);
   },
   closeMain: () => {
     const window = mainWindow;
@@ -474,6 +551,7 @@ const start = async () => {
   if (devOrigin) {
     serverOrigin = devOrigin;
     mainWindow = openMainWindow(devOrigin);
+    startComputer(devOrigin);
     return;
   }
   configPath = configFile(app.getPath("userData"));
@@ -484,6 +562,7 @@ const start = async () => {
   }
   serverOrigin = config.serverUrl;
   mainWindow = openMainWindow(config.serverUrl);
+  startComputer(config.serverUrl);
 };
 
 /** Menu entry; a refusal here is unexpected, since the entry is absent under a pinned server. */
@@ -587,6 +666,9 @@ void app.whenReady().then(async () => {
   );
   guardWindowPermissions(session.defaultSession, () => serverOrigin);
   machine = await loadMachineIdentity(app.getPath("userData"));
+  computerSettings = await ComputerSettings.load(computerSettingsFile(app.getPath("userData")));
+  // The process sandbox's grants, from before chats had computers.
+  void rm(join(app.getPath("userData"), "network-grants"), { recursive: true, force: true });
   siteGrants = await loadSiteGrants(app.getPath("userData"));
   const handlers = await runtime.runPromise(makeHandlers(desktopShell));
   respond = makeDesktopResponder(handlers);
@@ -641,67 +723,6 @@ void app.whenReady().then(async () => {
   });
   // Only the server's page asks, when someone clicks one of its notifications.
   onPage(CHROME_SHOW_WINDOW, NoPayload, () => restoreWindow());
-  // Settings › This computer: what every chat may reach. The page is trusted to
-  // ask, never to name something else: each payload is held to the grant rules.
-  const always = { scope: "always" } as const;
-  const permissions = () =>
-    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.permissions(always)));
-  onPage(NETWORK_LIST, NoPayload, async () => (await permissions()).network);
-  // The store refuses a grant that is not already canonical.
-  onPage(
-    NETWORK_REVOKE,
-    NetworkGrant,
-    (grant) =>
-      runtime.runPromise(
-        Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeNetwork(always, grant)),
-      ),
-    "Invalid network permission.",
-  );
-  onPage(LOCAL_GET, NoPayload, async () => {
-    // bubblewrap gives each command a loopback of its own; this computer's can't be opened.
-    if (process.platform === "linux") return "unavailable";
-    return (await permissions()).capabilities.includes("local-services") ? "allowed" : "asked";
-  });
-  // The person allowing it in Settings is the consent: the connected server is trusted.
-  onPage(LOCAL_ALLOW, NoPayload, async () => {
-    await runtime.runPromise(
-      Effect.flatMap(Sandbox, (sandbox) => sandbox.approveCapability(always, "local-services")),
-    );
-    return true;
-  });
-  onPage(LOCAL_REVOKE, NoPayload, () =>
-    runtime.runPromise(
-      Effect.flatMap(Sandbox, (sandbox) => sandbox.revokeCapability(always, "local-services")),
-    ),
-  );
-  onPage(AGENT_GET, NoPayload, () =>
-    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.agentSetting())),
-  );
-  // A socket must answer as an agent; the person choosing it in Settings is the consent.
-  onPage(
-    AGENT_CHOOSE,
-    AgentChoicePayload,
-    async ({ socket }): Promise<AgentChoiceReply> => {
-      const outcome = await runtime.runPromise(
-        Effect.result(Effect.flatMap(Sandbox, (sandbox) => sandbox.chooseAgent(socket))),
-      );
-      return Result.isSuccess(outcome)
-        ? { ok: true, changed: outcome.success }
-        : { ok: false, message: outcome.failure.message };
-    },
-    "Invalid agent socket.",
-  );
-  onPage(AGENT_FORGET_KEYS, NoPayload, () =>
-    runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.forgetKeys())),
-  );
-  onPage(PATHS_LIST, NoPayload, async () => (await permissions()).paths);
-  onPage(
-    PATHS_REVOKE,
-    PathRevokePayload,
-    ({ path }) =>
-      runtime.runPromise(Effect.flatMap(Sandbox, (sandbox) => sandbox.revokePath(always, path))),
-    "Invalid path permission.",
-  );
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {
@@ -746,27 +767,12 @@ void app.whenReady().then(async () => {
     if (!isRemoteSender(event)) return refusalReply("failed", "Not allowed from this page.");
     const { tag, payload } = (message ?? {}) as { tag?: unknown; payload?: unknown };
     if (typeof tag !== "string") return refusalReply("failed", "Malformed request.");
-    return executions.request(tag, payload);
+    const reply = await executions.request(tag, payload);
+    const conversationId = (payload as { conversationId?: unknown } | null)?.conversationId;
+    if (FOLDER_CHANGES.has(tag) && typeof conversationId === "string")
+      void computer?.host.foldersChanged(conversationId);
+    return reply;
   });
-
-  ipcMain.handle(
-    DROPPED_FILE_CHANNEL,
-    makeDroppedFileHandler({
-      contents: () => mainWindow?.webContents,
-      origin: () => serverOrigin,
-      stage: (input, sourcePath) =>
-        Effect.gen(function* () {
-          const workspaces = yield* WorkspaceRegistry;
-          return yield* workspaces.stageFileFromPath(
-            input.conversationId,
-            input.submissionId,
-            input.fileName,
-            sourcePath,
-          );
-        }),
-      run: (effect) => runtime.runPromise(effect),
-    }),
-  );
 
   if (devReload && process.send) {
     // Only the owning dev supervisor can request a restart, never the web page.

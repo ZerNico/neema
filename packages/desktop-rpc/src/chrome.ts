@@ -2,12 +2,14 @@ import { Schema } from "effect";
 
 export const DesktopTheme = Schema.Literals(["light", "dark", "system"]);
 export type DesktopTheme = typeof DesktopTheme.Type;
+/** The payload of a page channel that carries nothing. */
+export const NoPayload = Schema.Undefined;
 export type DesktopPlatform = "darwin" | "win32" | "linux";
 export interface DesktopChromeState {
   readonly fullscreen: boolean;
 }
 
-/** Optional presentation capability, independent of the Work protocol version. */
+/** Optional presentation capability, independent of the bridge's protocol version. */
 export interface DesktopChrome {
   readonly platform: DesktopPlatform;
   getState(): Promise<DesktopChromeState>;

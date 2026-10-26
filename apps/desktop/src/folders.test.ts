@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { exists, resolveAmongRoots, resolveInFolder } from "./folders.ts";
+import { exists, isOwnRealPath, resolveInFolder } from "./folders.ts";
 
 /**
  * Real directories and real symlinks. A fake fs would let the containment check
@@ -138,61 +138,6 @@ describe("resolving a path inside the chosen folder", () => {
   });
 });
 
-describe("resolving an absolute path among several roots", () => {
-  // One root exists and one does not, the way the workspace dir is missing
-  // until a write creates it: the live root answers, the missing one is
-  // skipped rather than masking the live one with its own failure. Read lazily:
-  // `root` is only set once the suite's beforeAll has run.
-  const among = (requested: string) =>
-    Effect.runPromise(
-      Effect.result(
-        resolveAmongRoots(
-          [
-            { name: "gone", root: join(root, "..", "not-yet-created") },
-            { name: "workspace", root },
-            { name: "elsewhere", root: outsideDir },
-          ],
-          requested,
-        ),
-      ),
-    );
-
-  it("picks the root that owns the path and names the receipt with it", async () => {
-    const outcome = await among(join(root, "src", "index.ts"));
-    expect(outcome._tag).toBe("Success");
-    if (outcome._tag !== "Success") return;
-    expect(outcome.success.relative).toBe("workspace/src/index.ts");
-    expect(outcome.success.absolute.endsWith(join("src", "index.ts"))).toBe(true);
-    expect(outcome.success.root.endsWith("workspace")).toBe(true);
-  });
-
-  it("resolves a root itself to its name", async () => {
-    const outcome = await among(outsideDir);
-    expect(outcome._tag).toBe("Success");
-    if (outcome._tag !== "Success") return;
-    expect(outcome.success.relative).toBe("elsewhere");
-    expect(outcome.success.absolute).toBe(outcome.success.root);
-  });
-
-  it("refuses a relative path", async () => {
-    const outcome = await among("src/index.ts");
-    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
-  });
-
-  it("refuses an absolute path under no root", async () => {
-    const outcome = await among("/etc/passwd");
-    expect(outcome._tag === "Failure" && outcome.failure.reason).toBe("outside-folder");
-  });
-
-  it("still refuses an escape through a symlink inside a root", async () => {
-    const outcome = await among(join(root, "escape", "secrets.txt"));
-    expect(outcome._tag).toBe("Failure");
-    if (outcome._tag !== "Failure") return;
-    expect(outcome.failure.reason).toBe("outside-folder");
-    expect(outcome.failure.message).not.toContain(outsideDir);
-  });
-});
-
 describe("a pinned root", () => {
   it("is gone once a link replaces it, however recently it was checked", async () => {
     const base = await realpath(await mkdtemp(join(tmpdir(), "chat-pinned-")));
@@ -210,5 +155,14 @@ describe("a pinned root", () => {
       "Success",
     );
     await rm(base, { recursive: true, force: true });
+  });
+});
+
+describe("a real path", () => {
+  it("is the path's own apart from the system's aliases, never where a link leads", () => {
+    expect(isOwnRealPath("/Users/a/project/", "/Users/a/project")).toBe(true);
+    expect(isOwnRealPath("/Users/a/project", "/Users/a/elsewhere")).toBe(false);
+    if (process.platform === "darwin")
+      expect(isOwnRealPath("/tmp/project", "/private/tmp/project")).toBe(true);
   });
 });

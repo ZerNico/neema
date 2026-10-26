@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { context } from "esbuild";
 import { buildOptions } from "./build.mjs";
+import { compileMessages } from "./paraglide.ts";
 import { electronBinary } from "./electron-app.mjs";
 import { makeDevReloader } from "./src/dev-reloader.ts";
 
@@ -22,6 +23,7 @@ const reloader = makeDevReloader({
   reportError: (cause) => console.error("[desktop] restart failed", cause),
 });
 
+await compileMessages();
 const ctx = await context({
   ...buildOptions(),
   plugins: [

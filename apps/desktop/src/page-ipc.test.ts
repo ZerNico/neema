@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentChoicePayload, NetworkGrant, NoPayload } from "@chat/desktop-rpc";
+import { Schema } from "effect";
+import { DesktopTheme, NoPayload } from "@chat/desktop-rpc";
 import { pageHandler } from "./page-ipc.ts";
 
+const Choice = Schema.Struct({ socket: Schema.NullOr(Schema.String) });
 const page = { fromPage: true };
 const elsewhere = { fromPage: false };
 const allowed = (event: { fromPage: boolean }) => event.fromPage;
@@ -15,29 +17,17 @@ describe("pageHandler", () => {
   });
 
   it("hands run the decoded payload", () => {
-    const handle = pageHandler(allowed, NetworkGrant, (grant) => grant);
-    const grant = { host: "github.com", port: 22, privateNetwork: false };
-    expect(handle(page, grant)).toEqual(grant);
+    expect(pageHandler(allowed, DesktopTheme, (theme) => theme)(page, "dark")).toBe("dark");
     expect(pageHandler(allowed, NoPayload, () => "ran")(page)).toBe("ran");
-    expect(
-      pageHandler(allowed, AgentChoicePayload, ({ socket }) => socket)(page, { socket: null }),
-    ).toBeNull();
+    expect(pageHandler(allowed, Choice, ({ socket }) => socket)(page, { socket: null })).toBeNull();
   });
 
   it("refuses a payload outside the schema with the channel's message", () => {
     const run = vi.fn();
-    const handle = pageHandler(allowed, NetworkGrant, run, "Invalid network permission.");
-    for (const payload of [
-      undefined,
-      "github.com",
-      { host: "github.com", port: "22", privateNetwork: false },
-      { host: "github.com", port: 0, privateNetwork: false },
-      { host: "github.com", port: 22 },
-    ])
-      expect(() => handle(page, payload)).toThrow("Invalid network permission.");
-    expect(() => pageHandler(allowed, AgentChoicePayload, run)(page, {})).toThrow(
-      "Malformed request.",
-    );
+    const handle = pageHandler(allowed, DesktopTheme, run, "Invalid theme.");
+    for (const payload of [undefined, "blue", 1, { theme: "dark" }])
+      expect(() => handle(page, payload)).toThrow("Invalid theme.");
+    expect(() => pageHandler(allowed, Choice, run)(page, {})).toThrow("Malformed request.");
     expect(() => pageHandler(allowed, NoPayload, run)(page, { extra: true })).toThrow(
       "Malformed request.",
     );

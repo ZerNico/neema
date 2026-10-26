@@ -62,6 +62,11 @@ export interface Hypervisor {
   named(label: string, value: string): Promise<string[]>;
   /** Puts an empty ext4 filesystem in a sparse file, using a throwaway VM of the image. */
   formatDisk(path: string, image: string): Promise<void>;
+  /**
+   * Downloads the image unless it is already here, reporting the share of bytes done. Booting
+   * a throwaway VM of it also proves this machine can run one.
+   */
+  prepare(image: string, onProgress: (fraction: number) => void): Promise<void>;
 }
 
 type Microsandbox = typeof import("microsandbox");
@@ -197,6 +202,39 @@ export const microsandbox = (
         cursor = page.nextCursor;
       } while (cursor);
       return names;
+    },
+    async prepare(image, onProgress) {
+      const { Image, Sandbox, MiB } = await sdk();
+      const present = await Image.get(image).then(
+        () => true,
+        () => false,
+      );
+      const name = `prepare-${randomUUID()}`;
+      const creating = await Sandbox.builder(name)
+        .image(image)
+        .registry((registry) => (options.insecureRegistry ? registry.insecure() : registry))
+        .memory(MiB(512))
+        .replace()
+        .network((network) => network.enabled(false))
+        .createWithPullProgress();
+      if (!present) {
+        const totals = new Map<string, number>();
+        const done = new Map<string, number>();
+        for await (const event of creating.progress) {
+          const key = event.digest ?? String(event.layerIndex ?? "");
+          if (event.totalBytes) totals.set(key, event.totalBytes);
+          if (event.downloadedBytes !== undefined) done.set(key, event.downloadedBytes);
+          const total = [...totals.values()].reduce((sum, bytes) => sum + bytes, 0);
+          if (total > 0)
+            onProgress(
+              Math.min(1, [...done.values()].reduce((sum, bytes) => sum + bytes, 0) / total),
+            );
+        }
+      }
+      const helper = await creating.awaitSandbox();
+      await helper.stop().catch(() => {});
+      await remove(name).catch(() => {});
+      onProgress(1);
     },
     async formatDisk(path, image) {
       const { Sandbox, MiB } = await sdk();

@@ -3,8 +3,8 @@ name: Desktop
 # Unsigned installers for every platform, uploaded as workflow artifacts.
 # release.yml attaches them to the release; a manual run is for trying a build.
 # No native modules are rebuilt, so one runner cross-packages both architectures
-# of its OS: koffi's binding for each is installed, and after-pack.mjs keeps
-# only the target's natives. MXC has no Intel macOS backend, so macOS is arm64.
+# of its OS: microsandbox's native package for each is installed, and after-pack.mjs
+# keeps only the target's. microsandbox has no Intel macOS build, so macOS is arm64.
 
 on:
   workflow_dispatch:
@@ -41,9 +41,6 @@ jobs:
             targets: --win --x64 --arm64
             smoke: release/win-unpacked/neema.exe
             app: release/win-unpacked/resources/app
-            # Not known whether GitHub's Windows Server image hosts the process container;
-            # loading MXC's library still proves the package.
-            smoke-mode: --load-only
           - os: linux
             runner: ubuntu-24.04
             targets: --linux --x64 --arm64
@@ -94,15 +91,7 @@ jobs:
             fi
           done
 
-      # The runner's own architecture runs one contained command from the packaged app.
-      - name: Prepare the Linux sandbox
-        if: matrix.os == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap slirp4netns
-          # Ubuntu 24.04 confines unprivileged user namespaces, which bubblewrap needs.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
+      # The runner's own architecture loads microsandbox from the packaged app.
       - name: Smoke-test the package
         shell: bash
         working-directory: apps/desktop
@@ -110,10 +99,8 @@ jobs:
           ELECTRON_RUN_AS_NODE: "1"
           SMOKE: ${{ matrix.smoke }}
           APP: ${{ matrix.app }}
-          MODE: ${{ matrix.smoke-mode }}
         run: |
-          mkdir -p smoke-workspace
-          "$SMOKE" scripts/package-smoke.mjs "$PWD/$APP" "$PWD/smoke-workspace" $MODE
+          "$SMOKE" scripts/package-smoke.mjs "$PWD/$APP"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

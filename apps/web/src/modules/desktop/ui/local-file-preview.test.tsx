@@ -51,7 +51,6 @@ const connect = (): DesktopClient => {
     folderStatus: notUsed("folderStatus"),
     chooseFolder: notUsed("chooseFolder"),
     detachFolder: notUsed("detachFolder"),
-    listDirectory: notUsed("listDirectory"),
     fileInfo: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "fileInfo", path });
@@ -59,30 +58,10 @@ const connect = (): DesktopClient => {
           ? refuse("not-found", `${path} does not exist.`)
           : Effect.succeed({ path, bytes: 4 });
       }),
-    writeFile: notUsed("writeFile"),
     saveToWorkspace: notUsed("saveToWorkspace"),
-    editFile: notUsed("editFile"),
-    movePath: notUsed("movePath"),
-    deletePath: notUsed("deletePath"),
-    findFiles: notUsed("findFiles"),
-    searchFiles: notUsed("searchFiles"),
-    runCommand: notUsed("runCommand"),
-    requestNetworkAccess: notUsed("requestNetworkAccess"),
-    requestPathAccess: notUsed("requestPathAccess"),
-    chatPermissions: notUsed("chatPermissions"),
-    requestCapability: notUsed("requestCapability"),
-    revokeChatPermission: notUsed("revokeChatPermission"),
-    setUpSandbox: notUsed("setUpSandbox"),
-    stageFile: notUsed("stageFile"),
-    discardStagedFile: notUsed("discardStagedFile"),
-    discardSubmission: notUsed("discardSubmission"),
-    promoteSubmission: notUsed("promoteSubmission"),
-    commitPromotion: notUsed("commitPromotion"),
-    rollbackPromotion: notUsed("rollbackPromotion"),
-    listPendingPromotions: notUsed("listPendingPromotions"),
-    cloneWorkspace: notUsed("cloneWorkspace"),
-    copyFolderGrants: notUsed("copyFolderGrants"),
-    discardWorkspace: notUsed("discardWorkspace"),
+    computerStatus: notUsed("computerStatus"),
+    setRemoteControl: notUsed("setRemoteControl"),
+    setAgentSocket: notUsed("setAgentSocket"),
     readFile: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "readFile", path });
@@ -116,7 +95,6 @@ const connect = (): DesktopClient => {
   const respond = makeDesktopResponder(handlers);
   return makeDesktopClient({
     protocolVersion: PROTOCOL_VERSION,
-    stageDroppedFile: async () => null,
     // Round-tripped through JSON, because contextBridge carries nothing else.
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify(payload)) as unknown;

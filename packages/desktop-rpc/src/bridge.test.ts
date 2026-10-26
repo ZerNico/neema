@@ -14,41 +14,20 @@ const unimplemented = (tag: string) => () =>
   Effect.fail(new DesktopError({ reason: "failed", message: `${tag} not part of this test` }));
 
 const handlers = (overrides: Partial<DesktopHandlers>): DesktopHandlers => ({
-  executionSession: unimplemented("executionSession"),
-  cancelCall: unimplemented("cancelCall"),
-  setWorkState: unimplemented("setWorkState"),
-  readBinary: unimplemented("readBinary"),
-  editFile: unimplemented("editFile"),
-  movePath: unimplemented("movePath"),
-  deletePath: unimplemented("deletePath"),
-  findFiles: unimplemented("findFiles"),
-  searchFiles: unimplemented("searchFiles"),
   folderStatus: unimplemented("folderStatus"),
   chooseFolder: unimplemented("chooseFolder"),
   detachFolder: unimplemented("detachFolder"),
-  listDirectory: unimplemented("listDirectory"),
-  fileInfo: unimplemented("fileInfo"),
-  readFile: unimplemented("readFile"),
-  writeFile: unimplemented("writeFile"),
+  executionSession: unimplemented("executionSession"),
+  cancelCall: unimplemented("cancelCall"),
+  setWorkState: unimplemented("setWorkState"),
   saveToWorkspace: unimplemented("saveToWorkspace"),
-  requestNetworkAccess: unimplemented("requestNetworkAccess"),
-  requestPathAccess: unimplemented("requestPathAccess"),
-  chatPermissions: unimplemented("chatPermissions"),
-  requestCapability: unimplemented("requestCapability"),
-  revokeChatPermission: unimplemented("revokeChatPermission"),
-  runCommand: unimplemented("runCommand"),
+  readFile: unimplemented("readFile"),
+  readBinary: unimplemented("readBinary"),
+  fileInfo: unimplemented("fileInfo"),
   revealPath: unimplemented("revealPath"),
-  setUpSandbox: unimplemented("setUpSandbox"),
-  stageFile: unimplemented("stageFile"),
-  discardStagedFile: unimplemented("discardStagedFile"),
-  discardSubmission: unimplemented("discardSubmission"),
-  promoteSubmission: unimplemented("promoteSubmission"),
-  commitPromotion: unimplemented("commitPromotion"),
-  rollbackPromotion: unimplemented("rollbackPromotion"),
-  listPendingPromotions: unimplemented("listPendingPromotions"),
-  cloneWorkspace: unimplemented("cloneWorkspace"),
-  copyFolderGrants: unimplemented("copyFolderGrants"),
-  discardWorkspace: unimplemented("discardWorkspace"),
+  computerStatus: unimplemented("computerStatus"),
+  setRemoteControl: unimplemented("setRemoteControl"),
+  setAgentSocket: unimplemented("setAgentSocket"),
   ...overrides,
 });
 
@@ -57,7 +36,6 @@ const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
   const respond = makeDesktopResponder(handlers(implemented));
   return {
     protocolVersion: PROTOCOL_VERSION,
-    stageDroppedFile: async () => null,
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify({ tag, payload })) as {
         tag: string;
@@ -70,72 +48,44 @@ const connect = (implemented: Partial<DesktopHandlers>): DesktopChannel => {
 };
 
 describe("the desktop channel", () => {
-  it("round-trips a scoped host and port for network approval", async () => {
+  it("round-trips this machine's computer settings", async () => {
+    let remote = true;
+    const status = () =>
+      Effect.sync(() => ({
+        status: "preparing" as const,
+        progress: 0.5,
+        remote,
+        agentSocket: null,
+      }));
     const client = makeDesktopClient(
       connect({
-        requestNetworkAccess: ({ host, port, privateNetwork, scope }) =>
-          Effect.succeed({ host, port, privateNetwork, scope }),
+        computerStatus: status,
+        setRemoteControl: ({ enabled }) =>
+          Effect.flatMap(
+            Effect.sync(() => {
+              remote = enabled;
+            }),
+            status,
+          ),
       }),
     );
-    const result = await Effect.runPromise(
-      client.requestNetworkAccess({
-        conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-        callId: "call-1",
-        generationId: "generation-1",
-        host: "github.com",
-        port: 22,
-        privateNetwork: false,
-        scope: "chat",
-      }),
-    );
-    expect(result).toEqual({ host: "github.com", port: 22, privateNetwork: false, scope: "chat" });
+    expect(await Effect.runPromise(client.computerStatus(undefined))).toEqual({
+      status: "preparing",
+      progress: 0.5,
+      remote: true,
+      agentSocket: null,
+    });
+    expect(await Effect.runPromise(client.setRemoteControl({ enabled: false }))).toMatchObject({
+      remote: false,
+    });
   });
 
-  it("rejects a port outside 1 to 65535 before sending it to the desktop", async () => {
+  it("rejects an invalid conversation before sending anything to the desktop", async () => {
     const request = vi.fn().mockRejectedValue(new Error("should not send"));
-    const client = makeDesktopClient({
-      protocolVersion: PROTOCOL_VERSION,
-      stageDroppedFile: async () => null,
-      request,
-    });
+    const client = makeDesktopClient({ protocolVersion: PROTOCOL_VERSION, request });
     await expect(
       Effect.runPromise(
-        client.requestNetworkAccess({
-          conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-          callId: "call-1",
-          generationId: "generation-1",
-          host: "example.com",
-          port: 70_000,
-          privateNetwork: false,
-          scope: "answer",
-        }),
-      ),
-    ).rejects.toMatchObject({
-      _tag: "DesktopError",
-      reason: "failed",
-      message: "Could not send the request.",
-    });
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("rejects an invalid conversation before sending network approval to the desktop", async () => {
-    const request = vi.fn().mockRejectedValue(new Error("should not send"));
-    const client = makeDesktopClient({
-      protocolVersion: PROTOCOL_VERSION,
-      stageDroppedFile: async () => null,
-      request,
-    });
-    await expect(
-      Effect.runPromise(
-        client.requestNetworkAccess({
-          conversationId: "not-a-conversation-id",
-          callId: "call-1",
-          generationId: "generation-1",
-          host: "example.com",
-          port: 443,
-          privateNetwork: false,
-          scope: "answer",
-        }),
+        client.readFile({ conversationId: "not-a-conversation-id", path: "/workspace/a.md" }),
       ),
     ).rejects.toMatchObject({
       _tag: "DesktopError",
@@ -156,7 +106,6 @@ describe("the desktop channel", () => {
       client.readFile({
         conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
         path: "notes.md",
-        callId: "c",
       }),
     );
 
@@ -181,7 +130,6 @@ describe("the desktop channel", () => {
         client.readFile({
           conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
           path: "../secrets",
-          callId: "c",
         }),
       ),
     );
@@ -218,9 +166,9 @@ describe("the desktop channel", () => {
     expect(ran).toBe(false);
   });
 
-  it("carries call ids and lifecycle requests through the schema-derived client", async () => {
-    let receivedId: string | undefined;
+  it("carries the browser executor's requests through the schema-derived client", async () => {
     let work = { active: 0, needsApproval: 0 };
+    let saved: string | undefined;
     const client = makeDesktopClient(
       connect({
         executionSession: () =>
@@ -230,10 +178,10 @@ describe("the desktop channel", () => {
           Effect.sync(() => {
             work = state;
           }),
-        readFile: ({ callId, path }) =>
+        saveToWorkspace: ({ callId, fileName }) =>
           Effect.sync(() => {
-            receivedId = callId;
-            return { path, text: "hello", truncated: false };
+            saved = callId;
+            return { path: `/workspace/${fileName}`, created: true, bytes: 1 };
           }),
       }),
     );
@@ -243,17 +191,18 @@ describe("the desktop channel", () => {
       machineName: "Test Mac",
     });
     expect(await Effect.runPromise(client.cancelCall({ callId: "call" }))).toBe(true);
-    const attempts = [{ conversationId: "chat", generationId: "generation-1" }];
-    await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1, attempts }));
-    expect(work).toEqual({ active: 2, needsApproval: 1, attempts });
-    await Effect.runPromise(
-      client.readFile({
+    await Effect.runPromise(client.setWorkState({ active: 2, needsApproval: 1 }));
+    expect(work).toEqual({ active: 2, needsApproval: 1 });
+    const receipt = await Effect.runPromise(
+      client.saveToWorkspace({
         callId: "call",
         conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-        path: "work/file",
+        fileName: "a.txt",
+        base64: "YQ==",
       }),
     );
-    expect(receivedId).toBe("call");
+    expect(receipt.path).toBe("/workspace/a.txt");
+    expect(saved).toBe("call");
   });
 
   it("round-trips a reveal, which answers with nothing at all", async () => {
@@ -301,13 +250,6 @@ describe("the desktop channel", () => {
     expect(readDesktopChannel()).toBeNull();
 
     globals.__chatDesktop = { protocolVersion: PROTOCOL_VERSION, request: () => {} };
-    expect(readDesktopChannel()).toBeNull();
-
-    globals.__chatDesktop = {
-      protocolVersion: PROTOCOL_VERSION,
-      request: () => {},
-      stageDroppedFile: () => {},
-    };
     expect(readDesktopChannel()).not.toBeNull();
 
     delete globals.__chatDesktop;

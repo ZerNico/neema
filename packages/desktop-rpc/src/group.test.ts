@@ -3,111 +3,64 @@ import { describe, expect, it } from "vitest";
 import { DesktopRpcs } from "./group.ts";
 
 const CONVERSATION = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
-const BRANCH = "01990f4e-6650-7a33-a768-611e2e4bf4c8";
-const SUBMISSION = "550e8400-e29b-41d4-a716-446655440000";
-const RESERVATION = "550e8400-e29b-41d4-a716-446655440001";
-const path = { conversationId: CONVERSATION, path: "work/file" };
-const cases = [
-  { tag: "listDirectory", payload: path },
-  { tag: "readFile", payload: path },
-  { tag: "readBinary", payload: { ...path, purpose: "view" } },
-  { tag: "writeFile", payload: { ...path, text: "hello" } },
-  {
-    tag: "saveToWorkspace",
-    payload: { conversationId: CONVERSATION, fileName: "q3.pdf", base64: "JVBERi0=" },
-  },
-  { tag: "editFile", payload: { ...path, old: "hello", new: "world", all: false } },
-  { tag: "movePath", payload: { conversationId: CONVERSATION, from: "work/a", to: "work/b" } },
-  { tag: "deletePath", payload: { conversationId: CONVERSATION, paths: ["work/file"] } },
-  { tag: "findFiles", payload: { conversationId: CONVERSATION, pattern: "*.ts" } },
-  { tag: "searchFiles", payload: { conversationId: CONVERSATION, pattern: "needle" } },
-];
 
-describe("model operation identity", () => {
-  it.each(cases)("requires callId on $tag", ({ tag, payload }) => {
-    const rpc = DesktopRpcs.requests.get(tag)!;
-    const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
+const decoder = (tag: string) =>
+  Schema.decodeUnknownSync(DesktopRpcs.requests.get(tag)!.payloadSchema);
+
+describe("the page's procedures", () => {
+  it("are exactly the folder, browser executor, preview and computer settings ones", () => {
+    expect([...DesktopRpcs.requests.keys()].toSorted()).toEqual(
+      [
+        "folderStatus",
+        "chooseFolder",
+        "detachFolder",
+        "executionSession",
+        "cancelCall",
+        "setWorkState",
+        "saveToWorkspace",
+        "readFile",
+        "readBinary",
+        "fileInfo",
+        "revealPath",
+        "computerStatus",
+        "setRemoteControl",
+        "setAgentSocket",
+      ].toSorted(),
+    );
+  });
+
+  it("requires callId on saveToWorkspace, the one model operation", () => {
+    const decode = decoder("saveToWorkspace");
+    const payload = { conversationId: CONVERSATION, fileName: "q3.pdf", base64: "JVBERi0=" };
     expect(() => decode(payload)).toThrow('Missing key\n  at ["callId"]');
     expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
   });
 
-  it("still requires callId for commands", () => {
-    const rpc = DesktopRpcs.requests.get("runCommand")!;
-    const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
-    const payload = {
+  it.each(["readFile", "readBinary", "fileInfo"])("%s carries no callId", (tag) => {
+    // A preview is the reader's: nothing about it is a model call to replay.
+    const decoded = decoder(tag)({
       conversationId: CONVERSATION,
-      generationId: "generation",
-      command: "true",
-      timeoutMs: 100,
-    };
-    expect(() => decode(payload)).toThrow('Missing key\n  at ["callId"]');
-    expect(decode({ ...payload, callId: "call" })).toMatchObject({ callId: "call" });
-  });
-});
-
-describe("user-driven workspace operations", () => {
-  const tags = [
-    {
-      tag: "stageFile",
-      payload: {
-        conversationId: CONVERSATION,
-        submissionId: SUBMISSION,
-        fileName: "a.bin",
-        base64: "AA==",
-      },
-    },
-    {
-      tag: "discardStagedFile",
-      payload: {
-        conversationId: CONVERSATION,
-        submissionId: SUBMISSION,
-        name: "a.bin",
-      },
-    },
-    {
-      tag: "discardSubmission",
-      payload: { conversationId: CONVERSATION, submissionId: SUBMISSION },
-    },
-    {
-      tag: "promoteSubmission",
-      payload: {
-        conversationId: CONVERSATION,
-        submissionId: SUBMISSION,
-        reservationId: RESERVATION,
-      },
-    },
-    {
-      tag: "commitPromotion",
-      payload: { conversationId: CONVERSATION, reservationId: RESERVATION },
-    },
-    {
-      tag: "rollbackPromotion",
-      payload: { conversationId: CONVERSATION, reservationId: RESERVATION },
-    },
-    {
-      tag: "cloneWorkspace",
-      payload: { fromConversationId: CONVERSATION, toConversationId: BRANCH },
-    },
-    {
-      tag: "copyFolderGrants",
-      payload: { fromConversationId: CONVERSATION, toConversationId: BRANCH },
-    },
-    { tag: "discardWorkspace", payload: { conversationId: CONVERSATION } },
-  ];
-
-  it.each(tags)("$tag carries no callId", ({ tag, payload }) => {
-    const rpc = DesktopRpcs.requests.get(tag)!;
-    const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
-    // A callId would mean the model could fire a user action on its own.
-    expect(Object.keys(decode(payload) as object)).not.toContain("callId");
+      path: "/workspace/a",
+      callId: "c",
+    });
+    expect(Object.keys(decoded as object)).not.toContain("callId");
   });
 
-  it.each(["../outside", "/tmp/outside", "__draft__", "not-a-uuid", SUBMISSION])(
+  it("takes read-only as optional when choosing a folder", () => {
+    const decode = decoder("chooseFolder");
+    expect(decode({ conversationId: CONVERSATION })).toEqual({ conversationId: CONVERSATION });
+    expect(decode({ conversationId: CONVERSATION, readOnly: true })).toMatchObject({
+      readOnly: true,
+    });
+    expect(() => decode({ conversationId: CONVERSATION, readOnly: "yes" })).toThrow(
+      'Expected boolean\n  at ["readOnly"]',
+    );
+  });
+
+  it.each(["../outside", "/tmp/outside", "__draft__", "not-a-uuid"])(
     "rejects unsafe workspace id %s",
     (conversationId) => {
-      const rpc = DesktopRpcs.requests.get("folderStatus")!;
-      const decode = Schema.decodeUnknownSync(rpc.payloadSchema);
-      expect(() => decode({ conversationId })).toThrow(
+      expect(() => decoder("folderStatus")({ conversationId })).toThrow(
         'Expected a canonical UUIDv7.\n  at ["conversationId"]',
       );
     },
