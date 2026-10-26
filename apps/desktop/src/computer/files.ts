@@ -390,10 +390,10 @@ export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern:
       "outside",
       `${pattern} is outside this chat's folders. list_folder "." lists the ones it can reach.`,
     );
-  const relative = absolute ? pattern.slice(all[0]!.path.length + 1) || "**" : pattern;
+  const rest = absolute ? pattern.slice(all[0]!.path.length + 1) || "**" : pattern;
   let matcher: RegExp;
   try {
-    matcher = globToRegExp(relative, absolute);
+    matcher = globToRegExp(rest, absolute);
   } catch {
     throw new Refusal("bad-pattern", `Could not read ${pattern}.`);
   }
