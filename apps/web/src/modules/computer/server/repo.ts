@@ -30,7 +30,7 @@ export interface MachineRecord {
 
 const toMachine = (row: typeof machines.$inferSelect): MachineRecord => ({
   id: row.id,
-  name: row.name,
+  name: row.label ?? row.name,
   platform: row.platform,
   lastSeenAt: row.lastSeenAt,
 });
@@ -40,7 +40,14 @@ export class ComputerRepo extends Context.Service<
   ComputerRepo,
   {
     /** Records a machine connecting, its name and platform as it reports them now. */
-    saveMachine(userId: string, hello: MachineHello): Effect.Effect<void>;
+    /** Records a connecting machine; the name to show for it, the person's own when they set one. */
+    saveMachine(userId: string, hello: MachineHello): Effect.Effect<string>;
+    /** The person's name for a machine, or null for the one it reports; null when not theirs. */
+    renameMachine(
+      userId: string,
+      machineId: string,
+      label: string | null,
+    ): Effect.Effect<string | null>;
     touchMachine(userId: string, machineId: string): Effect.Effect<void>;
     machine(userId: string, machineId: string): Effect.Effect<MachineRecord | null>;
     machines(userId: string): Effect.Effect<ReadonlyArray<MachineRecord>>;
@@ -100,7 +107,21 @@ export class ComputerRepo extends Context.Service<
               target: [machines.userId, machines.id],
               set: { name: hello.name, platform: hello.platform, lastSeenAt: sql`now()` },
             })
-            .pipe(Effect.orDie, Effect.asVoid),
+            .returning({ name: machines.name, label: machines.label })
+            .pipe(
+              Effect.orDie,
+              Effect.map(([row]) => row?.label ?? row?.name ?? hello.name),
+            ),
+        renameMachine: (userId, machineId, label) =>
+          db
+            .update(machines)
+            .set({ label })
+            .where(and(eq(machines.userId, userId), eq(machines.id, machineId)))
+            .returning({ name: machines.name, label: machines.label })
+            .pipe(
+              Effect.orDie,
+              Effect.map(([row]) => (row ? (row.label ?? row.name) : null)),
+            ),
         touchMachine: (userId, machineId) =>
           db
             .update(machines)

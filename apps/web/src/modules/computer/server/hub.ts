@@ -49,6 +49,8 @@ export class MachineHub extends Context.Service<
     ): Effect.Effect<Stream.Stream<MachineEvent>, never, Scope.Scope>;
     /** A new hello from a connected machine; false when it is not connected. */
     update(userId: string, hello: MachineHello): Effect.Effect<boolean>;
+    /** A connected machine's name changed, the person having renamed it. */
+    rename(userId: string, machineId: string, name: string): Effect.Effect<void>;
     /** False when the machine is not connected, so the caller can answer for it. */
     send(userId: string, machineId: string, event: MachineEvent): Effect.Effect<boolean>;
     /** Sends to every connected machine of the person. */
@@ -106,6 +108,12 @@ export class MachineHub extends Context.Service<
             connections.set(id, { ...current, hello });
             if (worthTelling(current.hello, hello)) yield* changed(userId);
             return true;
+          }),
+        rename: (userId, machineId, name) =>
+          Effect.sync(() => {
+            const id = key(userId, machineId);
+            const current = connections.get(id);
+            if (current) connections.set(id, { ...current, hello: { ...current.hello, name } });
           }),
         send: (userId, machineId, event) =>
           Effect.gen(function* () {

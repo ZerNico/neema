@@ -131,7 +131,10 @@ and of `process.argv` on a cold start; both are read.
 ## A chat may have a computer
 
 - **A machine** is one desktop install a person signed in on, keyed by its own id
-  (`machine.json`) together with the person, in `machines`. A reinstall is a new machine.
+  (`machine.json`) together with the person, in `machines`. A reinstall is a new machine. It
+  reports its own name on every connect; the person may give it one of theirs (`label`), from
+  any device, which is shown in its place everywhere, the hub's presence included, so two of
+  the same model can be told apart.
 - **A chat binds to a machine** (`conversations.machine_id`) the first time it needs one. The
   first local call of an unbound chat asks which machine to use: the one the message was sent
   from when it is online, else the person's first ready one, else any online. One still

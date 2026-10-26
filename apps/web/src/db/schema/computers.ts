@@ -25,7 +25,10 @@ export const machines = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /** What the machine calls itself, refreshed on every connect. */
     name: text().notNull(),
+    /** The person's own name for it, shown in place of `name` when set. */
+    label: text(),
     platform: text({ enum: ["darwin", "win32", "linux"] }).notNull(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

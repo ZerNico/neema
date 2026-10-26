@@ -1,12 +1,16 @@
-import { Globe02Icon, InternetIcon, LaptopIcon } from "@hugeicons/core-free-icons";
+import { Globe02Icon, InternetIcon, LaptopIcon, PencilEdit02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { useState } from "react";
 import { formatLocale } from "~/i18n/formats.ts";
-import { useComputerSnapshot } from "~/modules/computer/client/use-computer.ts";
-import { listNetworkGrants, removeNetworkGrant } from "~/modules/computer/server/functions.ts";
-import { useDesktop } from "~/modules/desktop/client/bridge.ts";
+import { COMPUTER_QUERY_KEY, useComputerSnapshot } from "~/modules/computer/client/use-computer.ts";
+import {
+  listNetworkGrants,
+  removeNetworkGrant,
+  renameComputer,
+} from "~/modules/computer/server/functions.ts";
+import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { useDesktopBrowser } from "~/modules/browser/client/use-desktop-browser.ts";
 import { BrowserSearchSetting } from "~/modules/browser/ui/search-engine-setting.tsx";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -14,6 +18,7 @@ import { toastError } from "~/ui/error-toast.ts";
 import { EmptyState, ListCard, ListRow, Page, Section } from "~/ui/page-shell.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
+import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Switch } from "~/ui/primitives/switch";
 import { m } from "~/paraglide/messages.js";
@@ -273,32 +278,94 @@ function ThisComputer() {
 /** Every machine that ever connected, and whether it is online, so a chat's computer has a name. */
 function Machines() {
   const snapshot = useComputerSnapshot();
+  const here = useLocalMachineId();
   const machines = snapshot.data?.machines ?? [];
   if (machines.length === 0) return null;
   return (
     <Section title={m.settings_computer_machines_title()}>
       <ListCard>
         {machines.map((machine) => (
-          <ListRow key={machine.id}>
-            <HugeiconsIcon
-              icon={LaptopIcon}
-              strokeWidth={2}
-              className="text-muted-foreground size-5 shrink-0"
-            />
-            <span className="flex-1 text-sm font-medium">{machine.name}</span>
-            <Badge variant={machine.online ? "secondary" : "outline"}>
-              {machine.online
-                ? m.computer_status_online()
-                : m.computer_status_offline_since({
-                    time: new Date(machine.lastSeenAt).toLocaleString(formatLocale(), {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    }),
-                  })}
-            </Badge>
-          </ListRow>
+          <MachineRow key={machine.id} machine={machine} here={machine.id === here} />
         ))}
       </ListCard>
     </Section>
+  );
+}
+
+/**
+ * One machine, renamed in place: two of the same model report the same name, and the person's
+ * own tells them apart everywhere the machine is named. A blank name goes back to the reported one.
+ */
+function MachineRow({
+  machine,
+  here,
+}: {
+  machine: { id: string; name: string; online: boolean; lastSeenAt: string };
+  here: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const rename = useMutation({
+    mutationFn: (name: string) => renameComputer({ data: { machineId: machine.id, name } }),
+    onError: (error) => toastError(m.settings_computer_rename_failed(), error),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY }),
+  });
+  const finish = () => {
+    if (draft !== null && draft.trim() !== machine.name) rename.mutate(draft);
+    setDraft(null);
+  };
+  return (
+    <ListRow>
+      <HugeiconsIcon
+        icon={LaptopIcon}
+        strokeWidth={2}
+        className="text-muted-foreground size-5 shrink-0"
+      />
+      {draft === null ? (
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="truncate text-sm font-medium">
+            {rename.isPending ? rename.variables : machine.name}
+          </span>
+          {here ? (
+            <span className="text-muted-foreground shrink-0 text-xs">
+              · {m.settings_section_computer()}
+            </span>
+          ) : null}
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={m.settings_computer_rename({ name: machine.name })}
+            onClick={() => setDraft(machine.name)}
+          >
+            <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
+          </Button>
+        </span>
+      ) : (
+        <Input
+          // oxlint-disable-next-line jsx-a11y/no-autofocus -- opened by the rename button for typing
+          autoFocus
+          aria-label={m.settings_computer_name()}
+          value={draft}
+          maxLength={60}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={finish}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") finish();
+            if (event.key === "Escape") setDraft(null);
+          }}
+          className="min-w-0 flex-1"
+        />
+      )}
+      <Badge variant={machine.online ? "secondary" : "outline"}>
+        {machine.online
+          ? m.computer_status_online()
+          : m.computer_status_offline_since({
+              time: new Date(machine.lastSeenAt).toLocaleString(formatLocale(), {
+                dateStyle: "short",
+                timeStyle: "short",
+              }),
+            })}
+      </Badge>
+    </ListRow>
   );
 }

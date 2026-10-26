@@ -9092,6 +9092,38 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
+  it("keeps the person's name for a machine across its reconnects, and blank goes back", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const names = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ComputerRepo;
+        const hello = {
+          machineId: "laptop",
+          name: "MacBook Pro",
+          platform: "darwin" as const,
+          computer: { status: "ready" as const },
+          remote: true,
+        };
+        const first = yield* repo.saveMachine(seed.userId, hello);
+        const renamed = yield* repo.renameMachine(seed.userId, "laptop", "Work laptop");
+        // The machine connects again under the name it reports; the person's stays.
+        const reconnected = yield* repo.saveMachine(seed.userId, hello);
+        const listed = (yield* repo.machine(seed.userId, "laptop"))?.name;
+        const notTheirs = yield* repo.renameMachine("someone-else", "laptop", "Mine");
+        const cleared = yield* repo.renameMachine(seed.userId, "laptop", null);
+        return { first, renamed, reconnected, listed, notTheirs, cleared };
+      }),
+    );
+    expect(names).toEqual({
+      first: "MacBook Pro",
+      renamed: "Work laptop",
+      reconnected: "Work laptop",
+      listed: "Work laptop",
+      notTheirs: null,
+      cleared: "MacBook Pro",
+    });
+  });
+
   it("tells a new chat's first answer the folders its page named", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];

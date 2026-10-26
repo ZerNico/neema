@@ -68,6 +68,34 @@ export const decideComputerCall = createServerFn({ method: "POST" })
     ),
   );
 
+/**
+ * The person's own name for one of their machines, so two of the same model can be told apart;
+ * blank goes back to the name the machine reports. Any device of theirs may rename any machine.
+ */
+export const renameComputer = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(
+    standard(
+      Schema.Struct({
+        machineId: Id,
+        name: Schema.String.check(Schema.isMaxLength(60)),
+      }),
+    ),
+  )
+  .handler(({ data, context }) =>
+    runServerFn(
+      Effect.gen(function* () {
+        const userId = context.session.user.id;
+        const label = data.name.trim() || null;
+        const shown = yield* (yield* ComputerRepo).renameMachine(userId, data.machineId, label);
+        if (shown === null) return { renamed: false };
+        yield* (yield* MachineHub).rename(userId, data.machineId, shown);
+        yield* (yield* SyncBus).publish(userId, { type: "computer.changed" });
+        return { renamed: true };
+      }),
+    ),
+  );
+
 /** Points a chat at another of the person's machines, or at none. Its folders stay behind. */
 export const switchChatComputer = createServerFn({ method: "POST" })
   .middleware([requireSession])

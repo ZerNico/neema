@@ -16,8 +16,11 @@ export const Route = createFileRoute("/api/machine/status")({
         if (!machine) return unauthorized();
         const connected = await runtime.runPromise(
           Effect.gen(function* () {
-            yield* (yield* ComputerRepo).saveMachine(machine.userId, machine.hello);
-            const connected = yield* (yield* MachineHub).update(machine.userId, machine.hello);
+            const name = yield* (yield* ComputerRepo).saveMachine(machine.userId, machine.hello);
+            const connected = yield* (yield* MachineHub).update(machine.userId, {
+              ...machine.hello,
+              name,
+            });
             // Calls held while it downloaded its environment run once it is ready.
             yield* (yield* ComputerCalls).machineChanged(machine.userId, machine.hello.machineId);
             return connected;

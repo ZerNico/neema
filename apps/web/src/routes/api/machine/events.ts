@@ -26,10 +26,11 @@ export const Route = createFileRoute("/api/machine/events")({
             const repo = yield* ComputerRepo;
             const hub = yield* MachineHub;
             const calls = yield* ComputerCalls;
-            yield* repo.saveMachine(userId, hello);
+            // Shown by the person's own name for it when they set one.
+            const shown = { ...hello, name: yield* repo.saveMachine(userId, hello) };
             return Stream.unwrap(
               Effect.gen(function* () {
-                const events = yield* hub.connect(userId, hello, session.session.id);
+                const events = yield* hub.connect(userId, shown, session.session.id);
                 yield* Effect.addFinalizer(() => repo.touchMachine(userId, hello.machineId));
                 yield* calls.pushPolicy(userId, hello.machineId);
                 yield* calls.machineConnected(userId, hello.machineId);

@@ -46,7 +46,8 @@ const fakeRepo = (
   const layer = Layer.succeed(
     ComputerRepo,
     ComputerRepo.of({
-      saveMachine: () => Effect.void,
+      saveMachine: (_userId, hello) => Effect.succeed(hello.name),
+      renameMachine: () => Effect.succeed(null),
       touchMachine: () => Effect.void,
       machine: (_userId, id) =>
         Effect.succeed({

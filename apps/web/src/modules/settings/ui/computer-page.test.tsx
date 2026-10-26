@@ -23,10 +23,12 @@ const server = vi.hoisted(() => ({
   }>,
   machines: [] as Array<Record<string, unknown>>,
   removeNetworkGrant: vi.fn(),
+  renameComputer: vi.fn(),
 }));
 vi.mock("~/modules/computer/server/functions.ts", () => ({
   listNetworkGrants: async () => ({ grants: server.grants }),
   removeNetworkGrant: server.removeNetworkGrant,
+  renameComputer: server.renameComputer,
   computerSnapshot: async () => ({ machines: server.machines, pending: [] }),
   decideComputerCall: vi.fn(),
   switchChatComputer: vi.fn(),
@@ -43,7 +45,10 @@ type Status = {
 const machine = vi.hoisted(() => ({
   client: null as null | Record<string, unknown>,
 }));
-vi.mock("~/modules/desktop/client/bridge.ts", () => ({ useDesktop: () => machine.client }));
+vi.mock("~/modules/desktop/client/bridge.ts", () => ({
+  useDesktop: () => machine.client,
+  useLocalMachineId: () => (machine.client ? "laptop" : null),
+}));
 
 const desktop = (initial: Status) => {
   let status = initial;
@@ -75,6 +80,7 @@ beforeEach(() => {
   server.grants = [];
   server.machines = [];
   server.removeNetworkGrant.mockReset().mockResolvedValue({ removed: true });
+  server.renameComputer.mockReset().mockResolvedValue({ renamed: true });
   machine.client = null;
 });
 
@@ -153,5 +159,33 @@ describe("ComputerPage", () => {
     expect(await screen.findByText("Studio Mac")).toBeInTheDocument();
     expect(screen.getByText("Online")).toBeInTheDocument();
     expect(screen.getByText(/^Offline since/)).toBeInTheDocument();
+  });
+});
+
+describe("the list of computers", () => {
+  it("renames a computer in place, and marks the one this is", async () => {
+    desktop({ status: "ready", remote: true, agentSocket: null });
+    server.machines = [
+      {
+        id: "laptop",
+        name: "MacBook Pro",
+        platform: "darwin",
+        lastSeenAt: new Date().toISOString(),
+        online: true,
+        computer: null,
+        remote: true,
+      },
+    ];
+    renderPage();
+    expect(await screen.findByText("· This computer")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Rename MacBook Pro" }));
+    const field = screen.getByRole("textbox", { name: "Name" });
+    await userEvent.clear(field);
+    await userEvent.type(field, "Work laptop{Enter}");
+    await waitFor(() =>
+      expect(server.renameComputer).toHaveBeenCalledWith({
+        data: { machineId: "laptop", name: "Work laptop" },
+      }),
+    );
   });
 });
