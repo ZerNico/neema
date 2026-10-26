@@ -36,12 +36,17 @@ const buildStamp = () => {
  */
 const sandboxImage = () => {
   if (process.env.SANDBOX_IMAGE_REF) return process.env.SANDBOX_IMAGE_REF;
-  const tree = execSync("git rev-parse HEAD:infra/sandbox-image", {
-    stdio: ["ignore", "pipe", "ignore"],
-  })
-    .toString()
-    .trim();
-  return `ghcr.io/zernico/neema-sandbox:tree-${tree.slice(0, 16)}`;
+  try {
+    const tree = execSync("git rev-parse HEAD:infra/sandbox-image", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    return `ghcr.io/zernico/neema-sandbox:tree-${tree.slice(0, 16)}`;
+  } catch {
+    // Not a checkout, so no sources to name: main's latest image.
+    return "ghcr.io/zernico/neema-sandbox:edge";
+  }
 };
 
 export const buildOptions = () => ({
