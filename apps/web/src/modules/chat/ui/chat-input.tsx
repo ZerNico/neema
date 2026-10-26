@@ -7,6 +7,7 @@ import {
   ArrowUp02Icon,
   Attachment01Icon,
   Book02Icon,
+  FolderAddIcon,
   GlobalSearchIcon,
   PlugSocketIcon,
   PlusSignIcon,
@@ -26,6 +27,7 @@ import {
   AgentPicker,
   CollectionPicker,
   AgentChip,
+  ContextChip,
   ReferenceChip,
   ContextMenuItems,
   type ContextPickerKind,
@@ -73,6 +75,10 @@ import type {
 import { AddIntegrationDialog } from "~/modules/integrations/ui/add-integration-dialog.tsx";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
 import type { MessageReference } from "../references.ts";
+import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
+
+/** A folder's guest path, the one the model uses: not words to translate. */
+const folderPath = (name: string) => `/folders/${name}`;
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
 const effortLabels: Record<ReasoningEffort, () => string> = {
@@ -170,6 +176,8 @@ export const ChatInput = forwardRef<
       | undefined;
     /** Connected services this chat may use; absent hides the controls (edits). */
     integrations?: ComposerIntegrations | undefined;
+    /** The chat's folders on this machine, in the desktop app only; absent hides them. */
+    folders?: ComposerFolders | undefined;
     /** The agent or schedule this message is about, shown as chips. */
     references?:
       | {
@@ -209,6 +217,7 @@ export const ChatInput = forwardRef<
     skills,
     integrations,
     references,
+    folders,
     placeholder = m.chat_composer_placeholder(),
     textareaLabel,
     autoFocus = false,
@@ -444,6 +453,7 @@ export const ChatInput = forwardRef<
           the row is already full height for the edit swap's measurement. */}
       <AnimatePresence initial={false}>
         {(references && references.items.length > 0) ||
+        (folders && folders.items.length > 0) ||
         (attachments && items.length > 0) ||
         (context?.selection.agent && !context.agentLocked) ? (
           <motion.div key="chips" {...rowMotion}>
@@ -455,6 +465,23 @@ export const ChatInput = forwardRef<
                     <ReferenceChip
                       reference={reference}
                       onRemove={controlsDisabled ? undefined : () => references.onRemove(reference)}
+                    />
+                  </CollapseItem>
+                ))}
+              </AnimatePresence>
+              <AnimatePresence initial={false}>
+                {folders?.items.map((folder) => (
+                  <CollapseItem key={`folder:${folder.name}`}>
+                    <ContextChip
+                      item={{
+                        kind: "folder",
+                        id: folder.name,
+                        name: folder.name,
+                        note: folder.readOnly
+                          ? `${folderPath(folder.name)} · ${m.computer_folder_read_only()}`
+                          : folderPath(folder.name),
+                      }}
+                      onRemove={controlsDisabled ? undefined : () => folders.onRemove(folder.name)}
                     />
                   </CollapseItem>
                 ))}
@@ -588,7 +615,9 @@ export const ChatInput = forwardRef<
                       variant="ghost"
                       aria-label={menuLabel}
                       ref={setMenuAnchor}
-                      disabled={controlsDisabled || (!hasTools && (!target || target.isFull))}
+                      disabled={
+                        controlsDisabled || (!hasTools && !folders && (!target || target.isFull))
+                      }
                       className="text-muted-foreground"
                     />
                   }
@@ -604,6 +633,15 @@ export const ChatInput = forwardRef<
               <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
                 <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
                 {m.chat_composer_attach_files()}
+              </DropdownMenuItem>
+            ) : null}
+            {folders ? (
+              <DropdownMenuItem
+                onClick={folders.onAdd}
+                disabled={controlsDisabled || folders.adding}
+              >
+                <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
+                {m.chat_composer_add_folder()}
               </DropdownMenuItem>
             ) : null}
             {context && (canChooseAgent || canChooseKnowledge) ? (

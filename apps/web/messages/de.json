@@ -6350,5 +6350,8 @@
   "settings_computer_agent_hint": "Der Agent, mit dem sich Chats anmelden, sobald du es erlaubst. Leer lassen für den Standard.",
   "settings_computer_agent_placeholder": "Standard-Agent",
   "settings_computer_machines_title": "Deine Computer",
-  "chat_status_computer": "Hat einen Computer"
+  "chat_status_computer": "Hat einen Computer",
+  "chat_composer_add_folder": "Ordner hinzufügen",
+  "chat_composer_folder_name_taken": "Ein Ordner mit diesem Namen ist schon hinzugefügt",
+  "chat_composer_folder_refused": "Dieser Ordner kann keinem Chat gegeben werden"
 }

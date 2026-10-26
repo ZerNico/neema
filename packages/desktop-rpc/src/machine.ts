@@ -84,6 +84,8 @@ export const MachineEvent = Schema.Union([
    * stream.
    */
   Schema.Struct({ type: Schema.Literal("running"), callIds: Schema.Array(Id) }),
+  /** Report this chat's folders: it was just created from this machine, which may hold some. */
+  Schema.Struct({ type: Schema.Literal("folders"), conversationId: Id }),
   /** Every network grant of the person, whole each time it changes. */
   Schema.Struct({ type: Schema.Literal("grants"), grants: Schema.Array(DestinationGrant) }),
   /** A branch of a chat on this machine: its workspace files are copied, its installs are not. */

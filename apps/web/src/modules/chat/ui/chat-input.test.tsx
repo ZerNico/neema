@@ -1,3 +1,4 @@
+import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -103,6 +104,7 @@ function Harness({
   parsingEnabled,
   handleRef,
   modelRef,
+  folders,
 }: {
   upload: (file: File) => Promise<Attachment>;
   destroy: (attachmentId: string) => Promise<unknown>;
@@ -111,6 +113,7 @@ function Harness({
   parsingEnabled: boolean;
   handleRef: Ref<AttachmentUploads>;
   modelRef: Ref<(modelId: string) => void>;
+  folders?: ComposerFolders | undefined;
 }) {
   const [value, setValue] = useState(initialValue);
   const [modelId, setModelId] = useState("text-only");
@@ -129,6 +132,7 @@ function Harness({
       searchEnabled={false}
       onSearchEnabledChange={() => {}}
       attachments={attachments}
+      folders={folders}
     />
   );
 }
@@ -139,6 +143,7 @@ const setup = (
     initialValue?: string;
     parsingEnabled?: boolean;
     capabilities?: Capabilities;
+    folders?: ComposerFolders;
   } = {},
 ): Harness => {
   const client = new QueryClient({
@@ -183,6 +188,7 @@ const setup = (
           modelRef={(value) => {
             if (value) setModel = value;
           }}
+          folders={options.folders}
         />
       </Suspense>
     </QueryClientProvider>,
@@ -717,6 +723,38 @@ describe("ChatInput pickers", () => {
         menuSide,
       ),
     );
+  });
+});
+
+describe("ChatInput folders", () => {
+  it("offers Add folder in the plus menu and shows each attached folder by its guest path", async () => {
+    const onAdd = vi.fn();
+    const onRemove = vi.fn();
+    setup({
+      folders: {
+        items: [
+          { name: "site", readOnly: false },
+          { name: "refs", readOnly: true },
+        ],
+        onAdd,
+        onRemove,
+        adding: false,
+      },
+    });
+    expect(screen.getByText("/folders/site")).toBeInTheDocument();
+    expect(screen.getByText("/folders/refs · read-only")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove site" }));
+    expect(onRemove).toHaveBeenCalledWith("site");
+    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
+    fireEvent.click(await screen.findByText("Add folder"));
+    expect(onAdd).toHaveBeenCalled();
+  });
+
+  it("has no folder entry where folders cannot be picked", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
+    await screen.findByText("Attach files");
+    expect(screen.queryByText("Add folder")).toBeNull();
   });
 });
 

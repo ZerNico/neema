@@ -27,7 +27,15 @@ export const Route = createFileRoute("/api/machine/folders")({
               body.value.conversationId,
               body.value.folders,
             );
-            if (ok) yield* (yield* SyncBus).publish(machine.userId, { type: "computer.changed" });
+            if (ok) {
+              const bus = yield* SyncBus;
+              yield* bus.publish(machine.userId, { type: "computer.changed" });
+              // A first folder may have bound the chat to this machine.
+              yield* bus.publish(machine.userId, {
+                type: "conversation.updated",
+                conversationId: body.value.conversationId,
+              });
+            }
             return ok;
           }),
         );

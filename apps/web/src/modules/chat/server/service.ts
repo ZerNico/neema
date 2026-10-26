@@ -536,6 +536,16 @@ function makeChatService() {
           ? { ...turnFields, questionResponse: input.questionResponse }
           : { ...turnFields, content: input.content },
       );
+      // A chat started in the desktop app may already have folders there, picked before it
+      // existed; the machine reports them now that there is a chat to report them for.
+      if (input.conversation.kind === "new") {
+        const machineId = yield* machines.machineOfSession(input.userId, input.deviceSessionId);
+        if (machineId)
+          yield* machines.send(input.userId, machineId, {
+            type: "folders",
+            conversationId: input.conversation.id,
+          });
+      }
 
       return yield* startTurn({
         userId: input.userId,

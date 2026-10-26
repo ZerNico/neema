@@ -1,3 +1,4 @@
+import { useComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { m } from "~/paraglide/messages.js";
 import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -100,6 +101,7 @@ export function ChatView({
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const imagePick = imageModelId ? { imageModelId } : {};
   const localMachineId = useLocalMachineId();
+  const folders = useComposerFolders(conversationId, data.conversation.machineId);
 
   const liveAnswer = useLiveAnswer({ data, conversationId, anchorFirstTurn });
   const { streamingMessage, stream, anchorId, releaseAnchor } = liveAnswer;
@@ -386,6 +388,7 @@ export function ChatView({
                 <Composer
                   ref={composer}
                   integrations={integrations}
+                  folders={folders}
                   onSend={(content, attachmentIds, researchEnabled, skillIds) =>
                     sendMutation.mutateAsync({
                       content,

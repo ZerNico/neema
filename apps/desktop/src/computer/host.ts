@@ -279,6 +279,9 @@ export class ComputerHost {
       case "grants":
         this.policy.setGrants(this.options.origin, event.grants);
         return;
+      case "folders":
+        void this.foldersChanged(event.conversationId).catch(() => {});
+        return;
       case "clone":
         // The branch starts with no folder names on the server; it hears them from here, so it
         // never names a folder this machine does not mount.

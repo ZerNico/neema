@@ -6356,5 +6356,8 @@
   "settings_computer_agent_hint": "The agent chats sign in with once you allow it. Leave empty for the default.",
   "settings_computer_agent_placeholder": "Default agent",
   "settings_computer_machines_title": "Your computers",
-  "chat_status_computer": "Has a computer"
+  "chat_status_computer": "Has a computer",
+  "chat_composer_add_folder": "Add folder",
+  "chat_composer_folder_name_taken": "A folder with that name is already attached",
+  "chat_composer_folder_refused": "That folder can’t be given to a chat"
 }

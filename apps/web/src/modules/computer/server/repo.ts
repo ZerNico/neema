@@ -58,6 +58,10 @@ export class ComputerRepo extends Context.Service<
       conversationId: string,
       machineId: string | null,
     ): Effect.Effect<boolean>;
+    /**
+     * The chat's folder names as its machine reports them. Folders attached at a machine are a
+     * use of it, so a chat with no computer yet binds to that machine.
+     */
     setFolders(
       userId: string,
       machineId: string,
@@ -172,12 +176,14 @@ export class ComputerRepo extends Context.Service<
         setFolders: (userId, machineId, conversationId, folders) =>
           db
             .update(conversations)
-            .set({ computerFolders: folders })
+            .set({ computerFolders: folders, machineId })
             .where(
               and(
                 ownedConversationById(conversationId, userId),
-                // Only the chat's own machine speaks for its folders.
-                eq(conversations.machineId, machineId),
+                // Only the chat's own machine speaks for its folders, or the first to attach one.
+                folders.length > 0
+                  ? or(eq(conversations.machineId, machineId), isNull(conversations.machineId))
+                  : eq(conversations.machineId, machineId),
               ),
             )
             .returning({ id: conversations.id })

@@ -231,10 +231,16 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   nothing: any session of the person could make it. It is asked when the call is decided, so
   a reconnect in between changes nothing. A queued message the server starts has no request,
   so it counts as sent from the session that queued it, kept on the entry.
-- **Attaching a folder yourself** happens in the desktop app on that machine, through the
-  native picker, and refuses a folder that is a disk root, the home folder itself, the app's
-  own data, or holds or lies inside credentials (`folder-access.ts`), judged by where links
-  lead. A folder may be attached read-only.
+- **Attaching a folder yourself** happens in the desktop app on that machine, from the composer's
+  plus menu or the chat's computer chip, through the native picker. It refuses a folder that is
+  a disk root, the home folder itself, the app's own data, or holds or lies inside credentials
+  (`folder-access.ts`), judged by where links lead. A folder may be attached read-only.
+- **A folder is a use of the machine.** Folders are offered only where the chat's computer is
+  this machine or none yet, and the first one binds a chat without a computer to it. A new chat
+  has its id before its first message, so the machine holds a folder picked for it. Creating the
+  chat from that machine's session asks the machine for its folders, and the names reach the
+  server then. A draft never sent leaves a grant whose chat does not exist, which the machine's
+  check for gone chats removes on its next start.
 
 ## A VM per chat
 

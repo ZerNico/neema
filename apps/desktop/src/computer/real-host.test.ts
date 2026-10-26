@@ -231,6 +231,16 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     });
   });
 
+  test("a new chat's folders are reported when the server asks", async () => {
+    const reported = new Promise<void>((resolve) => (folderReport = resolve));
+    send({ type: "folders", conversationId: CHAT });
+    await reported;
+    expect(reportedFolders.at(-1)).toEqual({
+      conversationId: CHAT,
+      folders: [{ name: "notes", readOnly: false }],
+    });
+  });
+
   test("a chat purged while the machine was offline is removed once it asks", async () => {
     await firstDiscard;
     expect(discarded).toEqual(["purged"]);

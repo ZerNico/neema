@@ -1,3 +1,4 @@
+import { useComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { m } from "~/paraglide/messages.js";
 import { Folder01Icon, IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -84,6 +85,7 @@ export function NewChatView({
   const composer = useRef<ComposerHandle>(null);
   // Fixed per visit, so a retried first send names the same chat.
   const [conversationId] = useState(uuidv7);
+  const folders = useComposerFolders(conversationId, null);
   // Held locally until the first message creates the chat and carries them.
   const integrations = useChatIntegrations(null);
   const isMobile = useIsMobile();
@@ -293,6 +295,7 @@ export function NewChatView({
           <Composer
             initialSkillId={initialSkillId}
             integrations={integrations}
+            folders={folders}
             onSend={(content, attachmentIds, researchEnabled, skillIds) =>
               sendMutation.mutateAsync({
                 content,

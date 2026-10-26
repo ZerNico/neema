@@ -1,3 +1,4 @@
+import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { m } from "~/paraglide/messages.js";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
@@ -93,6 +94,8 @@ interface ComposerProps {
   initialSkillId?: string | null | undefined;
   /** This chat's connected services; the view owns them so a send can carry them. */
   integrations?: ComposerIntegrations | undefined;
+  /** The chat's folders on this machine; see `useComposerFolders`. */
+  folders?: ComposerFolders | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -114,6 +117,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     context,
     initialSkillId,
     integrations,
+    folders,
   },
   ref,
 ) {
@@ -339,6 +343,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(capabilities?.skillsUse
           ? { skills: { items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds } }
           : {})}
+        folders={folders}
         references={{
           items: references,
           onRemove: (removed) =>

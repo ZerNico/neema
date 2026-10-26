@@ -9032,6 +9032,66 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
+  it("asks the sending machine for a new chat's folders, and the first folders bind the chat", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    authoringScript = () =>
+      Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const hub = yield* MachineHub;
+          const repo = yield* ComputerRepo;
+          const hello = {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin" as const,
+            computer: { status: "ready" as const },
+            remote: true,
+          };
+          yield* repo.saveMachine(seed.userId, hello);
+          const events = yield* hub.connect(seed.userId, hello, "laptop-session");
+          // The folder was picked before the chat existed, under the id the composer holds.
+          const id = uuidv7();
+          const sent = yield* (yield* ChatService).sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id },
+            modelId: textModelId,
+            content: "Look at my site",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            deviceSessionId: "laptop-session",
+          });
+          const [asked] = yield* Stream.filter(events, (event) => event.type === "folders").pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          );
+          const bound = yield* repo.setFolders(seed.userId, "laptop", id, [
+            { name: "site", readOnly: false },
+          ]);
+          const takenOver = yield* repo.setFolders(seed.userId, "desk", id, [
+            { name: "other", readOnly: false },
+          ]);
+          const chat = yield* repo.chat(seed.userId, id);
+          yield* Stream.runDrain((yield* StreamEngine).subscribe(sent.assistantMessageId, 0));
+          return { asked, id, bound, takenOver, chat };
+        }).pipe(Effect.scoped),
+      );
+      expect(result.asked).toEqual({ type: "folders", conversationId: result.id });
+      expect(result.bound).toBe(true);
+      expect(result.takenOver).toBe(false);
+      expect(result.chat).toMatchObject({
+        machineId: "laptop",
+        folders: [{ name: "site", readOnly: false }],
+      });
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("runs a queued message's calls as sent from the machine that queued it", async () => {
     const seed = await runtime.runPromise(desktopChat);
     let round = 0;
