@@ -37,7 +37,7 @@ const nothing: FixedPrefixInput = {
   web: null,
   integrations: null,
   research: false,
-  desktop: null,
+  desktop: false,
   browser: false,
   memory: [],
   project: null,
@@ -78,11 +78,7 @@ const configurations: Record<string, FixedPrefixInput> = {
     lazyFamilies: office,
     documents: true,
     web: { search: true, reader: true },
-    desktop: {
-      machine: { name: "Alex's MacBook", online: true },
-      folders: [{ name: "site", readOnly: false }],
-      files: [],
-    },
+    desktop: true,
     browser: true,
   },
   research: {

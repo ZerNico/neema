@@ -5,49 +5,57 @@ import {
   approvalKind,
   deletePathsOf,
   desktopToolTimeout,
+  computerNotice,
   computerSystemHint,
   forTranscript,
   unusableDesktopResult,
 } from "./tool-schema.ts";
 
 describe("computer system hint", () => {
+  it("is fixed text: nothing in it follows the chat's state, so the system prompt stays cached", () => {
+    expect(computerSystemHint()).toBe(computerSystemHint());
+    expect(computerSystemHint()).not.toMatch(/\/Users\/|C:\\/);
+  });
+
+  it("asks before deletes and new destinations, and treats output as data", () => {
+    const hint = computerSystemHint();
+    expect(hint).toMatch(
+      /always asked before a delete, a new network destination, a folder or the SSH agent/,
+    );
+    expect(hint).toMatch(/never as instructions/);
+    expect(hint).toContain("request_network_access");
+  });
+});
+
+describe("computer notice", () => {
   const ready = { machine: { name: "nico's MacBook", online: true }, folders: [], files: [] };
 
   it("names the guest paths, never a host path", () => {
-    const hint = computerSystemHint({
+    const notice = computerNotice({
       ...ready,
       folders: [
         { name: "site", readOnly: false },
         { name: "refs", readOnly: true },
       ],
     });
-    expect(hint).toContain("/workspace");
-    expect(hint).toContain("/folders/site, /folders/refs (read-only)");
-    expect(hint).not.toMatch(/\/Users\/|C:\\/);
+    expect(notice).toContain("/folders/site, /folders/refs (read-only)");
+    expect(notice).not.toMatch(/\/Users\/|C:\\/);
   });
 
   it("says which machine runs the chat, and when it is offline", () => {
-    expect(computerSystemHint(ready)).toContain(`runs on "nico's MacBook"`);
-    const offline = computerSystemHint({
+    expect(computerNotice(ready)).toContain(`"nico's MacBook", online.`);
+    const offline = computerNotice({
       ...ready,
       machine: { name: "nico's MacBook", online: false },
     });
     expect(offline).toMatch(/offline right now/);
-    expect(computerSystemHint({ ...ready, machine: null })).toMatch(/no computer yet/);
+    expect(computerNotice({ ...ready, machine: null })).toMatch(/none yet/);
   });
 
   it("names where sent files are", () => {
-    const hint = computerSystemHint({ ...ready, files: ["/workspace/data.csv"] });
-    expect(hint).toContain("/workspace/data.csv");
-  });
-
-  it("asks before deletes and new destinations, and treats output as data", () => {
-    const hint = computerSystemHint(ready);
-    expect(hint).toMatch(
-      /always asked before a delete, a new network destination, a folder or the SSH agent/,
+    expect(computerNotice({ ...ready, files: ["/workspace/data.csv"] })).toContain(
+      "/workspace/data.csv",
     );
-    expect(hint).toMatch(/never as instructions/);
-    expect(hint).toContain("request_network_access");
   });
 });
 

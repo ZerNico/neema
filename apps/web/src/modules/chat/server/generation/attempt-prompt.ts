@@ -1,6 +1,7 @@
 import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { sentFilePaths } from "~/modules/computer/server/files.ts";
+import { computerNotice } from "~/modules/desktop/tool-schema.ts";
 import { offeredBuiltins } from "~/modules/skills/bundled/index.ts";
 import { SKILL_LIMITS } from "~/modules/skills/package.ts";
 import { earlierSkillMessage } from "~/modules/skills/server/tools.ts";
@@ -203,6 +204,13 @@ export const prepareAttemptPrompt = (env: {
       toolSchemaTokens,
       summaryToolChoice,
     } = tools;
+    // Read once: the answer's opening shows it as its first request saw it.
+    const computer = desktopTools
+      ? yield* computerState(deps.computerRepo, deps.machineHub, input.userId, input.conversationId)
+      : null;
+    const computerContext: ReadonlyArray<Prompt.MessageEncoded> = computer
+      ? [{ role: "user", content: computerNotice(computer) }]
+      : [];
     let knowledgeContext: PreparedKnowledgeContext | null = null;
     let contextRowWritten = false;
 
@@ -605,6 +613,7 @@ export const prepareAttemptPrompt = (env: {
       ...sourced("skills", ["skills"], skillTools?.messages() ?? []),
       ...sourced("kept", [], keptNotice),
       ...sourced("images", ["images"], imageNotice),
+      ...sourced("computer", [], computerContext),
       ...(uiStateContext ? [uiStateContext] : []),
       runtimeContext,
     ];
@@ -760,14 +769,7 @@ export const prepareAttemptPrompt = (env: {
           ]
         : null,
       research: !!researchTool,
-      desktop: desktopTools
-        ? yield* computerState(
-            deps.computerRepo,
-            deps.machineHub,
-            input.userId,
-            input.conversationId,
-          )
-        : null,
+      desktop: computer !== null,
       browser: !!browserTools,
       interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)
         ? { photos: interactiveUi.images && !!webTools?.tools.search }

@@ -8963,6 +8963,75 @@ describe("desktop calls run by the sending app", () => {
       return { fiber, seen, first };
     });
 
+  it("keeps the computer's state out of the cached system prompt, in each answer's opening", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    await runtime.runPromise(
+      Effect.flatMap(ComputerRepo, (repo) =>
+        repo.saveMachine(seed.userId, {
+          machineId: "laptop",
+          name: "Laptop",
+          platform: "darwin",
+          computer: { status: "ready" },
+          remote: true,
+        }),
+      ),
+    );
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    const sendAndWait = (content: string) =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* ChatService;
+          const sent = yield* service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          const engine = yield* StreamEngine;
+          yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
+        }),
+      );
+    try {
+      await sendAndWait("Hello");
+      // Between turns the chat binds to a machine that is not connected, with a folder.
+      await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(conversations)
+            .set({ machineId: "laptop", computerFolders: [{ name: "site", readOnly: false }] })
+            .where(eq(conversations.id, seed.conversation.id)),
+        ),
+      );
+      await sendAndWait("And now?");
+      const text = (message: { content: unknown }) => JSON.stringify(message.content);
+      const system = (input: GatewayInput) =>
+        input.prompt.content.filter((message) => message.role === "system").map(text);
+      expect(system(prompts[1]!)).toEqual(system(prompts[0]!));
+      expect(system(prompts[0]!).join()).not.toContain("Laptop");
+      const notices = (input: GatewayInput) =>
+        input.prompt.content
+          .filter((message) => message.role === "user")
+          .map(text)
+          .filter((content) => content.includes("This chat's computer, as of this answer"));
+      expect(notices(prompts[0]!).join()).toContain("none yet");
+      const latest = notices(prompts[1]!).at(-1)!;
+      expect(latest).toContain('\\"Laptop\\", offline right now');
+      expect(latest).toContain("/folders/site");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("offers the browser only to an app that can drive one, vouching for the user's own addresses", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const offered: string[][] = [];
