@@ -129,7 +129,7 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       ask: {
         folder: async ({ path }) =>
           path ? { hostPath: path } : { refused: "The user picked no folder." },
-        agent: async () => true,
+        agent: async () => "allowed" as const,
       },
       attach: async (_conversationId, hostPath) => ({ name: hostPath.split("/").pop()! }),
       log: () => {},

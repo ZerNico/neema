@@ -239,6 +239,7 @@ const startComputer = (origin: string) => {
     window: () => mainWindow,
     locale: () => shellLocale(origin),
     appData: userData,
+    agentSocket: () => settings().agentSocket(),
     remembered: new RememberedFolders(
       join(
         userData,

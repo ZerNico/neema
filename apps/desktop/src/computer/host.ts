@@ -1,3 +1,4 @@
+import type { AgentAnswer } from "./dialogs.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createEgressProxy, type EgressProxy } from "@chat/egress-proxy";
@@ -41,7 +42,8 @@ export interface ComputerHostOptions {
       path?: string;
       reason?: string;
     }): Promise<{ hostPath: string } | { refused: string }>;
-    agent(): Promise<boolean>;
+    /** Says whether the agent holds a key too, which the model is told. */
+    agent(input: { allowed: boolean }): Promise<AgentAnswer>;
   };
   /** Attaches a folder to a chat here, refusing the ones no chat may have. */
   readonly attach: (
@@ -241,11 +243,13 @@ export class ComputerHost {
               return attached;
             },
             requestAgent: async (key) => {
-              if (this.agent.isAllowed(key)) return true;
-              if (!(await this.options.ask.agent())) return false;
-              this.agent.allow(key);
-              await this.saveAgentChats();
-              return true;
+              const allowed = this.agent.isAllowed(key);
+              const answer = await this.options.ask.agent({ allowed });
+              if (answer !== "declined" && !allowed) {
+                this.agent.allow(key);
+                await this.saveAgentChats();
+              }
+              return answer;
             },
           },
           {

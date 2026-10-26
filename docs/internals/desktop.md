@@ -333,7 +333,13 @@ The VM's only way out is the egress proxy, which decides by name. See [egress pr
   ones. Commands can ask the agent to sign but never read a key.
 - **Which agent:** the socket chosen in Settings › This computer, else `SSH_AUTH_SOCK`, else
   Windows' OpenSSH agent pipe. Windows' agent service is disabled by default, and Pageant and
-  Git for Windows' own agent are not supported. An empty agent needs the person's `ssh-add`.
+  Git for Windows' own agent are not supported.
+- **An empty agent** is the common case on a Mac, where `ssh` reads keys from disk and the agent
+  holds none. Asked for the agent, the machine counts its keys in the agent's own protocol, and
+  when there are none offers to add the default key, also to a chat already allowed. `ssh-add`
+  adds it, so the key never passes through the app; on macOS a native dialog asks for its
+  passphrase and the Keychain keeps it. If that fails the dialog gives the command to run. The
+  model hears whether the agent holds a key, so it asks for that, never a password.
 
 ## Browser calls stay with the page
 

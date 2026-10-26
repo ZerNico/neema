@@ -59,7 +59,7 @@ export interface DispatchDeps {
     input: { path?: string; reason?: string },
   ) => Promise<{ name: string } | { refused: string }>;
   /** Asks the person at this machine whether the chat may use their SSH agent. */
-  readonly requestAgent: (key: ChatKey) => Promise<boolean>;
+  readonly requestAgent: (key: ChatKey) => Promise<"allowed" | "allowed-empty" | "declined">;
 }
 
 /** Where `ssh-agent-bridge` in the image presents the person's agent inside the guest. */
@@ -171,13 +171,20 @@ async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<Too
           `The user gave this chat the folder at /folders/${answer.name}. The tools reach it from the next call on.`,
         );
   }
-  if (call.name === "request_ssh_agent")
-    return (await deps.requestAgent(call.key))
+  if (call.name === "request_ssh_agent") {
+    const answer = await deps.requestAgent(call.key);
+    if (answer === "declined")
+      return failure("You declined that", "The user declined. Do not retry it or work around it.");
+    return answer === "allowed"
       ? ok(
           "Allowed the SSH agent in this chat",
           "Commands in this chat may now sign in with the user's SSH agent. Retry the command.",
         )
-      : failure("You declined that", "The user declined. Do not retry it or work around it.");
+      : ok(
+          "Allowed the SSH agent, which holds no keys",
+          "Commands in this chat may use the user's SSH agent, but it holds no keys, so a login will still be refused. Tell the user to add their key to the agent (ssh-add) and to say when it is done; do not ask for a password or a key in the chat.",
+        );
+  }
   const args = call.args;
   let reset = false;
   // Joins the chat's queue before anything is awaited, so its calls run in the order they came;
