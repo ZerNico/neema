@@ -47,6 +47,22 @@ describe("DesktopActivityBlock", () => {
     expect(screen.getByText("Couldn’t read image.png")).toBeInTheDocument();
   });
 
+  it("still draws a stored row of a tool since removed", () => {
+    const removed: string = "move_local_file";
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          name: removed as DesktopToolActivity["name"],
+          status: "complete",
+          args: { from: "/workspace/a.md", to: "/workspace/b.md" },
+          result: { v: 1, ok: true, summary: "Moved a.md to b.md", detail: "", truncated: false },
+        })}
+      />,
+    );
+    const row = screen.getByText("Moved a.md to b.md").closest("div")!;
+    expect(row.querySelector("svg")).not.toBeNull();
+  });
+
   it("is pressable while the message is still streaming", async () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);

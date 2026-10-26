@@ -56,8 +56,13 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   request_ssh_agent: Key01Icon,
 };
 
+// A stored row may name a tool since removed: it keeps an icon, a plain one.
 const iconOf = (name: DesktopToolActivity["name"]) =>
-  isBrowserTool(name) ? BROWSER_ACTIVITY[name].icon : ICONS[name];
+  isBrowserTool(name)
+    ? BROWSER_ACTIVITY[name].icon
+    : Object.hasOwn(ICONS, name)
+      ? ICONS[name]
+      : File01Icon;
 
 /** The argument a reader would want to see: the path, the pattern, the command. */
 const argText = (activity: DesktopToolActivity) => {
