@@ -138,8 +138,24 @@ const copyAttachments = async (
   await deps.sentFiles.record(conversationId, done);
 };
 
-/** Runs one call in the chat's VM and words the answer the model reads. */
+/**
+ * Runs one call in the chat's VM and words the answer the model reads. Never rejects: a call
+ * that cannot even start (its folders unreadable, a dialog failing) is still answered, or the
+ * server would wait out the whole deadline for nothing.
+ */
 export async function dispatch(deps: DispatchDeps, call: ComputerCall): Promise<ToolResult> {
+  try {
+    return await dispatchCall(deps, call);
+  } catch (error) {
+    if (error instanceof Refusal) return failure(REFUSAL_SUMMARY[error.reason], error.message);
+    return failure(
+      "The computer could not do that",
+      `It failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000),
+    );
+  }
+}
+
+async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<ToolResult> {
   // Asking the person needs no VM.
   if (call.name === "request_folder") {
     const answer = await deps.requestFolder(call.key, {

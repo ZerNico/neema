@@ -114,7 +114,10 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
         await mkdir(join(root, "workspace"), { recursive: true });
         return join(root, "workspace");
       },
-      folders: async () => [{ name: "notes", hostPath: folder, readOnly: false }],
+      folders: async (conversationId) => {
+        if (conversationId === "unreadable") throw new Error("the grants file is unreadable");
+        return [{ name: "notes", hostPath: folder, readOnly: false }];
+      },
       discardWorkspace: async (conversationId) => {
         discarded.push(conversationId);
         discardedOne();
@@ -240,6 +243,14 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     expect(answer.ok).toBe(false);
     expect(answer.detail).toMatch(/stopped/);
   }, 120_000);
+
+  test("a call that cannot even start is still answered", async () => {
+    const answer = await call("c-unreadable", "list_folder", { path: "." }, {
+      conversationId: "unreadable",
+    } as Partial<MachineEvent>);
+    expect(answer).toMatchObject({ ok: false, summary: "The computer could not do that" });
+    expect(answer.detail).toContain("unreadable");
+  });
 
   test("a cancel stops the command it names", async () => {
     const pending = call("c6", "run_command", { command: "sleep 120" });
