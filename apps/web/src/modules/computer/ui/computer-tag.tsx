@@ -25,6 +25,7 @@ import {
   useComputerSnapshot,
   useNetworkGrants,
 } from "../client/use-computer.ts";
+import { desktopFoldersKey } from "../client/use-composer-folders.ts";
 
 /** What the conversation detail says about the chat's computer. */
 export interface ChatComputer {
@@ -140,6 +141,8 @@ function ComputerPanel({
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
       queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY }),
+      // The composer's folder chips read the machine directly.
+      queryClient.invalidateQueries({ queryKey: desktopFoldersKey(conversationId) }),
     ]);
   const level = useMutation({
     mutationFn: (permissionLevel: "ask" | "allow") =>
