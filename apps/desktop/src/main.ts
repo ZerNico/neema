@@ -203,9 +203,15 @@ const settings = () => {
  * arrive on. One per server; replaced on a switch, stopped on quit (docs/internals/desktop.md).
  */
 let computer: { origin: string; host: ComputerHost } | null = null;
-const hypervisor = microsandbox(() => import("microsandbox"), {
-  insecureRegistry: SANDBOX_INSECURE_REGISTRY,
-});
+const hypervisor = microsandbox(
+  async () => {
+    // Images, VM records and logs live with the app's own data, not in ~/.microsandbox, so a
+    // dev profile and an installed app never share VMs. Read once, when the SDK first loads.
+    process.env.MSB_HOME ??= join(app.getPath("userData"), "computer", "runtime");
+    return import("microsandbox");
+  },
+  { insecureRegistry: SANDBOX_INSECURE_REGISTRY },
+);
 const stopComputer = async () => {
   const current = computer;
   computer = null;
