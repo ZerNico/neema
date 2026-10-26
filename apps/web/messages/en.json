@@ -2653,7 +2653,7 @@
   "desktop_file_too_large": "This file is too large to show here.",
   "desktop_file_unreadable": "This file couldn’t be read.",
   "desktop_permission_allow": "Don’t ask",
-  "desktop_permission_allow_description": "Edits and commands run without asking. Deletes and network access still ask.",
+  "desktop_permission_allow_description": "Edits and commands run without asking, and a command can change or delete files. New network access still asks.",
   "desktop_permission_ask": "Ask before changes and commands",
   "desktop_permission_ask_description": "Reads run without asking. Edits and commands wait for your approval.",
   "desktop_work_chat_untitled": "Work chat",

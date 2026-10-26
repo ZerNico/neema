@@ -2652,7 +2652,7 @@
   "desktop_file_too_large": "Diese Datei ist zu groß, um sie hier zu zeigen.",
   "desktop_file_unreadable": "Diese Datei konnte nicht gelesen werden.",
   "desktop_permission_allow": "Nicht fragen",
-  "desktop_permission_allow_description": "Änderungen und Befehle laufen ohne Nachfrage. Löschen und Netzwerkzugriff fragen weiterhin.",
+  "desktop_permission_allow_description": "Änderungen und Befehle laufen ohne Nachfrage, und ein Befehl kann Dateien ändern oder löschen. Neuer Netzwerkzugriff fragt weiterhin.",
   "desktop_permission_ask": "Vor Änderungen und Befehlen fragen",
   "desktop_permission_ask_description": "Lesen läuft ohne Nachfrage. Änderungen und Befehle warten auf deine Freigabe.",
   "desktop_work_chat_untitled": "Arbeitschat",

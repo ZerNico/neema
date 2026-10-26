@@ -212,8 +212,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   held while its generation lives, shown to every client of the person through
   `computerSnapshot` and answerable from any of them with `decideComputerCall`.
 - **The permission level** is the chat's (`permission_level`): `ask` asks before changes and
-  commands, `allow` does not. Reads never ask: the VM bounds what they reach. A delete and a
-  new network destination always ask. "Allow in this chat" is kept in memory per chat and
+  commands, `allow` does not. Reads never ask: the VM bounds what they reach. The delete tool
+  and a new network destination always ask, but under `allow` a command runs unasked and may
+  delete files itself, which the level's description says rather than promise otherwise. "Allow in this chat" is kept in memory per chat and
   kind, until the server restarts. It is changed in the strip under the composer on the chat's
   own machine, where its work shows, and in the computer chip anywhere else.
 - **Network grants** are `network_grants` rows: a `host:port`, for one chat or every chat of
