@@ -4,9 +4,11 @@ import { baseLocale, type Locale } from "~/paraglide/runtime.js";
 /**
  * Words for a person, rendered in their locale only where they are shown. Server
  * code builds these instead of strings: it runs on fibers that do not carry the
- * request, so it cannot know the locale itself. See docs/internals/i18n.md.
+ * request, so it cannot know the locale itself. `formats` is the tag dates and
+ * numbers are written in ("en-GB"), the language's own when the renderer has
+ * none. See docs/internals/i18n.md.
  */
-export type Localized = (locale: Locale) => string;
+export type Localized = (locale: Locale, formats?: string) => string;
 
 export const Localized = Schema.declare(
   (input: unknown): input is Localized => typeof input === "function",

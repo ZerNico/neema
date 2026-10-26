@@ -43,14 +43,14 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 /** Today's runs by clock time, older ones by day, like the chats list. */
 const runStamp = (date: Date) => {
   const now = new Date();
   return date.toDateString() === now.toDateString()
-    ? clockLabel(date, getLocale())
-    : dayLabel(date, now, getLocale());
+    ? clockLabel(date, formatLocale())
+    : dayLabel(date, now, formatLocale());
 };
 
 export function ScheduleDetailPage({ scheduleId }: { scheduleId: string }) {
@@ -323,7 +323,7 @@ function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
                   ) : null}
                   <time
                     dateTime={new Date(run.firedAt).toISOString()}
-                    title={absoluteLabel(new Date(run.firedAt), getLocale())}
+                    title={absoluteLabel(new Date(run.firedAt), formatLocale())}
                     className="text-muted-foreground shrink-0 text-xs tabular-nums"
                   >
                     {runStamp(new Date(run.firedAt))}

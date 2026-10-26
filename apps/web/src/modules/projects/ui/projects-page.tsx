@@ -24,13 +24,13 @@ import { createProject } from "../server/functions.ts";
 import { roleLabel } from "./role-labels.ts";
 
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 const detail = (project: ProjectSummary) =>
   [
     project.description ||
       m.projects_list_updated({
-        age: relativeAgeLabel(project.updatedAt, new Date(), getLocale()),
+        age: relativeAgeLabel(project.updatedAt, new Date(), formatLocale()),
       }),
     project.role === "owner" ? null : m.projects_list_shared_by({ name: project.ownerName }),
   ]

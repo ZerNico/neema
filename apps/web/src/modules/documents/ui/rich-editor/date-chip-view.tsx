@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NodeViewWrapper, type ReactNodeViewProps } from "@tiptap/react";
@@ -23,7 +23,7 @@ export function DateChipView({ node, updateAttributes, editor, selected }: React
   const [open, setOpen] = useState(false);
   const day = parseDay(String(node.attrs.value ?? ""));
   const label = day
-    ? day.toLocaleDateString(getLocale(), { day: "numeric", month: "short", year: "numeric" })
+    ? day.toLocaleDateString(formatLocale(), { day: "numeric", month: "short", year: "numeric" })
     : m.documents_date_none();
   return (
     <NodeViewWrapper as="span" className="inline-block align-baseline">

@@ -170,8 +170,8 @@ skipped one on purpose.
 - **Reverse states**: every way in needs a way out. Stop, lease expiry, owner change
   and a stale run all have to leave the row terminal and the client consistent.
 - **Languages**: every word a person reads is a message in English and German
-  (`messages/`); server code builds `Localized`, never a string. See
-  [languages](docs/internals/i18n.md).
+  (`messages/`); server code builds `Localized`, never a string. Dates and numbers
+  use `formatLocale()`, the reader's region. See [languages](docs/internals/i18n.md).
 - **Docs**: if you changed a rule recorded in `docs/internals/`, rewrite the
   passage. Do not append.
 
@@ -330,8 +330,8 @@ skipped one on purpose.
 - `docs/internals/ui.md`: page shell, pending buttons, icons, copy rules, panel
   anatomy.
 - `docs/internals/i18n.md`: English and German through Paraglide. The account's choice
-  mirrored into a cookie, server code building `Localized` instead of strings, what stays
-  English for the model, keys, and the German glossary.
+  mirrored into a cookie, server code building `Localized` instead of strings, the region
+  dates and numbers follow, what stays English for the model, keys, and the German glossary.
 - `docs/internals/browser.md`: the desktop app's embedded browser. Webview guests gated
   by main, one profile per server, pages outside the routes laid over panel slots, the
   lifecycle that freezes and discards them, and the model's browser tools (desktop-family

@@ -1,4 +1,5 @@
 import { m } from "~/paraglide/messages.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { getLocale } from "~/paraglide/runtime.js";
 
 /**
@@ -44,7 +45,7 @@ export const MONTH_STEPS: ReadonlyArray<number> = [1, 2, 3, 4, 6];
 // Named by Intl in the page's locale. January 2023 began on a Sunday, so day
 // N of it is cron weekday N; UTC keeps the reader's zone from shifting it.
 const nameFormat = (options: Intl.DateTimeFormatOptions) =>
-  new Intl.DateTimeFormat(getLocale(), { ...options, timeZone: "UTC" });
+  new Intl.DateTimeFormat(formatLocale(), { ...options, timeZone: "UTC" });
 
 /** A cron weekday's name, 0 = Sunday. */
 export const weekdayName = (day: number) =>

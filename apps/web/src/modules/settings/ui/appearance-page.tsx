@@ -1,6 +1,7 @@
 import { ComputerIcon, Moon02Icon, Sun03Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import { FormatsSection } from "~/modules/language/ui/formats-section.tsx";
 import { LanguageSection } from "~/modules/language/ui/language-section.tsx";
 import { Page, Section } from "~/ui/page-shell.tsx";
 import {
@@ -80,6 +81,7 @@ export function AppearancePage() {
         </div>
       </Section>
       <LanguageSection />
+      <FormatsSection />
     </Page>
   );
 }

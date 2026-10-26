@@ -26,6 +26,7 @@ import { handlerOf, useHandler } from "./handler.ts";
 import { resolveMap, routeSummary, type MapModel } from "./map-model.ts";
 import { useMapLookups } from "./map-requests.ts";
 import { m } from "~/paraglide/messages.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { getLocale } from "~/paraglide/runtime.js";
 
 // MapLibre is large; it loads only for a block that draws a map.
@@ -273,7 +274,7 @@ export function UiMap({
                     className="h-0.5 w-3 rounded-full"
                     style={{ background: `var(--${route.color})` }}
                   />
-                  {route.label ?? MODE_LABEL[route.mode]()} {routeSummary(route, getLocale())}
+                  {route.label ?? MODE_LABEL[route.mode]()} {routeSummary(route, formatLocale())}
                 </li>
               ) : null,
             )}

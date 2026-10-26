@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { ListCard, ListRow, Section } from "~/ui/page-shell.tsx";
 import { Progress } from "~/ui/primitives/progress";
 import { myLimitsQuery } from "../client/queries.ts";
@@ -11,10 +11,10 @@ const resets = (limit: LimitStanding) => {
   const at = new Date(limit.resetsAt);
   if (limit.period === "day")
     return m.limits_mine_resets_at({
-      time: at.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" }),
+      time: at.toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" }),
     });
   return m.limits_mine_resets_on({
-    day: at.toLocaleDateString(getLocale(), {
+    day: at.toLocaleDateString(formatLocale(), {
       ...(limit.period === "week" ? { weekday: "long" } : {}),
       day: "numeric",
       month: "short",

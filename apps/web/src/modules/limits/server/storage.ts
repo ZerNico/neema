@@ -133,11 +133,11 @@ export class StorageQuota extends Context.Service<
         return yield* new StorageFull({
           reason:
             charged === "own"
-              ? (locale) =>
+              ? (locale, formats = locale) =>
                   m.limits_error_storage_full(
                     {
-                      needed: formatBytes(needed, locale),
-                      free: formatBytes(Math.max(0, quota - stored), locale),
+                      needed: formatBytes(needed, locale, formats),
+                      free: formatBytes(Math.max(0, quota - stored), locale, formats),
                     },
                     { locale },
                   )

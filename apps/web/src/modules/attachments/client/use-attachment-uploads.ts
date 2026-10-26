@@ -11,7 +11,7 @@ import {
 } from "../constants.ts";
 import type { Attachment } from "../schema.ts";
 import { deleteAttachment, uploadAttachment } from "../server/functions.ts";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 /**
@@ -200,7 +200,7 @@ export function useAttachmentUploads(options: AttachmentUploadsOptions = {}): At
           existing: false,
           error: oversized
             ? m.attachments_upload_too_large({
-                limit: formatFileSize(MAX_ATTACHMENT_BYTES, getLocale()),
+                limit: formatFileSize(MAX_ATTACHMENT_BYTES, formatLocale()),
               })
             : null,
         };

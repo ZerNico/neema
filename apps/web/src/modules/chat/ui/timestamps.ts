@@ -1,4 +1,4 @@
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 // Local-clock labels for the message list and the sidebar. Every function here
 // reads the visitor's timezone and clock, which the app always has: routes
@@ -19,7 +19,7 @@ interface Formatters {
 // hundreds of messages and each render formats every one of them.
 const cache = new Map<string, Formatters>();
 
-const formatters = (locale: string = getLocale()): Formatters => {
+const formatters = (locale: string = formatLocale()): Formatters => {
   const cached = cache.get(locale);
   if (cached) return cached;
   const made: Formatters = {

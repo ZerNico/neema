@@ -78,7 +78,8 @@ import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { errorMessage } from "../client/error-message.ts";
 import { customToolQuery } from "../client/queries.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale, type Locale, locales } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
+import { type Locale, locales } from "~/paraglide/runtime.js";
 
 // Same surface as the skill editor: app tokens, a bounded pane that scrolls
 // its own content, and the text cursor the host stylesheet resets.
@@ -885,7 +886,9 @@ function ToolEditor({ tool }: { tool?: CustomToolDetail }) {
                     {(testOutcome.ok
                       ? m.custom_tools_editor_test_completed
                       : m.custom_tools_editor_test_failed)({
-                      duration: new Intl.NumberFormat(getLocale()).format(testOutcome.durationMs),
+                      duration: new Intl.NumberFormat(formatLocale()).format(
+                        testOutcome.durationMs,
+                      ),
                     })}
                   </p>
                   {testOutcome.output ? (

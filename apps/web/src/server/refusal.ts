@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { formatLocale } from "~/i18n/formats.ts";
 import { english, type Localized, localized, verbatim } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import { getLocale, type Locale } from "~/paraglide/runtime.js";
@@ -272,7 +273,10 @@ export const refusalOf = <E extends Refusable>(error: E, overrides?: RefusalOver
   return (describe as (error: E) => Refusal)(error);
 };
 
-const responseOf = ({ body, ...init }: Refusal, locale: Locale) => new Response(body(locale), init);
+// The format locale is read while still in the request, like the locale, and
+// handed on, since an effect rendering the body later cannot read it.
+const responseOf = ({ body, ...init }: Refusal, locale: Locale, formats: string) =>
+  new Response(body(locale, formats), init);
 
 /**
  * A refusal the function decides itself, with no failure behind it, to throw
@@ -281,7 +285,7 @@ const responseOf = ({ body, ...init }: Refusal, locale: Locale) => new Response(
  * lets it pass.
  */
 export const refusal = (status: number, body: Localized) =>
-  responseOf({ status, body }, getLocale());
+  responseOf({ status, body }, getLocale(), formatLocale());
 
 /** A refusal decided inside an effect, rendered by `refusing` once the request's locale is known. */
 class PendingRefusal {
@@ -309,10 +313,14 @@ export const refusing = <A, E extends Refusable, R>(
   effect: Effect.Effect<A, E, R> & TypedErrors<E>,
   locale: Locale,
   overrides?: RefusalOverrides,
-): Effect.Effect<A, never, R> =>
-  effect.pipe(
+): Effect.Effect<A, never, R> => {
+  const formats = formatLocale(locale);
+  return effect.pipe(
     Effect.catch((error) => Effect.die(new PendingRefusal(refusalOf(error, overrides)))),
     Effect.catchDefect((defect) =>
-      Effect.die(defect instanceof PendingRefusal ? responseOf(defect.decided, locale) : defect),
+      Effect.die(
+        defect instanceof PendingRefusal ? responseOf(defect.decided, locale, formats) : defect,
+      ),
     ),
   );
+};

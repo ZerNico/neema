@@ -2,7 +2,7 @@ import { cadenceText, parseCadence } from "../cadence.ts";
 import type { ScheduleSummary } from "../schema.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 // The detail read returns the row, whose times are Dates rather than ISO strings.
 type Labelled = Pick<ScheduleSummary, "paused" | "cron" | "scheduleText"> & {
@@ -16,7 +16,7 @@ export const nextFireLabel = (schedule: Labelled) => {
   const next = new Date(schedule.nextFireAt);
   return next.getTime() <= Date.now()
     ? m.schedules_next_due()
-    : m.schedules_next_run({ when: relativeAgeLabel(next, new Date(), getLocale()) });
+    : m.schedules_next_run({ when: relativeAgeLabel(next, new Date(), formatLocale()) });
 };
 
 /** Named from the cron when the picker can read it, so a long day list stays one line. */

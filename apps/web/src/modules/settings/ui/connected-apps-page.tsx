@@ -13,11 +13,11 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { RichText } from "~/ui/rich-text.tsx";
 
 const when = (value: Date | string) =>
-  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
+  new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value),
   );
 

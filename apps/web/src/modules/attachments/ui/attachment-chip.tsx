@@ -12,7 +12,7 @@ import { Button } from "~/ui/primitives/button";
 import { Spinner } from "~/ui/primitives/spinner";
 import { cn } from "~/ui/utils";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 /** The subset of an upload / stored attachment a chip renders. */
@@ -85,9 +85,9 @@ export function AttachmentChip({
         ? // A sent import earns its size beside the label once the bridge
           // answers; before that (and for the composer) the home is the fact.
           item.size > 0
-          ? m.attachments_chip_workspace_size({ size: formatFileSize(item.size, getLocale()) })
+          ? m.attachments_chip_workspace_size({ size: formatFileSize(item.size, formatLocale()) })
           : m.attachments_chip_workspace()
-        : formatFileSize(item.size, getLocale()));
+        : formatFileSize(item.size, formatLocale()));
 
   const body = (
     <>

@@ -51,10 +51,15 @@ const periodBounds = (period: LimitPeriod, timeZone: string) => {
 };
 
 /** When the limit opens again, as its own sentence. */
-const resetWords = (period: LimitPeriod, resetsAt: Date, timeZone: string, locale: Locale) => {
+const resetWords = (
+  period: LimitPeriod,
+  resetsAt: Date,
+  timeZone: string,
+  locale: Locale,
+  formats: string,
+) => {
   if (period === "day") return m.limits_resets_midnight({ zone: timeZone }, { locale });
-  // English reads "Monday 3 March" rather than the US order.
-  const day = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : locale, {
+  const day = new Intl.DateTimeFormat(formats, {
     timeZone,
     weekday: period === "week" ? "long" : undefined,
     day: "numeric",
@@ -71,8 +76,8 @@ const reachedReason =
     resetsAt: Date,
     zone: string,
   ): Localized =>
-  (locale) => {
-    const amount = formatAmount(limit.metric, limit.amount, locale);
+  (locale, formats = locale) => {
+    const amount = formatAmount(limit.metric, limit.amount, locale, formats);
     const reached =
       limit.modelIds === null
         ? m.limits_reached({ period: limit.period, amount }, { locale })
@@ -86,7 +91,7 @@ const reachedReason =
             },
             { locale },
           );
-    return `${reached} ${resetWords(limit.period, resetsAt, zone, locale)}`;
+    return `${reached} ${resetWords(limit.period, resetsAt, zone, locale, formats)}`;
   };
 
 /**

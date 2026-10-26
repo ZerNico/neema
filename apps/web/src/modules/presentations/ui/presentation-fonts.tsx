@@ -18,7 +18,7 @@ import {
   uploadPresentationFont,
 } from "../server/font-functions.ts";
 import { presentationFontsQuery } from "../client/queries.ts";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 type Font = Awaited<ReturnType<typeof listPresentationFonts>>[number];
@@ -57,7 +57,7 @@ function FontItem({ font }: { font: Font }) {
       <span className="text-muted-foreground truncate text-xs">
         {(font.embeddable ? m.presentations_fonts_meta : m.presentations_fonts_meta_no_embedding)({
           style: styleLabel(font),
-          size: formatFileSize(font.byteSize, getLocale()),
+          size: formatFileSize(font.byteSize, formatLocale()),
         })}
       </span>
       {font.embeddable ? (

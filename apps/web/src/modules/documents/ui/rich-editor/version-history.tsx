@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { useQuery } from "@tanstack/react-query";
 import type { Editor, JSONContent } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -20,7 +20,7 @@ import type { DocumentVersion } from "../../server/versions.ts";
 import { browserEditorExtensions } from "./editor-extensions.ts";
 import { restoreVersion } from "./version-restore.ts";
 
-const when = new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" });
+const when = new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium", timeStyle: "short" });
 
 const label = (version: DocumentVersion) =>
   version.author === null

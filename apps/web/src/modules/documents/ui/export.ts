@@ -1,7 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { renderToString } from "katex";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 const escapeHtml = (text: string) =>
   text.replace(
@@ -90,7 +90,7 @@ export const printDocument = (editor: Editor, title: string) => {
     for (const chip of page.querySelectorAll<HTMLElement>("[data-date-chip]")) {
       const value = chip.dataset.value;
       if (value)
-        chip.textContent = new Date(`${value}T00:00:00`).toLocaleDateString(getLocale(), {
+        chip.textContent = new Date(`${value}T00:00:00`).toLocaleDateString(formatLocale(), {
           day: "numeric",
           month: "short",
           year: "numeric",

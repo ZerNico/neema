@@ -78,7 +78,7 @@ import {
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import * as motion from "motion/react-m";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { cn } from "~/ui/utils";
 import { toastError } from "~/ui/error-toast.ts";
 
@@ -96,7 +96,7 @@ const noteForm = () =>
       Schema.isMinLength(1, { message: m.knowledge_note_content_required() }),
       Schema.isMaxLength(KNOWLEDGE_LIMITS.maxNoteChars, {
         message: m.knowledge_note_content_limit({
-          max: KNOWLEDGE_LIMITS.maxNoteChars.toLocaleString(getLocale()),
+          max: KNOWLEDGE_LIMITS.maxNoteChars.toLocaleString(formatLocale()),
         }),
       }),
     ),

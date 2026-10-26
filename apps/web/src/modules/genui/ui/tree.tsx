@@ -56,7 +56,7 @@ import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { cn } from "~/ui/utils";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import type { ValidNode } from "../catalog.ts";
 import { Celebrate } from "./celebrate.tsx";
 import { UiChart, UiProgress, UiSvg, UiTable } from "./data.tsx";
@@ -192,7 +192,7 @@ function formatDate(value: unknown, format: string | undefined): string {
     typeof value === "number" || typeof value === "string" ? value : Number.NaN,
   );
   if (Number.isNaN(date.getTime())) return "";
-  const locale = getLocale();
+  const locale = formatLocale();
   if (format === "relative") {
     const days = Math.round((date.getTime() - Date.now()) / 86_400_000);
     return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
@@ -310,7 +310,7 @@ function DatePickerNode({ node }: { node: ValidNode }) {
   const max = parseDay(p.max);
   const label = str(p.label);
   const shown = day
-    ? new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" }).format(day)
+    ? new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium" }).format(day)
     : m.genui_date_pick();
   return (
     <Field label={label}>

@@ -7,6 +7,11 @@ export const Locale = Schema.Literals(locales);
 export const LanguageChoice = Schema.NullOr(Locale);
 export type LanguageChoice = typeof LanguageChoice.Type;
 
+/** A region's two letters ("GB"), whose way of writing dates and numbers a person picked, or null. */
+export const RegionChoice = Schema.NullOr(Schema.String.check(Schema.isPattern(/^[A-Z]{2}$/u)));
+export type RegionChoice = typeof RegionChoice.Type;
+
 export interface LanguageSetting {
   chosen: LanguageChoice;
+  region: RegionChoice;
 }

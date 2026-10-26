@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { defineServerRegion } from "~/i18n/formats.ts";
 import { localized, verbatim } from "~/i18n/localized.ts";
 import { QueueFull } from "~/modules/chat/errors.ts";
 import { SharingRateLimited } from "~/modules/sharing/errors.ts";
@@ -87,6 +88,18 @@ describe("refusing", () => {
     expect(await refusalFrom(refusing(decided, "en"))).toMatchObject({
       body: "This message could not be started",
     });
+  });
+
+  it("hands the body the request's format, read before the effect runs", async () => {
+    defineServerRegion(() => "CH");
+    const refused = refusing(
+      refuse(413, (locale, formats) => `${locale} ${formats}`),
+      "de",
+    );
+    // A later request's region must not reach a refusal already decided on.
+    defineServerRegion(() => "AT");
+    expect(await refusalFrom(refused)).toMatchObject({ body: "de de-CH" });
+    defineServerRegion(() => undefined);
   });
 
   it("leaves a defect to the unexpected-failure path", async () => {

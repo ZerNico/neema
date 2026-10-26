@@ -28,7 +28,7 @@ import type { DetailPanelRequest } from "~/ui/detail-panel-state.ts";
 import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import { commentMessage } from "~/modules/chat/comment-message.ts";
 import { FileCommentContext, type SendFileComment } from "./file-comment.ts";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 /** Each Office family's preview; the compiler keeps the table complete. */
@@ -152,7 +152,7 @@ export function AttachmentPreviewDialog({
             </div>
           </div>
           {target.size === undefined ? null : (
-            <DialogDescription>{formatFileSize(target.size, getLocale())}</DialogDescription>
+            <DialogDescription>{formatFileSize(target.size, formatLocale())}</DialogDescription>
           )}
         </DialogHeader>
         <PreviewToolbarContext value={toolbar}>

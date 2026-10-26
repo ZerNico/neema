@@ -1,0 +1,1 @@
+ALTER TABLE "language_settings" ADD COLUMN "region" text;

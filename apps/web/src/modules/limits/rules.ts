@@ -1,3 +1,4 @@
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 import { getLocale, type Locale } from "~/paraglide/runtime.js";
 
@@ -94,9 +95,14 @@ export const coversModel = (limit: Pick<EffectiveLimit, "modelIds">, modelId: st
   limit.modelIds === null || limit.modelIds.includes(modelId);
 
 /** "$10.00" or "20 answers", in the reader's locale unless the caller names one. */
-export const formatAmount = (metric: LimitMetric, amount: number, locale: Locale = getLocale()) =>
+export const formatAmount = (
+  metric: LimitMetric,
+  amount: number,
+  locale: Locale = getLocale(),
+  formats: string = formatLocale(locale),
+) =>
   metric === "cost"
-    ? new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(amount)
+    ? new Intl.NumberFormat(formats, { style: "currency", currency: "USD" }).format(amount)
     : m.limits_amount_answers({ count: amount }, { locale });
 
 /**
@@ -114,7 +120,11 @@ export const effectiveQuota = (
     : everyone;
 
 /** "1.5 GB", "300 MB", in the binary units file managers use. */
-export const formatBytes = (bytes: number, locale: Locale = getLocale()) => {
+export const formatBytes = (
+  bytes: number,
+  locale: Locale = getLocale(),
+  formats: string = formatLocale(locale),
+) => {
   const units = ["bytes", "KB", "MB", "GB", "TB"] as const;
   let value = bytes;
   let unit = 0;
@@ -124,7 +134,7 @@ export const formatBytes = (bytes: number, locale: Locale = getLocale()) => {
   }
   if (unit === 0) return m.limits_bytes({ count: value }, { locale });
   const digits = value >= 10 ? 0 : 1;
-  const size = new Intl.NumberFormat(locale, {
+  const size = new Intl.NumberFormat(formats, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value);

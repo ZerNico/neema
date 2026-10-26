@@ -18,10 +18,10 @@ import { describeSession } from "./describe-session.ts";
 import { install, useInstallWay, type InstallWay } from "~/ui/install-prompt.ts";
 import { Button } from "~/ui/primitives/button";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 const when = (value: Date | string) =>
-  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
+  new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value),
   );
 

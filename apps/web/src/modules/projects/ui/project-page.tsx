@@ -35,7 +35,7 @@ import type { EditableDocument } from "~/modules/documents/schema.ts";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { AlreadyTold, toastError } from "~/ui/error-toast.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import {
   EmptyState,
   ErrorState,
@@ -409,7 +409,7 @@ function ProjectDocumentRow({
     onError: (error) => toastError(m.projects_documents_delete_failed(), error),
   });
   const detail = m.projects_documents_updated({
-    age: relativeAgeLabel(document.updatedAt, undefined, getLocale()),
+    age: relativeAgeLabel(document.updatedAt, undefined, formatLocale()),
   });
   return (
     <ListRow>
@@ -631,7 +631,7 @@ function ChatsSection({ projectId }: { projectId: string }) {
                   {chat.title ?? m.projects_page_new_chat()}
                 </span>
                 <span className="text-muted-foreground truncate text-xs">
-                  {relativeAgeLabel(chat.lastActivityAt, undefined, getLocale())}
+                  {relativeAgeLabel(chat.lastActivityAt, undefined, formatLocale())}
                 </span>
               </Link>
             </ListRow>

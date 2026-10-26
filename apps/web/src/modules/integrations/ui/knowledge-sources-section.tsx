@@ -1,4 +1,4 @@
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 import {
   ArrowLeft01Icon,
@@ -201,7 +201,7 @@ function SourceRow({
           : null,
         source.lastSyncedAt
           ? m.integrations_sources_synced_at({
-              date: new Intl.DateTimeFormat(getLocale(), {
+              date: new Intl.DateTimeFormat(formatLocale(), {
                 dateStyle: "medium",
                 timeStyle: "short",
               }).format(new Date(source.lastSyncedAt)),

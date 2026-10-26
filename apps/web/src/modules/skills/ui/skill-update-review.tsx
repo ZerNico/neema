@@ -14,6 +14,7 @@ import {
 } from "../package.ts";
 import { formatFileSize } from "~/modules/attachments/constants.ts";
 import { PackageWorkspace } from "./package-workspace.tsx";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 type Review = Awaited<ReturnType<typeof reviewSkillUpdate>>;
@@ -179,6 +180,6 @@ function describeSide(file: SkillFile | null) {
   if (!isBinarySkillFile(file)) return file.content;
   return m.skills_update_binary({
     type: file.binary.mediaType,
-    size: formatFileSize(file.binary.size),
+    size: formatFileSize(file.binary.size, formatLocale()),
   });
 }

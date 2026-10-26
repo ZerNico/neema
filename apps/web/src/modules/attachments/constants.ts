@@ -3,7 +3,7 @@
 // module must stay free of node/browser-only imports.
 
 import { LIMITS } from "@chat/desktop-rpc/schema";
-import { baseLocale, type Locale } from "~/paraglide/runtime.js";
+import { baseLocale } from "~/paraglide/runtime.js";
 
 /**
  * One bound for a whole file anywhere: an attachment, a working draft, a file
@@ -173,9 +173,9 @@ export const attachmentKindForFileName = (fileName: string): AttachmentKind => {
 
 /**
  * A size for reading. English by default, which is what the model reads; a page
- * passes `getLocale()` so a German reader sees a decimal comma.
+ * passes `formatLocale()` so a German reader sees a decimal comma.
  */
-export const formatFileSize = (bytes: number, locale: Locale = baseLocale): string => {
+export const formatFileSize = (bytes: number, locale: string = baseLocale): string => {
   const number = (value: number, digits: number) =>
     new Intl.NumberFormat(locale, {
       minimumFractionDigits: digits,

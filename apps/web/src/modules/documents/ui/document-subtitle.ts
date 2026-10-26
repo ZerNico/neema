@@ -1,12 +1,12 @@
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import type { DocumentController as Controller } from "../client/use-document.ts";
 
 export const documentSubtitle = (controller: Controller, userId?: string) => {
   const document = controller.document;
   if (!document) return m.documents_subtitle_kind();
-  const age = relativeAgeLabel(document.updatedAt, undefined, getLocale());
+  const age = relativeAgeLabel(document.updatedAt, undefined, formatLocale());
   // Kept short: the panel header gives the title whatever this leaves. In a
   // project someone else's edit goes unnamed rather than crowding it out.
   const edited =

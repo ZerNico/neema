@@ -43,6 +43,7 @@ import {
 } from "../package.ts";
 import { focusRingClassName } from "~/ui/focus-ring.ts";
 import { LINK_SAFETY } from "~/ui/link-safety.tsx";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 import { getLocale } from "~/paraglide/runtime.js";
 import { findingText, findingsText } from "../finding-text.ts";
@@ -337,7 +338,7 @@ function BinaryFileView({
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-medium">{name}</span>
           <span className="text-muted-foreground truncate text-xs" title={file.binary.mediaType}>
-            {file.binary.mediaType} · {formatFileSize(file.binary.size)}
+            {file.binary.mediaType} · {formatFileSize(file.binary.size, formatLocale())}
           </span>
         </div>
       </div>
@@ -534,7 +535,9 @@ export function PackageWorkspace({
       if (path === "SKILL.md") throw new Error(m.skills_workspace_root_upload());
       if (picked.size > SKILL_LIMITS.binaryFileBytes)
         throw new Error(
-          m.skills_workspace_file_too_large({ size: formatFileSize(SKILL_LIMITS.binaryFileBytes) }),
+          m.skills_workspace_file_too_large({
+            size: formatFileSize(SKILL_LIMITS.binaryFileBytes, formatLocale()),
+          }),
         );
       if (
         !target &&

@@ -44,6 +44,7 @@ describe("the locale for words sent with no request behind them", () => {
     expect(await localeOf()).toBe("de");
     expect(await run(Effect.flatMap(LanguageRepo, (repo) => repo.get(userId)))).toEqual({
       chosen: null,
+      region: null,
     });
 
     await run(Effect.flatMap(LanguageRepo, (repo) => repo.choose(userId, "en")));
@@ -51,5 +52,15 @@ describe("the locale for words sent with no request behind them", () => {
     // Following the browser again picks up what it last asked for.
     await run(Effect.flatMap(LanguageRepo, (repo) => repo.choose(userId, null)));
     expect(await localeOf()).toBe("de");
+  });
+
+  it("keeps a picked region apart from the language", async () => {
+    const userId = await person();
+    const get = () => run(Effect.flatMap(LanguageRepo, (repo) => repo.get(userId)));
+    await run(Effect.flatMap(LanguageRepo, (repo) => repo.chooseRegion(userId, "CH")));
+    await run(Effect.flatMap(LanguageRepo, (repo) => repo.choose(userId, "de")));
+    expect(await get()).toEqual({ chosen: "de", region: "CH" });
+    await run(Effect.flatMap(LanguageRepo, (repo) => repo.chooseRegion(userId, null)));
+    expect(await get()).toEqual({ chosen: "de", region: null });
   });
 });

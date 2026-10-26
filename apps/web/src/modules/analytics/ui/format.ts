@@ -1,23 +1,23 @@
 // Shared number formatting so tiles, tooltips, axes and tables agree. Each call reads the
 // locale, since a module-level formatter would be fixed to whichever request loaded it.
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 /** 1234 → "1.2K", 5_600_000 → "5.6M". */
 export const formatTokens = (value: number): string =>
-  new Intl.NumberFormat(getLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(
+  new Intl.NumberFormat(formatLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(
     value,
   );
 
 export const formatCount = (value: number): string =>
-  new Intl.NumberFormat(getLocale()).format(value);
+  new Intl.NumberFormat(formatLocale()).format(value);
 
 /**
  * Costs span cents to hundreds of dollars; three significant digits keep tiny
  * per-message numbers readable without turning totals into noise.
  */
 export const formatCost = (value: number): string =>
-  new Intl.NumberFormat(getLocale(), {
+  new Intl.NumberFormat(formatLocale(), {
     style: "currency",
     currency: "USD",
     maximumSignificantDigits: 3,
@@ -25,7 +25,7 @@ export const formatCost = (value: number): string =>
 
 /** "2026-08-12" → "Aug 12" for axis ticks and tooltips. */
 export const formatDay = (day: string): string =>
-  new Intl.DateTimeFormat(getLocale(), {
+  new Intl.DateTimeFormat(formatLocale(), {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
@@ -33,7 +33,9 @@ export const formatDay = (day: string): string =>
 
 /** 0.42 → "42%". Rates are coarse; a decimal place would imply precision. */
 export const formatPercent = (value: number): string =>
-  new Intl.NumberFormat(getLocale(), { style: "percent", maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat(formatLocale(), { style: "percent", maximumFractionDigits: 0 }).format(
+    value,
+  );
 
 /**
  * Ratios that are already percentages move in *points*, not percent: 1% → 2%
@@ -42,7 +44,7 @@ export const formatPercent = (value: number): string =>
 export const formatPointDelta = (delta: number): string =>
   m.analytics_point_delta({
     sign: delta >= 0 ? "+" : "−",
-    value: new Intl.NumberFormat(getLocale(), {
+    value: new Intl.NumberFormat(formatLocale(), {
       minimumFractionDigits: 1,
       maximumFractionDigits: 1,
     }).format(Math.abs(delta * 100)),

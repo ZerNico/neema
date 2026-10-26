@@ -35,10 +35,10 @@ import {
   SelectValue,
 } from "~/ui/primitives/select";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 const when = (value: Date | string) =>
-  new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" }).format(new Date(value));
+  new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium" }).format(new Date(value));
 
 // A function, so the labels are read in the locale of the page.
 const lifetimes = (): ReadonlyArray<{ value: string; label: string; days: ApiKeyLifetime }> => [

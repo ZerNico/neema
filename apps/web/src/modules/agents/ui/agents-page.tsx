@@ -41,12 +41,14 @@ import {
 } from "~/ui/primitives/dropdown-menu";
 import { toastError } from "~/ui/error-toast.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 // Without a description the row still says something true about the agent,
 // the way a collection row falls back to its document count.
 const detail = (agent: AgentSummary) => {
-  const age = agent.description ? "" : relativeAgeLabel(agent.updatedAt, new Date(), getLocale());
+  const age = agent.description
+    ? ""
+    : relativeAgeLabel(agent.updatedAt, new Date(), formatLocale());
   return [
     agent.description || (age ? m.agents_list_updated({ age }) : null),
     agent.ownerName ? m.agents_list_shared_by({ name: agent.ownerName }) : null,

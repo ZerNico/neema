@@ -33,7 +33,7 @@ import { FieldLabel } from "~/ui/primitives/field";
 import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import { useDebounced } from "~/ui/use-debounced.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import {
   Joiner,
   MinuteSelect,
@@ -98,7 +98,7 @@ const PREVIEW_COUNT = 3;
 /** Fires are shown in the schedule's zone, which is the one the cadence means. */
 const fireLabel = (fire: string, timezone: string) => {
   try {
-    return new Intl.DateTimeFormat(getLocale(), {
+    return new Intl.DateTimeFormat(formatLocale(), {
       weekday: "short",
       day: "numeric",
       month: "short",
@@ -107,7 +107,7 @@ const fireLabel = (fire: string, timezone: string) => {
       timeZone: timezone,
     }).format(new Date(fire));
   } catch {
-    return new Date(fire).toLocaleString(getLocale());
+    return new Date(fire).toLocaleString(formatLocale());
   }
 };
 

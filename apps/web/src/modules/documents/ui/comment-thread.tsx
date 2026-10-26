@@ -9,7 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Fragment, useState } from "react";
 import { ChatTextarea, type TextareaMentions } from "~/modules/chat/ui/chat-textarea.tsx";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { inlineTagClassName } from "~/ui/inline-tag.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { initials } from "~/ui/initials.ts";
@@ -215,7 +215,7 @@ function Comment({
             </span>
           ) : null}
           <span className="text-muted-foreground shrink-0">
-            {relativeAgeLabel(comment.createdAt, undefined, getLocale())}
+            {relativeAgeLabel(comment.createdAt, undefined, formatLocale())}
           </span>
           {own && actions ? (
             <span className="ml-auto opacity-0 transition-opacity group-hover/comment:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">

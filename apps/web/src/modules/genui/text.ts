@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 // Invisible characters in model-written text. A label can look like one
 // message and carry another: Unicode tag characters, zero-width marks and
@@ -37,6 +37,6 @@ export function copiedPreview(text: string): string {
   return m.genui_copied_more({
     text: text.slice(0, PREVIEW_CHARS),
     count: more,
-    shown: more.toLocaleString(getLocale()),
+    shown: more.toLocaleString(formatLocale()),
   });
 }

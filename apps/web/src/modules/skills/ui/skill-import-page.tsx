@@ -14,6 +14,7 @@ import { Spinner } from "~/ui/primitives/spinner";
 import { SearchInput } from "~/ui/search-input.tsx";
 import { cn } from "~/ui/utils.ts";
 import { m } from "~/paraglide/messages.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { getLocale } from "~/paraglide/runtime.js";
 import { findingsText } from "../finding-text.ts";
 import { readSkillArchive, selectSkillPackage, skillPackageRoots } from "../archive.ts";
@@ -138,7 +139,9 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
     try {
       if (file.size > SKILL_LIMITS.archiveBytes)
         throw new Error(
-          m.skills_import_file_too_large({ size: formatFileSize(SKILL_LIMITS.archiveBytes) }),
+          m.skills_import_file_too_large({
+            size: formatFileSize(SKILL_LIMITS.archiveBytes, formatLocale()),
+          }),
         );
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (/\.zip$/iu.test(file.name)) {
@@ -363,7 +366,7 @@ export function SkillImportPage({ source, path }: { source?: string; path?: stri
                             {m.skills_import_installs({
                               source: skill.source,
                               count: skill.installs,
-                              installs: skill.installs.toLocaleString(getLocale()),
+                              installs: skill.installs.toLocaleString(formatLocale()),
                             })}
                           </p>
                         </div>

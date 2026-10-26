@@ -3,7 +3,7 @@ import { Context, Effect, Layer } from "effect";
 import { languageSettings } from "~/db/schema/index.ts";
 import { baseLocale, isLocale, type Locale } from "~/paraglide/runtime.js";
 import { Db } from "~/server/db.ts";
-import type { LanguageChoice, LanguageSetting } from "../schema.ts";
+import type { LanguageChoice, LanguageSetting, RegionChoice } from "../schema.ts";
 
 // A locale this build no longer ships reads as none.
 const known = (value: string | null | undefined) => (isLocale(value) ? value : null);
@@ -13,6 +13,7 @@ export class LanguageRepo extends Context.Service<
   {
     get(userId: string): Effect.Effect<LanguageSetting>;
     choose(userId: string, chosen: LanguageChoice): Effect.Effect<void>;
+    chooseRegion(userId: string, region: RegionChoice): Effect.Effect<void>;
     /** Records what the browser asked for, read only while nothing is chosen. */
     noteBrowser(userId: string, browser: Locale): Effect.Effect<void>;
     /** The locale for words sent with no request behind them, like a schedule's mail. */
@@ -32,7 +33,10 @@ export class LanguageRepo extends Context.Service<
             Effect.map(([found]) => found),
             Effect.orDie,
           );
-      const upsert = (userId: string, set: { chosen?: LanguageChoice; browser?: Locale }) =>
+      const upsert = (
+        userId: string,
+        set: { chosen?: LanguageChoice; browser?: Locale; region?: RegionChoice },
+      ) =>
         db
           .insert(languageSettings)
           .values({ userId, ...set })
@@ -43,9 +47,11 @@ export class LanguageRepo extends Context.Service<
           .pipe(Effect.asVoid, Effect.orDie);
       return LanguageRepo.of({
         get: Effect.fn("LanguageRepo.get")(function* (userId) {
-          return { chosen: known((yield* row(userId))?.chosen) };
+          const found = yield* row(userId);
+          return { chosen: known(found?.chosen), region: found?.region ?? null };
         }),
         choose: (userId, chosen) => upsert(userId, { chosen }),
+        chooseRegion: (userId, region) => upsert(userId, { region }),
         noteBrowser: (userId, browser) => upsert(userId, { browser }),
         localeOf: Effect.fn("LanguageRepo.localeOf")(function* (userId) {
           const found = yield* row(userId);

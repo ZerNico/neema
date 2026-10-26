@@ -47,7 +47,7 @@ import {
 } from "../server/functions.ts";
 import { searchProvidersQuery } from "../client/queries.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 type Provider = Awaited<ReturnType<typeof listSearchProviders>>[number];
 type TestResult =
@@ -79,7 +79,7 @@ const REASONS = {
 } as const;
 
 const clock = (at: number) =>
-  new Date(at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
+  new Date(at).toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" });
 
 /** What this server last saw of a provider, in a few words. */
 const statusOf = (provider: Provider) => {

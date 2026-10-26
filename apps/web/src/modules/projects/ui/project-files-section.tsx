@@ -50,7 +50,7 @@ import {
   uploadProjectFile,
 } from "../server/functions.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 
 const downloadHref = (versionId: string) => `/api/project-files/${versionId}`;
 
@@ -157,7 +157,7 @@ export function ProjectFilesSection({
             ))}
           </ListCard>
           <p className="text-muted-foreground text-xs">
-            {m.projects_files_used({ size: formatFileSize(list.usedBytes) })}
+            {m.projects_files_used({ size: formatFileSize(list.usedBytes, formatLocale()) })}
           </p>
         </>
       )}
@@ -193,14 +193,14 @@ function ProjectFileRow({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
     onError: (error) => toastError(m.projects_files_delete_failed(), error),
   });
-  const age = relativeAgeLabel(file.updatedAt, undefined, getLocale());
+  const age = relativeAgeLabel(file.updatedAt, undefined, formatLocale());
   const office = officePreview(
     { fileName: file.name, mediaType: file.mediaType },
     { kind: "project-version", id: file.versionId },
   );
   const detail = [
     m.projects_files_version({ number: file.version }),
-    formatFileSize(file.size),
+    formatFileSize(file.size, formatLocale()),
     file.origin === "model"
       ? m.projects_files_updated_by_assistant({ age })
       : file.updatedBy
@@ -353,7 +353,7 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
     <>
       <ListCard>
         {versions.data.map((version) => {
-          const age = relativeAgeLabel(version.createdAt, undefined, getLocale());
+          const age = relativeAgeLabel(version.createdAt, undefined, formatLocale());
           return (
             <ListRow key={version.id}>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -376,7 +376,7 @@ function VersionList({ file, editable }: { file: ProjectFileSummary; editable: b
                 <span className="text-muted-foreground truncate text-xs">
                   {[
                     version.label ? m.projects_files_version({ number: version.number }) : null,
-                    formatFileSize(version.size),
+                    formatFileSize(version.size, formatLocale()),
                     version.origin === "model"
                       ? m.projects_files_created_by_assistant({ age })
                       : version.createdBy

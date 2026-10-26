@@ -27,8 +27,8 @@ import type { SpreadsheetPreview as Preview } from "~/modules/spreadsheets/previ
 import type { OfficeFile } from "./office-preview.ts";
 import { previewSheet } from "./spreadsheet-preview-sheet.ts";
 import { usePreviewJson } from "./use-preview-json.ts";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
 
 const isPreview = (data: unknown): data is Preview =>
   !!data &&
@@ -132,9 +132,7 @@ export function SpreadsheetPreview({
 
 const tooMany = () =>
   toast.error(m.spreadsheets_copy_too_many(), { description: m.spreadsheets_copy_too_many_hint() });
-// The browser's region (en-GB dates) while it speaks the page's language; the page's otherwise.
-const browser = typeof navigator === "undefined" ? null : navigator.language;
-const locale = sheetLocale(browser?.split("-")[0] === getLocale() ? browser : getLocale());
+const locale = sheetLocale(formatLocale());
 
 /** One sheet's cells in the grid, with the active cell's formula or value above them. */
 function SheetView({

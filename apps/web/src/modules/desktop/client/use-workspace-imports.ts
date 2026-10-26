@@ -9,6 +9,7 @@ import {
 } from "~/modules/attachments/constants.ts";
 import { readBase64 } from "~/modules/attachments/client/read-base64.ts";
 import { desktopClient } from "./bridge.ts";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 
 /** One composer file held outside the model-visible workspace until send. */
@@ -151,7 +152,9 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
           status: oversized ? "error" : "importing",
           storedName: null,
           error: oversized
-            ? m.desktop_import_too_large({ limit: formatFileSize(LIMITS.importPathBytes) })
+            ? m.desktop_import_too_large({
+                limit: formatFileSize(LIMITS.importPathBytes, formatLocale()),
+              })
             : null,
         };
       });
@@ -175,7 +178,9 @@ export function useWorkspaceImports(conversationId: string): WorkspaceImports {
           if (receipt) return receipt;
           if (file.size > LIMITS.importBytes)
             throw new Error(
-              m.desktop_import_too_large({ limit: formatFileSize(LIMITS.importBytes) }),
+              m.desktop_import_too_large({
+                limit: formatFileSize(LIMITS.importBytes, formatLocale()),
+              }),
             );
           return Effect.runPromise(
             client.stageFile({

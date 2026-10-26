@@ -7,6 +7,23 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeftIcon, ArrowRightIcon, ArrowDownIcon } from "@hugeicons/core-free-icons";
 import { de } from "react-day-picker/locale";
 import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
+
+type WeekDay = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+/**
+ * The day the reader's region starts a week on: Monday in en-GB and de,
+ * Sunday in en-US. Undefined where the browser cannot say (Firefox), which
+ * leaves the picker's locale to decide.
+ */
+const weekStart = (): WeekDay | undefined => {
+  const region: Intl.Locale & { getWeekInfo?: () => { firstDay: number } } = new Intl.Locale(
+    formatLocale(),
+  );
+  const first = region.getWeekInfo?.().firstDay;
+  // Intl counts 1 (Monday) to 7 (Sunday); the picker 0 (Sunday) to 6.
+  return first === undefined ? undefined : ((first % 7) as WeekDay);
+};
 
 function Calendar({
   className,
@@ -17,6 +34,7 @@ function Calendar({
   locale,
   formatters,
   components,
+  weekStartsOn = weekStart(),
   ...props
 }: React.ComponentProps<typeof DayPicker> & {
   buttonVariant?: React.ComponentProps<typeof Button>["variant"];
@@ -36,6 +54,7 @@ function Calendar({
       )}
       captionLayout={captionLayout}
       locale={dayLocale}
+      weekStartsOn={weekStartsOn}
       formatters={{
         formatMonthDropdown: (date) => date.toLocaleString(dayLocale?.code, { month: "short" }),
         ...formatters,

@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { SkillActivityBlock } from "./skill-activity-block.tsx";
 import { agentUnavailableLines, type AgentUnavailable } from "./agent-unavailable.ts";
 import { findTags, tagWords } from "../tags.ts";
@@ -1014,7 +1014,7 @@ function retryDelay(error: string): string | null {
   const match = RETRY_AFTER.exec(error);
   if (!match) return null;
   const count = Number(match[1]!);
-  const amount = count.toLocaleString(getLocale());
+  const amount = count.toLocaleString(formatLocale());
   const unit = match[2]!.toLowerCase();
   if (unit === "ms" || unit.startsWith("millisecond")) {
     return m.chat_failure_retry_in_milliseconds({ count, amount });

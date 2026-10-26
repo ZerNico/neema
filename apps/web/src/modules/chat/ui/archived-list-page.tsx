@@ -1,4 +1,4 @@
-import { getLocale } from "~/paraglide/runtime.js";
+import { formatLocale } from "~/i18n/formats.ts";
 import { m } from "~/paraglide/messages.js";
 import { Archive02Icon, MoreHorizontalIcon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -18,7 +18,7 @@ import { cn } from "~/ui/utils";
 /** Archived chats, a page below Chats: the same rows, their own list. */
 export function ArchivedChatsListPage() {
   const [search, setSearch] = useState("");
-  const archivedDate = new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" });
+  const archivedDate = new Intl.DateTimeFormat(formatLocale(), { dateStyle: "medium" });
   const query = useDebounced(search.trim(), 250);
   // Archived chats are few and all fetched; the search box filters their titles here.
   const archivedList = useSuspenseQuery(archivedConversationsQuery);
