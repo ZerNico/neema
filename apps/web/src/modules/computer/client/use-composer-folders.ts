@@ -5,6 +5,8 @@ import { DesktopError, type FolderStatus } from "@chat/desktop-rpc";
 import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { m } from "~/paraglide/messages.js";
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
+import { setPermissionLevel } from "~/modules/chat/server/functions.ts";
 import { COMPUTER_QUERY_KEY } from "./use-computer.ts";
 
 /** The chat's folders in the composer: what is attached, and the ways to change that. */
@@ -21,6 +23,11 @@ export interface ComposerFolders {
   readonly onRemove: (name: string) => void;
   /** A pick or a detach is under way. */
   readonly busy: boolean;
+  /** How much the chat asks; only once its computer is this machine, where its work shows. */
+  readonly permission?: {
+    readonly level: PermissionLevel;
+    readonly onChange: (level: PermissionLevel) => void;
+  };
 }
 
 export const desktopFoldersKey = (conversationId: string) =>
@@ -34,8 +41,10 @@ export const desktopFoldersKey = (conversationId: string) =>
  */
 export function useComposerFolders(
   conversationId: string,
-  machineId: string | null,
+  /** Null before the chat exists. */
+  computer: { readonly machineId: string | null; readonly permissionLevel: PermissionLevel } | null,
 ): ComposerFolders | undefined {
+  const machineId = computer?.machineId ?? null;
   const desktop = useDesktop();
   const here = useLocalMachineId();
   const queryClient = useQueryClient();
@@ -74,6 +83,11 @@ export function useComposerFolders(
       Effect.runPromise(desktop!.detachFolder({ conversationId, name })),
     onSuccess: settle,
   });
+  const level = useMutation({
+    mutationFn: (permissionLevel: PermissionLevel) =>
+      setPermissionLevel({ data: { conversationId, permissionLevel } }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+  });
   if (!usable) return undefined;
   return {
     items: (status.data?.folders ?? []).map(({ name, readOnly, alive }) => ({
@@ -85,5 +99,13 @@ export function useComposerFolders(
     onChooseAgain: (name) => add.mutate(name),
     onRemove: (name) => remove.mutate(name),
     busy: add.isPending || remove.isPending,
+    ...(computer && machineId === here
+      ? {
+          permission: {
+            level: level.isPending && level.variables ? level.variables : computer.permissionLevel,
+            onChange: (next: PermissionLevel) => level.mutate(next),
+          },
+        }
+      : {}),
   };
 }

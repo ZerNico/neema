@@ -29,6 +29,23 @@ describe("FolderStrip", () => {
     expect(value.onRemove).toHaveBeenCalledWith("site");
   });
 
+  it("shows how much the chat asks, with no folder attached, and changes it", async () => {
+    const onChange = vi.fn();
+    render(
+      <FolderStrip
+        folders={{ ...folders([]), permission: { level: "ask", onChange } }}
+        disabled={false}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "How much this chat asks: Ask before changes and commands",
+      }),
+    );
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Don’t ask/ }));
+    expect(onChange).toHaveBeenCalledWith("allow");
+  });
+
   it("offers to pick a moved folder again", async () => {
     const value = folders([{ name: "site", readOnly: false, alive: false }]);
     render(<FolderStrip folders={value} disabled={false} />);

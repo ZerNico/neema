@@ -206,14 +206,17 @@ function ComputerPanel({
           )}
         </section>
       ) : null}
-      <label className="flex items-center justify-between gap-3">
-        <span>{m.computer_ask()}</span>
-        <Switch
-          checked={computer.permissionLevel === "ask"}
-          disabled={level.isPending}
-          onCheckedChange={(checked) => level.mutate(checked ? "ask" : "allow")}
-        />
-      </label>
+      {/* On the chat's own machine this is under the composer, beside the work it governs. */}
+      {local ? null : (
+        <label className="flex items-center justify-between gap-3">
+          <span>{m.computer_ask()}</span>
+          <Switch
+            checked={computer.permissionLevel === "ask"}
+            disabled={level.isPending}
+            onCheckedChange={(checked) => level.mutate(checked ? "ask" : "allow")}
+          />
+        </label>
+      )}
       {chatGrants.length > 0 ? (
         <section className="flex flex-col gap-1">
           <p className={sectionTitle}>{m.computer_destinations()}</p>

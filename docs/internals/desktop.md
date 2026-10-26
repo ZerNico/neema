@@ -207,8 +207,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   `computerSnapshot` and answerable from any of them with `decideComputerCall`.
 - **The permission level** is the chat's (`permission_level`): `ask` asks before changes and
   commands, `allow` does not. Reads never ask: the VM bounds what they reach. A delete and a
-  new network destination always ask. "Allow for the rest of this chat" is kept in memory per
-  chat and kind, until the server restarts.
+  new network destination always ask. "Allow in this chat" is kept in memory per chat and
+  kind, until the server restarts. It is changed in the strip under the composer on the chat's
+  own machine, where its work shows, and in the computer chip anywhere else.
 - **Network grants** are `network_grants` rows: a `host:port`, for one chat or every chat of
   the person, with a flag when the approval card showed a private address. Approving
   `request_network_access` writes one and pushes the whole list to the person's machines,
@@ -232,8 +233,8 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   a reconnect in between changes nothing. A queued message the server starts has no request,
   so it counts as sent from the session that queued it, kept on the entry.
 - **Attaching a folder yourself** happens in the desktop app on that machine, from the composer's
-  plus menu or the chat's computer chip, through the native picker. Attached folders stay with the
-  chat, so they show in a strip under the composer, not among a message's files. It refuses a folder that is
+  plus menu, through the native picker. Attached folders stay with the chat, so they show in a
+  strip under the composer, not among a message's files. It refuses a folder that is
   a disk root, the home folder itself, the app's own data, or holds or lies inside credentials
   (`folder-access.ts`), judged by where links lead. A folder may be attached read-only.
 - **A folder is a use of the machine.** Folders are offered only where the chat's computer is

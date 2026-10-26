@@ -101,7 +101,7 @@ export function ChatView({
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const imagePick = imageModelId ? { imageModelId } : {};
   const localMachineId = useLocalMachineId();
-  const folders = useComposerFolders(conversationId, data.conversation.machineId);
+  const folders = useComposerFolders(conversationId, data.computer);
 
   const liveAnswer = useLiveAnswer({ data, conversationId, anchorFirstTurn });
   const { streamingMessage, stream, anchorId, releaseAnchor } = liveAnswer;
