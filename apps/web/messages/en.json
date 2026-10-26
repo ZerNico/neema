@@ -6336,7 +6336,7 @@
   "computer_folders": "Folders",
   "computer_folder_read_only": "read-only",
   "computer_folder_remove": "Remove {name}",
-  "computer_attach": "Attach a folder",
+  "computer_attach": "Attach folder",
   "computer_attach_elsewhere": "Attach folders in the desktop app on {machine}",
   "computer_permission": "Before changes and commands",
   "computer_destinations": "Allowed destinations",
@@ -6357,7 +6357,7 @@
   "settings_computer_agent_placeholder": "Default agent",
   "settings_computer_machines_title": "Your computers",
   "chat_status_computer": "Has a computer",
-  "chat_composer_add_folder": "Add folder",
+  "chat_composer_attach_folder": "Attach folder",
   "chat_composer_folder_name_taken": "A folder with that name is already attached",
   "chat_composer_folder_refused": "That folder can’t be given to a chat"
 }

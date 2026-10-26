@@ -641,7 +641,7 @@ export const ChatInput = forwardRef<
                 disabled={controlsDisabled || folders.adding}
               >
                 <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
-                {m.chat_composer_add_folder()}
+                {m.chat_composer_attach_folder()}
               </DropdownMenuItem>
             ) : null}
             {context && (canChooseAgent || canChooseKnowledge) ? (

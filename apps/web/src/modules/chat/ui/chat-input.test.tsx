@@ -727,7 +727,7 @@ describe("ChatInput pickers", () => {
 });
 
 describe("ChatInput folders", () => {
-  it("offers Add folder in the plus menu and shows each attached folder by its guest path", async () => {
+  it("offers Attach folder in the plus menu and shows each attached folder by its guest path", async () => {
     const onAdd = vi.fn();
     const onRemove = vi.fn();
     setup({
@@ -746,7 +746,7 @@ describe("ChatInput folders", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove site" }));
     expect(onRemove).toHaveBeenCalledWith("site");
     fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
-    fireEvent.click(await screen.findByText("Add folder"));
+    fireEvent.click(await screen.findByText("Attach folder"));
     expect(onAdd).toHaveBeenCalled();
   });
 
@@ -754,7 +754,7 @@ describe("ChatInput folders", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
     await screen.findByText("Attach files");
-    expect(screen.queryByText("Add folder")).toBeNull();
+    expect(screen.queryByText("Attach folder")).toBeNull();
   });
 });
 
