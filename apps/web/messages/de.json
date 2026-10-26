@@ -6353,5 +6353,8 @@
   "chat_status_computer": "Hat einen Computer",
   "chat_composer_attach_folder": "Ordner anhängen",
   "chat_composer_folder_name_taken": "Ein Ordner mit diesem Namen ist schon hinzugefügt",
-  "chat_composer_folder_refused": "Dieser Ordner kann keinem Chat gegeben werden"
+  "chat_composer_folder_refused": "Dieser Ordner kann keinem Chat gegeben werden",
+  "computer_folder_lost": "Dieser Ordner ist nicht mehr dort, wo er war.",
+  "computer_folder_choose_again": "Erneut auswählen",
+  "computer_folder_detach": "{name} trennen"
 }

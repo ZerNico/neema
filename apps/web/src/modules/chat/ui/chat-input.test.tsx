@@ -727,24 +727,11 @@ describe("ChatInput pickers", () => {
 });
 
 describe("ChatInput folders", () => {
-  it("offers Attach folder in the plus menu and shows each attached folder by its guest path", async () => {
+  it("offers Attach folder in the plus menu", async () => {
     const onAdd = vi.fn();
-    const onRemove = vi.fn();
     setup({
-      folders: {
-        items: [
-          { name: "site", readOnly: false },
-          { name: "refs", readOnly: true },
-        ],
-        onAdd,
-        onRemove,
-        adding: false,
-      },
+      folders: { items: [], onAdd, onChooseAgain: vi.fn(), onRemove: vi.fn(), busy: false },
     });
-    expect(screen.getByText("/folders/site")).toBeInTheDocument();
-    expect(screen.getByText("/folders/refs · read-only")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Remove site" }));
-    expect(onRemove).toHaveBeenCalledWith("site");
     fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
     fireEvent.click(await screen.findByText("Attach folder"));
     expect(onAdd).toHaveBeenCalled();

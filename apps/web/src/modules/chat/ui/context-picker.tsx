@@ -6,7 +6,6 @@ import {
   Book02Icon,
   Calendar03Icon,
   Cancel01Icon,
-  Folder01Icon,
   FolderLibraryIcon,
   Robot01Icon,
 } from "@hugeicons/core-free-icons";
@@ -297,7 +296,7 @@ export function CollectionPicker({
  * read as one row: an icon tile, a name, and a one-line note underneath.
  */
 export interface ContextChipItem {
-  readonly kind: "agent" | "collection" | "folder" | "schedule" | "skill";
+  readonly kind: "agent" | "collection" | "schedule" | "skill";
   readonly id: string | null;
   /** Null when the id no longer resolves to something the viewer may read. */
   readonly name: string | null;
@@ -389,9 +388,7 @@ export function ContextChip({
                 ? Book02Icon
                 : item.kind === "schedule"
                   ? Calendar03Icon
-                  : item.kind === "folder"
-                    ? Folder01Icon
-                    : FolderLibraryIcon
+                  : FolderLibraryIcon
           }
           strokeWidth={2}
           className="size-4"

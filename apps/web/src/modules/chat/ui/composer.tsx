@@ -1,3 +1,4 @@
+import { FolderStrip } from "~/modules/computer/ui/folder-strip.tsx";
 import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { m } from "~/paraglide/messages.js";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
@@ -381,6 +382,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(context && (capabilities?.agentsUse || capabilities?.knowledgeUse) ? { context } : {})}
         {...(integrations ? { integrations } : {})}
       />
+      {/* Under the composer and inset, so it reads as part of it. */}
+      {folders ? <FolderStrip folders={folders} disabled={controlsDisabled ?? disabled} /> : null}
     </div>
   );
 });

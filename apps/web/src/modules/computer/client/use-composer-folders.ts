@@ -7,12 +7,20 @@ import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { m } from "~/paraglide/messages.js";
 import { COMPUTER_QUERY_KEY } from "./use-computer.ts";
 
-/** The chat's folders in the composer: what is attached, and the ways to add or remove one. */
+/** The chat's folders in the composer: what is attached, and the ways to change that. */
 export interface ComposerFolders {
-  readonly items: ReadonlyArray<{ readonly name: string; readonly readOnly: boolean }>;
+  readonly items: ReadonlyArray<{
+    readonly name: string;
+    readonly readOnly: boolean;
+    /** False when the folder was moved, renamed or deleted since it was attached. */
+    readonly alive: boolean;
+  }>;
   readonly onAdd: () => void;
+  /** Picks a moved folder again, under the name it had. */
+  readonly onChooseAgain: (name: string) => void;
   readonly onRemove: (name: string) => void;
-  readonly adding: boolean;
+  /** A pick or a detach is under way. */
+  readonly busy: boolean;
 }
 
 export const desktopFoldersKey = (conversationId: string) =>
@@ -49,7 +57,10 @@ export function useComposerFolders(
     void queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY });
   };
   const add = useMutation({
-    mutationFn: () => Effect.runPromise(desktop!.chooseFolder({ conversationId })),
+    mutationFn: (replace?: string) =>
+      Effect.runPromise(
+        desktop!.chooseFolder(replace ? { conversationId, replace } : { conversationId }),
+      ),
     onSuccess: settle,
     onError: (error) =>
       toast.error(
@@ -65,9 +76,14 @@ export function useComposerFolders(
   });
   if (!usable) return undefined;
   return {
-    items: (status.data?.folders ?? []).map(({ name, readOnly }) => ({ name, readOnly })),
-    onAdd: () => add.mutate(),
+    items: (status.data?.folders ?? []).map(({ name, readOnly, alive }) => ({
+      name,
+      readOnly,
+      alive,
+    })),
+    onAdd: () => add.mutate(undefined),
+    onChooseAgain: (name) => add.mutate(name),
     onRemove: (name) => remove.mutate(name),
-    adding: add.isPending,
+    busy: add.isPending || remove.isPending,
   };
 }

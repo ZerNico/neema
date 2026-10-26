@@ -6359,5 +6359,8 @@
   "chat_status_computer": "Has a computer",
   "chat_composer_attach_folder": "Attach folder",
   "chat_composer_folder_name_taken": "A folder with that name is already attached",
-  "chat_composer_folder_refused": "That folder can’t be given to a chat"
+  "chat_composer_folder_refused": "That folder can’t be given to a chat",
+  "computer_folder_lost": "This folder is no longer where it was.",
+  "computer_folder_choose_again": "Choose it again",
+  "computer_folder_detach": "Detach {name}"
 }
