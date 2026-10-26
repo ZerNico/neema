@@ -25,8 +25,6 @@ import { researchAvailable } from "./research/tool.ts";
 import { resolveAgentSelection, resolveEffectiveGeneration } from "./effective-config.ts";
 import type { ConversationDefaults, ResolveGeneration } from "./repo.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
-import { m } from "~/paraglide/messages.js";
-import { localized } from "~/i18n/localized.ts";
 
 /** What a person submits with a message: retry and resume reuse the saved ones. */
 type SubmittedChoices = {

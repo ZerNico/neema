@@ -3,7 +3,6 @@ import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useDraftPanel } from "~/modules/drafts/ui/draft-panel-context.ts";
 import type { DraftKind } from "~/modules/drafts/draft-schema.ts";
-import { m } from "~/paraglide/messages.js";
 import { Button } from "~/ui/primitives/button";
 import { cn } from "~/ui/utils";
 import { activityCardClassName, activityCardInteractiveClassName } from "./activity-row.ts";

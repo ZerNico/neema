@@ -273,19 +273,17 @@ export class ScheduleDraftService extends Context.Service<
         discard: (userId, draftId) =>
           core
             .discard(userId, draftId, "schedule", (tx) =>
-              policy
-                .can(userId, "schedules", tx)
-                .pipe(
-                  Effect.flatMap((allowed) =>
-                    allowed
-                      ? Effect.void
-                      : Effect.fail(
-                          new DraftRejected({
-                            reason: localized(m.schedules_error_editing_unavailable),
-                          }),
-                        ),
-                  ),
+              policy.can(userId, "schedules", tx).pipe(
+                Effect.flatMap((allowed) =>
+                  allowed
+                    ? Effect.void
+                    : Effect.fail(
+                        new DraftRejected({
+                          reason: localized(m.schedules_error_editing_unavailable),
+                        }),
+                      ),
                 ),
+              ),
             )
             .pipe(Effect.asVoid),
       });

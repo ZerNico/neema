@@ -38,7 +38,6 @@ import { appName } from "../app-name.ts";
 import { chatUrl } from "./chats.ts";
 import { defineTool, refused, result, type McpToolContext } from "./define.ts";
 import type { TurnRequestState } from "../request-state.ts";
-import { english, type Localized } from "~/i18n/localized.ts";
 
 /** Clients give up on a request after a minute unless progress keeps it alive. */
 export const DEFAULT_WAIT_SECONDS = 45;
@@ -327,7 +326,6 @@ export const resumeTurn = (state: TurnRequestState, context: McpToolContext) =>
     return { ...followed, content: [{ type: "text" as const, text: note }, ...followed.content] };
   });
 
-/** Why a send was refused, in words the calling model can act on. */
 /** A refusal's reason in English, for the client's model, whether worded yet or not. */
 export const reasonText = (reason: unknown) =>
   typeof reason === "function"
