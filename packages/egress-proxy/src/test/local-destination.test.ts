@@ -33,7 +33,7 @@ test("serves an allowed local destination without resolving or dialling it", asy
   client.socket.destroy();
   expect(f.resolve).not.toHaveBeenCalled();
   expect(f.connect).not.toHaveBeenCalled();
-  expect(local).toHaveBeenCalledWith(CONTEXT, AGENT, 1, true);
+  expect(local).toHaveBeenCalledWith(CONTEXT, AGENT, 1);
   await agent.close();
 });
 

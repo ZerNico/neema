@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { afterEach, expect, vi } from "vitest";
 import {
   createEgressProxy,
-  type CommandContext,
+  type ClientContext,
   type Denial,
   type EgressProxy,
   type ProxyOptions,
@@ -11,12 +11,7 @@ import {
 
 export const PUBLIC = "93.184.216.34";
 export const PUBLIC6 = "2001:4860:4860::8888";
-export const CONTEXT: CommandContext = {
-  server: "server-a",
-  chat: "chat-a",
-  attempt: "attempt-a",
-  command: "command-a",
-};
+export const CONTEXT: ClientContext = { server: "server-a", chat: "chat-a" };
 /** Marks policy denials so clients and reporting can tell them from network failures. */
 export const DENIAL_HEADER = "x-egress-denied";
 
@@ -170,7 +165,7 @@ export class Wire {
   }
 }
 
-export function auth(token: string, username = "cmd") {
+export function auth(token: string, username = "vm") {
   return `Basic ${Buffer.from(`${username}:${token}`).toString("base64")}`;
 }
 export function request(
@@ -266,7 +261,7 @@ export async function fixture(options: Partial<ProxyOptions> = {}) {
   if (!address || typeof address === "string") throw new Error("Expected TCP upstream address");
   upstreamPort = address.port;
   const { port } = await proxy.listen();
-  const issued = proxy.issue(CONTEXT);
+  const issued = await proxy.issue(CONTEXT);
   async function client() {
     const socket = createConnection({ host: "127.0.0.1", port, allowHalfOpen: true });
     const wire = new Wire(socket);
@@ -289,7 +284,8 @@ export async function fixture(options: Partial<ProxyOptions> = {}) {
   return {
     proxy,
     port,
-    ...issued,
+    token: issued.token,
+    dns: issued.dns,
     clock,
     denials,
     onDenial,
