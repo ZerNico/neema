@@ -158,7 +158,7 @@ function ComputerPanel({
       title: m.computer_reset_title(),
       description: m.computer_reset_note(),
       confirmLabel: m.computer_reset_confirm(),
-      // Nothing of the person's goes: installs come back when needed.
+      // Nothing of the person's goes: only what the chat installed, which comes back when needed.
       destructive: false,
     });
     if (confirmed) actions.reset.mutate();
