@@ -260,7 +260,9 @@ export class ExternalCompletion extends Context.Service<
         claim: (callId, owner) =>
           Effect.gen(function* () {
             const op = yield* inspect(callId);
-            if (!op || !sameOwner(op, owner)) return null;
+            // A computer call is answered by the chat's machine through ComputerCalls. A page
+            // naming this executor must not be able to claim one and answer with its own result.
+            if (!op || op.executorId === COMPUTER_EXECUTOR || !sameOwner(op, owner)) return null;
             const slot = waiting.get(callId);
             if (
               !slot ||
