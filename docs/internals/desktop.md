@@ -134,7 +134,8 @@ and of `process.argv` on a cold start; both are read.
   (`machine.json`) together with the person, in `machines`. A reinstall is a new machine.
 - **A chat binds to a machine** (`conversations.machine_id`) the first time it needs one. The
   first local call of an unbound chat asks which machine to use: the one the message was sent
-  from when it is online and ready, else the person's first ready one. The question is an
+  from when it is online, else the person's first ready one, else any online. One still
+  getting ready may take the chat; its calls then wait for it as below. The question is an
   ordinary approval card. A newly bound chat holds only an empty workspace, so binding opens
   nothing of the person's.
 - **Folder names** are reported by the machine (`computer_folders`): names and read-only only,
@@ -193,7 +194,12 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
 
 - **Offline:** a call to a chat whose machine is not connected is answered at once, naming the
   machine and when it was last seen. The attempt's hint says the same before any call, so the
-  model works from what the chat holds instead of trying.
+  model works from what the chat holds instead of trying. The exception is a machine likely on
+  its way back: seen in the last two minutes, or any in the server's first minute, since a
+  restart drops every stream at once without recording when. Then the call waits up to 30
+  seconds, the desktop's longest backoff, and is decided again without the wait. An unbound
+  chat waits the same way for any of the person's machines. Failing at once told the model,
+  and through it the person, that no app was open while it was reconnecting.
 - **Preparing:** a machine still downloading its image reports its progress. A call to it is
   held, not answered, and runs once the machine reports ready. Only if the download outlasts
   the call's own deadline is it answered, five seconds before, with how far the download got.

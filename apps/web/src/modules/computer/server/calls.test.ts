@@ -207,11 +207,46 @@ describe("ComputerCalls", () => {
     }),
   );
 
-  it.effect("a bound machine that is offline is answered for at once", () =>
+  it.effect("a bound machine long offline is answered for at once", () =>
+    Effect.gen(function* () {
+      const { open } = yield* setup(fakeRepo({ machineId: "laptop" }));
+      // Past the server's first minute, and the machine was last seen long ago.
+      yield* TestClock.adjust(Duration.minutes(2));
+      const { waiting } = yield* open("call-1", "run_command", { command: "ls" });
+      expect(yield* Fiber.join(waiting)).toMatchObject({ ok: false, summary: "Laptop is offline" });
+    }),
+  );
+
+  it.effect("just after a restart a call waits for its machine to reconnect, and runs then", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
+      yield* open("call-1", "run_command", { command: "ls" }, "laptop");
+      yield* TestClock.adjust(Duration.seconds(10));
+      const laptop = yield* connect("laptop");
+      yield* calls.machineConnected(USER, "laptop");
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ type: "call", callId: "call-1" });
+    }),
+  );
+
+  it.effect("a machine that does not come back is answered for after the grace", () =>
     Effect.gen(function* () {
       const { open } = yield* setup(fakeRepo({ machineId: "laptop" }));
       const { waiting } = yield* open("call-1", "run_command", { command: "ls" });
+      yield* TestClock.adjust(Duration.seconds(30));
       expect(yield* Fiber.join(waiting)).toMatchObject({ ok: false, summary: "Laptop is offline" });
+    }),
+  );
+
+  it.effect("an unbound chat binds to its sender while that is still getting ready", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(fakeRepo());
+      yield* connect("laptop", { computer: { status: "preparing", progress: 0.4 } });
+      yield* open("call-1", "list_folder", { path: "." }, "laptop");
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({ approval: "bind", machine: { id: "laptop", name: "Laptop" } }),
+      ]);
     }),
   );
 

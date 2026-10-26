@@ -36,6 +36,8 @@ interface Entry {
   readonly senderSession: string | undefined;
   /** The call's own scope: what runs for it ends with it. */
   readonly scope: Scope.Scope;
+  /** It already waited once for a machine to come back, so an absent one is now an answer. */
+  waitedForMachine?: true;
   state:
     | { readonly kind: "deciding" }
     | {
@@ -44,13 +46,24 @@ interface Entry {
         readonly machine?: { id: string; name: string };
       }
     | { readonly kind: "sent"; readonly machineId: string }
-    /** Held until the machine has its environment; the model is not answered meanwhile. */
-    | { readonly kind: "preparing"; readonly machineId: string }
+    /**
+     * Held until the machine has its environment, or is back (null: any of the person's), so the
+     * model is not answered meanwhile.
+     */
+    | { readonly kind: "preparing"; readonly machineId: string | null }
     | { readonly kind: "done" };
 }
 
 /** How long before a call's deadline a held call is answered, so the model hears why. */
 const DEADLINE_MARGIN_MS = 5_000;
+/**
+ * How long a call waits for a machine that is likely reconnecting: the desktop's longest backoff.
+ * Likely means seen in the last two minutes, or the server started within the last one, since a
+ * restart drops every machine's stream at once and may not record when.
+ */
+const RECONNECT_GRACE_MS = 30_000;
+const RECENTLY_SEEN_MS = 120_000;
+const JUST_STARTED_MS = 60_000;
 
 /** Tools the server answers itself: approving them is the whole of what they do. */
 const SERVER_TOOLS = new Set(["request_network_access"]);
@@ -144,6 +157,16 @@ export class ComputerCalls extends Context.Service<
       const external = yield* ExternalCompletion;
       const bus = yield* SyncBus;
       const entries = new Map<string, Entry>();
+      const startedAt = yield* Clock.currentTimeMillis;
+      /** Whether a machine away now is likely on its way back; see `RECONNECT_GRACE_MS`. */
+      const likelyBack = (entry: Entry, lastSeen: ReadonlyArray<Date>) =>
+        Effect.map(
+          Clock.currentTimeMillis,
+          (now) =>
+            !entry.waitedForMachine &&
+            (now - startedAt < JUST_STARTED_MS ||
+              lastSeen.some((seen) => now - seen.getTime() < RECENTLY_SEEN_MS)),
+        );
       /** Kinds a person allowed for the rest of a chat, until the server restarts. */
       const blanket = new Set<string>();
 
@@ -211,10 +234,26 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           if (!chat.machineId) {
-            const online = yield* hub.online(entry.userId);
-            const ready = online.filter((presence) => presence.hello.computer.status === "ready");
-            const candidate = ready.find((presence) => presence.machineId === sender) ?? ready[0];
+            // A machine still getting ready can take the chat; the call then waits for it.
+            const usable = (yield* hub.online(entry.userId)).filter(
+              (presence) => presence.hello.computer.status !== "unavailable",
+            );
+            const candidate =
+              usable.find((presence) => presence.machineId === sender) ??
+              usable.find((presence) => presence.hello.computer.status === "ready") ??
+              usable[0];
             if (!candidate) {
+              const known = yield* repo.machines(entry.userId);
+              if (
+                known.length > 0 &&
+                (yield* likelyBack(
+                  entry,
+                  known.map((machine) => machine.lastSeenAt),
+                ))
+              ) {
+                yield* hold(entry, null, "reconnecting");
+                return;
+              }
               yield* finish(
                 entry,
                 desktopFailure(
@@ -230,6 +269,10 @@ export class ComputerCalls extends Context.Service<
           const presence = yield* hub.presence(entry.userId, chat.machineId);
           if (!presence) {
             const machine = yield* repo.machine(entry.userId, chat.machineId);
+            if (yield* likelyBack(entry, machine ? [machine.lastSeenAt] : [])) {
+              yield* hold(entry, chat.machineId, "reconnecting");
+              return;
+            }
             const name = machine?.name ?? "This chat's computer";
             yield* finish(
               entry,
@@ -252,7 +295,7 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           if (status.status === "preparing") {
-            yield* hold(entry, chat.machineId);
+            yield* hold(entry, chat.machineId, "preparing");
             return;
           }
           if (sender !== chat.machineId && !presence.hello.remote) {
@@ -288,23 +331,40 @@ export class ComputerCalls extends Context.Service<
         });
 
       /**
-       * Waits for the machine to finish its environment instead of answering the model with a
-       * half-ready computer it might try to work around. `machineChanged` resumes the call; just
-       * before its deadline it is answered with how far the download got.
+       * Waits for the machine to finish its environment, or to come back, instead of answering
+       * the model with a computer it might try to work around. `machineChanged` and
+       * `machineConnected` resume the call. A reconnect is waited for briefly, then the call is
+       * decided again without the wait; a download until just before the deadline, when the
+       * model hears how far it got.
        */
-      const hold = (entry: Entry, machineId: string) =>
+      const hold = (entry: Entry, machineId: string | null, why: "preparing" | "reconnecting") =>
         Effect.gen(function* () {
           if (ended(entry)) return;
           const already = entry.state.kind === "preparing";
           entry.state = { kind: "preparing", machineId };
           if (already) return;
           const now = yield* Clock.currentTimeMillis;
+          const untilDeadline = entry.deadlineAt - now - DEADLINE_MARGIN_MS;
           yield* Effect.forkIn(
             Effect.gen(function* () {
               yield* Effect.sleep(
-                Duration.millis(Math.max(0, entry.deadlineAt - now - DEADLINE_MARGIN_MS)),
+                Duration.millis(
+                  Math.max(
+                    0,
+                    why === "reconnecting"
+                      ? Math.min(untilDeadline, RECONNECT_GRACE_MS)
+                      : untilDeadline,
+                  ),
+                ),
               );
               if (entry.state.kind !== "preparing") return;
+              if (why === "reconnecting") {
+                entry.waitedForMachine = true;
+                entry.state = { kind: "deciding" };
+                yield* advance(entry);
+                return;
+              }
+              if (machineId === null) return;
               const presence = yield* hub.presence(entry.userId, machineId);
               const progress =
                 presence?.hello.computer.status === "preparing"
@@ -382,7 +442,7 @@ export class ComputerCalls extends Context.Service<
             (entry) =>
               entry.userId === userId &&
               entry.state.kind === "preparing" &&
-              entry.state.machineId === machineId,
+              (entry.state.machineId === machineId || entry.state.machineId === null),
           ),
           advance,
           { discard: true },
