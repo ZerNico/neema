@@ -157,7 +157,9 @@ function ComputerPanel({
     const confirmed = await confirm({
       title: m.computer_reset_title(),
       description: m.computer_reset_note(),
-      confirmLabel: m.computer_reset(),
+      confirmLabel: m.computer_reset_confirm(),
+      // Nothing of the person's goes: installs come back when needed.
+      destructive: false,
     });
     if (confirmed) actions.reset.mutate();
   };
