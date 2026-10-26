@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,9 +24,10 @@ const server = vi.hoisted(() => ({
   machines: [] as Array<Record<string, unknown>>,
   removeNetworkGrant: vi.fn(),
   renameComputer: vi.fn(),
+  listed: vi.fn(),
 }));
 vi.mock("~/modules/computer/server/functions.ts", () => ({
-  listNetworkGrants: async () => ({ grants: server.grants }),
+  listNetworkGrants: server.listed,
   removeNetworkGrant: server.removeNetworkGrant,
   renameComputer: server.renameComputer,
   computerSnapshot: async () => ({ machines: server.machines, pending: [] }),
@@ -81,6 +82,7 @@ beforeEach(() => {
   server.machines = [];
   server.removeNetworkGrant.mockReset().mockResolvedValue({ removed: true });
   server.renameComputer.mockReset().mockResolvedValue({ renamed: true });
+  server.listed.mockReset().mockImplementation(async () => ({ grants: server.grants }));
   machine.client = null;
 });
 
@@ -88,6 +90,17 @@ describe("ComputerPage", () => {
   it("says where this computer's settings live when opened in a web browser", () => {
     renderPage();
     expect(screen.getByText("Only in neema Desktop")).toBeInTheDocument();
+  });
+
+  it("leaves out the list of destinations until one is allowed everywhere", async () => {
+    server.grants = [
+      { id: "g1", host: "github.com", port: 22, privateNetwork: false, conversationId: "c1" },
+    ];
+    renderPage();
+    // A chat's own grant is that chat's; the page lists only those for every chat.
+    await waitFor(() => expect(server.listed).toHaveBeenCalled());
+    await act(() => server.listed.mock.results[0]!.value);
+    expect(screen.queryByText("Internet access")).toBeNull();
   });
 
   it("lists destinations every chat may reach, ports only past HTTPS's, and removes one after confirming", async () => {

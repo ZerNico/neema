@@ -33,6 +33,8 @@ export const destinationLabel = ({ host, port }: { host: string; port: number })
  * page has one shape.
  */
 function AllowedList<T>({
+  title,
+  description,
   queryKey,
   load,
   remove,
@@ -40,9 +42,10 @@ function AllowedList<T>({
   itemKey = label,
   badge,
   icon,
-  empty,
   confirmRemove,
 }: {
+  title: string;
+  description: string;
   queryKey: readonly string[];
   load: () => Promise<ReadonlyArray<T>>;
   remove: (item: T) => Promise<void>;
@@ -52,7 +55,6 @@ function AllowedList<T>({
   /** A short mark beside the label. */
   badge?: (item: T) => string | null;
   icon: IconSvgElement;
-  empty: string;
   confirmRemove: (item: T) => { title: string; description: string };
 }) {
   const queryClient = useQueryClient();
@@ -63,53 +65,54 @@ function AllowedList<T>({
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
     onError: (error) => toastError(m.settings_computer_error_remove(), error),
   });
+  // Only for taking an "always allow" back, so there is nothing to show until one is given.
+  // Nothing while loading either, or the page would jump when an empty one vanished.
+  if (items.isPending || (items.isSuccess && items.data.length === 0)) return null;
   return (
-    <ListCard>
-      {items.isPending ? (
-        <ListRow className="text-muted-foreground text-sm">{m.settings_computer_loading()}</ListRow>
-      ) : items.isError ? (
-        <ListRow className="text-muted-foreground text-sm">
-          <span role="alert" className="flex-1">
-            {m.settings_computer_error_load()}
-          </span>
-          <PendingButton
-            variant="ghost"
-            size="sm"
-            pending={items.isFetching}
-            onClick={() => void items.refetch()}
-          >
-            {m.common_retry()}
-          </PendingButton>
-        </ListRow>
-      ) : items.data.length === 0 ? (
-        <ListRow className="text-muted-foreground text-sm">{empty}</ListRow>
-      ) : (
-        items.data.map((item) => (
-          <ListRow key={itemKey(item)}>
-            <HugeiconsIcon
-              icon={icon}
-              strokeWidth={2}
-              className="text-muted-foreground size-5 shrink-0"
-            />
-            <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
-              <span className="min-w-0 wrap-anywhere">{label(item)}</span>
-              {badge?.(item) ? <Badge variant="secondary">{badge(item)}</Badge> : null}
+    <Section title={title} description={description}>
+      <ListCard>
+        {items.isError ? (
+          <ListRow className="text-muted-foreground text-sm">
+            <span role="alert" className="flex-1">
+              {m.settings_computer_error_load()}
             </span>
             <PendingButton
               variant="ghost"
               size="sm"
-              pending={removal.isPending && removal.variables === item}
-              onClick={async () => {
-                if (await confirm({ ...confirmRemove(item), confirmLabel: m.common_remove() }))
-                  removal.mutate(item);
-              }}
+              pending={items.isFetching}
+              onClick={() => void items.refetch()}
             >
-              {m.common_remove()}
+              {m.common_retry()}
             </PendingButton>
           </ListRow>
-        ))
-      )}
-    </ListCard>
+        ) : (
+          items.data.map((item) => (
+            <ListRow key={itemKey(item)}>
+              <HugeiconsIcon
+                icon={icon}
+                strokeWidth={2}
+                className="text-muted-foreground size-5 shrink-0"
+              />
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
+                <span className="min-w-0 wrap-anywhere">{label(item)}</span>
+                {badge?.(item) ? <Badge variant="secondary">{badge(item)}</Badge> : null}
+              </span>
+              <PendingButton
+                variant="ghost"
+                size="sm"
+                pending={removal.isPending && removal.variables === item}
+                onClick={async () => {
+                  if (await confirm({ ...confirmRemove(item), confirmLabel: m.common_remove() }))
+                    removal.mutate(item);
+                }}
+              >
+                {m.common_remove()}
+              </PendingButton>
+            </ListRow>
+          ))
+        )}
+      </ListCard>
+    </Section>
   );
 }
 
@@ -137,48 +140,40 @@ export function ComputerPage() {
         />
       )}
       <Machines />
-      <Section
+      <AllowedList
         title={m.settings_computer_network_title()}
         description={m.settings_computer_network_description()}
-      >
-        <AllowedList
-          queryKey={["computer", "grants", "everywhere"]}
-          load={async () =>
-            (await listNetworkGrants()).grants.filter((grant) => grant.conversationId === null)
-          }
-          remove={async (grant) => {
-            await removeNetworkGrant({ data: { grantId: grant.id } });
-          }}
-          label={destinationLabel}
-          itemKey={(grant) => grant.id}
-          badge={(grant) => (grant.privateNetwork ? m.settings_computer_private_network() : null)}
-          icon={InternetIcon}
-          empty={m.settings_computer_network_empty()}
-          confirmRemove={(grant) => ({
-            title: m.settings_computer_remove_title({ name: destinationLabel(grant) }),
-            description: m.settings_computer_network_remove_description(),
-          })}
-        />
-      </Section>
+        queryKey={["computer", "grants", "everywhere"]}
+        load={async () =>
+          (await listNetworkGrants()).grants.filter((grant) => grant.conversationId === null)
+        }
+        remove={async (grant) => {
+          await removeNetworkGrant({ data: { grantId: grant.id } });
+        }}
+        label={destinationLabel}
+        itemKey={(grant) => grant.id}
+        badge={(grant) => (grant.privateNetwork ? m.settings_computer_private_network() : null)}
+        icon={InternetIcon}
+        confirmRemove={(grant) => ({
+          title: m.settings_computer_remove_title({ name: destinationLabel(grant) }),
+          description: m.settings_computer_network_remove_description(),
+        })}
+      />
       <BrowserSearchSetting />
       {agent ? (
-        <Section
+        <AllowedList
           title={m.settings_computer_sites_title()}
           description={m.settings_computer_sites_description()}
-        >
-          <AllowedList
-            queryKey={["desktop-browser-sites"]}
-            load={() => agent.allowedSites()}
-            remove={(site) => agent.revokeSite(site)}
-            label={(site) => site}
-            icon={Globe02Icon}
-            empty={m.settings_computer_empty()}
-            confirmRemove={(site) => ({
-              title: m.settings_computer_remove_title({ name: site }),
-              description: m.settings_computer_site_remove_description(),
-            })}
-          />
-        </Section>
+          queryKey={["desktop-browser-sites"]}
+          load={() => agent.allowedSites()}
+          remove={(site) => agent.revokeSite(site)}
+          label={(site) => site}
+          icon={Globe02Icon}
+          confirmRemove={(site) => ({
+            title: m.settings_computer_remove_title({ name: site }),
+            description: m.settings_computer_site_remove_description(),
+          })}
+        />
       ) : null}
     </Page>
   );
