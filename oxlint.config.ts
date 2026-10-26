@@ -80,11 +80,11 @@ export default defineConfig({
     {
       // Words a person reads come from messages. See docs/internals/i18n.md.
       files: ["apps/web/src/**/*.tsx", "apps/web/src/**/*.ts"],
-      rules: { "i18n/no-literal-text": "error" },
+      rules: { "i18n/no-literal-text": "error", "i18n/format-locale": "error" },
     },
     {
       files: ["**/*.test.ts", "**/*.test.tsx"],
-      rules: { "i18n/no-literal-text": "off" },
+      rules: { "i18n/no-literal-text": "off", "i18n/format-locale": "off" },
     },
     {
       // Tests and scripts keep helpers beside the cases that use them.

@@ -79,7 +79,72 @@ const noLiteralText = {
   },
 };
 
+/** Formatters whose output depends on the region as well as the language. */
+const REGIONAL_INTL = new Set(["DateTimeFormat", "NumberFormat", "RelativeTimeFormat"]);
+const TO_LOCALE = new Set(["toLocaleString", "toLocaleDateString", "toLocaleTimeString"]);
+
+const isGetLocale = (node) =>
+  node?.type === "CallExpression" &&
+  node.callee.type === "Identifier" &&
+  node.callee.name === "getLocale";
+
+/**
+ * Dates and numbers are written in `formatLocale()`, the language with the
+ * reader's region. The bare language formats every English reader as American,
+ * and no locale at all ignores the reader's choice.
+ */
+const formatLocale = {
+  meta: {
+    type: "problem",
+    docs: { description: "Format dates and numbers in formatLocale(), not the bare language." },
+  },
+  create(context) {
+    const check = (node, first) => {
+      if (
+        first === undefined ||
+        isGetLocale(first) ||
+        (first.type === "Identifier" && first.name === "undefined")
+      )
+        context.report({
+          node,
+          message:
+            "Pass formatLocale() from ~/i18n/formats.ts, or a fixed tag for text a program or the model reads.",
+        });
+    };
+    const intl = (node) => {
+      const callee = node.callee;
+      // Asking a formatter for the time zone formats nothing.
+      if (
+        node.parent?.type === "MemberExpression" &&
+        node.parent.property.name === "resolvedOptions"
+      )
+        return;
+      if (
+        callee.type === "MemberExpression" &&
+        callee.object.type === "Identifier" &&
+        callee.object.name === "Intl" &&
+        callee.property.type === "Identifier" &&
+        REGIONAL_INTL.has(callee.property.name)
+      )
+        check(node, node.arguments[0]);
+    };
+    return {
+      NewExpression: intl,
+      CallExpression(node) {
+        intl(node);
+        const callee = node.callee;
+        if (
+          callee.type === "MemberExpression" &&
+          callee.property.type === "Identifier" &&
+          TO_LOCALE.has(callee.property.name)
+        )
+          check(node, node.arguments[0]);
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "i18n" },
-  rules: { "no-literal-text": noLiteralText },
+  rules: { "no-literal-text": noLiteralText, "format-locale": formatLocale },
 };
