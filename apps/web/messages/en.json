@@ -121,13 +121,8 @@
   "admin_groups_loading_capabilities": "Loading feature access…",
   "admin_groups_members": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} member",
         "countPlural=*": "{count} members"
@@ -165,12 +160,8 @@
   "admin_image_price_output": "Output $/1M",
   "admin_image_price_quality": [
     {
-      "declarations": [
-        "input quality"
-      ],
-      "selectors": [
-        "quality"
-      ],
+      "declarations": ["input quality"],
+      "selectors": ["quality"],
       "match": {
         "quality=low": "Low $/image",
         "quality=medium": "Medium $/image",
@@ -184,12 +175,8 @@
   "admin_image_qualities": "Quality levels",
   "admin_image_quality": [
     {
-      "declarations": [
-        "input quality"
-      ],
-      "selectors": [
-        "quality"
-      ],
+      "declarations": ["input quality"],
+      "selectors": ["quality"],
       "match": {
         "quality=low": "Low",
         "quality=medium": "Medium",
@@ -219,12 +206,8 @@
   "admin_model_display_name": "Display name",
   "admin_model_effort": [
     {
-      "declarations": [
-        "input effort"
-      ],
-      "selectors": [
-        "effort"
-      ],
+      "declarations": ["input effort"],
+      "selectors": ["effort"],
       "match": {
         "effort=none": "Off",
         "effort=minimal": "Minimal",
@@ -320,13 +303,8 @@
   "admin_providers_error_add": "Could not add the provider.",
   "admin_providers_model_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} model",
         "countPlural=*": "{count} models"
@@ -572,9 +550,7 @@
         "input stopped",
         "input tries"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{failed} failed · {stopped} stopped · {tries} try",
         "countPlural=*": "{failed} failed · {stopped} stopped · {tries} tries"
@@ -596,13 +572,8 @@
   "analytics_range_last_90": "Last 90 days",
   "analytics_range_last_days": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Last {count} day",
         "countPlural=*": "Last {count} days"
@@ -626,13 +597,8 @@
   "analytics_table_user": "User",
   "api_keys_error_limit": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "You can have {count} key. Revoke it first.",
         "countPlural=*": "You can have {count} keys. Revoke one first."
@@ -640,60 +606,18 @@
     }
   ],
   "api_keys_error_not_allowed": "Your account can’t make API keys.",
-  "app_auth_back_to_sign_in": "Back to sign in",
-  "app_auth_email": "Email",
-  "app_auth_email_required": "Enter your email.",
-  "app_auth_name_required": "Enter your name.",
   "app_auth_password": "Password",
-  "app_auth_password_too_short": "Password must be at least 8 characters.",
   "app_chat_loading": "Loading conversation",
   "app_chat_not_found_description": "This chat may have been deleted or the link is no longer available.",
   "app_chat_not_found_title": "Chat not found",
-  "app_desktop_sign_in_in_browser": "Open this page in your browser.",
-  "app_desktop_sign_in_title": "Sign in to neema Desktop",
   "app_forgot_error": "Could not send the link.",
-  "app_forgot_sent": "If {email} has an account, a link to reset its password is on the way.",
-  "app_forgot_submit": "Send link",
-  "app_forgot_title": "Reset password",
   "app_integration_connected": "{name} is connected.",
   "app_integration_connected_unnamed": "The integration is connected.",
   "app_integration_sign_in_failed_description": "Go back to the app to see why and try again.",
   "app_integration_sign_in_failed_title": "Sign-in didn’t finish",
   "app_integration_signed_in_description": "You can close this window and go back to the app.",
   "app_integration_signed_in_title": "Signed in",
-  "app_login_email_not_verified": "Confirm your email first. We sent you a new link.",
-  "app_login_error": "Could not sign in.",
-  "app_login_forgot_password": "Forgot password?",
-  "app_login_no_account": "No account?",
-  "app_login_register": "Register",
-  "app_login_submit": "Sign in",
-  "app_login_title": "Sign in",
-  "app_oauth_continue_description": "The app you’re connecting asks for a fresh sign-in before it gets access.",
-  "app_oauth_continue_submit": "Sign in again",
-  "app_oauth_continue_title": "Sign in again",
-  "app_pending_declined_description": "An admin declined this account. Ask whoever runs this instance if you think that’s a mistake.",
-  "app_pending_declined_title": "Account declined",
-  "app_pending_description": "Your account is set up. An admin of this instance has to let it in before you can start a chat.",
-  "app_pending_sign_out": "Sign out",
-  "app_pending_title": "Waiting for approval",
-  "app_register_check_email": "Check your email",
-  "app_register_check_email_description": "We sent a link to {email}. Open it to finish creating your account.",
-  "app_register_closed": "This instance isn’t taking new accounts.",
-  "app_register_error": "Could not create the account.",
-  "app_register_have_account": "Already have an account?",
-  "app_register_sign_in": "Sign in",
-  "app_register_submit": "Create account",
-  "app_register_title": "Create account",
-  "app_reset_error": "Could not reset the password.",
-  "app_reset_link_expired": "This link has expired or was already used.",
   "app_reset_new_password": "New password",
-  "app_reset_send_new_link": "Send a new link",
-  "app_reset_submit": "Save password",
-  "app_reset_title": "Choose a new password",
-  "app_setup_description": "This account will be the admin.",
-  "app_setup_submit": "Create admin account",
-  "app_setup_title": "Set up neema",
-  "app_setup_who_can_join": "Who can join",
   "attachments_chip_adding": "Adding…",
   "attachments_chip_preview": "Preview {fileName}",
   "attachments_chip_remove": "Remove {fileName}",
@@ -745,13 +669,8 @@
   "attachments_word_picture": "Picture",
   "attachments_word_pictures_hidden": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "A picture isn’t shown here.",
         "countPlural=other": "{count} pictures aren’t shown here."
@@ -983,13 +902,8 @@
   "browser_element_named": "the “{name}” {role}",
   "browser_element_unnamed": [
     {
-      "declarations": [
-        "input role",
-        "input vowel"
-      ],
-      "selectors": [
-        "vowel"
-      ],
+      "declarations": ["input role", "input vowel"],
+      "selectors": ["vowel"],
       "match": {
         "vowel=yes": "an {role}",
         "vowel=*": "a {role}"
@@ -1030,13 +944,8 @@
   "browser_running_reload": "Reloading the page",
   "browser_running_save": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Saving a file",
         "countPlural=other": "Saving {count} files"
@@ -1086,13 +995,8 @@
   "chat_agent_missing_collection_named": "The agent’s collection “{name}” is no longer available",
   "chat_agent_missing_collection_unnamed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One of the agent’s collections is no longer available",
         "countPlural=other": "{count} of the agent’s collections are no longer available"
@@ -1102,13 +1006,8 @@
   "chat_agent_missing_integration_named": "The agent’s integration “{name}” is no longer available",
   "chat_agent_missing_integration_unnamed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One of the agent’s integrations is no longer available",
         "countPlural=other": "{count} of the agent’s integrations are no longer available"
@@ -1118,13 +1017,8 @@
   "chat_agent_missing_skill_named": "The agent’s skill “{name}” is no longer available",
   "chat_agent_missing_skill_unnamed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One of the agent’s skills is no longer available",
         "countPlural=other": "{count} of the agent’s skills are no longer available"
@@ -1134,13 +1028,8 @@
   "chat_agent_missing_tool_named": "The agent’s tool “{name}” is no longer available",
   "chat_agent_missing_tool_unnamed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One of the agent’s tools is no longer available",
         "countPlural=other": "{count} of the agent’s tools are no longer available"
@@ -1184,13 +1073,8 @@
   "chat_attachment_reading": "Reading a file",
   "chat_attachment_searched": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Searched a file: {count} match",
         "countPlural=other": "Searched a file: {count} matches"
@@ -1199,14 +1083,8 @@
   ],
   "chat_attachment_searched_named": [
     {
-      "declarations": [
-        "input count",
-        "input name",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input name", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Searched {name}: {count} match",
         "countPlural=other": "Searched {name}: {count} matches"
@@ -1216,14 +1094,8 @@
   "chat_branch_without_files": "The branch opened without its local files.",
   "chat_browser_browsed_many": [
     {
-      "declarations": [
-        "input count",
-        "input first",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input first", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Browsed {first} and {count} other site",
         "countPlural=other": "Browsed {first} and {count} other sites"
@@ -1237,13 +1109,8 @@
   "chat_browser_waiting": "Waiting for you",
   "chat_collection_documents": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} doc",
         "countPlural=other": "{count} docs"
@@ -1354,13 +1221,8 @@
   "chat_desktop_ask_delete": "Delete from this computer",
   "chat_desktop_ask_delete_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Delete {count} file from this computer",
         "countPlural=other": "Delete {count} files from this computer"
@@ -1369,14 +1231,8 @@
   ],
   "chat_desktop_ask_delete_in": [
     {
-      "declarations": [
-        "input count",
-        "input folder",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input folder", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Delete {count} file in {folder}",
         "countPlural=other": "Delete {count} files in {folder}"
@@ -1400,13 +1256,8 @@
   "chat_desktop_deleting": "Deleting files",
   "chat_desktop_deleting_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Deleting {count} file",
         "countPlural=other": "Deleting {count} files"
@@ -1570,14 +1421,8 @@
   "chat_failure_incomplete_title": "The response stopped partway",
   "chat_failure_retry_in_milliseconds": [
     {
-      "declarations": [
-        "input count",
-        "input amount",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input amount", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Try again in {amount} millisecond.",
         "countPlural=other": "Try again in {amount} milliseconds."
@@ -1586,14 +1431,8 @@
   ],
   "chat_failure_retry_in_minutes": [
     {
-      "declarations": [
-        "input count",
-        "input amount",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input amount", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Try again in {amount} minute.",
         "countPlural=other": "Try again in {amount} minutes."
@@ -1602,14 +1441,8 @@
   ],
   "chat_failure_retry_in_seconds": [
     {
-      "declarations": [
-        "input count",
-        "input amount",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input amount", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Try again in {amount} second.",
         "countPlural=other": "Try again in {amount} seconds."
@@ -1643,14 +1476,8 @@
   "chat_group_previous_week": "Previous 7 days",
   "chat_history_found_chats": [
     {
-      "declarations": [
-        "input count",
-        "input query",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input query", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Found {count} chat for “{query}”",
         "countPlural=other": "Found {count} chats for “{query}”"
@@ -1659,14 +1486,8 @@
   ],
   "chat_history_found_earlier": [
     {
-      "declarations": [
-        "input count",
-        "input query",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input query", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Found {count} earlier message for “{query}”",
         "countPlural=other": "Found {count} earlier messages for “{query}”"
@@ -1697,13 +1518,8 @@
   "chat_image_preview": "Preview {name}",
   "chat_knowledge_excerpts": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} excerpt",
         "countPlural=other": "{count} excerpts"
@@ -1715,13 +1531,8 @@
   "chat_knowledge_listed": "Listed documents",
   "chat_knowledge_listed_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Listed {count} document",
         "countPlural=other": "Listed {count} documents"
@@ -1731,13 +1542,8 @@
   "chat_knowledge_listing": "Listing documents",
   "chat_knowledge_read_excerpts": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Read {count} excerpt",
         "countPlural=other": "Read {count} excerpts"
@@ -1746,13 +1552,8 @@
   ],
   "chat_knowledge_read_in_full": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Read {count} excerpt in full",
         "countPlural=other": "Read {count} excerpts in full"
@@ -1764,13 +1565,8 @@
   "chat_knowledge_searching": "Searching documents",
   "chat_knowledge_steps_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One step didn’t work.",
         "countPlural=other": "{count} steps didn’t work."
@@ -1793,13 +1589,8 @@
   "chat_list_title": "Chats",
   "chat_loss_agent_draft_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} agent draft",
         "countPlural=other": "{count} agent drafts"
@@ -1810,13 +1601,8 @@
   "chat_loss_agent_draft_untitled": "An untitled agent draft will also be deleted.",
   "chat_loss_document_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} document",
         "countPlural=other": "{count} documents"
@@ -1827,13 +1613,8 @@
   "chat_loss_document_untitled": "An untitled document will also be deleted.",
   "chat_loss_schedule_draft_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} schedule draft",
         "countPlural=other": "{count} schedule drafts"
@@ -1845,13 +1626,8 @@
   "chat_loss_several": "{list} will also be deleted.",
   "chat_loss_working_file_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} unpublished file",
         "countPlural=other": "{count} unpublished files"
@@ -1888,13 +1664,8 @@
   "chat_notify_running": "Notifying you",
   "chat_office_blocks": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} paragraph or table",
         "countPlural=other": "{count} paragraphs and tables"
@@ -1904,13 +1675,8 @@
   "chat_office_check_slides_failed": "Couldn’t check the slides",
   "chat_office_checked_appearance": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Checked appearance of {count} slide",
         "countPlural=other": "Checked appearance of {count} slides"
@@ -1925,13 +1691,8 @@
   "chat_office_failed": "Failed",
   "chat_office_formula_errors": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} formula shows an error",
         "countPlural=other": "{count} formulas show an error"
@@ -1970,13 +1731,8 @@
   "chat_office_read_slide_range": "Read slides {from}–{to}",
   "chat_office_sheets": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} sheet",
         "countPlural=other": "{count} sheets"
@@ -1985,13 +1741,8 @@
   ],
   "chat_office_slides": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} slide",
         "countPlural=other": "{count} slides"
@@ -2056,13 +1807,8 @@
   "chat_queue_answer_first": "Answer the questions above first",
   "chat_queue_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} message queued",
         "countPlural=other": "{count} messages queued"
@@ -2075,7 +1821,6 @@
   "chat_queue_editing": "Editing",
   "chat_queue_failure_account": "This account can’t start messages. Try Send now after access is restored.",
   "chat_queue_failure_files": "A file in this message can’t be read by its model anymore. Edit it or remove it.",
-  "chat_queue_failure_limit": "You’ve reached a usage limit.",
   "chat_queue_failure_model": "This message’s model is no longer available. Edit it to pick another.",
   "chat_queue_failure_other": "This message could not be started. Its model or collections may no longer be available.",
   "chat_queue_more": "{count} more",
@@ -2120,13 +1865,8 @@
   "chat_research_made_plan": "Made a plan",
   "chat_research_more_sources": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} more source",
         "countPlural=other": "{count} more sources"
@@ -2136,13 +1876,8 @@
   "chat_research_no_sources": "No sources found",
   "chat_research_note_incomplete": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One topic couldn’t be finished, so some of this may be missing.",
         "countPlural=other": "{count} topics couldn’t be finished, so some of this may be missing."
@@ -2157,13 +1892,8 @@
   "chat_research_panel_in_progress": "In progress",
   "chat_research_panel_steps": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} step",
         "countPlural=other": "{count} steps"
@@ -2172,13 +1902,8 @@
   ],
   "chat_research_planned": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Made a plan · {count} topic",
         "countPlural=other": "Made a plan · {count} topics"
@@ -2192,13 +1917,8 @@
   "chat_research_searching_query": "Searching “{query}”",
   "chat_research_sources": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} source",
         "countPlural=other": "{count} sources"
@@ -2208,13 +1928,8 @@
   "chat_research_sources_by_site": "Sources by site",
   "chat_research_sources_so_far": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} source so far",
         "countPlural=other": "{count} sources so far"
@@ -2223,13 +1938,8 @@
   ],
   "chat_research_step_excerpts": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} excerpt",
         "countPlural=other": "{count} excerpts"
@@ -2238,13 +1948,8 @@
   ],
   "chat_research_step_listed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Listed {count} document",
         "countPlural=other": "Listed {count} documents"
@@ -2254,13 +1959,8 @@
   "chat_research_step_read_documents": "Read documents",
   "chat_research_step_read_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Couldn’t read a page",
         "countPlural=other": "Couldn’t read {count} pages"
@@ -2269,13 +1969,8 @@
   ],
   "chat_research_step_read_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Read a page",
         "countPlural=other": "Read {count} pages"
@@ -2284,13 +1979,8 @@
   ],
   "chat_research_step_reading_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Reading a page",
         "countPlural=other": "Reading {count} pages"
@@ -2299,13 +1989,8 @@
   ],
   "chat_research_step_results": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} result",
         "countPlural=other": "{count} results"
@@ -2321,13 +2006,8 @@
   "chat_research_step_using_skill": "Using {name}",
   "chat_research_steps": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} step",
         "countPlural=other": "{count} steps"
@@ -2341,13 +2021,8 @@
   "chat_research_title": "Deep research",
   "chat_research_topics": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} topic",
         "countPlural=other": "{count} topics"
@@ -2383,13 +2058,8 @@
   "chat_status_unread": "New answer",
   "chat_steer_loss": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "The message you steered into it will be removed too.",
         "countPlural=other": "The {count} messages you steered into it will be removed too."
@@ -2420,13 +2090,8 @@
   "chat_web_read_failed": "Couldn’t read the pages",
   "chat_web_read_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Read a page",
         "countPlural=other": "Read {count} pages"
@@ -2436,13 +2101,8 @@
   "chat_web_reading_host": "Reading {host}",
   "chat_web_reading_sites": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Reading a website",
         "countPlural=other": "Reading {count} websites"
@@ -2454,13 +2114,8 @@
   "chat_web_searched": "Searched the web",
   "chat_web_searches_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "One search didn’t work.",
         "countPlural=other": "{count} searches didn’t work."
@@ -2472,13 +2127,8 @@
   "chat_web_show_more": "Show {count} more",
   "chat_web_sources": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} source",
         "countPlural=other": "{count} sources"
@@ -2509,13 +2159,8 @@
   "chat_work_past_read_file": "read a file",
   "chat_work_past_read_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "read a page",
         "countPlural=other": "read {count} pages"
@@ -2620,13 +2265,8 @@
   "custom_tools_editor_function": "Function",
   "custom_tools_editor_function_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} function:",
         "countPlural=*": "{count} functions:"
@@ -2644,13 +2284,8 @@
   "custom_tools_editor_parameter_schema": "Parameter schema",
   "custom_tools_editor_problem_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} problem",
         "countPlural=*": "{count} problems"
@@ -2681,13 +2316,8 @@
   "custom_tools_error_slug_taken": "The slug {slug} is already in use.",
   "custom_tools_list_dependency_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} dependency",
         "countPlural=*": "{count} dependencies"
@@ -2700,13 +2330,8 @@
   "custom_tools_list_empty_title": "No modules yet",
   "custom_tools_list_function_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} function",
         "countPlural=*": "{count} functions"
@@ -2750,13 +2375,8 @@
   "desktop_grant_ssh_agent": "Signing in with your SSH keys",
   "desktop_grants_always": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Every chat may also reach one more, listed in Settings › This computer.",
         "countPlural=*": "Every chat may also reach {count} more, listed in Settings › This computer."
@@ -2925,13 +2545,8 @@
   "documents_image_add_some_failed": "Could not add every image",
   "documents_import_dropped_comments_over_limit": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a comment past the document’s limit",
         "countPlural=*": "{count} comments past the document’s limit"
@@ -2940,13 +2555,8 @@
   ],
   "documents_import_dropped_comments_shortened": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a comment shortened",
         "countPlural=*": "{count} comments shortened"
@@ -2955,13 +2565,8 @@
   ],
   "documents_import_dropped_equations": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "an equation, kept as its text",
         "countPlural=*": "{count} equations, kept as their text"
@@ -2971,13 +2576,8 @@
   "documents_import_dropped_headers_footers": "headers and footers",
   "documents_import_dropped_large_pictures": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a picture too large to keep",
         "countPlural=*": "{count} pictures too large to keep"
@@ -2986,13 +2586,8 @@
   ],
   "documents_import_dropped_linked_pictures": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a linked picture",
         "countPlural=*": "{count} linked pictures"
@@ -3002,13 +2597,8 @@
   "documents_import_dropped_nested_tables": "tables inside tables, kept as their text",
   "documents_import_dropped_old_format_pictures": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a picture or object in an older format",
         "countPlural=*": "{count} pictures or objects in an older format"
@@ -3017,13 +2607,8 @@
   ],
   "documents_import_dropped_shapes": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a chart, diagram or shape",
         "countPlural=*": "{count} charts, diagrams or shapes"
@@ -3033,13 +2618,8 @@
   "documents_import_dropped_table_of_contents": "a table of contents, which Word rebuilds from the headings",
   "documents_import_dropped_text_boxes": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a text box",
         "countPlural=*": "{count} text boxes"
@@ -3048,13 +2628,8 @@
   ],
   "documents_import_dropped_unshowable_pictures": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "a picture in a format a document can’t show",
         "countPlural=*": "{count} pictures in formats a document can’t show"
@@ -3063,13 +2638,8 @@
   ],
   "documents_import_dropped_unstored_pictures": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} picture the app couldn’t store",
         "countPlural=*": "{count} pictures the app couldn’t store"
@@ -3164,9 +2734,7 @@
         "local selectedShown = selected: number",
         "local wordsShown = words: number"
       ],
-      "selectors": [
-        "wordsPlural"
-      ],
+      "selectors": ["wordsPlural"],
       "match": {
         "wordsPlural=one": "{selectedShown} of {wordsShown} word",
         "wordsPlural=*": "{selectedShown} of {wordsShown} words"
@@ -3183,10 +2751,7 @@
         "local wordsShown = words: number",
         "local charactersShown = characters: number"
       ],
-      "selectors": [
-        "wordsPlural",
-        "charactersPlural"
-      ],
+      "selectors": ["wordsPlural", "charactersPlural"],
       "match": {
         "wordsPlural=one, charactersPlural=one": "{wordsShown} word · {charactersShown} character",
         "wordsPlural=one, charactersPlural=*": "{wordsShown} word · {charactersShown} characters",
@@ -3236,9 +2801,7 @@
         "input shown",
         "local countPlural = count: plural"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{text}… and {shown} more character",
         "countPlural=*": "{text}… and {shown} more characters"
@@ -3340,13 +2903,8 @@
   "help_tour_skip": "Skip",
   "help_tour_welcome_body": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Besides chatting, you can set it up to work the way you do. This takes about a minute: here is the 1 thing worth knowing about.",
         "countPlural=other": "Besides chatting, you can set it up to work the way you do. This takes about a minute: here are the {count} things worth knowing about."
@@ -3357,13 +2915,8 @@
   "help_tour_welcome_title": "Welcome to neema",
   "images_activity_create_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Couldn’t create the image",
         "countPlural=other": "Couldn’t create the images"
@@ -3372,13 +2925,8 @@
   ],
   "images_activity_creating": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Creating image",
         "countPlural=other": "Creating images"
@@ -3389,13 +2937,8 @@
   "images_activity_declined_unnamed": "The image model declined",
   "images_activity_edit_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Couldn’t edit the image",
         "countPlural=other": "Couldn’t edit the images"
@@ -3405,13 +2948,8 @@
   "images_activity_edited_with": "Edited with {model}",
   "images_activity_editing": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Editing image",
         "countPlural=other": "Editing images"
@@ -3459,13 +2997,8 @@
   "integrations_activity_refused": "{label}: not done",
   "integrations_activity_results": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} result",
         "countPlural=other": "{count} results"
@@ -3498,13 +3031,8 @@
   "integrations_admin_delete_description": "Chats, agents and schedules stop using it. Past answers keep what it found.",
   "integrations_admin_delete_description_people": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} person loses their connection, and chats, agents and schedules stop using it. Past answers keep what it found.",
         "countPlural=other": "{count} people lose their connections, and chats, agents and schedules stop using it. Past answers keep what it found."
@@ -3521,14 +3049,8 @@
   "integrations_admin_enabled_label": "{name} on",
   "integrations_admin_failing": [
     {
-      "declarations": [
-        "input count",
-        "input error",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input error", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} account could not list its tools: {error}",
         "countPlural=other": "{count} accounts could not list its tools: {error}"
@@ -3541,13 +3063,8 @@
   "integrations_admin_on": "On",
   "integrations_admin_people_connected": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} person connected",
         "countPlural=other": "{count} people connected"
@@ -3574,14 +3091,8 @@
   "integrations_approval_change_account": "This will change with your {service} account “{account}”.",
   "integrations_approval_contact": [
     {
-      "declarations": [
-        "input service",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input service", "input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account.",
         "countPlural=other": "This will contact these {count} people from your {service} account."
@@ -3596,9 +3107,7 @@
         "input count",
         "local countPlural = count: plural"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "This will contact this person from your {service} account “{account}”.",
         "countPlural=other": "This will contact these {count} people from your {service} account “{account}”."
@@ -3657,13 +3166,8 @@
   "integrations_connect_ready_no_tools": "It lists no tools to your account yet.",
   "integrations_connect_ready_tools": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} tool. Reads run, changes ask first.",
         "countPlural=other": "{count} tools. Reads run, changes ask first."
@@ -3679,13 +3183,8 @@
   "integrations_connect_use_key_instead": "Use {noun} instead",
   "integrations_count_schedules": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} schedule",
         "countPlural=other": "{count} schedules"
@@ -3694,13 +3193,8 @@
   ],
   "integrations_count_sources": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} knowledge source",
         "countPlural=other": "{count} knowledge sources"
@@ -3726,14 +3220,8 @@
   "integrations_disconnect": "Disconnect",
   "integrations_disconnect_affected": [
     {
-      "declarations": [
-        "input count",
-        "input things",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input things", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay.",
         "countPlural=other": "Chats lose it, and {things} stop working until you connect it again. Documents already synced stay."
@@ -3823,13 +3311,8 @@
   "integrations_error_source_stale": "This source is no longer current.",
   "integrations_error_sources_mirror": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} knowledge source mirrors it. Remove it first.",
         "countPlural=other": "{count} knowledge sources mirror it. Remove them first."
@@ -4036,13 +3519,8 @@
   "integrations_server_setup_title": "Set up {name}",
   "integrations_server_tool_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} tool",
         "countPlural=other": "{count} tools"
@@ -4073,13 +3551,8 @@
   "integrations_sources_edit_label": "Edit what is synced from {title}",
   "integrations_sources_elsewhere": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page already synced by another source",
         "countPlural=other": "{count} pages already synced by another source"
@@ -4103,13 +3576,8 @@
   "integrations_sources_over_limit": "{count} over the collection limit",
   "integrations_sources_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page",
         "countPlural=other": "{count} pages"
@@ -4120,13 +3588,8 @@
   "integrations_sources_paused_owner": "Paused: the owner’s {name} account is disconnected. Pages already synced stay searchable.",
   "integrations_sources_picked": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page picked",
         "countPlural=other": "{count} pages picked"
@@ -4135,14 +3598,8 @@
   ],
   "integrations_sources_picked_excluded": [
     {
-      "declarations": [
-        "input count",
-        "input excluded",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input excluded", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page picked, {excluded} left out",
         "countPlural=other": "{count} pages picked, {excluded} left out"
@@ -4158,13 +3615,8 @@
   "integrations_sources_retry_nothing": "Nothing needed preparing again.",
   "integrations_sources_retry_started": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Preparing search again for {count} page.",
         "countPlural=other": "Preparing search again for {count} pages."
@@ -4192,13 +3644,8 @@
   "integrations_sources_where_label": "Where to sync from",
   "integrations_status_accounts": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} account",
         "countPlural=other": "{count} accounts"
@@ -4210,13 +3657,8 @@
   "integrations_status_signed_out": "Signed out",
   "integrations_status_signed_out_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} signed out",
         "countPlural=other": "{count} signed out"
@@ -4228,14 +3670,8 @@
   "integrations_sync_error_owner": "The collection’s owner can no longer sync it.",
   "integrations_sync_gone": [
     {
-      "declarations": [
-        "input count",
-        "input titles",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input titles", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "“{titles}” can no longer be found or opened, so its pages were removed. Edit the selection to drop it.",
         "countPlural=other": "“{titles}” can no longer be found or opened, so their pages were removed. Edit the selection to drop them."
@@ -4247,13 +3683,8 @@
   "integrations_synced_failed": "Couldn’t prepare",
   "integrations_synced_filter": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Filter {count} page…",
         "countPlural=other": "Filter {count} pages…"
@@ -4312,14 +3743,8 @@
   "knowledge_admin_rebuild_instead": "Rebuild instead",
   "knowledge_admin_rebuild_started": [
     {
-      "declarations": [
-        "input count",
-        "input collections",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input collections", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Rebuilding {count} document across {collections} collections in the background.",
         "countPlural=*": "Rebuilding {count} documents across {collections} collections in the background."
@@ -4350,13 +3775,8 @@
   "knowledge_collection_title": "Collection",
   "knowledge_count_documents": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} document",
         "countPlural=*": "{count} documents"
@@ -4365,13 +3785,8 @@
   ],
   "knowledge_count_failed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=*": "{count} failed"
       }
@@ -4389,13 +3804,8 @@
   "knowledge_document_open_in": "Open in {name}",
   "knowledge_document_pages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} page",
         "countPlural=*": "{count} pages"
@@ -4443,14 +3853,8 @@
   "knowledge_field_add": "Add collection",
   "knowledge_field_detail_shared": [
     {
-      "declarations": [
-        "input count",
-        "input name",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input name", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} document · shared by {name}",
         "countPlural=*": "{count} documents · shared by {name}"
@@ -4496,13 +3900,8 @@
   "knowledge_rebuild_index_description": "Redo preparation for documents that need it.",
   "knowledge_rebuild_started": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Rebuilding {count} document in the background. Search keeps working meanwhile.",
         "countPlural=*": "Rebuilding {count} documents in the background. Search keeps working meanwhile."
@@ -4540,13 +3939,8 @@
   "limits_all_models": "All models",
   "limits_amount_answers": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} answer",
         "countPlural=*": "{count} answers"
@@ -4555,13 +3949,8 @@
   ],
   "limits_bytes": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} byte",
         "countPlural=*": "{count} bytes"
@@ -4607,13 +3996,8 @@
   "limits_field_period": "How often it starts again",
   "limits_group_changes_removed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "A group’s change to this limit will be removed.",
         "countPlural=*": "{count} groups’ changes to this limit will be removed."
@@ -4628,14 +4012,8 @@
   "limits_mine_title": "Limits",
   "limits_mine_usage": [
     {
-      "declarations": [
-        "input period",
-        "input used",
-        "input amount"
-      ],
-      "selectors": [
-        "period"
-      ],
+      "declarations": ["input period", "input used", "input amount"],
+      "selectors": ["period"],
       "match": {
         "period=day": "{used} of {amount} today",
         "period=week": "{used} of {amount} this week",
@@ -4649,13 +4027,8 @@
   "limits_period_week": "Per week",
   "limits_reached": [
     {
-      "declarations": [
-        "input period",
-        "input amount"
-      ],
-      "selectors": [
-        "period"
-      ],
+      "declarations": ["input period", "input amount"],
+      "selectors": ["period"],
       "match": {
         "period=day": "You’ve reached today’s limit of {amount}.",
         "period=week": "You’ve reached this week’s limit of {amount}.",
@@ -4665,14 +4038,8 @@
   ],
   "limits_reached_models": [
     {
-      "declarations": [
-        "input period",
-        "input amount",
-        "input models"
-      ],
-      "selectors": [
-        "period"
-      ],
+      "declarations": ["input period", "input amount", "input models"],
+      "selectors": ["period"],
       "match": {
         "period=day": "You’ve reached today’s limit of {amount} with {models}.",
         "period=week": "You’ve reached this week’s limit of {amount} with {models}.",
@@ -4686,16 +4053,8 @@
   "limits_resets_on": "It resets on {day}.",
   "limits_rule": [
     {
-      "declarations": [
-        "input period",
-        "input scope",
-        "input amount",
-        "input models"
-      ],
-      "selectors": [
-        "period",
-        "scope"
-      ],
+      "declarations": ["input period", "input scope", "input amount", "input models"],
+      "selectors": ["period", "scope"],
       "match": {
         "period=day, scope=all": "Up to {amount} per day",
         "period=day, scope=models": "Up to {amount} per day with {models}",
@@ -4711,17 +4070,8 @@
   ],
   "limits_rule_lifted": [
     {
-      "declarations": [
-        "input metric",
-        "input period",
-        "input scope",
-        "input models"
-      ],
-      "selectors": [
-        "metric",
-        "period",
-        "scope"
-      ],
+      "declarations": ["input metric", "input period", "input scope", "input models"],
+      "selectors": ["metric", "period", "scope"],
       "match": {
         "metric=cost, period=day, scope=all": "No limit on cost per day",
         "metric=cost, period=day, scope=models": "No limit on cost per day with {models}",
@@ -5169,13 +4519,8 @@
   "schedules_allowance_addresses": "{label}: addresses",
   "schedules_allowance_cap": [
     {
-      "declarations": [
-        "input cap",
-        "local capPlural = cap: plural"
-      ],
-      "selectors": [
-        "capPlural"
-      ],
+      "declarations": ["input cap", "local capPlural = cap: plural"],
+      "selectors": ["capPlural"],
       "match": {
         "capPlural=one": "Runs may contact only these addresses, at most {cap} time per run.",
         "capPlural=*": "Runs may contact only these addresses, at most {cap} times per run."
@@ -5188,13 +4533,8 @@
   "schedules_cadence_daily": "Every day at {time}",
   "schedules_cadence_hourly": [
     {
-      "declarations": [
-        "input every",
-        "local everyPlural = every: plural"
-      ],
-      "selectors": [
-        "everyPlural"
-      ],
+      "declarations": ["input every", "local everyPlural = every: plural"],
+      "selectors": ["everyPlural"],
       "match": {
         "everyPlural=one": "Every hour",
         "everyPlural=*": "Every {every} hours"
@@ -5203,14 +4543,8 @@
   ],
   "schedules_cadence_hourly_at": [
     {
-      "declarations": [
-        "input every",
-        "input minute",
-        "local everyPlural = every: plural"
-      ],
-      "selectors": [
-        "everyPlural"
-      ],
+      "declarations": ["input every", "input minute", "local everyPlural = every: plural"],
+      "selectors": ["everyPlural"],
       "match": {
         "everyPlural=one": "Every hour at :{minute}",
         "everyPlural=*": "Every {every} hours at :{minute}"
@@ -5226,9 +4560,7 @@
         "input time",
         "local everyPlural = every: plural"
       ],
-      "selectors": [
-        "everyPlural"
-      ],
+      "selectors": ["everyPlural"],
       "match": {
         "everyPlural=one": "Every month on the {days} at {time}",
         "everyPlural=*": "Every {every} months on the {days} at {time}"
@@ -5243,9 +4575,7 @@
         "input time",
         "local everyPlural = every: plural"
       ],
-      "selectors": [
-        "everyPlural"
-      ],
+      "selectors": ["everyPlural"],
       "match": {
         "everyPlural=one": "Every month on {count} days at {time}",
         "everyPlural=*": "Every {every} months on {count} days at {time}"
@@ -5254,13 +4584,8 @@
   ],
   "schedules_cadence_ordinal": [
     {
-      "declarations": [
-        "input day",
-        "local dayOrdinal = day: plural type=ordinal"
-      ],
-      "selectors": [
-        "dayOrdinal"
-      ],
+      "declarations": ["input day", "local dayOrdinal = day: plural type=ordinal"],
+      "selectors": ["dayOrdinal"],
       "match": {
         "dayOrdinal=one": "{day}st",
         "dayOrdinal=two": "{day}nd",
@@ -5463,13 +4788,8 @@
   "schedules_timing_day_of_week": "Day of the week",
   "schedules_timing_days_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} day",
         "countPlural=*": "{count} days"
@@ -5483,13 +4803,8 @@
   "schedules_timing_hourly": "Hourly",
   "schedules_timing_hours": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} hour",
         "countPlural=*": "{count} hours"
@@ -5507,13 +4822,8 @@
   "schedules_timing_monthly": "Monthly",
   "schedules_timing_months": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} month",
         "countPlural=*": "{count} months"
@@ -5529,14 +4839,8 @@
   "schedules_timing_repeats": "Repeats",
   "schedules_timing_short_months_skip": [
     {
-      "declarations": [
-        "input count",
-        "input days",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input days", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Months without the {days} skip it.",
         "countPlural=*": "Months without the {days} skip them."
@@ -5545,14 +4849,8 @@
   ],
   "schedules_timing_short_months_skip_last": [
     {
-      "declarations": [
-        "input count",
-        "input days",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input days", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Months without the {days} skip it. Choose Last day to run every month.",
         "countPlural=*": "Months without the {days} skip them. Choose Last day to run every month."
@@ -5604,13 +4902,8 @@
   "settings_api_keys_lifetime": "Expires",
   "settings_api_keys_lifetime_days": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "1 day",
         "countPlural=other": "{count} days"
@@ -5658,13 +4951,8 @@
   "settings_archived_confirm_title": "Archive all chats?",
   "settings_archived_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "1 chat",
         "countPlural=other": "{count} chats"
@@ -5673,13 +4961,8 @@
   ],
   "settings_archived_done": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Archived 1 chat",
         "countPlural=other": "Archived {count} chats"
@@ -5825,14 +5108,8 @@
   "settings_section_usage": "Usage",
   "settings_ssh_added_on_sign_in": [
     {
-      "declarations": [
-        "input names",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input names", "input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{names} is added when a chat signs in",
         "countPlural=other": "{names} are added when a chat signs in"
@@ -5845,13 +5122,8 @@
   "settings_ssh_error_load": "Couldn’t load the agent.",
   "settings_ssh_key_count": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "1 key",
         "countPlural=other": "{count} keys"
@@ -5910,14 +5182,8 @@
   "settings_storage_used_title": "Used",
   "settings_storage_where_more": [
     {
-      "declarations": [
-        "input place",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input place", "input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{place} and 1 more place",
         "countPlural=other": "{place} and {count} more places"
@@ -6045,13 +5311,8 @@
   "skills_form_instructions": "Instructions",
   "skills_form_more_files": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "This skill includes 1 more file, such as a template or image. Switch to Advanced to see it.",
         "countPlural=*": "This skill includes {count} more files, such as templates or images. Switch to Advanced to see them."
@@ -6077,9 +5338,7 @@
         "input source",
         "local countPlural = count: plural"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{source} · {installs} install",
         "countPlural=*": "{source} · {installs} installs"
@@ -6191,13 +5450,8 @@
   "spreadsheets_preview_chart_loading": "Loading chart",
   "spreadsheets_preview_charts_hidden": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "A chart isn’t shown here.",
         "countPlural=other": "{count} charts aren’t shown here."
@@ -6302,14 +5556,8 @@
   "tools_providers_test_failed": "Didn’t work: {error}",
   "tools_providers_test_works": [
     {
-      "declarations": [
-        "input count",
-        "input latency",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input latency", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Works: {count} result in {latency}ms.",
         "countPlural=*": "Works: {count} results in {latency}ms."
