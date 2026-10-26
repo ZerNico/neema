@@ -773,6 +773,17 @@ html[data-desktop-chrome][data-sidebar-variant="inset"][data-sidebar-state="expa
   );
 }
 
+/* On the sidebar's canvas a tinted tag reads as a hole in it; it takes the page's colour, as
+   the sheet below does. In a browser the header sits on the page, where the tint stands out. */
+html[data-sidebar-variant="inset"] .desktop-header [data-slot="badge"][data-variant="secondary"] {
+  background-color: var(--background);
+}
+html[data-sidebar-variant="inset"]
+  .desktop-header
+  a[data-slot="badge"][data-variant="secondary"]:hover {
+  background-color: var(--muted);
+}
+
 /* The open detail rail owns the titlebar above it (`--detail-panel-inset` is how
    far its left edge sits from the window's right), so the rail's tab strip starts
    at the rail's edge and the header ends at its footprint, the same edge except at
