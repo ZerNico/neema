@@ -66,6 +66,14 @@ interface Slot {
   tail: Promise<unknown>;
   running?: Running | undefined;
   idle?: unknown;
+  /** The disk was just made over for a new image, and no call has said so yet. */
+  reset?: boolean;
+}
+
+/** What the VM's first use after a change should tell the model. */
+export interface UseInfo {
+  /** The chat's disk started over from a new image: earlier installs are gone, files are not. */
+  readonly reset: boolean;
 }
 
 /**
@@ -90,7 +98,7 @@ export class ChatVms {
   use<A>(
     key: ChatKey,
     setup: ChatSetup,
-    fn: (guest: Guest) => Promise<A>,
+    fn: (guest: Guest, info: UseInfo) => Promise<A>,
     signal?: AbortSignal,
   ): Promise<A> {
     const slot = this.slot(key);
@@ -102,7 +110,10 @@ export class ChatVms {
       try {
         const guest = await this.ensure(key, slot, setup);
         signal?.throwIfAborted();
-        return await fn(guest);
+        // Told once: the call that sees it carries the news to the model.
+        const reset = slot.reset === true;
+        slot.reset = false;
+        return await fn(guest, { reset });
       } finally {
         this.armIdle(key, slot);
       }
@@ -199,7 +210,7 @@ export class ChatVms {
     const mounts = mountKey(setup.workspace, setup.mounts);
     if (slot.running?.mounts === mounts) return slot.running.guest;
     await this.halt(key, slot);
-    const rootDisk = await this.disk(key);
+    const rootDisk = await this.disk(key, slot);
     const name = vmName(key);
     const context: ClientContext = { server: key.origin, chat: key.conversationId };
     const client = await this.options.egress.issue(context);
@@ -250,7 +261,7 @@ export class ChatVms {
   }
 
   /** The chat's root disk, made and formatted on first use or when the image changed. */
-  private async disk(key: ChatKey) {
+  private async disk(key: ChatKey, slot: Slot) {
     const path = this.diskPath(key);
     const marker = `${path}.json`;
     const made = await readFile(marker, "utf8")
@@ -258,6 +269,8 @@ export class ChatVms {
       .catch(() => undefined);
     if (made === this.options.image) return path;
     // Installs made on another image's files would sit on a base they were not made for.
+    // A first disk is no news to the model; one made over for a new image is.
+    if (made !== undefined) slot.reset = true;
     await mkdir(this.options.disks, { recursive: true });
     await rm(path, { force: true });
     await writeFile(path, "");

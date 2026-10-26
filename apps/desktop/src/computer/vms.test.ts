@@ -198,9 +198,10 @@ test("an idle VM stops and the next use starts it again", async () => {
   expect(hv.started).toHaveLength(2);
 });
 
-test("a new image starts the chat over on a fresh disk", async () => {
+test("a new image starts the chat over on a fresh disk, and the next use is told once", async () => {
   const first = await setup("image@sha256:a");
-  await first.vms.use(KEY, plain, async () => {});
+  // A chat's first disk is not a reset.
+  expect(await first.vms.use(KEY, plain, async (_, info) => info.reset)).toBe(false);
   const second = new ChatVms({
     hypervisor: first.hv.hypervisor,
     egress: first.eg.egress,
@@ -212,8 +213,9 @@ test("a new image starts the chat over on a fresh disk", async () => {
     idleMs: 300_000,
     timers: first.timers,
   });
-  await second.use(KEY, plain, async () => {});
+  expect(await second.use(KEY, plain, async (_, info) => info.reset)).toBe(true);
   expect(first.hv.formatted).toHaveLength(2);
+  expect(await second.use(KEY, plain, async (_, info) => info.reset)).toBe(false);
 });
 
 test("discard removes the VM and its disk; a sweep removes only unowned VMs", async () => {

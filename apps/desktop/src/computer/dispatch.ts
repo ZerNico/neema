@@ -150,25 +150,33 @@ export async function dispatch(deps: DispatchDeps, call: ComputerCall): Promise<
   const setup = await deps.setup(call.key);
   const { mounts } = setup;
   const args = call.args;
-  try {
-    return await deps.vms.use(
+  let reset = false;
+  const result = await deps.vms
+    .use(
       call.key,
       setup,
-      async (guest) => {
+      async (guest, info) => {
+        reset = info.reset;
         await copyAttachments(deps, call, guest, mounts);
         return await run(deps, call, guest, mounts, args);
       },
       call.signal,
-    );
-  } catch (error) {
-    if (error instanceof Refusal) return failure(REFUSAL_SUMMARY[error.reason], error.message);
-    if (call.signal.aborted) return failure("Stopped", "The call was stopped before it finished.");
-    return failure(
-      "The computer could not do that",
-      `It failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000),
-    );
-  }
+    )
+    .catch((error: unknown) => {
+      if (error instanceof Refusal) return failure(REFUSAL_SUMMARY[error.reason], error.message);
+      if (call.signal.aborted)
+        return failure("Stopped", "The call was stopped before it finished.");
+      return failure(
+        "The computer could not do that",
+        `It failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 1_000),
+      );
+    });
+  return reset ? { ...result, detail: `${RESET_NOTE}\n\n${result.detail}` } : result;
 }
+
+/** Said once after the image changed under a chat, so the model reinstalls instead of guessing. */
+export const RESET_NOTE =
+  "Note: this computer was updated to a new system image since this chat last used it. Packages installed earlier (apt, pip, npm -g) are gone and need installing again. Files in /workspace and /folders are kept.";
 
 async function run(
   deps: DispatchDeps,
