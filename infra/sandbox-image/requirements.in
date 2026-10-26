@@ -1,5 +1,5 @@
 # Python packages preinstalled in the sandbox image. Edit this file, then regenerate the lock:
-#   uv pip compile requirements.in --python-version 3.12 --universal --generate-hashes -o requirements.txt
+#   uv pip compile requirements.in --python-version 3.14 --universal --generate-hashes -o requirements.txt
 # Tables and numbers
 numpy
 pandas

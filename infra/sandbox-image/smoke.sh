@@ -14,7 +14,8 @@ check() {
 
 check python "python3 --version"
 check pip-libs "python3 -c 'import numpy, pandas, scipy, openpyxl, xlsxwriter, docx, pptx, pypdf, pdfplumber, reportlab, matplotlib, PIL, requests, bs4, lxml, yaml, jinja2, tabulate; print(\"imports ok\")'"
-check pip "pip --version"
+check pip "pip --version | grep -q /opt/venv && pip --version"
+check login-path "bash -lc 'command -v python3' | grep -x /opt/venv/bin/python3"
 check node "node --version"
 check npm "npm --version"
 check npx "npx --version"
@@ -36,6 +37,7 @@ check soffice "soffice --version"
 check socat-vsock "socat -h | grep -i vsock-connect"
 check bridge "test -x /usr/local/bin/ssh-agent-bridge && echo present"
 check safe-dir "git config --system --get-all safe.directory"
+check apt-https "! grep -q 'http://' /etc/apt/sources.list.d/ubuntu.sources && echo https-only"
 
 # LibreOffice actually converting, not only starting: the case the model relies on.
 tmp=$(mktemp -d)

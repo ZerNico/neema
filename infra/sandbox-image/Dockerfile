@@ -5,7 +5,7 @@
 FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS node
 FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
 
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -39,18 +39,27 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# The model installs with plain `pip install` as root; Debian's externally-managed marker
-# would refuse that, and there is no system Python of ours to protect in a per-chat VM.
+# Python packages, ours and whatever the model installs with plain `pip install`, live in a
+# virtualenv first on PATH: never in conflict with the system's own Python modules, which pip
+# cannot replace, and no externally-managed refusal.
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
 COPY requirements.txt /tmp/requirements.txt
-RUN rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED \
+RUN python3 -m venv /opt/venv \
  && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
- && rm /tmp/requirements.txt
+ && rm /tmp/requirements.txt \
+ # Commands run in a login shell, whose /etc/profile resets root's PATH.
+ && printf 'export VIRTUAL_ENV=/opt/venv\nexport PATH="/opt/venv/bin:$PATH"\n' > /etc/profile.d/10-venv.sh
 
 # Mounted folders belong to the person's host account, not root, and git refuses a repository
 # owned by someone else. First contact with a new SSH host is trusted, per chat VM.
 RUN git config --system --add safe.directory '*' \
  && git config --system init.defaultBranch main \
  && printf 'Host *\n  StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-sandbox.conf
+
+# apt over HTTPS: the egress proxy grants destinations by name and port, and the built-in grants
+# cover the Ubuntu archives on 443 only.
+RUN sed -i 's#http://#https://#g' /etc/apt/sources.list.d/ubuntu.sources
 
 COPY ssh-agent-bridge /usr/local/bin/ssh-agent-bridge
 COPY smoke.sh /usr/local/share/sandbox/smoke.sh
