@@ -332,14 +332,15 @@ and an explicit Quit asks while work is active. See [the embedded browser](brows
 - **One image for every chat's computer** (`infra/sandbox-image`): Ubuntu 26.04 LTS with
   Python 3.14 and the document packages, Node, uv, LibreOffice, pandoc, tesseract, ffmpeg,
   ImageMagick, poppler, git and build tools.
-- **An image is named by its sources.** CI tags it `tree-<hash>` of `infra/sandbox-image` and
-  its workflow, and reuses an existing tag instead of rebuilding. Rebuilding the same sources
+- **An image is named by its sources.** CI tags it `tree-` and the start of the git tree id of
+  `infra/sandbox-image`, and reuses an existing tag instead of rebuilding. Rebuilding the same sources
   would still give a new image, since apt is not pinned, and every new image resets each chat's
   installs. So the image changes only when its sources do.
 - **A release boots the image of its own commit.** Its sandbox job resolves or builds that tag
   and hands `name:tag@digest` to the desktop build, which bakes it in (`__SANDBOX_IMAGE__`).
   The digest is what is pulled, so a published release cannot be moved to other bytes. Other
-  builds follow `edge`, which main moves.
+  builds name their checkout's tag, computed the same way, so development boots the image of
+  its own sources as well. `edge` is main's latest, for anyone pulling by hand.
 - **Updates come once a month, together.** Renovate groups the base image digests and the
   Python lock refresh on the first of the month, which is when chats lose their installs. The
   guest kernel is not in the image: it ships with microsandbox's `libkrunfw`, updated with the

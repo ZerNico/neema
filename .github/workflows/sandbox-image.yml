@@ -1,7 +1,7 @@
 name: Sandbox image
 
 # The Linux guest of every chat's computer (infra/sandbox-image). An image is named by what it is
-# built from: `tree-<hash>` of that folder and this file. An existing one is reused, never
+# built from: `tree-` and the start of that folder's git tree id. An existing one is reused, never
 # rebuilt, so the image changes only when its sources do, and a chat's disk resets only then
 # (docs/internals/desktop.md#the-image). Pull requests build and smoke test amd64 without
 # pushing. main and releases publish what is missing, each architecture on its own native runner
@@ -50,12 +50,11 @@ jobs:
 
       - name: Tag from the sources
         id: tag
-        # Git's own ids of the folder and this file: equal sources, equal tag, whatever commit.
-        # GHCR requires a lowercase repository path.
+        # Git's own id of the folder: equal sources, equal tag, whatever commit. The desktop's
+        # build.mjs names the same tag for development. GHCR requires a lowercase path.
         run: |
-          sources=$(git rev-parse HEAD:infra/sandbox-image HEAD:.github/workflows/sandbox-image.yml)
           echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/neema-sandbox" >> "$GITHUB_OUTPUT"
-          echo "tag=tree-$(sha256sum <<< "$sources" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "tag=tree-$(git rev-parse HEAD:infra/sandbox-image | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: env.PUSH == 'true'

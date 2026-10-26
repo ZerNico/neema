@@ -29,11 +29,20 @@ const buildStamp = () => {
 };
 
 /**
- * The guest image chats' VMs boot, as `name:tag@digest`. A release passes the one its
- * sandbox job resolved for this commit (.github/workflows/release.yml), so the app always
- * boots the image built from its own infra/sandbox-image. Other builds follow `edge`.
+ * The guest image chats' VMs boot. A release passes `name:tag@digest` as its sandbox job
+ * resolved it (.github/workflows/release.yml). Other builds name the tag CI gives this
+ * checkout's committed infra/sandbox-image, so they boot the image of their own sources too.
+ * Edits not yet published need `NEEMA_SANDBOX_IMAGE` and a local build.
  */
-const sandboxImage = () => process.env.SANDBOX_IMAGE_REF || "ghcr.io/zernico/neema-sandbox:edge";
+const sandboxImage = () => {
+  if (process.env.SANDBOX_IMAGE_REF) return process.env.SANDBOX_IMAGE_REF;
+  const tree = execSync("git rev-parse HEAD:infra/sandbox-image", {
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+    .toString()
+    .trim();
+  return `ghcr.io/zernico/neema-sandbox:tree-${tree.slice(0, 16)}`;
+};
 
 export const buildOptions = () => ({
   entryPoints: ["src/main.ts", "src/preload.ts", "src/connect-preload.ts"],
