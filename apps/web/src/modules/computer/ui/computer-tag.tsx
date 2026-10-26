@@ -1,5 +1,5 @@
 import { m } from "~/paraglide/messages.js";
-import { Cancel01Icon, ComputerIcon, Folder01Icon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, Folder01Icon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { setPermissionLevel } from "~/modules/chat/server/functions.ts";
@@ -88,7 +88,7 @@ export function ComputerTag({
       >
         {/* Wrapped for the status dot, so the badge's own icon size doesn't reach it. */}
         <span className="relative flex shrink-0">
-          <HugeiconsIcon icon={ComputerIcon} strokeWidth={2} className="size-3" aria-hidden />
+          <HugeiconsIcon icon={LaptopIcon} strokeWidth={2} className="size-3" aria-hidden />
           <span
             className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${online ? "bg-success" : "bg-muted-foreground"}`}
             aria-hidden

@@ -1,4 +1,4 @@
-import { ComputerIcon, Globe02Icon, InternetIcon } from "@hugeicons/core-free-icons";
+import { Globe02Icon, InternetIcon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Effect } from "effect";
@@ -126,7 +126,7 @@ export function ComputerPage() {
         <ThisComputer />
       ) : (
         <EmptyState
-          icon={ComputerIcon}
+          icon={LaptopIcon}
           title={m.settings_computer_desktop_only_title()}
           description={m.settings_computer_desktop_only_description()}
         />
@@ -281,7 +281,7 @@ function Machines() {
         {machines.map((machine) => (
           <ListRow key={machine.id}>
             <HugeiconsIcon
-              icon={ComputerIcon}
+              icon={LaptopIcon}
               strokeWidth={2}
               className="text-muted-foreground size-5 shrink-0"
             />
