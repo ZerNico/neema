@@ -20,7 +20,6 @@ import {
   QueueEntryNotFound,
   QueueFull,
   NoActiveGeneration,
-  WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import { AnalyticsRepo } from "~/modules/analytics/server/repo.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
@@ -33,7 +32,6 @@ import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
 import { AgentNotAvailable } from "~/modules/agents/errors.ts";
 import { KnowledgeNotAvailable, KnowledgeRejected } from "~/modules/knowledge/errors.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { Db } from "~/server/db.ts";
 import { agents as savedAgents } from "~/db/schema/index.ts";
 import { eq } from "drizzle-orm";
@@ -45,7 +43,6 @@ import {
   type TurnContent,
   type TurnFields,
   type ResolveError,
-  type WorkTurnReservationRow,
 } from "./repo.ts";
 import { resumeFirstTurn } from "./prompt.ts";
 import { RESEARCH_TURN_BASE } from "./research/execution.ts";
@@ -105,12 +102,6 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveInte
     reasoningEffort?: ReasoningEffort | null | undefined;
     /** What the desktop app reports about the machine this send came from. */
     desktop?: DesktopSubmission | undefined;
-    /**
-     * Basenames of files the composer copied into the chat's workspace for
-     * this send. Stored on the attempt's generation config; the transcript
-     * renders them as chips, never as message text.
-     */
-    workspaceFiles?: ReadonlyArray<string> | undefined;
     /** See `ExternalOwner.deviceSessionId`; read from the session, never the body. */
     deviceSessionId?: string | undefined;
     timeZone?: string | undefined;
@@ -122,15 +113,6 @@ type SendTurnInput = Omit<TurnFields, "associateAgentId" | "resolve" | "saveInte
     imageModelId?: string | null | undefined;
   };
 
-/** What the page learns of a Work turn reservation. */
-const reservationView = (row: WorkTurnReservationRow) => ({
-  reservationId: row.id,
-  conversationId: row.conversationId,
-  status: row.status,
-  assistantMessageId: row.assistantMessageId,
-});
-type WorkTurnReservationView = ReturnType<typeof reservationView>;
-
 /** Orchestrates the chat use-cases on top of repo + stream engine + sync bus. */
 /** The question a turn answers: the last user message before it, past steers. */
 const turnQuestionIds = (before: ReadonlyArray<MessageRow>) => {
@@ -141,23 +123,6 @@ const turnQuestionIds = (before: ReadonlyArray<MessageRow>) => {
 export class ChatService extends Context.Service<
   ChatService,
   {
-    reserveWorkTurn(input: {
-      id: string;
-      userId: string;
-      conversation: TurnFields["conversation"];
-    }): Effect.Effect<
-      { reservationId: string; conversationId: string },
-      ConversationNotFound | ConversationBusy | InvalidMessage
-    >;
-    getWorkTurnReservation(input: {
-      userId: string;
-      reservationId: string;
-    }): Effect.Effect<WorkTurnReservationView, ConversationNotFound>;
-    /** Answers with the state the reservation is left in, which may be activated. */
-    abortWorkTurn(input: {
-      userId: string;
-      reservationId: string;
-    }): Effect.Effect<WorkTurnReservationView, ConversationNotFound>;
     sendMessage(
       input: SendTurnInput,
     ): Effect.Effect<
@@ -171,7 +136,6 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
-      | WorkDesktopRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -267,7 +231,6 @@ export class ChatService extends Context.Service<
       | RetryNotAllowed
       | ConversationBusy
       | AgentNotAvailable
-      | WorkDesktopRequired
       | KnowledgeRejected
       | InvalidMessage
       | AttachmentNotAvailable
@@ -299,7 +262,6 @@ export class ChatService extends Context.Service<
       | ResumeNotAllowed
       | ConversationBusy
       | AgentNotAvailable
-      | WorkDesktopRequired
       | KnowledgeRejected
       | InvalidMessage
       | AttachmentNotAvailable
@@ -348,7 +310,6 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
-      | WorkDesktopRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -380,12 +341,12 @@ export class ChatService extends Context.Service<
       conversationId: string;
       mark: string;
     }): Effect.Effect<boolean>;
-    /** Work-chat policy. Refused on a plain chat, where there is nothing to govern. */
-    updateWorkSettings(input: {
+    /** How much the chat's computer asks before acting. */
+    setPermissionLevel(input: {
       userId: string;
       conversationId: string;
-      permissionLevel: "manual" | "auto" | "skip";
-    }): Effect.Effect<void, ConversationNotFound | InvalidMessage>;
+      permissionLevel: "ask" | "allow";
+    }): Effect.Effect<void, ConversationNotFound>;
     renameConversation(input: {
       userId: string;
       conversationId: string;
@@ -445,7 +406,6 @@ export class ChatService extends Context.Service<
       | AttachmentNotAvailable
       | AttachmentUnsupported
       | AgentNotAvailable
-      | WorkDesktopRequired
       | SkillNotAvailable
       | SkillRejected
       | KnowledgeNotAvailable
@@ -464,7 +424,6 @@ function makeChatService() {
     const repo = yield* ChatRepo;
     const providers = yield* ProviderRepo;
     const sync = yield* SyncBus;
-    const policy = yield* FeaturePolicy;
     // A new answer is a new message that is streaming: lists move the chat up
     // and mark it generating from these two, without re-reading every page.
     const announceStarted = (userId: string, conversationId: string, messageId: string) =>
@@ -495,42 +454,12 @@ function makeChatService() {
     });
     const { startAttempt } = queue;
 
-    const reserveWorkTurn = Effect.fn("ChatService.reserveWorkTurn")(function* (input: {
-      id: string;
-      userId: string;
-      conversation: TurnFields["conversation"];
-    }) {
-      if (!(yield* policy.can(input.userId, "work")))
-        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
-      const row = yield* repo.reserveWorkTurn(input);
-      return { reservationId: row.id, conversationId: row.conversationId };
-    });
-
-    const getWorkTurnReservation = Effect.fn("ChatService.getWorkTurnReservation")(
-      function* (input: { userId: string; reservationId: string }) {
-        return reservationView(
-          yield* repo.getWorkTurnReservation(input.userId, input.reservationId),
-        );
-      },
-    );
-
-    const abortWorkTurn = Effect.fn("ChatService.abortWorkTurn")(function* (input: {
-      userId: string;
-      reservationId: string;
-    }) {
-      return reservationView(yield* repo.abortWorkTurn(input.userId, input.reservationId));
-    });
-
     const sendMessage = Effect.fn("ChatService.sendMessage")(function* (input: SendTurnInput) {
-      // Dropped files count as content on their own: an import-only send is a
-      // question with chips and no bubble. Both names and text, since the
-      // composer trims text.
-      const workspaceFiles = input.workspaceFiles ?? [];
+      // Both text and files, since the composer trims text.
       if (
         !input.questionResponse &&
         input.content.trim() === "" &&
-        input.attachmentIds.length === 0 &&
-        workspaceFiles.length === 0
+        input.attachmentIds.length === 0
       ) {
         return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
       }
@@ -542,16 +471,6 @@ function makeChatService() {
         yield* validateGenerationOptions(input);
       const searchAvailable = yield* searchToolEnabled;
 
-      // A work chat's grants and folders live on the user's machine under its
-      // id, so sweeping it away a day later would strand them.
-      if (
-        input.conversation.kind === "new" &&
-        input.conversation.temporary &&
-        input.conversation.mode === "work"
-      )
-        return yield* new InvalidMessage({
-          reason: localized(m.chat_error_work_chat_not_temporary),
-        });
       if (
         input.conversation.kind === "new" &&
         input.conversation.temporary &&
@@ -578,7 +497,6 @@ function makeChatService() {
       const turnFields: TurnFields = {
         userId: input.userId,
         conversation: input.conversation,
-        ...(input.reservationId !== undefined ? { reservationId: input.reservationId } : {}),
         modelId: input.modelId,
         attachmentIds: input.attachmentIds,
         ...(input.collectionIds !== undefined ? { collectionIds: input.collectionIds } : {}),
@@ -606,7 +524,6 @@ function makeChatService() {
           userId: input.userId,
           imageModelId: input.imageModelId,
           desktop: input.desktop,
-          workspaceFiles,
           model,
           searchAvailable,
           collectionIds: input.collectionIds,
@@ -624,7 +541,6 @@ function makeChatService() {
         modelId: input.modelId,
         turn,
         attachmentFileNames,
-        workspaceFileNames: workspaceFiles,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
         desktop: input.desktop,
@@ -634,14 +550,12 @@ function makeChatService() {
 
     // The tail every accepted turn shares: publish, start the generation, and
     // set a title on a brand-new conversation. sendMessage reaches it through
-    // the composer; runScheduledTurn reaches it with none of that. A reserved
-    // Work turn has not activated yet, so nothing here fires for it.
+    // the composer; runScheduledTurn reaches it with none of that.
     const startTurn = Effect.fn("ChatService.startTurn")(function* (input: {
       userId: string;
       modelId: string;
       turn: Effect.Success<ReturnType<typeof repo.createTurn>>;
       attachmentFileNames: ReadonlyArray<string>;
-      workspaceFileNames?: ReadonlyArray<string> | undefined;
       timeZone?: string | undefined;
       openDocument?: OpenDocument | undefined;
       desktop?: DesktopSubmission | undefined;
@@ -649,34 +563,32 @@ function makeChatService() {
       onSettled?: Effect.Effect<void> | undefined;
     }) {
       const { turn } = input;
-      if (turn.activatedNow && turn.conversationCreated) {
+      if (turn.conversationCreated) {
         yield* sync.publish(input.userId, {
           type: "conversation.created",
           conversationId: turn.conversation.id,
         });
       }
 
-      if (turn.activatedNow)
-        yield* announceStarted(input.userId, turn.conversation.id, turn.assistant.id);
+      yield* announceStarted(input.userId, turn.conversation.id, turn.assistant.id);
 
-      if (turn.activatedNow)
-        yield* startAttempt({
-          desktop: input.desktop,
-          deviceSessionId: input.deviceSessionId,
-          userId: input.userId,
-          conversationId: turn.conversation.id,
-          messageId: turn.assistant.id,
-          generationId: turn.assistant.generationId,
-          modelId: input.modelId,
-          timeZone: input.timeZone,
-          openDocument: input.openDocument,
-          onSettled: input.onSettled,
-        });
+      yield* startAttempt({
+        desktop: input.desktop,
+        deviceSessionId: input.deviceSessionId,
+        userId: input.userId,
+        conversationId: turn.conversation.id,
+        messageId: turn.assistant.id,
+        generationId: turn.assistant.generationId,
+        modelId: input.modelId,
+        timeZone: input.timeZone,
+        openDocument: input.openDocument,
+        onSettled: input.onSettled,
+      });
 
       // Only a brand-new conversation has a pending title. Forked after the
       // answer so the reply never waits on it, and detached so it survives the
       // response ending.
-      if (turn.activatedNow && turn.conversationCreated) {
+      if (turn.conversationCreated) {
         yield* Effect.forkDetach(
           generateConversationTitle(titleDeps, {
             userId: input.userId,
@@ -684,7 +596,6 @@ function makeChatService() {
             modelId: input.modelId,
             content: turn.userMessage.content,
             attachmentFileNames: input.attachmentFileNames,
-            workspaceFileNames: input.workspaceFileNames ?? [],
           }),
         );
       }
@@ -735,21 +646,13 @@ function makeChatService() {
       });
       const searchAvailable = yield* searchToolEnabled;
       const target = input.target;
-      // Saving a schedule already refuses a work chat; this keeps the fire
-      // itself safe. Its tools run in the desktop app, which an unattended
-      // turn never has, so it would start with nothing to run them.
-      if (
-        target.kind === "existing" &&
-        (yield* repo.getConversationDefaults(target.conversationId)).mode === "work"
-      )
-        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_chat_no_schedule) });
       const fire = (agentId: string | undefined) =>
         repo.createTurn({
           userId: input.userId,
           conversation:
             target.kind === "existing"
               ? { kind: "existing", id: target.conversationId }
-              : { kind: "new", id: uuidv7(), mode: "chat" },
+              : { kind: "new", id: uuidv7() },
           modelId,
           content: input.prompt,
           attachmentIds: [],
@@ -1307,9 +1210,6 @@ function makeChatService() {
     if (conversationSweepInterval) yield* lifecycle.startSweeper(conversationSweepInterval);
 
     return ChatService.of({
-      reserveWorkTurn,
-      getWorkTurnReservation,
-      abortWorkTurn,
       sendMessage,
       queueMessage: queue.queueMessage,
       replaceQueuedMessage: queue.replaceQueuedMessage,
@@ -1324,7 +1224,7 @@ function makeChatService() {
       stopGeneration: lifecycle.stopGeneration,
       deleteConversation: lifecycle.deleteConversation,
       restoreConversation: lifecycle.restoreConversation,
-      updateWorkSettings: lifecycle.updateWorkSettings,
+      setPermissionLevel: lifecycle.setPermissionLevel,
       renameConversation: lifecycle.renameConversation,
       keepConversation: lifecycle.keepConversation,
       markRead: lifecycle.markRead,

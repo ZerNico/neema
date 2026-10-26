@@ -22,6 +22,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
@@ -43,6 +44,7 @@ process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 let database: TestDatabase;
 type Services =
   | ChatRepo
+  | ComputerRepo
   | ChatService
   | CustomToolRepo
   | AttachmentRepo
@@ -308,7 +310,6 @@ describe("branching a conversation", () => {
         const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
         const repo = yield* ChatRepo;
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
-          mode: "chat",
           projectId: null,
           conversationId: forked.conversation.id,
           imageModelId: null,
@@ -323,7 +324,6 @@ describe("branching a conversation", () => {
           `delete from conversations where id = '${source.conversation.id}'` as never,
         );
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
-          mode: "chat",
           projectId: null,
           conversationId: forked.conversation.id,
           imageModelId: null,

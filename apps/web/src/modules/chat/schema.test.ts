@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  ActivateWorkTurnInput,
   AnswerQuestionInput,
   EditMessageInput,
   QueueMessageInput,
@@ -37,8 +36,7 @@ it("accepts a structured edit without prose and rejects mixed edit payloads", ()
 
 it("accepts supported reasoning efforts and defaults across submissions", () => {
   const id = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
-  const send = { conversation: { kind: "new", id, mode: "chat" }, ...generation };
-  const work = { ...send, reservationId: id, workspaceFiles: ["notes.txt"] };
+  const send = { conversation: { kind: "new", id }, ...generation };
   const answer = {
     conversationId: "c1",
     callId: "call1",
@@ -56,7 +54,6 @@ it("accepts supported reasoning efforts and defaults across submissions", () => 
   const queue = { conversationId: "c1", ...generation };
   for (const [schema, input] of [
     [SendMessageInput, send],
-    [ActivateWorkTurnInput, work],
     [AnswerQuestionInput, answer],
     [EditMessageInput, edit],
     [EditMessageInput, structuredEdit],
@@ -80,7 +77,6 @@ for (const [name, schema, input] of [
       conversation: {
         kind: "new",
         id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
-        mode: "chat",
       },
       ...generation,
     },

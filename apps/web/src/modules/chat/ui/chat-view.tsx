@@ -1,18 +1,10 @@
 import { m } from "~/paraglide/messages.js";
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentDraftOwner } from "~/modules/agents/ui/agent-draft-owner.tsx";
 import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
 import { useBrowserChat } from "~/modules/browser/client/use-browser-chat.ts";
-import { useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
-import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
-import { ForeignMachineBanner } from "~/modules/desktop/ui/foreign-machine-banner.tsx";
-import { foreignMachineStamp } from "~/modules/desktop/ui/foreign-machine-stamp.ts";
+import { desktopAttemptFields, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { LocalFileConversationProvider } from "~/modules/desktop/ui/local-file-preview.tsx";
 import { DocumentOwner } from "~/modules/documents/ui/document-owner.tsx";
 import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
@@ -25,19 +17,17 @@ import { useChatIntegrations } from "~/modules/integrations/client/use-chat-inte
 import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ScheduleDraftOwner } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
-import { toastError } from "~/ui/error-toast.ts";
 import { PendingButton } from "~/ui/pending-button.tsx";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import { learnServerClock } from "../client/use-message-stream.ts";
-import type { PermissionLevel } from "../schema.ts";
-import { lookupUiMap, saveUiState, updateWorkSettings } from "../server/functions.ts";
+import { lookupUiMap, saveUiState } from "../server/functions.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import { withHistory } from "./conversation-window.ts";
-import { FileReferenceContext } from "./file-reference-context.ts";
+import { FileReferenceContext, FileReferenceMachine } from "./file-reference-context.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
 import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
@@ -74,7 +64,6 @@ export function ChatView({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- again for each chat opened
     [conversationId, isMobile],
   );
-  const queryClient = useQueryClient();
   const { data: head, dataUpdatedAt } = useSuspenseQuery(conversationQuery(conversationId));
   // Older turns load only once the reader scrolls up to the first loaded one.
   // A new anchor (a rewind past the old one) starts that over.
@@ -110,21 +99,7 @@ export function ChatView({
   // A pick in this view; the chat's own lock shows until one is made.
   const [imageModelId, setImageModelId] = useState<string | null>(null);
   const imagePick = imageModelId ? { imageModelId } : {};
-  // One folder state for the strip and the send, so attaching in the strip is
-  // what the very next message reports. A plain chat never offers the tools.
-  const work = useWorkGate(conversationId, data.conversation.mode === "work");
-  const folder = work.folder;
   const localMachineId = useLocalMachineId();
-  const foreignMachine =
-    data.conversation.mode === "work"
-      ? foreignMachineStamp(
-          conversationId,
-          localMachineId,
-          // Found server-side: the newest such attempt may predate the loaded turns.
-          data.latestMachineAttempt ? [data.latestMachineAttempt] : [],
-          data.latestMachineAttempt ? [data.latestMachineAttempt.messageId] : [],
-        )
-      : null;
 
   const liveAnswer = useLiveAnswer({ data, conversationId, anchorFirstTurn });
   const { streamingMessage, stream, anchorId, releaseAnchor } = liveAnswer;
@@ -149,12 +124,6 @@ export function ChatView({
     isMobile,
   });
 
-  const workSettingsMutation = useMutation({
-    mutationFn: (permissionLevel: PermissionLevel) =>
-      updateWorkSettings({ data: { conversationId, permissionLevel } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
-    onError: (error) => toastError(m.chat_view_approval_failed(), error),
-  });
   const questionResponses = useMemo(
     () => associateQuestionResponses(data.messages, data.toolCalls),
     [data.messages, data.toolCalls],
@@ -184,7 +153,6 @@ export function ChatView({
     data,
     live: liveAnswer,
     edit: messageEdit,
-    work,
     questionResponses,
     flushArtifacts,
     documentFocus,
@@ -197,7 +165,6 @@ export function ChatView({
     context,
   });
   const {
-    checkWorkReady,
     flushPending,
     sendMutation,
     stopMutation,
@@ -271,7 +238,6 @@ export function ChatView({
 
   const conversationQueue = useConversationQueue({
     conversationId,
-    mode: data.conversation.mode,
     rows: data.queue,
     state: data.queueState,
     running:
@@ -285,17 +251,13 @@ export function ChatView({
       ...imagePick,
       searchEnabled,
       reasoningEffort,
-      ...(await work.attemptFields()),
+      ...(await desktopAttemptFields()),
       timeZone: browserTimeZone(),
       ...documentFocus(),
       ...context.sendFields,
     }),
-    attemptFields: () => work.attemptFields(),
-    checkWork: checkWorkReady,
-    prepare: async () => {
-      checkWorkReady();
-      await flushPending();
-    },
+    attemptFields: desktopAttemptFields,
+    prepare: flushPending,
     settings: {
       modelId: model.picked,
       setModelId: model.pick,
@@ -320,7 +282,6 @@ export function ChatView({
     liveAnswer,
     messageEdit,
     attempts,
-    work,
     localMachineId,
     effectiveModelId,
     changeModel,
@@ -366,18 +327,11 @@ export function ChatView({
               archived={!!data.conversation.archivedAt}
               project={data.project}
             />
-            {foreignMachine ? (
-              <ForeignMachineBanner conversationId={conversationId} stamp={foreignMachine} />
-            ) : null}
             <div className="min-h-0 flex-1">
               <ResearchPanelOwner messages={display} />
               <SourcesPanelOwner messages={display} />
-              {/* A Work row names a path; only this view knows whose folders it
-              resolves against. */}
-              <LocalFileConversationProvider
-                conversationId={conversationId}
-                workspaceRoot={folder?.status?.workspace.path ?? null}
-              >
+              {/* No workspace root yet: a local path resolves once the chat's machine names one. */}
+              <LocalFileConversationProvider conversationId={conversationId}>
                 <WritableChatProjectProvider
                   project={
                     data.project && projectCan.edit(data.project.role)
@@ -386,17 +340,20 @@ export function ChatView({
                   }
                 >
                   <FileReferenceContext value={fileReferences}>
-                    <GenuiActionsContext value={genuiActions}>
-                      <FileCommentContext value={sendFileComment}>
-                        <VirtualMessageList
-                          messages={withPlacedCards}
-                          anchorId={anchorId}
-                          onReleaseAnchor={releaseAnchor}
-                          onReachStart={loadOlder}
-                          loadingOlder={loadingOlder}
-                        />
-                      </FileCommentContext>
-                    </GenuiActionsContext>
+                    {/* Local paths in answers are on the chat's machine. */}
+                    <FileReferenceMachine value={data.conversation.machineId}>
+                      <GenuiActionsContext value={genuiActions}>
+                        <FileCommentContext value={sendFileComment}>
+                          <VirtualMessageList
+                            messages={withPlacedCards}
+                            anchorId={anchorId}
+                            onReleaseAnchor={releaseAnchor}
+                            onReachStart={loadOlder}
+                            loadingOlder={loadingOlder}
+                          />
+                        </FileCommentContext>
+                      </GenuiActionsContext>
+                    </FileReferenceMachine>
                   </FileReferenceContext>
                 </WritableChatProjectProvider>
               </LocalFileConversationProvider>
@@ -421,30 +378,13 @@ export function ChatView({
                 ) : null}
                 <Composer
                   ref={composer}
-                  conversationId={conversationId}
                   integrations={integrations}
-                  folder={folder}
-                  readOnly={work.readOnly}
-                  mode={{ kind: "fixed", value: data.conversation.mode }}
-                  settings={{
-                    permissionLevel: data.conversation.permissionLevel,
-                    onChange: (level) => workSettingsMutation.mutate(level),
-                  }}
-                  onSend={(
-                    content,
-                    attachmentIds,
-                    researchEnabled,
-                    skillIds,
-                    workspaceFiles,
-                    workspaceImports,
-                  ) =>
+                  onSend={(content, attachmentIds, researchEnabled, skillIds) =>
                     sendMutation.mutateAsync({
                       content,
                       attachmentIds,
                       researchEnabled,
                       ...(skillIds ? { skillIds } : {}),
-                      ...(workspaceFiles ? { workspaceFiles } : {}),
-                      ...(workspaceImports ? { workspaceImports } : {}),
                     })
                   }
                   {...(generating ? { onQueue: conversationQueue.submit } : {})}

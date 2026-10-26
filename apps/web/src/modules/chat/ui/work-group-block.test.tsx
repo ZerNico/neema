@@ -171,13 +171,13 @@ describe("a run of work", () => {
   });
 
   it("names an access request as one, not as looking through files", () => {
-    const desktop = (name: "request_network_access" | "request_path_access" | "find_files") => ({
+    const desktop = (name: "request_network_access" | "find_files") => ({
       kind: "tool" as const,
       key: name,
       activity: call(name, { family: "desktop", name }) as never,
     });
     expect(workSummary([desktop("request_network_access")])).toBe("Asked for access");
-    expect(workSummary([desktop("find_files"), desktop("request_path_access")])).toBe(
+    expect(workSummary([desktop("find_files"), desktop("request_network_access")])).toBe(
       "Looked through files and asked for access",
     );
   });

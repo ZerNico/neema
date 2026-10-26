@@ -1,3 +1,6 @@
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
+import { sentFilePaths } from "~/modules/computer/server/files.ts";
 import { offeredBuiltins } from "~/modules/skills/bundled/index.ts";
 import { SKILL_LIMITS } from "~/modules/skills/package.ts";
 import { earlierSkillMessage } from "~/modules/skills/server/tools.ts";
@@ -69,6 +72,28 @@ export interface RoundProgress {
 
 /** Identical failures of one tool in a row after which an answer is offered no more tools. */
 export const REPEATED_FAILURE_LIMIT = 3;
+
+/** What the hint says about the chat's computer: its machine, whether it is online, its folders. */
+const computerState = (
+  repo: ComputerRepo["Service"],
+  hub: MachineHub["Service"],
+  userId: string,
+  conversationId: string,
+) =>
+  Effect.gen(function* () {
+    const chat = yield* repo.chat(userId, conversationId);
+    const files = sentFilePaths(yield* repo.sentFiles(userId, conversationId)).map(
+      (file) => file.path,
+    );
+    if (!chat?.machineId) return { machine: null, folders: chat?.folders ?? [], files };
+    const machine = yield* repo.machine(userId, chat.machineId);
+    const online = (yield* hub.presence(userId, chat.machineId)) !== null;
+    return {
+      machine: { name: machine?.name ?? "the user's computer", online },
+      folders: chat.folders,
+      files,
+    };
+  });
 
 /** What the rounds change as the answer goes: its compacted history and active rounds. */
 export interface RoundState {
@@ -736,7 +761,7 @@ export const prepareAttemptPrompt = (env: {
         : null,
       research: !!researchTool,
       desktop: desktopTools
-        ? { folders: input.desktop?.folders ?? [], commands: config.desktopCommands ?? false }
+        ? yield* computerState(deps.computerRepo, deps.machineHub, input.userId, input.conversationId)
         : null,
       browser: !!browserTools,
       interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)

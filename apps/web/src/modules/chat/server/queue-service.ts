@@ -9,14 +9,12 @@ import {
   InvalidMessage,
   ModelNotFound,
   QueueEntryNotFound,
-  WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ToolUnavailable } from "~/modules/tools/server/web-search.ts";
-import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { UsageLimitReached } from "~/modules/limits/errors.ts";
 import { ChatRepo, type ResolveError } from "./repo.ts";
 import { StreamEngine, type StartGenerationInput } from "./streaming.ts";
@@ -31,7 +29,7 @@ export type QueueSubmission = {
   content: string;
   attachmentIds: ReadonlyArray<string>;
   input: QueuedTurnInput;
-  /** Present when queued from the desktop app; a Work chat requires it. */
+  /** Present when queued from the desktop app. */
   desktop?: DesktopSubmission | undefined;
 };
 
@@ -39,7 +37,6 @@ export type QueueSubmissionError =
   | ModelNotFound
   | ToolUnavailable
   | InvalidMessage
-  | WorkDesktopRequired
   | AttachmentUnsupported
   | AttachmentNotAvailable;
 
@@ -82,7 +79,6 @@ export const makeQueueService = (deps: {
     const engine = yield* StreamEngine;
     const sync = yield* SyncBus;
     const attachmentService = yield* AttachmentService;
-    const policy = yield* FeaturePolicy;
     const language = yield* LanguageRepo;
     const { validateGenerationOptions, validateAttachments, searchToolEnabled, resolver } =
       deps.options;
@@ -90,12 +86,11 @@ export const makeQueueService = (deps: {
 
     // Recovers queues a restart or a reaped generation left waiting: the
     // in-process completion hook is gone with the fiber that owned it, and the
-    // promotion transaction refuses anything the hook would have refused. Work
-    // chats are not swept; only a desktop app can start them.
+    // promotion transaction refuses anything the hook would have refused.
     const startQueueSweeper = (interval: Duration.Duration) =>
       Effect.forkScoped(
         Effect.gen(function* () {
-          const pending = yield* repo.listQueuedConversations({ limit: 20, mode: "chat" });
+          const pending = yield* repo.listQueuedConversations({ limit: 20 });
           yield* Effect.forEach(pending, (row) => drainQueue(row.userId, row.conversationId), {
             discard: true,
           });
@@ -116,11 +111,7 @@ export const makeQueueService = (deps: {
     ) {
       if (input.content.trim() === "" && input.attachmentIds.length === 0)
         return yield* new InvalidMessage({ reason: localized(m.chat_error_message_empty) });
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      if (conversation.mode === "work" && !(yield* policy.can(input.userId, "work")))
-        return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
-      // Queued Work runs on a machine, so it can only be handed over from one.
-      if (conversation.mode === "work" && !input.desktop) return yield* new WorkDesktopRequired();
+      yield* repo.getConversation(input.userId, input.conversationId);
       yield* validateGenerationOptions({
         userId: input.userId,
         modelId: input.input.modelId,
@@ -215,10 +206,7 @@ export const makeQueueService = (deps: {
       conversationId: string;
       force?: boolean | undefined;
       entryId?: string | undefined;
-      /**
-       * What the dispatching app reports now: its folders, whether it can
-       * sandbox, and which running app it is. A Work entry needs it.
-       */
+      /** What the dispatching app reports now, when one dispatches. */
       desktop?: DesktopSubmission | undefined;
       /** See `ExternalOwner.deviceSessionId`; from the session, never the body. */
       deviceSessionId?: string | undefined;
@@ -231,9 +219,7 @@ export const makeQueueService = (deps: {
       | AttachmentUnsupported
       | ResolveError
     > {
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      // Not an error: the entry simply waits for a desktop app to pick it up.
-      if (conversation.mode === "work" && !input.desktop) return { started: false };
+      yield* repo.getConversation(input.userId, input.conversationId);
       const queue = yield* repo.listQueue(input.conversationId);
       const head = input.entryId ? queue.find((entry) => entry.id === input.entryId) : queue[0];
       if (!head || (head.lastError && !(input.force && input.entryId))) return { started: false };
@@ -309,18 +295,12 @@ export const makeQueueService = (deps: {
       userId: string;
       conversationId: string;
       entryId: string;
-      /**
-       * What the dispatching app reports now: its folders, whether it can
-       * sandbox, and which running app it is. A Work entry needs it.
-       */
+      /** What the dispatching app reports now, when one dispatches. */
       desktop?: DesktopSubmission | undefined;
       /** See `ExternalOwner.deviceSessionId`; from the session, never the body. */
       deviceSessionId?: string | undefined;
     }) {
-      const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-      // Only a desktop app can start Work. Without one, stopping the answer
-      // would leave nothing running and the message still waiting.
-      if (conversation.mode === "work" && !input.desktop) return { started: false };
+      yield* repo.getConversation(input.userId, input.conversationId);
       const live = (yield* repo.listMessages(input.conversationId)).find(
         (message) => message.status === "streaming",
       );

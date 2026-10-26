@@ -16,3 +16,16 @@ export const paraglide = () => paraglideVitePlugin(options);
 
 /** The same compile without Vite, for `tsc`, which reads the output but cannot write it. */
 export const compileMessages = () => compile(options);
+
+/**
+ * The desktop shell's copy of the same messages, into its own `src/paraglide`. No strategy beyond
+ * the base locale: its main process passes the locale to each message (docs/internals/i18n.md).
+ * Compiled from here so both apps use one compiler and one project.
+ */
+export const compileDesktopMessages = (outdir: string) =>
+  compile({
+    project: new URL("./project.inlang", import.meta.url).pathname,
+    outdir,
+    strategy: ["baseLocale"],
+    emitTsDeclarations: true,
+  });

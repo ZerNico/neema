@@ -354,7 +354,7 @@ function useAskInNewChat(
     // Refused, it says why here, and the caller then knows not to say it again.
     const result = await sendMessage({
       data: {
-        conversation: { kind: "new", id: uuidv7(), mode: "chat", projectId },
+        conversation: { kind: "new", id: uuidv7(), projectId },
         modelId: model.id,
         content: request,
         searchEnabled: false,

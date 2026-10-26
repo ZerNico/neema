@@ -1,6 +1,6 @@
 import type { Prompt } from "effect/ai";
 import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
-import { desktopToolsSystemHint } from "~/modules/desktop/tool-schema.ts";
+import { computerSystemHint, type ChatComputerState } from "~/modules/desktop/tool-schema.ts";
 import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
 import { interactiveUiPolicy } from "~/modules/genui/skill.ts";
 import { KNOWLEDGE_SYSTEM_HINT } from "~/modules/knowledge/server/context.ts";
@@ -27,7 +27,7 @@ const basePolicy = (input: FixedPrefixInput) =>
       input.web
         ? null
         : "This chat has no web access: when a question depends on recent events, say your information may be out of date.",
-      input.desktop?.commands
+      input.desktop
         ? null
         : "You cannot run code in this chat, so work results out by reasoning and say when a figure is an estimate.",
     ]
@@ -69,10 +69,8 @@ export interface FixedPrefixInput {
   /** Display names of the connected services whose tools are offered. */
   readonly integrations: ReadonlyArray<string> | null;
   readonly research: boolean;
-  readonly desktop: {
-    readonly folders: ReadonlyArray<{ name: string; path: string }>;
-    readonly commands: boolean;
-  } | null;
+  /** The chat's computer, when its tools are offered. */
+  readonly desktop: ChatComputerState | null;
   readonly browser: boolean;
   /** `read_history` is offered; `otherChats` when `search_chats` and `read_chat` are too. */
   readonly history?: { readonly otherChats: boolean } | null;
@@ -123,9 +121,7 @@ export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded
     ...(input.integrations ? [system(integrationsPolicy(input.integrations))] : []),
     // After the web hint, so the ranking between them is the last word.
     ...(input.research ? [system(RESEARCH_APP_POLICY)] : []),
-    ...(input.desktop
-      ? [system(desktopToolsSystemHint(input.desktop.folders, input.desktop.commands))]
-      : []),
+    ...(input.desktop ? [system(computerSystemHint(input.desktop))] : []),
     ...(input.browser ? [system(BROWSER_TOOLS_SYSTEM_HINT)] : []),
     ...(input.images ? [system(IMAGE_APP_POLICY)] : []),
     ...(input.history ? [system(historyToolsHint(input.history.otherChats))] : []),

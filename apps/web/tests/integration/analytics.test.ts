@@ -156,7 +156,7 @@ const generateOnce = Effect.fn("test.generateOnce")(function* (userId: string, m
   const engine = yield* StreamEngine;
   const turn = yield* chat.sendMessage({
     userId,
-    conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+    conversation: { kind: "new", id: uuidv7() },
     modelId,
     content: "hello there",
     searchEnabled: false,

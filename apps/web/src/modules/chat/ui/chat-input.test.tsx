@@ -1,4 +1,3 @@
-import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1162,62 +1161,5 @@ describe("queueing behind a live response", () => {
     render(input(client(), ""));
     expect(screen.getAllByRole("button", { name: "Stop generating" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull();
-  });
-
-  it("never queues a Work draft holding files dropped into the workspace", () => {
-    const onSubmit = vi.fn();
-    const imports: WorkspaceImports = {
-      items: [
-        {
-          localId: "i1",
-          fileName: "notes.md",
-          size: 10,
-          kind: "text",
-          status: "complete",
-          storedName: "notes.md",
-          error: null,
-        },
-      ],
-      fileNames: ["notes.md"],
-      importing: false,
-      hasError: false,
-      isFull: false,
-      notice: null,
-      queued: false,
-      submissionId: "s1",
-      addFiles: vi.fn(),
-      remove: vi.fn(),
-      submit: vi.fn(),
-      cancelQueue: vi.fn(),
-      promote: vi.fn(),
-      commit: vi.fn(),
-      rollback: vi.fn(),
-      beginSubmission: vi.fn(() => vi.fn()),
-      markClaimed: vi.fn(),
-      reset: vi.fn(),
-      dismissNotice: vi.fn(),
-    };
-    render(
-      <AppMotionProvider>
-        <QueryClientProvider client={client()}>
-          <ChatInput
-            value="Use these"
-            onValueChange={() => {}}
-            onSubmit={onSubmit}
-            onStop={vi.fn()}
-            queueing
-            workspaceImports={imports}
-            disabled={false}
-            modelId="text-only"
-            onModelChange={() => {}}
-            searchEnabled={false}
-            onSearchEnabledChange={() => {}}
-          />
-        </QueryClientProvider>
-      </AppMotionProvider>,
-    );
-    // Their send reserves the turn, which a running answer refuses.
-    expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Stop generating" })).toHaveLength(1);
   });
 });

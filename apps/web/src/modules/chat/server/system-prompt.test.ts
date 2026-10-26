@@ -79,11 +79,9 @@ const configurations: Record<string, FixedPrefixInput> = {
     documents: true,
     web: { search: true, reader: true },
     desktop: {
-      folders: [
-        { name: "workspace", path: "/Users/alex/Library/Work/c1" },
-        { name: "site", path: "/Users/alex/code/site" },
-      ],
-      commands: true,
+      machine: { name: "Alex's MacBook", online: true },
+      folders: [{ name: "site", readOnly: false }],
+      files: [],
     },
     browser: true,
   },

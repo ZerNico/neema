@@ -1,6 +1,6 @@
 import { m } from "~/paraglide/messages.js";
 import { localized } from "~/i18n/localized.ts";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { Effect } from "effect";
 import { readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { uuidv7 } from "uuidv7";
@@ -20,7 +20,6 @@ import {
   messageUiStates,
   schedules,
   scheduleRuns,
-  workTurnReservations,
 } from "~/db/schema/index.ts";
 import { ownedConversationById } from "../owned-conversation.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
@@ -40,13 +39,11 @@ import {
   questionForMessage,
   questionContent,
 } from "./questions.ts";
-import { lockWorkTurn, expireWorkTurns, rejectReservedWorkTurn } from "./work-turns.ts";
 import type { RepoContext } from "./context.ts";
 import type {
   EditContent,
   GenerationConfig,
   ConversationDefaults,
-  WorkTurnReservationRow,
   ConversationRow,
   MessageRow,
   HistorySnapshot,
@@ -73,9 +70,8 @@ const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boo
 
 /**
  * The locks retry, resume and edit open with, in the order every attempt takes
- * them: the account, then the work-turn reservation, then the conversation.
- * Answers the conversation, or null when the message is gone or the chat is not
- * the reader's. A live reservation fails the claim as busy.
+ * them: the account, then the conversation. Answers the conversation, or null
+ * when the message is gone or the chat is not the reader's.
  */
 const lockAttemptConversation = Effect.fn("ChatRepo.lockAttemptConversation")(function* (
   tx: DbTx,
@@ -93,7 +89,6 @@ const lockAttemptConversation = Effect.fn("ChatRepo.lockAttemptConversation")(fu
           .where(eq(messages.id, input.messageId))
           .pipe(Effect.orDie))[0];
   if (!target) return null;
-  yield* rejectReservedWorkTurn(tx, target.conversationId);
   const owned = yield* tx
     .select({ id: conversations.id })
     .from(conversations)
@@ -154,79 +149,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                   reason: localized(m.chat_error_scheduled_fire_not_pending),
                 });
             }
-            yield* lockWorkTurn(tx, conversationId);
-            yield* expireWorkTurns(tx, conversationId);
-            let reservation: WorkTurnReservationRow | null = null;
-            if (input.reservationId) {
-              const rows = yield* tx
-                .select()
-                .from(workTurnReservations)
-                .where(
-                  and(
-                    eq(workTurnReservations.id, input.reservationId),
-                    eq(workTurnReservations.userId, input.userId),
-                  ),
-                )
-                .for("update")
-                .pipe(Effect.orDie);
-              reservation = rows[0] ?? null;
-              if (!reservation || reservation.conversationId !== conversationId)
-                return yield* new ConversationNotFound({ conversationId });
-              if (reservation.intent !== input.conversation.kind)
-                return yield* new InvalidMessage({
-                  reason: localized(m.chat_error_reservation_changed),
-                });
-              if (reservation.status === "activated" && reservation.assistantMessageId) {
-                const conversationRows = yield* tx
-                  .select()
-                  .from(conversations)
-                  .where(ownedConversationById(conversationId, input.userId))
-                  .pipe(Effect.orDie);
-                const turnMessages = yield* tx
-                  .select()
-                  .from(messages)
-                  .where(eq(messages.conversationId, conversationId))
-                  .orderBy(asc(messages.createdAt), asc(messages.id))
-                  .pipe(Effect.orDie);
-                const assistantIndex = turnMessages.findIndex(
-                  (message) => message.id === reservation!.assistantMessageId,
-                );
-                const userMessage = turnMessages
-                  .slice(0, assistantIndex)
-                  .toReversed()
-                  .find((message) => message.role === "user");
-                const assistant = turnMessages[assistantIndex];
-                // Deleted since: a replay finds the chat gone like any send.
-                if (!conversationRows[0])
-                  return yield* new ConversationNotFound({ conversationId });
-                if (!assistant || !userMessage)
-                  return yield* Effect.die("Activated Work turn is incomplete");
-                return {
-                  conversation: conversationRows[0],
-                  conversationCreated: reservation.intent === "new",
-                  userMessage,
-                  assistant,
-                  config: yield* readConfig(tx, assistant.id),
-                  activatedNow: false,
-                };
-              }
-              if (reservation.status !== "reserved")
-                return yield* new ConversationBusy({ conversationId });
-            } else {
-              const live = yield* tx
-                .select({ id: workTurnReservations.id })
-                .from(workTurnReservations)
-                .where(
-                  and(
-                    eq(workTurnReservations.conversationId, conversationId),
-                    eq(workTurnReservations.status, "reserved"),
-                  ),
-                )
-                .limit(1)
-                .pipe(Effect.orDie);
-              if (live.length > 0) return yield* new ConversationBusy({ conversationId });
-            }
-
             let conversationCreated = false;
             let conversation: ConversationRow;
             if (input.conversation.kind === "existing") {
@@ -266,7 +188,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                   userId: input.userId,
                   modelId: input.modelId,
                   title: null,
-                  mode: input.conversation.mode,
                   temporary: input.conversation.temporary ?? false,
                   projectId: input.conversation.projectId ?? null,
                   ...(input.scheduleId !== undefined ? { scheduleId: input.scheduleId } : {}),
@@ -328,7 +249,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               });
             const association = input.associateAgentId ? { agentId: input.associateAgentId } : null;
             const fresh = {
-              mode: conversation.mode,
               projectId: conversation.projectId,
               conversationId: conversation.id,
               imageModelId: conversation.imageModelId,
@@ -385,31 +305,16 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               })
               .where(eq(conversations.id, conversation.id))
               .pipe(Effect.orDie);
-            if (reservation)
-              yield* tx
-                .update(workTurnReservations)
-                .set({
-                  status: "activated",
-                  assistantMessageId: assistantRows[0]!.id,
-                  updatedAt: sql`now()`,
-                })
-                .where(eq(workTurnReservations.id, reservation.id))
-                .pipe(Effect.orDie);
-
             return {
               conversation,
               conversationCreated,
               userMessage,
               assistant: assistantRows[0]!,
               config,
-              activatedNow: true,
             };
           }),
         )
-        .pipe(
-          Effect.catchTag("SqlError", Effect.die),
-          Effect.catchTag("EffectDrizzleQueryError", Effect.die),
-        );
+        .pipe(Effect.catchTag("SqlError", Effect.die));
     }),
 
     promoteNextQueuedTurn: Effect.fn("ChatRepo.promoteNextQueuedTurn")(function* (input) {
@@ -417,8 +322,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
         .transaction((tx) =>
           Effect.gen(function* () {
             yield* lockAccount(tx, input.userId);
-            // Before the conversation, in the order reservations take it.
-            yield* lockWorkTurn(tx, input.conversationId).pipe(Effect.orDie);
             const [conversation] = yield* tx
               .select()
               .from(conversations)

@@ -22,8 +22,6 @@ vi.mock("../server/functions.ts", () => ({
   sendQueuedNow: vi.fn(),
   dispatchQueuedMessage: vi.fn(),
 }));
-let desktop: object | null = null;
-vi.mock("~/modules/desktop/client/bridge.ts", () => ({ useDesktop: () => desktop }));
 
 const row = (id: string, overrides: Partial<QueueRow> = {}): QueueRow => ({
   id,
@@ -57,14 +55,12 @@ function render(
   );
   const props = {
     conversationId: "c1",
-    mode: "chat" as const,
     rows: [row("a")],
     state: "running" as QueueState,
     running: { messageId: "answer", generationId: "g1" },
     arrived: [],
     submission: async () => ({ modelId: "m1", searchEnabled: true, timeZone: "UTC" }),
     attemptFields: async () => ({}),
-    checkWork: vi.fn(),
     prepare: vi.fn(async () => {}),
     settings: settings(),
     ...overrides,
@@ -74,7 +70,6 @@ function render(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  desktop = null;
 });
 
 describe("useConversationQueue", () => {
@@ -88,25 +83,6 @@ describe("useConversationQueue", () => {
     const { result } = render({ state });
     expect(result.current.queue.paused?.reason ?? null).toBe(reason);
     expect(result.current.queue.sendNowBlocked).toBe(blocked);
-  });
-
-  it("says Work needs the desktop app, and refuses Send now rather than stop for nothing", () => {
-    const outside = render({ mode: "work", state: "stopped" });
-    expect(outside.result.current.queue.paused).toEqual({
-      reason: "Open Chat Desktop to continue this work",
-      canDispatch: false,
-    });
-    expect(outside.result.current.queue.sendNowBlocked).toBe(
-      "Open Chat Desktop to send queued work",
-    );
-
-    desktop = {};
-    const inside = render({ mode: "work", state: "stopped" });
-    expect(inside.result.current.queue.paused).toEqual({
-      reason: "Queue paused",
-      canDispatch: true,
-    });
-    expect(inside.result.current.queue.sendNowBlocked).toBeNull();
   });
 
   it("hides a row the stream says arrived, and marks rows steered at the running answer", () => {
@@ -139,7 +115,6 @@ describe("useConversationQueue", () => {
     vi.mocked(queueMessage).mockResolvedValue({ entryId: "new" });
     const { result, props } = render();
     await act(() => result.current.submit("next", ["file-1"], true, ["skill-1"]));
-    expect(props.checkWork).toHaveBeenCalledOnce();
     expect(queueMessage).toHaveBeenCalledWith({
       data: {
         modelId: "m1",
@@ -197,7 +172,7 @@ describe("useConversationQueue", () => {
     vi.mocked(sendQueuedNow).mockResolvedValue({ started: true });
     vi.mocked(dispatchQueuedMessage).mockResolvedValue({ started: true });
     const fields = {
-      desktop: { executorId: "exec-1", folders: [], commands: false, browser: false },
+      desktop: { executorId: "exec-1", machineId: "machine-1", browser: false },
     };
     const { result } = render({ attemptFields: async () => fields });
     act(() => result.current.queue.onSendNow("a"));

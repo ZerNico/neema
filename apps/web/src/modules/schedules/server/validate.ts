@@ -204,12 +204,11 @@ export const checkScheduleResources = (
           reason: localized(m.schedules_error_unknown_allowance),
         });
     }
-    // A chosen chat must be the owner's and a plain chat: a work chat needs
-    // the desktop app, which an unattended fire never has, and a temporary one
-    // is swept away while the schedule still points at it.
+    // A chosen chat must be the owner's and kept: a temporary one is swept
+    // away while the schedule still points at it.
     if (settings.chatId) {
       const [chat] = yield* tx
-        .select({ mode: conversations.mode, temporary: conversations.temporary })
+        .select({ temporary: conversations.temporary })
         .from(conversations)
         .where(ownedConversationById(settings.chatId, userId))
         .limit(1);
@@ -217,8 +216,6 @@ export const checkScheduleResources = (
         return yield* new ScheduleRejected({
           reason: localized(m.schedules_error_chat_unavailable),
         });
-      if (chat.mode !== "chat")
-        return yield* new ScheduleRejected({ reason: localized(m.schedules_error_work_chat) });
       if (chat.temporary)
         return yield* new ScheduleRejected({
           reason: localized(m.schedules_error_temporary_chat),

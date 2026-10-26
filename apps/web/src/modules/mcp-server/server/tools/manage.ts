@@ -99,8 +99,8 @@ export const readChat = defineTool({
       const text = [
         `# ${title}`,
         `Chat: ${url}${chat.temporary ? " (temporary)" : ""}${chat.archivedAt ? " (archived)" : ""}`,
-        chat.mode === "work"
-          ? "This is a Work chat: it continues only in the desktop app, so send_message and retry_message refuse it."
+        chat.machineId !== null
+          ? "This chat has a computer: its local tools run on the person's desktop machine and fail while it is offline."
           : null,
         page.olderCursor ? `Earlier turns: read_chat with cursor ${page.olderCursor}` : null,
         page.markdown || "This chat has no messages yet.",
@@ -116,7 +116,7 @@ export const readChat = defineTool({
         url,
         temporary: chat.temporary,
         archived: chat.archivedAt !== null,
-        work: chat.mode === "work",
+        computer: chat.machineId !== null,
         projectId: chat.projectId,
         olderCursor: page.olderCursor,
         // Each message's own text, so who said what never rests on headings

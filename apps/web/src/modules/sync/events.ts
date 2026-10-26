@@ -11,6 +11,8 @@ export const SyncEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("sync.ready") }),
   Schema.Struct({ type: Schema.Literal("account.approval.changed") }),
   Schema.Struct({ type: Schema.Literal("desktop.work.changed") }),
+  /** A machine came or went, or a computer call started, waits for approval or ended. */
+  Schema.Struct({ type: Schema.Literal("computer.changed") }),
   Schema.Struct({
     type: Schema.Literal("draft.changed"),
     kind: Schema.Literals(["agent", "schedule"]),

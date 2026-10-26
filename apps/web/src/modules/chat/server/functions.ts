@@ -22,10 +22,7 @@ import {
   ListConversationsInput,
   MessageIdInput,
   RenameConversationInput,
-  ReserveWorkTurnInput,
-  WorkTurnReservationInput,
-  ActivateWorkTurnInput,
-  UpdateWorkSettingsInput,
+  SetPermissionLevelInput,
   RetryMessageInput,
   ResumeMessageInput,
   SearchChatsInput,
@@ -120,16 +117,15 @@ export const getConversationHistory = createServerFn({ method: "GET" })
     ),
   );
 
-/** A new turn, sent from the composer or activated from a desktop reservation. */
+/** A new turn, sent from the composer. */
 const startTurn = (
-  data: typeof SendMessageInput.Type & { reservationId?: string },
+  data: typeof SendMessageInput.Type,
   session: { user: { id: string }; session: { id: string } },
 ) =>
   runServerFn(
     Effect.flatMap(ChatService, (chat) =>
       chat.sendMessage({
         userId: session.user.id,
-        ...(data.reservationId === undefined ? {} : { reservationId: data.reservationId }),
         conversation: data.conversation,
         modelId: data.modelId,
         imageModelId: data.imageModelId,
@@ -138,7 +134,6 @@ const startTurn = (
         researchEnabled: data.researchEnabled,
         searchEnabled: data.searchEnabled,
         desktop: data.desktop,
-        workspaceFiles: data.workspaceFiles,
         deviceSessionId: session.session.id,
         timeZone: data.timeZone,
         openDocument: data.openDocument,
@@ -156,58 +151,6 @@ export const sendMessage = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(standard(SendMessageInput))
   .handler(({ data, context }) => startTurn(data, context.session));
-
-export const reserveWorkTurn = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(standard(ReserveWorkTurnInput))
-  .handler(({ data, context }) =>
-    runServerFn(
-      ChatService.use((chat) =>
-        chat.reserveWorkTurn({
-          id: data.reservationId,
-          userId: context.session.user.id,
-          conversation: data.conversation,
-        }),
-      ),
-      {
-        // Not the message's fault: the reservation no longer fits this chat.
-        InvalidMessage: (error) => ({ status: 409, body: error.reason }),
-      },
-    ),
-  );
-
-export const activateWorkTurn = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(standard(ActivateWorkTurnInput))
-  .handler(({ data, context }) => startTurn(data, context.session));
-
-export const getWorkTurnReservation = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(standard(WorkTurnReservationInput))
-  .handler(({ data, context }) =>
-    runServerFn(
-      ChatService.use((chat) =>
-        chat.getWorkTurnReservation({
-          userId: context.session.user.id,
-          reservationId: data.reservationId,
-        }),
-      ),
-    ),
-  );
-
-export const abortWorkTurn = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(standard(WorkTurnReservationInput))
-  .handler(({ data, context }) =>
-    runServerFn(
-      ChatService.use((chat) =>
-        chat.abortWorkTurn({
-          userId: context.session.user.id,
-          reservationId: data.reservationId,
-        }),
-      ),
-    ),
-  );
 
 /** The fields a queued submission carries, shared by queueing and editing. */
 const queueSubmission = (
@@ -507,13 +450,13 @@ export const restoreConversation = createServerFn({ method: "POST" })
     ),
   );
 
-export const updateWorkSettings = createServerFn({ method: "POST" })
+export const setPermissionLevel = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(standard(UpdateWorkSettingsInput))
+  .validator(standard(SetPermissionLevelInput))
   .handler(({ data, context }) =>
     runServerFn(
       ChatService.use((chat) =>
-        chat.updateWorkSettings({
+        chat.setPermissionLevel({
           userId: context.session.user.id,
           conversationId: data.conversationId,
           permissionLevel: data.permissionLevel,

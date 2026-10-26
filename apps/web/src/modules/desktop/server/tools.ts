@@ -26,8 +26,8 @@ const Path = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)
 
 export const listFolderTool = Tool.make("list_folder", {
   description:
-    'List a directory on the user\'s computer by its absolute path. "." lists the roots this chat ' +
-    "can reach, each with its absolute path. You cannot reach anything outside them.",
+    'List a directory on this chat\'s computer by its absolute path. "." lists the roots this ' +
+    "chat can reach: /workspace and each attached folder under /folders. Nothing else exists there.",
   parameters: Schema.Struct({ path: Path }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -37,7 +37,7 @@ const LineNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 export const readLocalFileTool = Tool.make("read_local_file", {
   description:
-    "Read a file on the user's computer by its absolute path. Text comes back as text; a " +
+    "Read a file on this chat's computer by its absolute path. Text comes back as text; a " +
     "long file comes back in part, saying the offset to continue from. Give offset and limit " +
     "to read just those lines of a large file. An image or PDF comes back for you to look at " +
     "when you can take it, otherwise as extracted text or a note that you cannot.",
@@ -57,7 +57,7 @@ export const readLocalFileTool = Tool.make("read_local_file", {
 export const importLocalFileTool = Tool.make("import_local_file", {
   description:
     "Bring a PNG, JPEG, PowerPoint (.pptx), Excel workbook (.xlsx) or Word document (.docx) " +
-    "from the user's computer into this answer so other tools can use it. Returns a working: " +
+    "from this chat's computer into this answer so other tools can use it. Returns a working: " +
     "reference: pass a picture as imageRef, a deck as sourceRef to inspect_presentation and " +
     "edit_presentation, a workbook to inspect_spreadsheet and edit_spreadsheet, or a document " +
     "to inspect_word_file and edit_word_file. The copy lasts for this " +
@@ -69,7 +69,7 @@ export const importLocalFileTool = Tool.make("import_local_file", {
 
 export const findFilesTool = Tool.make("find_files", {
   description:
-    "Find files and folders across the attached folders by glob, newest first: `*.ts` at any depth, " +
+    "Find files and folders across /workspace and the attached folders by glob, newest first: `*.ts` at any depth, " +
     "`src/**/*.test.ts`, `{a,b}.md`. Results come back as absolute paths. A folder whose name " +
     "matches is included, and so is every file inside it, so `*extracted*` finds " +
     "`DVR/extracted_images/` and its contents. Skips what .gitignore skips. Capped, so narrow " +
@@ -83,7 +83,7 @@ export const findFilesTool = Tool.make("find_files", {
 
 export const searchFilesTool = Tool.make("search_files", {
   description:
-    "Search file contents across the attached folders with a regular expression. Returns matching " +
+    "Search file contents across /workspace and the attached folders with a regular expression. Returns matching " +
     "lines with their absolute path and line number; skips binary files and what .gitignore " +
     "skips. Pass a glob to narrow which files are searched.",
   parameters: Schema.Struct({
@@ -96,7 +96,7 @@ export const searchFilesTool = Tool.make("search_files", {
 
 export const editLocalFileTool = Tool.make("edit_local_file", {
   description:
-    "Replace text inside a file on the user's computer, by its absolute path. `old` must match " +
+    "Replace text inside a file on this chat's computer, by its absolute path. `old` must match " +
     "exactly, whitespace included, and exactly once unless `all` is true; include enough " +
     "surrounding lines to make it unique. Returns a diff of what changed. The user is asked " +
     "before it happens and may refuse.",
@@ -112,7 +112,7 @@ export const editLocalFileTool = Tool.make("edit_local_file", {
 
 export const moveLocalFileTool = Tool.make("move_local_file", {
   description:
-    "Rename or move a file or folder by absolute paths, anywhere inside the attached folders. " +
+    "Rename or move a file or folder by absolute paths, anywhere inside /workspace and the attached folders. " +
     "Never overwrites an existing path. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ from: Path, to: Path }),
   success: DesktopToolResult,
@@ -121,8 +121,8 @@ export const moveLocalFileTool = Tool.make("move_local_file", {
 
 export const deleteLocalFileTool = Tool.make("delete_local_file", {
   description:
-    "Delete files or folders by absolute path, and everything inside a folder, within the " +
-    `attached folders. Pass every path in one call rather than one call per file, up to ` +
+    "Delete files or folders by absolute path, and everything inside a folder, within " +
+    `/workspace and the attached folders. Pass every path in one call rather than one call per file, up to ` +
     `${LIMITS.deletedPaths}. ` +
     "The user is asked once for that list and may refuse. This cannot be undone.",
   parameters: Schema.Struct({
@@ -134,7 +134,7 @@ export const deleteLocalFileTool = Tool.make("delete_local_file", {
 
 export const writeLocalFileTool = Tool.make("write_local_file", {
   description:
-    "Create or replace a text file on the user's computer by its absolute path. " +
+    "Create or replace a text file on this chat's computer by its absolute path. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
     "creating it. The user is asked before it happens and may refuse.",
   parameters: Schema.Struct({ path: Path, text: Schema.String }),
@@ -144,7 +144,7 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
 
 export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
   description:
-    "Copy a file this chat already holds on the server onto the user's computer, by the " +
+    "Copy a file this chat already holds on the server onto this chat's computer, by the " +
     "attachment id a tool result gave you. Without path it lands in the chat's workspace under " +
     "a new name if needed, so a command or another local tool can reach it. With path, an " +
     "absolute path inside the workspace or an attached folder, it is saved exactly there, " +
@@ -160,14 +160,12 @@ export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
 
 export const runCommandTool = Tool.make("run_command", {
   description:
-    "Run a shell command on the user's computer. The command starts in this chat's workspace, " +
-    "and paths inside it are absolute: it may `cd` and `cp` anywhere inside the workspace and " +
-    "the attached folders. It runs sandboxed: writes land only inside those roots and only " +
-    "package registries are reachable by default. A blocked destination needs a separate " +
-    "request_network_access call naming its host and port, and user approval before retrying. " +
-    "The user is asked before " +
-    "the command happens and may refuse. Installed Python and Node can run here; discover " +
-    "the executable when needed. Each call is a fresh process, so shell state does not persist. " +
+    "Run a shell command on this chat's computer: a Linux VM of its own, as root, starting in " +
+    "/workspace. It sees only /workspace and the attached folders under /folders, and may `cd` " +
+    "and `cp` anywhere inside them. apt, pip and npm work; only package registries are reachable " +
+    "by default. A blocked destination needs a separate request_network_access call naming its " +
+    "host and port, and user approval before retrying. The user may be asked before the command " +
+    "runs and may refuse. Each call is a fresh shell; installed software stays for this chat. " +
     "Prefer the file tools over commands to inspect or change files.",
   parameters: Schema.Struct({
     command: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000)),
@@ -178,14 +176,14 @@ export const runCommandTool = Tool.make("run_command", {
 
 export const requestNetworkAccessTool = Tool.make("request_network_access", {
   description:
-    "Ask the user to let commands on their computer reach one network destination: an exact " +
-    "host or public IP address and port, such as registry.example.com on 443 or github.com on " +
-    "22 for git over SSH. " +
+    "Ask the user to let commands in this chat reach one network destination: an exact host or " +
+    "IP address and port, such as registry.example.com on 443 or github.com on 22 for git over " +
+    "SSH. A service running on the user's own computer is host.internal with its port. " +
     "Request it before running a command that needs it, or use the destination a blocked " +
     "run_command result reports. Wait for approval before running or retrying the command. " +
-    "The user decides whether it lasts for this answer, this chat, or every chat. Set " +
-    "privateNetwork only for a host on their local or company network, such as an internal " +
-    "git server or a private IP address. Proxied TCP only: plain HTTP and UDP never work.",
+    "The user decides whether it lasts for this chat or every chat. Set privateNetwork only " +
+    "for a host on their local or company network, such as an internal git server or a private " +
+    "IP address. TCP only: UDP never works.",
   // Every key decodes anything, absent included, so the handler explains a malformed call.
   parameters: Schema.Struct({
     host: advertisedParameter({ type: "string", minLength: 1, maxLength: 253 }),
@@ -201,31 +199,23 @@ export const requestNetworkAccessTool = Tool.make("request_network_access", {
   failureMode: "return",
 });
 
-export const requestPathAccessTool = Tool.make("request_path_access", {
+export const requestFolderTool = Tool.make("request_folder", {
   description:
-    "Ask the user to let commands read one exact file or folder outside the attached folders, " +
-    "such as a reference repository or a document in Downloads. Use it when a command fails " +
-    "with a permission error on a path outside the workspace and attached folders, or before " +
-    "running a command that needs one. Name the absolute path. Wait for approval before " +
-    "running or retrying the command. The user decides whether it lasts for this answer, this " +
-    "chat, or every chat. Read only: to write somewhere, ask the user to attach that folder. " +
-    "The home folder as a whole and credential files are never shared.",
+    "Ask the user to give this chat a folder on their computer. With path (as the user named it, " +
+    "such as ~/Downloads/invoices), they are asked to allow exactly that folder; without it, a " +
+    "folder picker opens for them to choose or create one. The folder then appears at " +
+    "/folders/<name>, which the result names. It asks the user at their computer itself, so it " +
+    "only works when they are there; otherwise ask them to attach the folder.",
   parameters: Schema.Struct({
-    path: advertisedParameter({ type: "string", minLength: 1, maxLength: 4_096 }),
+    path: Schema.optionalKey(
+      Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
+    ).annotate({
+      description: "The folder as the user named it. Omit to let them pick one.",
+    }),
+    reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))).annotate({
+      description: 'What the folder is for, shown to the user: "the folder with your invoices".',
+    }),
   }),
-  success: DesktopToolResult,
-  failureMode: "return",
-});
-
-export const requestLocalServicesTool = Tool.make("request_local_services", {
-  description:
-    "Ask the user to let commands use local network services on their computer: connect to " +
-    "servers on localhost and accept connections. Build tools such as Gradle, test suites " +
-    "that start a local server, and dev servers need it. Use it when a command fails with a " +
-    "socket or connection error on localhost, such as Gradle not reaching its daemon or " +
-    "'Operation not permitted' binding a port. Wait for approval before running or retrying " +
-    "the command. The user decides whether it lasts for this answer, this chat, or every chat.",
-  parameters: Tool.EmptyParams,
   success: DesktopToolResult,
   failureMode: "return",
 });
@@ -233,10 +223,11 @@ export const requestLocalServicesTool = Tool.make("request_local_services", {
 export const requestSshAgentTool = Tool.make("request_ssh_agent", {
   description:
     "Ask the user to let commands in this chat sign in with their SSH keys through their SSH " +
-    "agent, for example to push with git over SSH. Use it when an SSH connection to a host " +
-    "this chat may reach fails with 'Permission denied (publickey)'. Request the host's port " +
-    "with request_network_access first. The key files themselves are never readable. Wait for " +
-    "approval before retrying. It lasts for this chat only.",
+    "agent, for example to push with git over SSH. Use it when an SSH connection to a host this " +
+    "chat may reach fails with 'Permission denied (publickey)'. Request the host's port with " +
+    "request_network_access first. The keys themselves are never readable. The user is asked " +
+    "at their computer itself, so it only works when they are there. Wait for the answer before " +
+    "retrying. It lasts for this chat only.",
   parameters: Tool.EmptyParams,
   success: DesktopToolResult,
   failureMode: "return",
@@ -245,13 +236,6 @@ export const requestSshAgentTool = Tool.make("request_ssh_agent", {
 export interface DesktopToolDeps {
   /** Waits for the durable row and its owned external registration to exist. */
   readonly rowIdFor: (providerCallId: string) => Effect.Effect<string | undefined>;
-  /**
-   * Whether the machine could sandbox a command when the message was sent.
-   * False withholds `run_command` alone: the folder still attaches and reads
-   * and writes still work, so a missing shell prerequisite never costs the
-   * whole feature.
-   */
-  readonly commands: boolean;
 }
 
 const timedOut = (name: string) =>
@@ -262,11 +246,6 @@ const timedOut = (name: string) =>
       : "The desktop app did not answer in time. It may be closed. Ask the user rather than guessing.",
   );
 
-/**
- * Offered only when the page said a folder is attached. Withholding them
- * otherwise is what keeps the model from proposing work it cannot do; a browser
- * tab with no desktop behind it never sees these names.
- */
 /** A handler that only waits for the machine to answer the call it was given. */
 export const awaitDesktopCall =
   (rowIdFor: DesktopToolDeps["rowIdFor"], name: string, timeoutMs: number) =>
@@ -305,18 +284,17 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     moveLocalFileTool,
     deleteLocalFileTool,
   ] as const;
+  // Offered whenever the person may use a computer, machine online or not, so the prompt's
+  // tool list stays the same and an offline machine is an answer, not a missing tool.
   return {
     family: "desktop",
-    toolkit: deps.commands
-      ? Toolkit.make(
-          ...files,
-          runCommandTool,
-          requestNetworkAccessTool,
-          requestPathAccessTool,
-          requestLocalServicesTool,
-          requestSshAgentTool,
-        )
-      : Toolkit.make(...files),
+    toolkit: Toolkit.make(
+      ...files,
+      runCommandTool,
+      requestNetworkAccessTool,
+      requestFolderTool,
+      requestSshAgentTool,
+    ),
     handlers: {
       list_folder: handle("list_folder"),
       find_files: handle("find_files"),
@@ -328,15 +306,10 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       edit_local_file: handle("edit_local_file"),
       move_local_file: handle("move_local_file"),
       delete_local_file: handle("delete_local_file"),
-      ...(deps.commands
-        ? {
-            run_command: handle("run_command"),
-            request_network_access: handle("request_network_access"),
-            request_path_access: handle("request_path_access"),
-            request_local_services: handle("request_local_services"),
-            request_ssh_agent: handle("request_ssh_agent"),
-          }
-        : {}),
+      run_command: handle("run_command"),
+      request_network_access: handle("request_network_access"),
+      request_folder: handle("request_folder"),
+      request_ssh_agent: handle("request_ssh_agent"),
     },
   };
 };

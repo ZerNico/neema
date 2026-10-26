@@ -342,8 +342,6 @@ export const explainRefusal = (error: { readonly _tag: string }) => {
       return "That question is no longer open: the chat moved on. Read the chat again.";
     case "AgentNotAvailable":
       return "That agent isn't available. Call list_agents.";
-    case "WorkDesktopRequired":
-      return "This chat works on files on a computer and can only continue in the desktop app.";
     case "SkillNotAvailable":
     case "SkillRejected":
     case "KnowledgeNotAvailable":
@@ -496,7 +494,6 @@ export const sendMessage = defineTool({
               : {
                   kind: "new",
                   id: uuidv7(),
-                  mode: "chat",
                   ...(args.temporary ? { temporary: true } : {}),
                   ...(args.projectId ? { projectId: args.projectId } : {}),
                 },

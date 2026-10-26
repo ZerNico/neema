@@ -182,7 +182,7 @@ describe("one-shot new-chat prefill", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({
-      conversation: { kind: "new", id: expect.any(String), mode: "chat" },
+      conversation: { kind: "new", id: expect.any(String) },
       content: "Make it a writing coach instead.",
       modelId: "normal-default",
       attachmentIds: [],
@@ -293,7 +293,7 @@ describe("temporary new chat", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(sendMessage).mock.calls[0]![0].data).toMatchObject({
-      conversation: { kind: "new", mode: "chat", temporary: true },
+      conversation: { kind: "new", temporary: true },
     });
   });
 

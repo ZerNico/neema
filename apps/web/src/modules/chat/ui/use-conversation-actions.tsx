@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
-import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import {
   deleteConversation,
@@ -45,8 +44,7 @@ export function useConversationActions(): ConversationActions {
    * there was nothing to reverse. Undo shows the chat again at once. A chat
    * that `leaves` is closed if open, and reopened only after the server
    * agrees it exists again, and only if the reader is still where the close
-   * left them. `kept` runs once the action has landed and the toast went
-   * without its Undo.
+   * left them.
    */
   const reversibly = async <T,>(input: {
     conversationId: string;
@@ -55,9 +53,8 @@ export function useConversationActions(): ConversationActions {
     failed: string;
     act: () => Promise<T | null>;
     revert: (acted: T) => Promise<boolean>;
-    kept?: () => void;
   }) => {
-    const { conversationId, kept } = input;
+    const { conversationId } = input;
     const closed = input.leaves && activeId === conversationId;
     const hold = await holdRow(queryClient, conversationId);
     if (closed) void navigate({ to: "/" });
@@ -81,16 +78,7 @@ export function useConversationActions(): ConversationActions {
       else if (reverted && closed && router.state.location.pathname === "/")
         await navigate({ to: "/chat/$conversationId", params: { conversationId } });
     };
-    const dismiss = undoToast(
-      input.done,
-      () => void undo(),
-      kept &&
-        (() =>
-          void acted.then(
-            (result) => result !== null && kept(),
-            () => undefined,
-          )),
-    );
+    const dismiss = undoToast(input.done, () => void undo());
     acted.then(
       (result) => {
         if (result === null) dismiss();
@@ -154,9 +142,6 @@ export function useConversationActions(): ConversationActions {
         failed: m.chat_actions_delete_failed(),
         act: () => deleteConversation({ data: { conversationId } }),
         revert: (mark) => restoreConversation({ data: { conversationId, mark } }),
-        // Undo is only ever offered here, so a work chat's folder can go once
-        // it is not taken. The purge event is the fallback for a closed tab.
-        kept: () => discardWorkspace(conversationId),
       });
     },
     renameDialog: (

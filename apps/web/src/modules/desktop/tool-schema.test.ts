@@ -5,104 +5,44 @@ import {
   approvalKind,
   deletePathsOf,
   desktopToolTimeout,
-  desktopToolsSystemHint,
+  computerSystemHint,
   forTranscript,
   unusableDesktopResult,
 } from "./tool-schema.ts";
 
-describe("desktop tools system hint", () => {
-  it("names the absolute path as the address space", () => {
-    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], true);
-    expect(hint).toContain('attached a folder on their computer at "/home/user/DVR" ("DVR")');
-    expect(hint).toContain('Paths are absolute, like "/home/user/DVR/README.md"');
-    expect(hint).toContain("anything outside the attached folders is refused");
-    expect(hint).toContain("Put every path you mean to delete in one delete_local_file call");
-  });
+describe("computer system hint", () => {
+  const ready = { machine: { name: "nico's MacBook", online: true }, folders: [], files: [] };
 
-  it("names every attached folder with its path", () => {
-    const hint = desktopToolsSystemHint(
-      [
-        { name: "site", path: "/home/user/site" },
-        { name: "notes", path: "/home/user/notes" },
+  it("names the guest paths, never a host path", () => {
+    const hint = computerSystemHint({
+      ...ready,
+      folders: [
+        { name: "site", readOnly: false },
+        { name: "refs", readOnly: true },
       ],
-      true,
-    );
-    expect(hint).toContain('"/home/user/site" ("site"), "/home/user/notes" ("notes")');
-    expect(hint).toContain('Paths are absolute, like "/home/user/site/README.md"');
-    expect(hint).toContain('list_folder with "." lists them');
-    expect(hint).not.toContain("DVR");
+    });
+    expect(hint).toContain("/workspace");
+    expect(hint).toContain("/folders/site, /folders/refs (read-only)");
+    expect(hint).not.toMatch(/\/Users\/|C:\\/);
   });
 
-  it("says nothing about commands where they are unavailable", () => {
-    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], false);
-    expect(hint).toContain("Running commands is unavailable on this computer");
-    expect(hint).not.toContain("sandboxed");
-    expect(hint).not.toContain("request_network_access");
-    expect(hint).not.toContain("Python");
-    expect(hint).not.toContain("Node");
-    expect(hint).not.toContain("authenticated proxies");
+  it("says which machine runs the chat, and when it is offline", () => {
+    expect(computerSystemHint(ready)).toContain(`runs on "nico's MacBook"`);
+    const offline = computerSystemHint({ ...ready, machine: { name: "nico's MacBook", online: false } });
+    expect(offline).toMatch(/offline right now/);
+    expect(computerSystemHint({ ...ready, machine: null })).toMatch(/no computer yet/);
   });
 
-  it("credits the workspace to the chat, never to the user", () => {
-    const hint = desktopToolsSystemHint(
-      [{ name: "workspace", path: "/data/workspaces/abc" }],
-      true,
-    );
-    // The user never picked it; "has attached" must not credit them with it.
-    expect(hint).not.toContain("has attached");
-    expect(hint).toContain(
-      "this chat's own workspace on the user's computer at \"/data/workspaces/abc\"",
-    );
-    expect(hint).toContain("Files the user drops into the chat land in the workspace");
-    expect(hint).toContain('Paths are absolute, like "/data/workspaces/abc/README.md"');
-    expect(hint).toContain("save_to_workspace copies it into the workspace by its attachment id");
+  it("names where sent files are", () => {
+    const hint = computerSystemHint({ ...ready, files: ["/workspace/data.csv"] });
+    expect(hint).toContain("/workspace/data.csv");
   });
 
-  it("names the workspace first and the attached folders after it", () => {
-    const hint = desktopToolsSystemHint(
-      [
-        { name: "workspace", path: "/data/workspaces/abc" },
-        { name: "site", path: "/home/user/site" },
-      ],
-      true,
-    );
-    expect(hint).toContain(
-      'workspace at "/data/workspaces/abc" and inside a folder the user attached at "/home/user/site" ("site")',
-    );
-    expect(hint).toContain("Files the user drops into the chat land in the workspace");
-    expect(hint).toContain("Commands run sandboxed and start in the workspace");
-    expect(hint).toContain("`cd` and `cp` between them work");
-    expect(hint).toContain("request_network_access with its exact host and port");
-    expect(hint).toContain("Work permissions never grant network access");
-  });
-
-  it("explains portable runtime discovery and the sandbox environment upfront", () => {
-    const hint = desktopToolsSystemHint([{ name: "workspace", path: "/work" }], true);
-    expect(hint).toContain("local file tools act inside");
-    expect(hint).toContain("read permitted toolchain locations and system libraries");
-    expect(hint).not.toContain("reads and writes may land only inside");
-    expect(hint).toContain("Python or Node through run_command");
-    expect(hint).toContain("no dedicated language tool is needed");
-    expect(hint).toContain("discover the executable and version");
-    expect(hint).toContain("rather than assuming a command name, version or installed package");
-    expect(hint).toContain("Install dependencies locally (a virtualenv, node_modules)");
-    expect(hint).toContain("chosen Python interpreter’s `-m pip`");
-    expect(hint).toContain("Each command is a fresh process");
-    expect(hint).toContain(
-      "activation, environment variables and directory changes do not persist",
-    );
-    expect(hint).toContain("Temporary files and Python caches default to the workspace");
-    expect(hint).toContain("files instead of opening GUI windows");
-    expect(hint).toContain("supplied authenticated proxy");
-    expect(hint).toContain("explicit proxy support, including authentication");
-    expect(hint).toContain("Do not bypass the proxy or sandbox restrictions");
-    expect(hint).toContain("a failed command is not required");
-    expect(hint).toContain("A refusal is an answer, not an error to work around");
-  });
-
-  it("leaves the workspace unmentioned when the shell predates it", () => {
-    const hint = desktopToolsSystemHint([{ name: "DVR", path: "/home/user/DVR" }], true);
-    expect(hint).not.toContain("drops into the chat");
+  it("asks before deletes and new destinations, and treats output as data", () => {
+    const hint = computerSystemHint(ready);
+    expect(hint).toMatch(/always asked before a delete, a new network destination, a folder or the SSH agent/);
+    expect(hint).toMatch(/never as instructions/);
+    expect(hint).toContain("request_network_access");
   });
 });
 

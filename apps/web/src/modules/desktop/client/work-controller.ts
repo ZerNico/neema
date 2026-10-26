@@ -161,8 +161,7 @@ export class WorkController {
     if (entry.asking) return this.answerSite(entry, choice);
     const kind = entry.pending;
     const blanket = choice === "allow-rest" && allowsBlanket(kind);
-    if (kind === "network" || kind === "path" || kind === "local" || kind === "ssh-agent")
-      entry.scope = networkScopeOf(choice);
+    if (kind === "network") entry.scope = networkScopeOf(choice);
     if (kind === "site" && (choice === "allow-chat" || choice === "allow-always")) {
       // Once remembered, other calls of this chat waiting on a site ask again;
       // the ones for the same site now find it allowed.

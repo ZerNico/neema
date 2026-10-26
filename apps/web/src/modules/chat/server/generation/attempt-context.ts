@@ -74,8 +74,7 @@ export const loadAttemptContext = (
       (config.collectionIds.length && !permissions.knowledgeUse) ||
       ((config.skills?.length ?? 0) > 0 && !permissions.skillsUse) ||
       (config.searchEnabled && !permissions.webSearch) ||
-      (config.researchEnabled && (!permissions.deepResearch || !permissions.webSearch)) ||
-      (config.desktopFolders && !permissions.work);
+      (config.researchEnabled && (!permissions.deepResearch || !permissions.webSearch));
     // Modules are read here rather than stored with the config: a plain
     // chat offers every module the sender may use, an agent exactly what it
     // attached, and a disabled, deleted or no-longer-shared module drops
@@ -152,33 +151,7 @@ export const loadAttemptContext = (
       });
       steersByAnswer.set(m.steeredIntoMessageId, list);
     }
-    const rawCompleted = settled.filter((m) => !m.steeredIntoMessageId);
-    // Desktop sends carry their drops on the assistant attempt's config,
-    // not the user message text. Key each prior attempt's names back to its
-    // preceding user message, then add this attempt's own names to the last
-    // user message. Without this annotation the model never learns what its
-    // workspace gained.
-    const workspaceFilesByAttempt = yield* repo.listWorkspaceFilesByMessage(
-      rawCompleted.filter((message) => message.role === "assistant").map((message) => message.id),
-    );
-    const workspaceFilesBySend = new Map<string, ReadonlyArray<string>>();
-    for (let index = 0; index < rawCompleted.length; index++) {
-      const files = workspaceFilesByAttempt.get(rawCompleted[index]!.id);
-      if (!files) continue;
-      for (let previous = index - 1; previous >= 0; previous--) {
-        const candidate = rawCompleted[previous]!;
-        if (candidate.role !== "user") continue;
-        workspaceFilesBySend.set(candidate.id, files);
-        break;
-      }
-    }
-    const currentSend = rawCompleted.at(-1);
-    if (currentSend?.role === "user" && config.workspaceFiles && config.workspaceFiles.length > 0)
-      workspaceFilesBySend.set(currentSend.id, config.workspaceFiles);
-    const completed = rawCompleted.map((message) => {
-      const files = workspaceFilesBySend.get(message.id);
-      return files ? Object.assign({}, message, { workspaceFiles: files }) : message;
-    });
+    const completed = settled.filter((m) => !m.steeredIntoMessageId);
     // Steers are the person's own words, so their links grant the reader
     // authority exactly as any other user message's do.
     const readerUrls = extractUserMessageUrls([

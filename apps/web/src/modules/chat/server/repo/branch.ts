@@ -28,7 +28,6 @@ import { projectRole } from "~/modules/projects/server/access.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ToolFileActivity } from "../../tool-file-schema.ts";
 import { BranchNotAllowed, ConversationNotFound, MessageNotFound } from "../../errors.ts";
-import { rejectReservedWorkTurn } from "./work-turns.ts";
 import type { RepoContext } from "./context.ts";
 import type { ChatRepo } from "../repo.ts";
 
@@ -91,7 +90,6 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
-            yield* rejectReservedWorkTurn(tx, input.sourceConversationId);
             // Locks both sides of what is being copied: the conversation
             // row against a concurrent rename/title/delete, the messages
             // against a retry or edit rewinding history mid-copy.
@@ -158,10 +156,11 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 title: source.title,
                 modelId: source.modelId,
                 imageModelId: source.imageModelId,
-                // A branch of a work chat is still work: its history is
-                // full of folder activity the continuation has to match.
-                // The approval level is a fact about the chat too.
-                mode: source.mode,
+                // The branch keeps the computer: its history is full of
+                // workspace activity the continuation has to match, and the
+                // machine clones the workspace. Its settings go with it.
+                machineId: source.machineId,
+                computerFolders: source.computerFolders,
                 permissionLevel: source.permissionLevel,
                 // A copy of a temporary chat must not outlive it in the
                 // sidebar; it gets its own day from now.

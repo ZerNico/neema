@@ -29,6 +29,7 @@ import {
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
@@ -47,7 +48,7 @@ import { purgeConversation } from "./purge.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
-type Services = ChatRepo | AttachmentRepo | AgentRepo | ScheduleRepo | Db;
+type Services = ChatRepo | AttachmentRepo | AgentRepo | ScheduleRepo | ComputerRepo | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** conversations.model_id / messages.model_id are real FKs. */
 let modelId: string;
@@ -66,6 +67,7 @@ beforeAll(async () => {
       ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer)),
       AgentRepo.layer,
       ScheduleRepo.layer,
+      ComputerRepo.layer,
     ).pipe(Layer.provideMerge(InfraLayer)),
   );
 
@@ -878,7 +880,10 @@ describe("loadConversationDetail", () => {
       ...ProjectFileToolName.literals.map((name) => [name, "project-file"] as const),
       ...KnowledgeToolName.literals.map((name) => [name, "knowledge"] as const),
       ...SkillToolName.literals.map((name) => [name, "skill"] as const),
-      ...DESKTOP_TOOL_NAMES.map((name) => [name, "desktop"] as const),
+      // request_folder came after the backfill, so every row of it already names its family.
+      ...DESKTOP_TOOL_NAMES.filter((name) => name !== "request_folder").map(
+        (name) => [name, "desktop"] as const,
+      ),
       [IMAGE_TOOL, "image"],
       ["deep_research", "research"],
       ["ask_user", "ask"],

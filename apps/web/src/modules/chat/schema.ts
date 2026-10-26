@@ -3,7 +3,7 @@ import { MAX_SEARCH_LENGTH } from "~/modules/search/text.ts";
 import { Schema } from "effect";
 import { QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import { Attachment, AttachmentIds } from "~/modules/attachments/schema.ts";
-import { LocalTransactionId, WorkspaceId } from "@chat/desktop-rpc";
+import { WorkspaceId } from "@chat/desktop-rpc";
 import { REASONING_EFFORTS } from "~/modules/providers/model-config.ts";
 import { EntityId } from "~/entity-id.ts";
 
@@ -30,34 +30,14 @@ export const OpenDocument = Schema.Struct({
 export type OpenDocument = typeof OpenDocument.Type;
 const OpenDocumentField = Schema.optionalKey(OpenDocument);
 /**
- * What the desktop app reports about the machine an attempt is sent from.
- * Present only on a submission from the app; a Work attempt requires it.
+ * What the desktop app adds to a submission sent from it. Absent from a browser. Not where a
+ * chat's computer is decided: that is the chat's bound machine (docs/internals/desktop.md).
  */
 export const DesktopSubmission = Schema.Struct({
-  /** The app's execution session, which owns this attempt's local calls. */
+  /** The app's execution session, which runs this attempt's browser calls in its pages. */
   executorId: EntityId,
-  /**
-   * Which machine sent the attempt. Stored per generation so the client can
-   * tell "this chat last worked here" from "elsewhere" and offer take-over.
-   * Display text only; names are never an address.
-   */
-  machine: Schema.optionalKey(
-    Schema.Struct({ id: EntityId, name: Schema.String.check(Schema.isMaxLength(64)) }),
-  ),
-  /**
-   * The folders reachable on the sending machine, by real absolute path. Paths
-   * live in attempt-scoped prompt text and tool traffic, never in a row: the
-   * generation config keeps the names alone, so the same conversation
-   * continued on another machine resolves its own folders or none.
-   */
-  folders: Schema.Array(
-    Schema.Struct({
-      name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
-      path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
-    }),
-  ).check(Schema.isMaxLength(32)),
-  /** False while the machine cannot sandbox, which withholds run_command. */
-  commands: Schema.Boolean,
+  /** The machine sending, offered first when the chat has no computer yet. */
+  machineId: Schema.optionalKey(EntityId),
   /** Whether the app can drive embedded pages, which offers the browser tools. */
   browser: Schema.Boolean,
 });
@@ -108,14 +88,10 @@ export const TEMPORARY_CHAT_HOURS = 24;
  */
 export const DELETED_CHAT_GRACE_SECONDS = 120;
 
-export const ConversationMode = Schema.Literals(["chat", "work"]);
-export type ConversationMode = typeof ConversationMode.Type;
-
 export const ConversationReference = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["new"]),
     id: WorkspaceId,
-    mode: ConversationMode,
     temporary: Schema.optionalKey(Schema.Boolean),
     /** Starts the chat inside a project; authorized in the attempt that creates it. */
     projectId: Schema.optionalKey(EntityId),
@@ -124,35 +100,9 @@ export const ConversationReference = Schema.Union([
 ]);
 export type ConversationReference = typeof ConversationReference.Type;
 
-const WorkspaceFiles = Schema.Array(
-  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
-).check(Schema.isMaxLength(50));
-
-const sendFields = {
-  ...generationFields,
-  /** Names only; absolute workspace paths stay in the attempt-scoped `desktop`. */
-  workspaceFiles: Schema.optionalKey(WorkspaceFiles),
-};
-
 export const SendMessageInput = Schema.Struct({
   conversation: ConversationReference,
-  ...sendFields,
-});
-
-export const ReserveWorkTurnInput = Schema.Struct({
-  reservationId: LocalTransactionId,
-  conversation: ConversationReference,
-});
-
-export const ActivateWorkTurnInput = Schema.Struct({
-  reservationId: LocalTransactionId,
-  conversation: ConversationReference,
-  ...sendFields,
-  workspaceFiles: WorkspaceFiles.check(Schema.isMinLength(1)),
-});
-
-export const WorkTurnReservationInput = Schema.Struct({
-  reservationId: LocalTransactionId,
+  ...generationFields,
 });
 
 /** One ```ui block's state; the JSON the block's runtime reported, at most 16 KB. */
@@ -354,10 +304,11 @@ export const EditMessageInput = Schema.Union([
   }),
 ]);
 
-export const PermissionLevel = Schema.Literals(["manual", "auto", "skip"]);
+/** How much a chat's computer asks before acting; deletes and network always ask. */
+export const PermissionLevel = Schema.Literals(["ask", "allow"]);
 export type PermissionLevel = typeof PermissionLevel.Type;
 
-export const UpdateWorkSettingsInput = Schema.Struct({
+export const SetPermissionLevelInput = Schema.Struct({
   conversationId: Schema.String,
   permissionLevel: PermissionLevel,
 });

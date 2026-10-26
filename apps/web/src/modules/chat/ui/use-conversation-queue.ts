@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { toast } from "sonner";
 import { AlreadyTold } from "~/ui/error-toast.ts";
-import { useDesktop } from "~/modules/desktop/client/bridge.ts";
 import {
   dispatchQueuedMessage,
   queueMessage,
@@ -12,7 +11,6 @@ import {
   sendQueuedNow,
   steerQueuedMessage,
 } from "../server/functions.ts";
-import type { ConversationMode } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { AssistantSteer } from "./assistant-body.ts";
 import type { ComposerQueue, EditableQueuedMessage } from "./composer.tsx";
@@ -34,7 +32,7 @@ type Submission = Omit<
   "conversationId" | "content" | "attachmentIds" | "researchEnabled" | "skillIds"
 >;
 
-/** This app's desktop fields, which give a Work entry its machine. */
+/** What the desktop app adds to a start, so its browser can run the answer's browser calls. */
 type AttemptFields = Omit<
   Parameters<typeof sendQueuedNow>[0]["data"],
   "conversationId" | "entryId"
@@ -71,7 +69,6 @@ const failed = (fallback: () => string) => (error: unknown) => {
  */
 export function useConversationQueue(input: {
   conversationId: string;
-  mode: ConversationMode;
   rows: ReadonlyArray<QueueRow>;
   state: QueueState;
   /** The answer running now, which Steer aims at. */
@@ -80,10 +77,8 @@ export function useConversationQueue(input: {
   arrived: ReadonlyArray<AssistantSteer>;
   /** What a send would carry now besides the draft; queueing freezes it. */
   submission: () => Promise<Submission>;
-  /** This app's desktop fields; a Work entry needs them to start. */
+  /** This app's desktop fields, empty in a browser. */
   attemptFields: () => Promise<AttemptFields>;
-  /** Throws, having said why, when Work cannot act yet. */
-  checkWork: () => void;
   /** What starting an answer here runs first, like the view's own starts. */
   prepare: () => Promise<void>;
   /** The composer settings an edit of a queued message borrows and hands back. */
@@ -106,7 +101,6 @@ export function useConversationQueue(input: {
 }): { submit: (...draft: SubmitArguments) => Promise<unknown>; queue: ComposerQueue } {
   const { conversationId, settings } = input;
   const queryClient = useQueryClient();
-  const desktop = useDesktop();
   const refresh = () =>
     void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
 
@@ -122,7 +116,6 @@ export function useConversationQueue(input: {
   });
 
   const queue = useMutation({
-    onMutate: () => input.checkWork(),
     mutationFn: async (draft: Draft) => queueMessage({ data: await fields(draft) }),
     onSuccess: () => {
       settings.resetSearchEnabled();
@@ -132,7 +125,6 @@ export function useConversationQueue(input: {
     onError: failed(m.chat_queue_add_failed),
   });
   const replace = useMutation({
-    onMutate: () => input.checkWork(),
     mutationFn: async (draft: Draft & { entryId: string }) =>
       replaceQueuedMessage({ data: { ...(await fields(draft)), entryId: draft.entryId } }),
     onSuccess: refresh,
@@ -160,8 +152,7 @@ export function useConversationQueue(input: {
   });
   const dispatch = useMutation({
     onMutate: () => input.prepare(),
-    // A person asking may start after a stop. A Work chat's entry takes this
-    // app's executor and folders as they are now, never the queued ones.
+    // A person asking may start after a stop.
     mutationFn: async () =>
       dispatchQueuedMessage({
         data: { conversationId, force: true, ...(await input.attemptFields()) },
@@ -170,9 +161,6 @@ export function useConversationQueue(input: {
     onError: failed(m.chat_queue_start_failed),
   });
 
-  // The one reason only this page knows: whether it is the desktop app a Work
-  // entry needs to start at all. Everything else comes from the server's gate.
-  const needsDesktop = input.mode === "work" && !desktop;
   // The composer settings an open edit borrowed, handed back when it ends.
   const borrowed = useRef<{
     modelId: string | null;
@@ -202,14 +190,10 @@ export function useConversationQueue(input: {
           )
           .map((row) => row.id),
       ),
-      paused: pausedReason(input.state, needsDesktop),
+      paused: pausedReason(input.state),
       // Send now stops the answer first; where nothing could start afterwards
       // it must not stop anything, so it is refused before the click.
-      sendNowBlocked: needsDesktop
-        ? m.chat_queue_send_needs_desktop()
-        : input.state === "question"
-          ? m.chat_queue_answer_first()
-          : null,
+      sendNowBlocked: input.state === "question" ? m.chat_queue_answer_first() : null,
       onSteer: (entryId) => {
         if (!input.running) return;
         steer.mutate({ entryId, ...input.running });
@@ -250,7 +234,7 @@ export function useConversationQueue(input: {
 }
 
 /** Why an idle queue is not moving, as the strip words it. */
-const pausedReason = (state: QueueState, needsDesktop: boolean): ComposerQueue["paused"] => {
+const pausedReason = (state: QueueState): ComposerQueue["paused"] => {
   switch (state) {
     case null:
     case "running":
@@ -258,13 +242,9 @@ const pausedReason = (state: QueueState, needsDesktop: boolean): ComposerQueue["
     case "question":
       return { reason: m.chat_queue_paused_question(), canDispatch: false };
     case "ready":
-      return needsDesktop
-        ? { reason: m.chat_queue_paused_desktop(), canDispatch: false }
-        : { reason: m.chat_queue_starting(), canDispatch: false };
+      return { reason: m.chat_queue_starting(), canDispatch: false };
     case "stopped":
     case "failed":
-      return needsDesktop
-        ? { reason: m.chat_queue_paused_desktop(), canDispatch: false }
-        : { reason: m.chat_queue_paused(), canDispatch: true };
+      return { reason: m.chat_queue_paused(), canDispatch: true };
   }
 };

@@ -4,7 +4,7 @@ import { requireEligibleAccount } from "~/modules/auth/server/account-eligibilit
 import type { DesktopSubmission } from "../schema.ts";
 import { Effect, Option } from "effect";
 import { sendsReasoningEffort } from "~/modules/providers/provider-presets.ts";
-import { InvalidMessage, ModelNotFound, WorkDesktopRequired } from "~/modules/chat/errors.ts";
+import { InvalidMessage, ModelNotFound } from "~/modules/chat/errors.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { attachmentKind, MAX_ATTACHMENTS_PER_MESSAGE } from "~/modules/attachments/constants.ts";
 import { AttachmentNotAvailable, AttachmentUnsupported } from "~/modules/attachments/errors.ts";
@@ -235,8 +235,6 @@ export const makeAttemptOptions = Effect.gen(function* () {
         skillIds?: ReadonlyArray<string> | undefined;
         /** What the sending app reports now; a retry re-reports it too. */
         desktop?: DesktopSubmission | undefined;
-        /** Files this send copied into the workspace; only a send carries them. */
-        workspaceFiles?: ReadonlyArray<string> | undefined;
         /** The image model this submission picked; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
       } & Attempt,
@@ -318,17 +316,6 @@ export const makeAttemptOptions = Effect.gen(function* () {
           return yield* new InvalidMessage({
             reason: localized(m.chat_error_research_not_permitted),
           });
-        if (defaults.mode === "work" && !(yield* policy.can(input.userId, "work", tx)))
-          return yield* new InvalidMessage({ reason: localized(m.chat_error_work_not_permitted) });
-        if ((input.workspaceFiles?.length ?? 0) > 0 && defaults.mode !== "work")
-          return yield* new InvalidMessage({
-            reason: localized(m.chat_error_workspace_files_require_work),
-          });
-        // Kept for Work alone, and re-stamped on every attempt, retry included:
-        // the stream learns from it whether a machine tool is offered, and the
-        // banner must name the machine the chat actually last worked on.
-        const desktop = defaults.mode === "work" ? input.desktop : undefined;
-        if (defaults.mode === "work" && !desktop) return yield* new WorkDesktopRequired();
         // Every attempt resolves its collections and skills as they are now: a
         // submitted selection (an edit's) replaces the saved one, otherwise the
         // saved one is kept.
@@ -349,8 +336,7 @@ export const makeAttemptOptions = Effect.gen(function* () {
           searchEnabled,
           researchEnabled,
           reasoningEffort,
-          desktop,
-          workspaceFiles: input.workspaceFiles ?? continuation?.workspaceFiles ?? [],
+          desktop: input.desktop,
           model: input.model,
           searchAvailable: input.searchAvailable,
         });

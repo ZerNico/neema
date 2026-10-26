@@ -7,7 +7,6 @@ import {
   ArrowUp02Icon,
   Attachment01Icon,
   Book02Icon,
-  Folder01Icon,
   GlobalSearchIcon,
   PlugSocketIcon,
   PlusSignIcon,
@@ -42,7 +41,6 @@ import {
   shouldPasteAsFile,
 } from "~/modules/attachments/client/use-attachment-uploads.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
-import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { Button } from "~/ui/primitives/button";
 import {
   DropdownMenu,
@@ -68,14 +66,12 @@ import { CollapseItem, MotionSwap } from "~/ui/motion.tsx";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
-import { ToggleGroup, ToggleGroupItem } from "~/ui/primitives/toggle-group";
 import type {
   ComposerIntegration,
   ComposerIntegrations,
 } from "~/modules/integrations/client/use-chat-integrations.ts";
 import { AddIntegrationDialog } from "~/modules/integrations/ui/add-integration-dialog.tsx";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import type { ConversationMode } from "../schema.ts";
 import type { MessageReference } from "../references.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
@@ -161,22 +157,8 @@ export const ChatInput = forwardRef<
     researchEnabled?: boolean;
     onResearchEnabledChange?: (enabled: boolean) => void;
     imageModel?: ImageModelChoice | undefined;
-    /**
-     * Chat or Work, offered only where Work can be honoured: a new chat inside
-     * the desktop app. Absent hides the toggle; an existing chat's mode is
-     * fixed at creation and shown by the folder strip instead.
-     */
-    mode?: { value: ConversationMode; onChange: (mode: ConversationMode) => void } | undefined;
-    /** Why sending is blocked right now, when it is. Shown under the row. */
-    blockedReason?: string | null | undefined;
     /** Owner-held upload state; research remains available without uploads. */
     attachments?: AttachmentUploads | undefined;
-    /**
-     * Work chat inside the desktop app: drops and pastes become local
-     * workspace files instead of server uploads. Present only there; the
-     * browser keeps the upload path.
-     */
-    workspaceImports?: WorkspaceImports | undefined;
     /** Agent and collections for the next turn; absent hides the controls (edits). */
     context?: ComposerContext | undefined;
     skills?:
@@ -222,10 +204,7 @@ export const ChatInput = forwardRef<
     researchEnabled = false,
     onResearchEnabledChange,
     imageModel,
-    mode,
-    blockedReason = null,
     attachments,
-    workspaceImports,
     context,
     skills,
     integrations,
@@ -261,14 +240,8 @@ export const ChatInput = forwardRef<
       (onResearchEnabledChange !== undefined || researchEnabled),
   });
   const researchHintId = useId();
-  // Where a dropped file goes: the chat's local workspace inside the desktop
-  // app, a server upload everywhere else.
-  const target =
-    capabilities?.work && workspaceImports
-      ? workspaceImports
-      : capabilities?.attachments
-        ? attachments
-        : undefined;
+  // Where a dropped file goes: a server upload, in every chat.
+  const target = capabilities?.attachments ? attachments : undefined;
   const canChooseAgent = !!capabilities?.agentsUse;
   const canChooseKnowledge = !!capabilities?.knowledgeUse;
   const canChooseSkills = !!capabilities?.skillsUse;
@@ -277,24 +250,17 @@ export const ChatInput = forwardRef<
   const reduced = useAppReducedMotion();
   const rowMotion = collapseMotion(reduced);
   // Queueing owns the primary button only while there is something to queue,
-  // so an empty composer still offers Stop where people expect it. Files
-  // dropped into a Work chat's workspace never queue: their send reserves the
-  // turn, which a running answer refuses, so that draft keeps Stop instead.
-  const queueDraft =
-    queueing &&
-    !workspaceImports?.items.length &&
-    (value.trim() !== "" || (attachments?.items.length ?? 0) > 0);
+  // so an empty composer still offers Stop where people expect it.
+  const queueDraft = queueing && (value.trim() !== "" || (attachments?.items.length ?? 0) > 0);
   const stopping = !!onStop && !queueDraft;
   const action = stopping ? "stop" : target?.queued ? "upload" : "send";
   const actionLabel = stopping
     ? m.chat_composer_stop()
-    : workspaceImports?.queued
-      ? m.chat_composer_sending_after_workspace()
-      : attachments?.queued
-        ? m.chat_composer_sending_after_uploads()
-        : queueDraft
-          ? queueLabel
-          : submitLabel;
+    : attachments?.queued
+      ? m.chat_composer_sending_after_uploads()
+      : queueDraft
+        ? queueLabel
+        : submitLabel;
   // Everything the "+" menu can offer besides attaching files. Three things key
   // off this: the trigger's label, whether it's enabled, and the menu width.
   // They drifted apart when Skills was added to the menu without being added
@@ -397,7 +363,7 @@ export const ChatInput = forwardRef<
   const { data: parsingAvailability } = useQuery({
     ...composerAvailabilityQuery,
     select: (available) => available.documentParsing,
-    enabled: attachments !== undefined && workspaceImports === undefined,
+    enabled: attachments !== undefined,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noModels = models.length === 0;
@@ -439,11 +405,9 @@ export const ChatInput = forwardRef<
   };
 
   const items = attachments?.items ?? [];
-  const importItems = workspaceImports?.items ?? [];
   const blocked =
     items.some((item) => item.status === "error") ||
-    items.some((item) => warningFor(item) !== null) ||
-    importItems.some((item) => item.status === "error");
+    items.some((item) => warningFor(item) !== null);
   // The agent's collections count toward the per-message limit too.
   const extraCollections = context
     ? context.selection.collectionIds.length - context.maxCollections
@@ -451,16 +415,14 @@ export const ChatInput = forwardRef<
   const collectionsReason =
     extraCollections > 0 ? m.chat_composer_too_many_collections({ count: extraCollections }) : null;
   const usable = items.filter((item) => item.status !== "error").length;
-  const usableImports = importItems.filter((item) => item.status !== "error").length;
   const canSubmit =
     !disabled &&
     !!selectedModel &&
     !blocked &&
     !(researchEnabled && (!canResearch || researchUnavailableReason)) &&
-    !blockedReason &&
     !collectionsReason &&
     !target?.queued &&
-    (value.trim() !== "" || usable > 0 || usableImports > 0);
+    (value.trim() !== "" || usable > 0);
 
   const submit = () => {
     if (canSubmit) onSubmit();
@@ -483,7 +445,6 @@ export const ChatInput = forwardRef<
       <AnimatePresence initial={false}>
         {(references && references.items.length > 0) ||
         (attachments && items.length > 0) ||
-        (workspaceImports && importItems.length > 0) ||
         (context?.selection.agent && !context.agentLocked) ? (
           <motion.div key="chips" {...rowMotion}>
             <AttachmentChipRow className="px-3 pt-3">
@@ -508,20 +469,6 @@ export const ChatInput = forwardRef<
                 />
               ) : null}
               <AnimatePresence initial={false}>
-                {workspaceImports
-                  ? importItems.map((item) => (
-                      <CollapseItem key={item.localId}>
-                        <AttachmentChip
-                          item={{ ...item, location: "workspace" }}
-                          onRemove={
-                            controlsDisabled
-                              ? undefined
-                              : () => workspaceImports.remove(item.localId)
-                          }
-                        />
-                      </CollapseItem>
-                    ))
-                  : null}
                 {attachments
                   ? items.map((item) => (
                       <CollapseItem key={item.localId}>
@@ -656,9 +603,7 @@ export const ChatInput = forwardRef<
             {target ? (
               <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
                 <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-                {workspaceImports
-                  ? m.chat_composer_add_workspace_files()
-                  : m.chat_composer_attach_files()}
+                {m.chat_composer_attach_files()}
               </DropdownMenuItem>
             ) : null}
             {context && (canChooseAgent || canChooseKnowledge) ? (
@@ -781,29 +726,6 @@ export const ChatInput = forwardRef<
             anchor={menuAnchor}
             side={pickerSide}
           />
-        ) : null}
-        {mode && capabilities?.work ? (
-          <ToggleGroup
-            value={[mode.value]}
-            onValueChange={(values) => {
-              const next = values[0];
-              if (next === "chat" || next === "work") mode.onChange(next);
-            }}
-            variant="outline"
-            size="sm"
-            spacing={0}
-            disabled={modeDisabled}
-            aria-label={m.chat_composer_mode()}
-            className="shrink-0"
-          >
-            <ToggleGroupItem value="chat" aria-label={m.chat_composer_mode_chat()}>
-              {m.chat_composer_mode_chat()}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="work" aria-label={m.chat_composer_mode_work_label()}>
-              <HugeiconsIcon icon={Folder01Icon} strokeWidth={2} data-icon="inline-start" />
-              {m.chat_composer_mode_work()}
-            </ToggleGroupItem>
-          </ToggleGroup>
         ) : null}
         {searchAvailable ? (
           <Button
@@ -945,15 +867,12 @@ export const ChatInput = forwardRef<
       </div>
       <Disclosure
         open={
-          (researchEnabled && (!canResearch || !!researchUnavailableReason)) ||
-          !!blockedReason ||
-          !!collectionsReason
+          (researchEnabled && (!canResearch || !!researchUnavailableReason)) || !!collectionsReason
         }
       >
         <DisclosureContent>
           <p role="status" className="text-muted-foreground px-4 pb-3 text-xs">
-            {blockedReason ??
-              collectionsReason ??
+            {collectionsReason ??
               (!canResearch ? m.chat_composer_research_unavailable() : researchUnavailableReason)}
           </p>
         </DisclosureContent>
@@ -969,7 +888,7 @@ export const ChatInput = forwardRef<
       >
         <span className="text-foreground flex items-center gap-2 text-sm font-medium">
           <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} className="size-4" />
-          {workspaceImports ? m.chat_composer_drop_workspace() : m.chat_composer_drop_attach()}
+          {m.chat_composer_drop_attach()}
         </span>
       </motion.div>
     </div>

@@ -36,7 +36,7 @@ export const listChats = defineTool({
   name: "list_chats",
   title: "List chats",
   description:
-    "This person's recent chats, newest activity first, as the sidebar lists them (temporary and archived chats are left out). A Work chat can be read here but continues only in the desktop app. Pass `cursor` from a previous answer for the next page.",
+    "This person's recent chats, newest activity first, as the sidebar lists them (temporary and archived chats are left out). A chat with a computer runs its local tools on the person's desktop machine, which must be online for them. Pass `cursor` from a previous answer for the next page.",
   scope: "chats:read",
   input: Schema.Struct({
     query: Schema.optionalKey(Schema.String),
@@ -60,8 +60,8 @@ export const listChats = defineTool({
         id: chat.id,
         title: chat.title ?? "Untitled",
         projectId: chat.projectId,
-        // A Work chat goes on only in the desktop app, beside its files.
-        work: chat.mode === "work",
+        // Its local tools run on the person's machine, wherever the message comes from.
+        computer: chat.machineId !== null,
         lastActivity: (chat.lastMessageAt ?? chat.createdAt).toISOString(),
         generating: chat.generating,
         url: chatUrl(origin, chat.id),
@@ -69,7 +69,7 @@ export const listChats = defineTool({
       const nextCursor = page.nextCursor ? encodeCursor(page.nextCursor) : null;
       const lines = chats.map(
         (c) =>
-          `- ${c.title} (${c.id}), ${c.lastActivity}${c.work ? ", Work chat (desktop app only)" : ""}${c.generating ? ", answering now" : ""}`,
+          `- ${c.title} (${c.id}), ${c.lastActivity}${c.computer ? ", has a computer" : ""}${c.generating ? ", answering now" : ""}`,
       );
       if (nextCursor) lines.push(`More: cursor ${nextCursor}`);
       return result(lines.length ? lines.join("\n") : "No chats.", { chats, nextCursor });

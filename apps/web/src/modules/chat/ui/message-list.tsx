@@ -43,7 +43,6 @@ import {
   MarkdownReferenceSpan,
   type MarkdownComponents,
 } from "./assistant-markdown.tsx";
-import { FileReferenceMachine } from "./file-reference-context.ts";
 import { AskUserBlock, type QuestionActions } from "./ask-user-block.tsx";
 import {
   projectAssistantBody,
@@ -119,7 +118,6 @@ import {
 } from "~/ui/detail-panel-context.ts";
 import { officePreview } from "~/modules/attachments/ui/office-preview.ts";
 import { AttachmentChip, AttachmentChipRow } from "~/modules/attachments/ui/attachment-chip.tsx";
-import { WorkspaceFileChip } from "~/modules/desktop/ui/workspace-file-chip.tsx";
 import { Button } from "~/ui/primitives/button";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
@@ -202,7 +200,6 @@ const CitedAnswer = memo(function CitedAnswer({
 });
 
 export interface DisplayMessage {
-  desktopMachineId?: string | null;
   /** Scanned pages the live answer is reading before it can start. */
   reading?: StreamState["reading"];
   files?: ReadonlyArray<AssistantFile>;
@@ -219,11 +216,6 @@ export interface DisplayMessage {
   questionActions?: QuestionActions | undefined;
   /** Decisions this message is waiting on, by tool-call id. */
   desktopApprovals?: ReadonlyMap<string, DesktopApprovalRequest> | undefined;
-  /**
-   * The attempt's roots (name + absolute path), so delete lists group by the
-   * folder that owns each path. Absent on user bubbles and browser history.
-   */
-  desktopRoots?: ReadonlyArray<{ name: string; path: string }> | undefined;
   /** Sanitized failure reason stored with the message, when it failed. */
   error?: string | null;
   /** What of its agent this answer ran without, shown above it. */
@@ -263,12 +255,6 @@ export interface DisplayMessage {
   uiLookups?: UiLookups;
   /** In-progress images of running image calls, by call; live only. */
   imagePreviews?: Readonly<Record<string, string>>;
-  /**
-   * Files this send copied into the chat's workspace, by basename. The path
-   * joins against the machine's current workspace root at click time: the
-   * server stores names only, and a browser renders these inert.
-   */
-  workspaceFiles?: ReadonlyArray<string>;
   /** Edit this completed user message. */
   onEdit?: () => void;
   editDisabled?: boolean;
@@ -482,7 +468,6 @@ function UserBubble({ message }: { message: DisplayMessage }) {
         <div className="group/user flex w-full flex-col items-end">
           {references.length > 0 ||
           (message.attachments && message.attachments.length > 0) ||
-          (message.workspaceFiles && message.workspaceFiles.length > 0) ||
           (chipCollections && chipCollections.length > 0) ||
           (chipSkills && chipSkills.length > 0) ? (
             <AttachmentChipRow className="mb-1.5 max-w-[80%] justify-end">
@@ -500,9 +485,6 @@ function UserBubble({ message }: { message: DisplayMessage }) {
               ))}
               {message.attachments?.map((attachment) => (
                 <StoredAttachmentChip key={attachment.id} attachment={attachment} />
-              ))}
-              {message.workspaceFiles?.map((name) => (
-                <WorkspaceFileChip key={name} fileName={name} />
               ))}
             </AttachmentChipRow>
           ) : null}
@@ -814,13 +796,11 @@ const AssistantBody = memo(function AssistantBody({
       );
       return (
         <div key={part.key} className="mb-3 last:mb-0">
-          <FileReferenceMachine value={message.desktopMachineId ?? null}>
-            {sources.length > 0 ? (
-              <CitedAnswer content={content} sources={sources} streaming={part.streaming} />
-            ) : (
-              <AssistantMarkdown content={content} streaming={part.streaming} />
-            )}
-          </FileReferenceMachine>
+          {sources.length > 0 ? (
+            <CitedAnswer content={content} sources={sources} streaming={part.streaming} />
+          ) : (
+            <AssistantMarkdown content={content} streaming={part.streaming} />
+          )}
         </div>
       );
     }
@@ -925,7 +905,6 @@ const AssistantBody = memo(function AssistantBody({
         <DesktopActivityBlock
           key={part.key}
           activity={part.activity}
-          roots={message.desktopRoots ?? []}
           {...(approval ? { approval } : {})}
         />
       );

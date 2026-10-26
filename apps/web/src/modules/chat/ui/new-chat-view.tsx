@@ -7,8 +7,7 @@ import { AnimatePresence } from "motion/react";
 import * as motion from "motion/react-m";
 import { useEffect, useRef, useState } from "react";
 import { uuidv7 } from "uuidv7";
-import { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
-import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import { desktopAttemptFields } from "~/modules/desktop/client/bridge.ts";
 import { useChatIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import { projectQuery } from "~/modules/projects/client/queries.ts";
 import { toastError } from "~/ui/error-toast.ts";
@@ -23,8 +22,7 @@ import { prefersReducedMotion, useAppReducedMotion } from "~/ui/reduced-motion.t
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { cn } from "~/ui/utils";
 import { browserTimeZone } from "../client/time-zone.ts";
-import type { ConversationMode } from "../schema.ts";
-import { activateWorkTurn, sendMessage } from "../server/functions.ts";
+import { sendMessage } from "../server/functions.ts";
 import { agentIcon } from "./agent-icons.ts";
 import { Composer, type ComposerHandle } from "./composer.tsx";
 import { greetingFor } from "./greeting.ts";
@@ -32,7 +30,6 @@ import { useContextSelection } from "./use-context-selection.ts";
 import { useReasoningEffort } from "./use-reasoning-effort.ts";
 import { useModelChoice } from "../client/use-model-choice.ts";
 import { useSearchMode } from "./use-search-mode.ts";
-import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
 /**
  * How long the composer takes to travel from the middle of the column down to
@@ -85,14 +82,10 @@ export function NewChatView({
   const { effort: reasoningEffort, setEffort: setReasoningEffort } = useReasoningEffort(modelId);
   const starters = selectedAgent.data?.starters ?? [];
   const composer = useRef<ComposerHandle>(null);
-  const [mode, setMode] = useState<ConversationMode>("chat");
-  // The final id exists before local folders or files do, so the first prompt
-  // and every desktop capability already name the durable workspace path.
+  // Fixed per visit, so a retried first send names the same chat.
   const [conversationId] = useState(uuidv7);
-  const work = useWorkGate(conversationId, mode === "work");
   // Held locally until the first message creates the chat and carries them.
   const integrations = useChatIntegrations(null);
-  const folder = work.folder;
   const isMobile = useIsMobile();
   useEffect(() => {
     if (initialPrefill) composer.current?.prefillDraft(initialPrefill);
@@ -117,57 +110,32 @@ export function NewChatView({
       attachmentIds: ReadonlyArray<string>;
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
-      workspaceFiles?: ReadonlyArray<string>;
-      workspaceImports?: WorkspaceImports;
-      mode: ConversationMode;
-    }) => {
-      const conversation = {
-        kind: "new" as const,
-        id: conversationId,
-        mode: input.mode,
-        ...(input.mode === "chat" && temporary && !projectId ? { temporary: true } : {}),
-        ...(projectId ? { projectId } : {}),
-      };
-      const fields = {
-        modelId: modelId!,
-        ...(imageModelId ? { imageModelId } : {}),
-        content: input.content,
-        searchEnabled,
-        reasoningEffort,
-        timeZone: browserTimeZone(),
-        attachmentIds: input.attachmentIds,
-        researchEnabled: input.researchEnabled,
-        skillIds: [...(input.skillIds ?? [])],
-        ...context.sendFields,
-        ...integrations.sendFields,
-      };
-      if (input.workspaceImports && input.workspaceFiles?.length)
-        return sendReservedWorkspaceTurn({
-          conversation,
-          imports: input.workspaceImports,
-          activate: async (reservationId, workspaceFiles) =>
-            activateWorkTurn({
-              data: {
-                reservationId,
-                conversation,
-                ...fields,
-                ...(await work.attemptFields(true)),
-                workspaceFiles: [...workspaceFiles],
-              },
-            }),
-        });
-      return sendMessage({
+    }) =>
+      sendMessage({
         data: {
-          conversation,
-          ...fields,
-          ...(await work.attemptFields(input.mode === "work")),
+          conversation: {
+            kind: "new" as const,
+            id: conversationId,
+            ...(temporary && !projectId ? { temporary: true } : {}),
+            ...(projectId ? { projectId } : {}),
+          },
+          modelId: modelId!,
+          ...(imageModelId ? { imageModelId } : {}),
+          content: input.content,
+          searchEnabled,
+          reasoningEffort,
+          timeZone: browserTimeZone(),
+          attachmentIds: input.attachmentIds,
+          researchEnabled: input.researchEnabled,
+          skillIds: [...(input.skillIds ?? [])],
+          ...context.sendFields,
+          ...integrations.sendFields,
+          ...(await desktopAttemptFields()),
         },
-      });
-    },
+      }),
     // Fires when the request starts, i.e. after any queued upload settled.
     // the composer should not move while it is still waiting on those.
-    onMutate: (input) => {
-      work.check(input.mode === "work");
+    onMutate: () => {
       setSending(true);
       slide.current = prefersReducedMotion()
         ? Promise.resolve()
@@ -193,9 +161,8 @@ export function NewChatView({
     },
   });
 
-  // A work chat keeps grants and folders on the machine, so it is never
-  // temporary; nor is a project chat, which the project lists.
-  const offerTemporary = mode === "chat" && !!onTemporaryChange && !projectId;
+  // A project chat is never temporary: the project lists it.
+  const offerTemporary = !!onTemporaryChange && !projectId;
   const project = useQuery({ ...projectQuery(projectId ?? ""), enabled: !!projectId });
   const isTemporary = offerTemporary && temporary;
   const reducedMotion = useAppReducedMotion();
@@ -325,27 +292,13 @@ export function NewChatView({
         <div className="mx-auto w-full max-w-3xl px-4">
           <Composer
             initialSkillId={initialSkillId}
-            conversationId={conversationId}
             integrations={integrations}
-            folder={folder}
-            readOnly={work.readOnly}
-            mode={{ kind: "choose", value: mode, onChange: setMode }}
-            onSend={(
-              content,
-              attachmentIds,
-              researchEnabled,
-              skillIds,
-              workspaceFiles,
-              workspaceImports,
-            ) =>
+            onSend={(content, attachmentIds, researchEnabled, skillIds) =>
               sendMutation.mutateAsync({
                 content,
                 attachmentIds,
                 researchEnabled,
                 ...(skillIds ? { skillIds } : {}),
-                ...(workspaceFiles ? { workspaceFiles } : {}),
-                ...(workspaceImports ? { workspaceImports } : {}),
-                mode,
               })
             }
             disabled={sendMutation.isPending}

@@ -65,12 +65,7 @@ const toConfig = (
   researchEnabled: row.researchEnabled,
   reasoningEffort: row.reasoningEffort,
   planEnabled: row.planEnabled,
-  desktopFolders: row.desktopFolders,
-  desktopCommands: row.desktopCommands,
   desktopBrowser: row.desktopBrowser,
-  desktopMachineId: row.desktopMachineId,
-  desktopMachineName: row.desktopMachineName,
-  workspaceFiles: row.workspaceFiles,
   integrationGrants: row.integrationGrants,
   imageModel:
     row.imageModelId && row.imageModelName
@@ -117,7 +112,6 @@ export const readDefaults = Effect.fn("chat.readDefaults")(function* (
   }));
   const [conversation] = yield* tx
     .select({
-      mode: conversations.mode,
       projectId: conversations.projectId,
       imageModelId: conversations.imageModelId,
     })
@@ -130,7 +124,6 @@ export const readDefaults = Effect.fn("chat.readDefaults")(function* (
     scheduleDrafts: drafts.filter((draft) => draft.kind === "schedule").map(draftSummary),
     documents: documentRows,
     workingFiles,
-    mode: conversation?.mode ?? "chat",
     projectId: conversation?.projectId ?? null,
     conversationId,
     imageModelId: conversation?.imageModelId ?? null,
@@ -179,12 +172,7 @@ export const writeConfig = Effect.fn("chat.writeGenerationConfig")(function* (
       searchEnabled: config.searchEnabled,
       researchEnabled: config.researchEnabled,
       reasoningEffort: config.reasoningEffort,
-      desktopFolders: config.desktopFolders ? [...config.desktopFolders] : null,
-      desktopCommands: config.desktopCommands ?? false,
       desktopBrowser: config.desktopBrowser ?? false,
-      desktopMachineId: config.desktopMachineId ?? null,
-      desktopMachineName: config.desktopMachineName ?? null,
-      workspaceFiles: [...(config.workspaceFiles ?? [])],
       collectionIds: [...config.collectionIds],
       integrationGrants: config.integrationGrants ? [...config.integrationGrants] : null,
       imageModelId: config.imageModel?.id ?? null,

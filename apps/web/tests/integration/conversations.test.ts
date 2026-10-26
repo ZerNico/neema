@@ -416,7 +416,7 @@ describe("temporary chat expiry", () => {
       }),
     );
     expect(result.listed).toEqual(new Set([result.ids.expired, result.ids.expiredNeverUsed]));
-    expect(result.deleted).toEqual({ userId: expect.any(String), keys: [] });
+    expect(result.deleted).toEqual({ userId: expect.any(String), keys: [], machineId: null });
     expect(result.remaining.has(result.ids.expired)).toBe(false);
     expect(result.remaining.has(result.ids.live)).toBe(true);
     expect(result.remaining.has(result.ids.fresh)).toBe(true);
@@ -619,7 +619,7 @@ describe("deleted chats", () => {
     expect(result.restored).toBe(true);
     expect(result.purgedUndone).toBeNull();
     expect(result.purgedRecent).toBeNull();
-    expect(result.purgedOld).toEqual({ userId: expect.any(String), keys: [] });
+    expect(result.purgedOld).toEqual({ userId: expect.any(String), keys: [], machineId: null });
     expect(result.restoredAfterPurge).toBe(false);
     expect(result.remaining).toEqual(new Set([result.ids.recent, result.ids.undone]));
   });

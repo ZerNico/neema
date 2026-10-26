@@ -59,7 +59,7 @@ const sameHash = (a: string, b: string) =>
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 /** The plugin’s own field; the adapter’s session type does not carry plugin fields. */
-const markedDesktop = (session: object) => "desktop" in session && session.desktop === true;
+export const markedDesktop = (session: object) => "desktop" in session && session.desktop === true;
 
 const desktopExpiry = () => new Date(Date.now() + DESKTOP_SESSION_SECONDS * 1000);
 

@@ -11,7 +11,6 @@ import {
 import { ChatView } from "~/modules/chat/ui/chat-view.tsx";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { skillsQuery } from "~/modules/skills/client/queries.ts";
-import { prepareWorkFolder } from "~/modules/desktop/client/bridge.ts";
 import { EmptyState } from "~/ui/page-shell.tsx";
 import { RouteStatusScreen } from "~/ui/route-error.tsx";
 import { buttonVariants } from "~/ui/primitives/button";
@@ -23,7 +22,7 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
   // and search toggle are ready when the view renders, not a round trip later.
   // Nothing is returned: the view reads these from the query cache, so a
   // loader payload would only be a second copy.
-  loader: async ({ context, params, abortController }) => {
+  loader: async ({ context, params }) => {
     await Promise.all([
       context.queryClient
         .ensureQueryData(conversationQuery(params.conversationId))
@@ -36,12 +35,6 @@ export const Route = createFileRoute("/_app/chat/$conversationId")({
           if (detail.messages.some((message) => /(?:```|~~~)ui\b/.test(message.content)))
             // Under the 200 ms pendingMs, so the wait never shows the pending view.
             await Promise.race([prewarmGenui(), new Promise((done) => setTimeout(done, 180))]);
-          if (detail.conversation.mode === "work")
-            await prepareWorkFolder(
-              context.queryClient,
-              params.conversationId,
-              abortController.signal,
-            );
         }),
       context.queryClient.ensureQueryData(chatModelsQuery),
       // Prefetch keeps optional search-config failures out of the route error boundary.

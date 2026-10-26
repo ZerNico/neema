@@ -27,13 +27,6 @@ export interface HistoryMessage {
   readonly completedAt?: Date | null;
   readonly assistantOutput?: AssistantOutput | null;
   readonly providerReplay?: ProviderReplay | null;
-  /**
-   * Files this send copied into the chat's workspace, by name. A desktop work
-   * chat has no attachment links for them (they never touch the server), so
-   * the line here is the only place the model is told what the chips it sees
-   * mean. Nothing is inlined: the bytes are a `read_local_file` away.
-   */
-  readonly workspaceFiles?: ReadonlyArray<string>;
 }
 
 /**
@@ -141,23 +134,6 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
     content: messageTimestamp(message) + message.content,
   });
 
-  // A workspace import is named ahead of the text, like an attachment part,
-  // so a question that is only a drop still reads as "about these files".
-  const workspaceLine = (message: HistoryMessage) => {
-    const files = message.workspaceFiles ?? [];
-    return message.role === "user" && files.length > 0
-      ? `[The user added ${files.length === 1 ? "this file" : "these files"} to the workspace: ${files.join(", ")}]`
-      : null;
-  };
-  const withWorkspaceFiles = (message: HistoryMessage): Prompt.MessageEncoded => {
-    const line = workspaceLine(message);
-    if (line === null) return plain(message);
-    return {
-      role: "user" as const,
-      content: line + "\n" + messageTimestamp(message) + message.content,
-    };
-  };
-
   const steersOf = (message: HistoryMessage): HistorySteer[] => {
     if (message.role !== "assistant") return [];
     const list = [...(input.steers?.get(message.id) ?? [])];
@@ -179,7 +155,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       (message) => message.assistantOutput?.files.length || message.providerReplay?.turns.length,
     )
   )
-    return input.messages.map(withWorkspaceFiles);
+    return input.messages.map(plain);
 
   const byMessage = new Map<string, Array<AttachmentWithBlob>>();
   for (const row of rows) {
@@ -235,12 +211,10 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
 
   const userMessage = Effect.fn("chat.historyUserMessage")(function* (message: HistoryMessage) {
     const attached = byMessage.get(message.id);
-    if (!attached || attached.length === 0) return withWorkspaceFiles(message);
+    if (!attached || attached.length === 0) return plain(message);
     const parts: Array<Prompt.UserMessagePartEncoded> = [
       { type: "text", text: attached.map(attachmentReferenceHint).join("\n") },
     ];
-    const line = workspaceLine(message);
-    if (line !== null) parts.push({ type: "text", text: line });
     for (const row of attached) {
       const kind = attachmentKind(row.mediaType);
       if (kind === "file") {
@@ -463,7 +437,7 @@ export const buildHistoryMessages = Effect.fn("chat.buildHistoryMessages")(funct
       continue;
     }
     if (message.role !== "user" || !attached || attached.length === 0) {
-      messages.push(withWorkspaceFiles(message));
+      messages.push(plain(message));
       continue;
     }
     messages.push(yield* userMessage(message));

@@ -9,6 +9,9 @@ import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
@@ -51,6 +54,7 @@ const baseLayer = (url: string, maxConnections: number) =>
     ChatRepo.layer,
     CustomToolRepo.layer,
     MemoryRepo.layer,
+    ComputerRepo.layer,
     ProviderRepo.layer,
     ToolsRepo.layer,
     GroupRepo.layer,
@@ -86,7 +90,11 @@ const defaultServices = (gateway: Partial<AiGateway["Service"]> | undefined) =>
     FakeCustomToolRuntime,
     NoIntegrations,
     FakeMemoryService,
-    ExternalCompletion.layer,
+    // As in runtime.ts: computer calls complete external waits and reach machines through the hub.
+    ComputerCalls.layer.pipe(
+      Layer.provideMerge(MachineHub.layer),
+      Layer.provideMerge(ExternalCompletion.layer),
+    ),
     ScheduleDraftService.layer,
     AgentDraftService.layer,
   );

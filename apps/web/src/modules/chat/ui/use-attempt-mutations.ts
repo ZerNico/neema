@@ -3,9 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { copyWorkspaceToBranch, desktopClient } from "~/modules/desktop/client/bridge.ts";
-import type { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
-import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
+import { desktopAttemptFields } from "~/modules/desktop/client/bridge.ts";
 import type { AskTarget } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { flushBlockSaves } from "~/modules/genui/ui/pending-saves.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
@@ -15,7 +13,6 @@ import { toastError } from "~/ui/error-toast.ts";
 import { chatModelsQuery } from "../client/queries.ts";
 import { browserTimeZone } from "../client/time-zone.ts";
 import {
-  activateWorkTurn,
   answerQuestion,
   branchConversation,
   editMessage,
@@ -33,7 +30,6 @@ import type { useLiveAnswer } from "./use-live-answer.ts";
 import type { useMessageEdit } from "./use-message-edit.ts";
 import type { useReasoningEffort } from "./use-reasoning-effort.ts";
 import type { useSearchMode } from "./use-search-mode.ts";
-import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 
 /**
  * Every way this chat starts or ends an answer: send, answer a question,
@@ -45,7 +41,6 @@ export function useAttemptMutations({
   data,
   live,
   edit,
-  work,
   questionResponses,
   flushArtifacts,
   documentFocus,
@@ -62,7 +57,6 @@ export function useAttemptMutations({
   /** When the loaded conversation was last read. */
   live: ReturnType<typeof useLiveAnswer>;
   edit: ReturnType<typeof useMessageEdit>;
-  work: ReturnType<typeof useWorkGate>;
   questionResponses: ReturnType<typeof associateQuestionResponses>;
   flushArtifacts: ReturnType<typeof useChatArtifacts>["flushArtifacts"];
   documentFocus: ReturnType<typeof useChatArtifacts>["documentFocus"];
@@ -93,7 +87,6 @@ export function useAttemptMutations({
     closeEdit,
   } = edit;
 
-  const checkWorkReady = () => work.check();
   // A refused start says why, a usage limit among them; the models' standing may have moved too.
   const refused = (title: string, error: unknown) => {
     cancelAnchor();
@@ -106,7 +99,6 @@ export function useAttemptMutations({
     await flushArtifacts();
   };
   const prepareGeneration = async () => {
-    checkWorkReady();
     await flushPending();
     closeEdit();
   };
@@ -122,8 +114,6 @@ export function useAttemptMutations({
       attachmentIds: ReadonlyArray<string>;
       researchEnabled: boolean;
       skillIds?: ReadonlyArray<string>;
-      workspaceFiles?: ReadonlyArray<string>;
-      workspaceImports?: WorkspaceImports;
       /** Where in a document the request was made, instead of the editor's selection at send. */
       asked?: AskTarget & { documentId: string };
     }) => {
@@ -141,26 +131,11 @@ export function useAttemptMutations({
         skillIds: [...(input.skillIds ?? [])],
         ...context.sendFields,
       };
-      if (input.workspaceImports && input.workspaceFiles?.length)
-        return sendReservedWorkspaceTurn({
-          conversation,
-          imports: input.workspaceImports,
-          activate: async (reservationId, workspaceFiles) =>
-            activateWorkTurn({
-              data: {
-                reservationId,
-                conversation,
-                ...fields,
-                ...(await work.attemptFields()),
-                workspaceFiles: [...workspaceFiles],
-              },
-            }),
-        });
       return sendMessage({
         data: {
           conversation,
           ...fields,
-          ...(await work.attemptFields()),
+          ...(await desktopAttemptFields()),
         },
       });
     },
@@ -205,7 +180,7 @@ export function useAttemptMutations({
           modelId: effectiveModelId!,
           // Search and research are the asking attempt's, kept by the server.
           reasoningEffort,
-          ...(await work.attemptFields()),
+          ...(await desktopAttemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -232,7 +207,7 @@ export function useAttemptMutations({
           conversationId,
           ...input,
           ...imagePick,
-          ...(await work.attemptFields()),
+          ...(await desktopAttemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -263,7 +238,7 @@ export function useAttemptMutations({
         data: {
           conversationId,
           ...input,
-          ...(await work.attemptFields()),
+          ...(await desktopAttemptFields()),
           timeZone: browserTimeZone(),
           ...documentFocus(),
         },
@@ -283,17 +258,6 @@ export function useAttemptMutations({
     },
     mutationFn: (messageId: string) => branchConversation({ data: { conversationId, messageId } }),
     onSuccess: async (result) => {
-      // A work chat's local state is what makes the branch usable: grants and
-      // workspace are copied before the view opens, so the destination's first
-      // send cannot race its own lazy creation. Local and fast; a failure
-      // opens the branch without its files rather than not opening it.
-      if (data.conversation.mode === "work" && desktopClient()) {
-        try {
-          await copyWorkspaceToBranch(conversationId, result.conversationId);
-        } catch {
-          toast.error(m.chat_branch_without_files());
-        }
-      }
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       await navigate({
         to: "/chat/$conversationId",
@@ -313,7 +277,6 @@ export function useAttemptMutations({
 
   const editMutation = useMutation({
     onMutate: async () => {
-      checkWorkReady();
       await flushPending();
       requestAnchor();
     },
@@ -343,7 +306,7 @@ export function useAttemptMutations({
         modelId: input.modelId,
         ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
         attachmentIds: input.attachmentIds,
-        ...(await work.attemptFields()),
+        ...(await desktopAttemptFields()),
         timeZone: browserTimeZone(),
         ...documentFocus(),
       };
@@ -415,9 +378,7 @@ export function useAttemptMutations({
     resumeMutation.isPending ||
     editMutation.isPending ||
     branchMutation.isPending;
-  // Generation actions (edit/retry/answer/save) wait on the folder; branch
-  // copies history and must stay available in a browser.
-  const generationDisabled = actionsDisabled || work.readOnly;
+  const generationDisabled = actionsDisabled;
   const respondToQuestion = useCallback(
     async (callId: string, response: QuestionResponse) => {
       if (actionsDisabled || !effectiveModelId || answerInFlight.current) {
@@ -606,7 +567,6 @@ export function useAttemptMutations({
   );
 
   return {
-    checkWorkReady,
     flushPending,
     sendMutation,
     stopMutation,

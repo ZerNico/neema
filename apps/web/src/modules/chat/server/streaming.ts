@@ -1,4 +1,5 @@
 import type { ExternalOwner } from "~/modules/tools/server/external-completion.ts";
+import { COMPUTER_EXECUTOR } from "~/modules/tools/server/external-completion.ts";
 import { AgentDraftService } from "~/modules/agents/server/draft-service.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
 import { ProjectMemoryService } from "~/modules/projects/server/project-memory.ts";
@@ -295,17 +296,18 @@ export class StreamEngine extends Context.Service<
           messageId: input.messageId,
           generationId: input.generationId,
         };
-        const owner: ExternalOwner | null =
-          input.desktop && input.generationId
-            ? {
-                userId: input.userId,
-                conversationId: input.conversationId,
-                messageId: input.messageId,
-                generationId: input.generationId,
-                executorId: input.desktop.executorId,
-                deviceSessionId: input.deviceSessionId,
-              }
-            : null;
+        // Tracked for every attempt: a computer call can come from any device, and only browser
+        // calls need the sending app's own executor.
+        const owner: ExternalOwner | null = input.generationId
+          ? {
+              userId: input.userId,
+              conversationId: input.conversationId,
+              messageId: input.messageId,
+              generationId: input.generationId,
+              executorId: input.desktop?.executorId ?? COMPUTER_EXECUTOR,
+              deviceSessionId: input.deviceSessionId,
+            }
+          : null;
         const registration = {
           abort,
           settled: yield* Deferred.make<void>(),

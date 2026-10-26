@@ -1,8 +1,6 @@
-import { WORKSPACE_FOLDER_NAME } from "@chat/desktop-rpc";
 import { useMemo } from "react";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import type { ApprovalChoice } from "~/modules/desktop/client/approvals.ts";
-import type { useWorkGate } from "~/modules/desktop/client/use-work-gate.ts";
 import { useWorkApprovals } from "~/modules/desktop/client/work-context.ts";
 import { lookupsOf, mergeLookups, NO_LOOKUPS } from "../assistant-output.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
@@ -35,7 +33,6 @@ export function useChatDisplay({
   liveAnswer,
   messageEdit,
   attempts,
-  work,
   localMachineId,
   effectiveModelId,
   changeModel,
@@ -54,7 +51,6 @@ export function useChatDisplay({
   liveAnswer: ReturnType<typeof useLiveAnswer>;
   messageEdit: ReturnType<typeof useMessageEdit>;
   attempts: ReturnType<typeof useAttemptMutations>;
-  work: ReturnType<typeof useWorkGate>;
   localMachineId: string | null;
   effectiveModelId: string | null;
   changeModel: (id: string) => void;
@@ -67,7 +63,6 @@ export function useChatDisplay({
   documentIds: readonly string[];
 }) {
   const {
-    machinesByMessage,
     agentUnavailableByMessage,
     attachmentsByMessage,
     steersByAnswer,
@@ -78,7 +73,6 @@ export function useChatDisplay({
     modelByMessage,
     collectionsByUserMessage,
     skillsByUserMessage,
-    workspaceFilesByUserMessage,
   } = rows;
   const { stream, liveId } = liveAnswer;
   const {
@@ -105,7 +99,6 @@ export function useChatDisplay({
     saveEdit,
     saveQuestionEdit,
   } = attempts;
-  const folder = work.folder;
   const desktopApprovals = useWorkApprovals(conversationId);
   // Handed to every message; the card is found by call id, so only the message
   // holding that call renders one.
@@ -148,28 +141,6 @@ export function useChatDisplay({
   // stream and edit state are layered below so every unrelated row keeps its
   // object identity across stream chunks and local editor updates.
 
-  // The server keeps root names only, so display resolves them against this
-  // machine's live workspace and grants. Unresolved names drop out; grouping
-  // then falls back to the path's first segment.
-  const desktopRootsByMessage = useMemo(() => {
-    if (data.conversation.mode !== "work") return new Map<string, never>();
-    const workspacePath =
-      folder?.readiness === "ready" ? (folder.status.workspace?.path ?? null) : null;
-    const grants =
-      folder?.readiness === "ready" ? folder.status.folders.filter((item) => item.alive) : [];
-    const result = new Map<string, ReadonlyArray<{ name: string; path: string }>>();
-    for (const row of data.generations ?? []) {
-      const names = row.desktopRoots ?? [];
-      const roots = names.flatMap((name) => {
-        if (name === WORKSPACE_FOLDER_NAME)
-          return workspacePath ? [{ name, path: workspacePath }] : [];
-        const grant = grants.find((item) => item.name === name);
-        return grant ? [{ name, path: grant.path }] : [];
-      });
-      if (roots.length > 0) result.set(row.messageId, roots);
-    }
-    return result;
-  }, [data.generations, data.conversation.mode, folder]);
   const baseDisplay = useMemo(() => {
     const inherited = inheritSources(
       visibleMessages.map((message) => collectSources(toolCallsByMessage.get(message.id) ?? [])),
@@ -207,7 +178,6 @@ export function useChatDisplay({
         ...(uiStatesByMessage.has(message.id)
           ? { uiStates: uiStatesByMessage.get(message.id)! }
           : {}),
-        desktopMachineId: machinesByMessage.get(message.id) ?? null,
         reasoningSeen: reasoning.length > 0,
         toolActivities,
         inheritedSources,
@@ -232,9 +202,6 @@ export function useChatDisplay({
             }
           : {}),
         ...(desktopApprovalRequests.size > 0 ? { desktopApprovals: desktopApprovalRequests } : {}),
-        ...(desktopRootsByMessage.has(message.id)
-          ? { desktopRoots: desktopRootsByMessage.get(message.id)! }
-          : {}),
         ...(attachmentsByMessage.has(message.id)
           ? { attachments: attachmentsByMessage.get(message.id)! }
           : {}),
@@ -246,9 +213,6 @@ export function useChatDisplay({
           : {}),
         ...(collectionsByUserMessage.has(message.id)
           ? { collectionIds: collectionsByUserMessage.get(message.id)! }
-          : {}),
-        ...(workspaceFilesByUserMessage.has(message.id)
-          ? { workspaceFiles: workspaceFilesByUserMessage.get(message.id)! }
           : {}),
         ...(message.role === "user" && message.status === "complete"
           ? {
@@ -289,9 +253,6 @@ export function useChatDisplay({
     actionsDisabled,
     collectionsByUserMessage,
     skillsByUserMessage,
-    workspaceFilesByUserMessage,
-    desktopRootsByMessage,
-    machinesByMessage,
     agentUnavailableByMessage,
     answerStamps,
     questionResponses,
@@ -332,7 +293,7 @@ export function useChatDisplay({
             onResearchEnabledChange: setEditResearchEnabled,
             onSave: (draft) => void saveEdit(draft),
             onCancel: closeEdit,
-            saveDisabled: editPending || work.readOnly,
+            saveDisabled: editPending,
             controlsDisabled: editPending,
             modelId: effectiveModelId,
             onModelChange: changeModel,
@@ -375,7 +336,6 @@ export function useChatDisplay({
     effectiveModelId,
     liveId,
     generationDisabled,
-    work.readOnly,
     saveQuestionEdit,
     saveEdit,
     editSkillIds,

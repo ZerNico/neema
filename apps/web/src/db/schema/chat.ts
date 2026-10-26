@@ -47,18 +47,20 @@ export const conversations = pgTable(
       onDelete: "set null",
     }),
     fileReferenceAliases: jsonb("file_reference_aliases").$type<FileReferenceAliases>(),
-    // Fixed at creation, like the agent association. A work chat can reach
-    // folders on the user's machine; a browser tab can only read it. A folder
-    // is invited, not required: tools stay withheld until one is attached.
-    mode: text({ enum: ["chat", "work"] })
+    // The person's machine this chat's computer runs on, bound the first time the chat needs
+    // one; null is a plain chat. Not a reference: machines are keyed per person and install.
+    // See docs/internals/desktop.md.
+    machineId: text("machine_id"),
+    // Names of the folders attached on that machine, reported by it; paths stay there.
+    computerFolders: jsonb("computer_folders")
+      .$type<ReadonlyArray<{ name: string; readOnly: boolean }>>()
       .notNull()
-      .default("chat"),
-    // How much a work chat asks before acting. Policy is a fact about the
-    // chat, not the machine, so it lives here and every device honours the
-    // same choice; the folder path is the one thing that stays on the machine.
-    permissionLevel: text("permission_level", { enum: ["manual", "auto", "skip"] })
+      .default([]),
+    // How much the computer asks before acting. A fact about the chat, so every device honours
+    // the same choice. Deletes and network destinations always ask.
+    permissionLevel: text("permission_level", { enum: ["ask", "allow"] })
       .notNull()
-      .default("auto"),
+      .default("ask"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
@@ -134,32 +136,6 @@ export const conversations = pgTable(
     index("conversations_deleted_at_idx")
       .on(t.deletedAt)
       .where(sql`${t.deletedAt} is not null`),
-  ],
-);
-
-export const workTurnReservations = pgTable(
-  "work_turn_reservations",
-  {
-    id: text().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    conversationId: text("conversation_id").notNull(),
-    intent: text({ enum: ["new", "existing"] }).notNull(),
-    status: text({ enum: ["reserved", "activated", "aborted", "expired"] })
-      .notNull()
-      .default("reserved"),
-    assistantMessageId: text("assistant_message_id"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    index("work_turn_reservations_user_id_idx").on(t.userId),
-    index("work_turn_reservations_expiry_idx").on(t.expiresAt),
-    uniqueIndex("work_turn_reservations_live_conversation_idx")
-      .on(t.conversationId)
-      .where(sql`${t.status} = 'reserved'`),
   ],
 );
 

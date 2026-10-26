@@ -37,6 +37,9 @@ import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { UrlReaderExecutor } from "~/modules/tools/server/url-reader.ts";
 import { WebSearchExecutor } from "~/modules/tools/server/web-search.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { type PromptDeps } from "../prompt.ts";
 import { ChatRepo } from "../repo.ts";
 
@@ -47,6 +50,9 @@ import { ChatRepo } from "../repo.ts";
 export const generationDeps = Effect.gen(function* () {
   const repo = yield* ChatRepo;
   const external = yield* ExternalCompletion;
+  const computerCalls = yield* ComputerCalls;
+  const computerRepo = yield* ComputerRepo;
+  const machineHub = yield* MachineHub;
   const gateway = yield* AiGateway;
   const sync = yield* SyncBus;
   const webSearch = yield* WebSearchExecutor;
@@ -100,6 +106,9 @@ export const generationDeps = Effect.gen(function* () {
   return {
     repo,
     external,
+    computerCalls,
+    computerRepo,
+    machineHub,
     gateway,
     sync,
     webSearch,

@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { Toaster, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatsPage } from "./chats-page.tsx";
-import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { deleteConversation, listConversations, restoreConversation } from "../server/functions.ts";
 
 vi.mock("../server/functions.ts", () => ({
@@ -13,8 +12,6 @@ vi.mock("../server/functions.ts", () => ({
   renameConversation: vi.fn(),
   setConversationArchived: vi.fn(),
 }));
-
-vi.mock("~/modules/desktop/client/bridge.ts", () => ({ discardWorkspace: vi.fn() }));
 
 const navigate = vi.fn();
 let params: Record<string, string> = {};
@@ -130,7 +127,6 @@ describe("deleting a chat", () => {
     await waitFor(() =>
       expect(restoreMock).toHaveBeenCalledWith({ data: { conversationId: "b", mark: "mark-b" } }),
     );
-    expect(discardWorkspace).not.toHaveBeenCalled();
   });
 
   it("undoes one delete without bringing back another", async () => {
@@ -151,14 +147,6 @@ describe("deleting a chat", () => {
       expect(restoreMock).toHaveBeenCalledWith({ data: { conversationId: "b", mark: "mark-b" } }),
     );
     expect(screen.queryByText("Bin me too")).toBeNull();
-  });
-
-  it("lets a work chat's folder go once the toast closes without an Undo", async () => {
-    renderPage();
-    await remove("Bin me");
-    await screen.findByText("Chat deleted");
-    act(() => void toast.dismiss());
-    await waitFor(() => expect(discardWorkspace).toHaveBeenCalledWith("b"));
   });
 
   it("undoes with ⌘Z while the toast is up, but not from a text field", async () => {
@@ -201,21 +189,6 @@ describe("deleting a chat", () => {
     expect(await screen.findByText("Could not delete the chat.")).toBeInTheDocument();
     expect(await screen.findByText("Bin me")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Chat deleted")).toBeNull());
-  });
-
-  it("keeps a work chat's folder when its delete fails after the toast closed", async () => {
-    let fail: (error: Error) => void = () => undefined;
-    deleteMock.mockImplementation(() => new Promise((_, reject) => (fail = reject)) as never);
-    renderPage();
-    await remove("Bin me");
-    await screen.findByText("Chat deleted");
-    act(() => void toast.dismiss());
-    await waitFor(() => expect(screen.queryByText("Chat deleted")).toBeNull());
-
-    fail(new Error("offline"));
-    expect(await screen.findByText("Could not delete the chat.")).toBeInTheDocument();
-    expect(await screen.findByText("Bin me")).toBeInTheDocument();
-    expect(discardWorkspace).not.toHaveBeenCalled();
   });
 
   it("keeps a chat hidden while its delete is on the way, whatever refreshes the list", async () => {

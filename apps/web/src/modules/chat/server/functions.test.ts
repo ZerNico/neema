@@ -7,7 +7,6 @@ import { IntegrationNotAvailable } from "~/modules/integrations/errors.ts";
 import { ModelNotFound } from "../errors.ts";
 import type { ChatService as ChatServiceContext } from "./service.ts";
 import {
-  activateWorkTurn,
   answerQuestion,
   dispatchQueuedMessage,
   editMessage,
@@ -110,17 +109,6 @@ const promotions = [
 const boundaries = [
   { name: "send", run: () => sendMessage({ data: submission }) },
   {
-    name: "activate",
-    run: () =>
-      activateWorkTurn({
-        data: {
-          ...submission,
-          reservationId: "00000000-0000-7000-8000-000000000001",
-          workspaceFiles: ["synthetic.txt"],
-        },
-      }),
-  },
-  {
     name: "answer",
     run: () =>
       answerQuestion({
@@ -179,18 +167,6 @@ const integrationSelections = [
   {
     name: "send",
     run: () => sendMessage({ data: { ...submission, integrationChoices: selectedIntegrations } }),
-  },
-  {
-    name: "activate",
-    run: () =>
-      activateWorkTurn({
-        data: {
-          ...submission,
-          reservationId: "00000000-0000-7000-8000-000000000001",
-          workspaceFiles: ["synthetic.txt"],
-          integrationChoices: selectedIntegrations,
-        },
-      }),
   },
 ];
 

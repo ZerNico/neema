@@ -200,17 +200,11 @@ export const resolveAgentSelection = Effect.fn("chat.resolveAgentSelection")(fun
 });
 
 /**
- * What an attempt keeps of the desktop report. Folder names alone: paths stay
- * on the machine that granted them, so a conversation continued elsewhere
- * resolves its own folders. The machine stamp names where the chat last worked.
+ * What an attempt keeps of the desktop report: only whether the sending app could drive
+ * embedded pages. A chat's computer is the chat's bound machine, not the sender.
  */
 const desktopGenerationConfig = (desktop: DesktopSubmission | undefined) => ({
-  desktopFolders:
-    desktop && desktop.folders.length > 0 ? desktop.folders.map((folder) => folder.name) : null,
-  desktopCommands: desktop?.commands ?? false,
   desktopBrowser: desktop?.browser ?? false,
-  desktopMachineId: desktop?.machine?.id ?? null,
-  desktopMachineName: desktop?.machine?.name ?? null,
 });
 
 /**
@@ -234,10 +228,8 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
     /** Whether `deep_research` is offered to this attempt. */
     researchEnabled: boolean;
     reasoningEffort?: ReasoningEffort | null;
-    /** What the sending app reported, for a Work attempt only. */
+    /** What the sending app reported; absent from a browser. */
     desktop?: DesktopSubmission | undefined;
-    /** Workspace files this turn's send claimed; the resolver threads them through. */
-    workspaceFiles?: ReadonlyArray<string> | undefined;
     model: { contextLength: number | null | undefined };
     /** Whether web search could run at all; an agent preference cannot force it. */
     searchAvailable: boolean;
@@ -296,7 +288,6 @@ export const resolveEffectiveGeneration = Effect.fn("chat.resolveEffectiveGenera
       reasoningEffort: input.reasoningEffort ?? null,
       planEnabled,
       ...desktopGenerationConfig(input.desktop),
-      workspaceFiles: [...(input.workspaceFiles ?? [])],
     } satisfies GenerationConfig;
   },
 );

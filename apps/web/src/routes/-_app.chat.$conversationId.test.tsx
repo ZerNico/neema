@@ -51,12 +51,10 @@ const runLoader = (queryClient: QueryClient, route: typeof Route | typeof NewCha
     route.options.loader as (args: {
       context: { queryClient: QueryClient };
       params: { conversationId: string };
-      abortController: AbortController;
     }) => Promise<undefined>
   )({
     context: { queryClient },
     params: { conversationId: "c1" },
-    abortController: new AbortController(),
   });
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -142,16 +140,6 @@ describe.each([
 });
 
 describe("chat route loader", () => {
-  it("opens Work in a browser without creating a local folder query", async () => {
-    conversationMock.mockResolvedValue({
-      conversation: { id: "c1", mode: "work" },
-      messages: [],
-    } as never);
-    const queryClient = newClient();
-    await runLoader(queryClient);
-    expect(queryClient.getQueryState(["desktop-folder", "c1"])).toBeUndefined();
-  });
-
   it("preserves a missing server conversation as route not-found", async () => {
     conversationMock.mockRejectedValue(notFound());
     await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
@@ -162,30 +150,6 @@ describe("chat route loader", () => {
     await expect(runLoader(newClient())).rejects.toSatisfy(isNotFound);
   });
 });
-
-it.each(["server", "browser", "outdated"])(
-  "skips folder preparation on %s before touching the cache",
-  async (environment) => {
-    vi.resetModules();
-    const { prepareWorkFolder } = await import("~/modules/desktop/client/bridge.ts");
-    const request = vi.fn();
-    const queryClient = newClient();
-    if (environment === "server") vi.stubGlobal("window", undefined);
-    else
-      vi.stubGlobal(
-        "__chatDesktop",
-        environment === "browser" ? undefined : { protocolVersion: -1, request },
-      );
-    try {
-      await prepareWorkFolder(queryClient, "c1", new AbortController().signal);
-      expect(request).not.toHaveBeenCalled();
-      expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
-    } finally {
-      vi.unstubAllGlobals();
-      queryClient.clear();
-    }
-  },
-);
 
 describe("chat route pending state", () => {
   it("waits out a warm open before showing anything", () => {

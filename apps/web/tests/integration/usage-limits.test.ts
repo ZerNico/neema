@@ -405,7 +405,7 @@ describe("usage limits", () => {
           chat
             .sendMessage({
               userId: person,
-              conversation: { kind: "new", id, mode: "chat" },
+              conversation: { kind: "new", id },
               modelId: model.id,
               content: "hello",
               searchEnabled: false,

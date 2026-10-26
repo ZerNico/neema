@@ -5,7 +5,7 @@ import { ExternalCompletion } from "~/modules/tools/server/external-completion.t
 import { mergeToolGroups } from "~/modules/tools/server/toolset.ts";
 import { Tool } from "effect/ai";
 import { unusableDesktopResult } from "../tool-schema.ts";
-import { prepareDesktopTools, requestNetworkAccessTool, requestPathAccessTool } from "./tools.ts";
+import { prepareDesktopTools, requestNetworkAccessTool } from "./tools.ts";
 
 const owner = {
   userId: "user",
@@ -21,7 +21,6 @@ const waitingHandler = Effect.gen(function* () {
   const completed = yield* Deferred.make<void>();
   const toolkit = yield* mergeToolGroups([
     prepareDesktopTools({
-      commands: false,
       rowIdFor: (id) =>
         Effect.gen(function* () {
           expect(id).toBe("provider-call");
@@ -53,24 +52,17 @@ describe("desktop handler registration", () => {
       },
     });
     // The handler explains a missing or misspelled key; decoding must not fail the generation.
-    for (const tool of [requestNetworkAccessTool, requestPathAccessTool])
-      expect(() => Schema.decodeUnknownSync(tool.parametersSchema)({ file: "/x" })).not.toThrow();
-    expect(Tool.getJsonSchema(requestPathAccessTool)).toMatchObject({
-      properties: { path: { type: "string", minLength: 1, maxLength: 4_096 } },
-    });
+    expect(() =>
+      Schema.decodeUnknownSync(requestNetworkAccessTool.parametersSchema)({ file: "/x" }),
+    ).not.toThrow();
   });
 
-  it("offers network and path requests only when commands are ready", () => {
-    const deps = { rowIdFor: () => Effect.succeed(undefined) };
-    for (const name of [
-      "request_network_access",
-      "request_path_access",
-      "request_local_services",
-      "request_ssh_agent",
-    ]) {
-      expect(prepareDesktopTools({ ...deps, commands: false }).handlers).not.toHaveProperty(name);
-      expect(prepareDesktopTools({ ...deps, commands: true }).handlers).toHaveProperty(name);
-    }
+  it("always offers the network and SSH agent requests", () => {
+    const { handlers } = prepareDesktopTools({ rowIdFor: () => Effect.succeed(undefined) });
+    for (const name of ["request_network_access", "request_ssh_agent"])
+      expect(handlers).toHaveProperty(name);
+    for (const name of ["request_path_access", "request_local_services"])
+      expect(handlers).not.toHaveProperty(name);
   });
 
   it.effect("waits for registration and keeps an answer that arrived before readiness", () =>
@@ -115,7 +107,7 @@ describe("refused arguments", () => {
   it.effect("reach the model as what was wrong, not as a silent failure", () =>
     Effect.gen(function* () {
       const toolkit = yield* mergeToolGroups([
-        prepareDesktopTools({ commands: false, rowIdFor: () => Effect.die("never sent") }),
+        prepareDesktopTools({ rowIdFor: () => Effect.die("never sent") }),
       ]);
       const parts = yield* toolkit!
         .handle("list_folder", { path: "" }, "provider-call")

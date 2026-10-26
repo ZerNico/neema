@@ -3,7 +3,6 @@ import { announceSignIn } from "~/modules/integrations/client/sign-in-channel.ts
 import { bringToTop, markGenerating } from "~/modules/chat/client/conversation-list-cache.ts";
 import { useEffect } from "react";
 import { announceTicketRedeemed } from "~/modules/auth/ticket-events.ts";
-import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { showNotification } from "~/modules/notifications/client/show.ts";
 import type { SyncEvent } from "../events.ts";
 import { takeSyncFeed } from "./feed.ts";
@@ -259,8 +258,6 @@ export function useSync(
         case "conversation.updated":
         case "conversation.deleted":
         case "conversation.purged":
-          // Not at the delete itself: Undo would find a work chat's folder gone.
-          if (event.type === "conversation.purged") discardWorkspace(event.conversationId);
           refreshWork();
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           // A project's chat list is the same rows, filtered by project.

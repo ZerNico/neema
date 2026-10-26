@@ -122,32 +122,6 @@ describe("buildHistoryMessages without attachments", () => {
       { role: "assistant", content: "an answer[^1]" },
     ]);
   });
-
-  it("names the files a desktop send copied into the workspace", async () => {
-    const { deps } = harness({ rows: [] });
-    const messages = await build(deps, [
-      {
-        id: "m1",
-        role: "user",
-        content: "can you see whats in this file?",
-        workspaceFiles: ["dump.sql"],
-      },
-      { id: "m2", role: "user", content: "", workspaceFiles: ["a.txt", "b.png"] },
-      { id: "m3", role: "user", content: "plain question" },
-    ]);
-    expect(messages).toEqual([
-      {
-        role: "user",
-        content:
-          "[The user added this file to the workspace: dump.sql]\ncan you see whats in this file?",
-      },
-      {
-        role: "user",
-        content: "[The user added these files to the workspace: a.txt, b.png]\n",
-      },
-      { role: "user", content: "plain question" },
-    ]);
-  });
 });
 
 describe("buildHistoryMessages timestamps", () => {

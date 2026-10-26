@@ -33,8 +33,6 @@ export interface TitleInput {
   readonly modelId: string;
   readonly content: string;
   readonly attachmentFileNames: ReadonlyArray<string>;
-  /** Files dropped into the workspace with the first message; title input too. */
-  readonly workspaceFileNames?: ReadonlyArray<string>;
 }
 
 /** Enough of the first message to title it; the rest is noise for this. */
@@ -70,12 +68,9 @@ const readableText = (content: string) => extractReferences(tagWords(content)).t
 export const buildTitlePrompt = (input: {
   content: string;
   attachmentFileNames: ReadonlyArray<string>;
-  workspaceFileNames?: ReadonlyArray<string>;
 }): Prompt.Prompt => {
   const content = collapse(readableText(input.content)).slice(0, PROMPT_CONTENT_CAP);
-  const files = [...input.attachmentFileNames, ...(input.workspaceFileNames ?? [])]
-    .map((name) => `- ${collapse(name)}`)
-    .join("\n");
+  const files = input.attachmentFileNames.map((name) => `- ${collapse(name)}`).join("\n");
   const payload = [
     "<first_message>",
     content || "(no text)",
@@ -114,7 +109,6 @@ export const fallbackTitle = (
   input: {
     content: string;
     attachmentFileNames: ReadonlyArray<string>;
-    workspaceFileNames?: ReadonlyArray<string>;
   },
   locale: Locale = baseLocale,
 ): string => {
@@ -122,9 +116,7 @@ export const fallbackTitle = (
   if (/\p{L}|\p{N}/u.test(content)) {
     return capLength(content.split(" ").slice(0, TITLE_WORDS).join(" "));
   }
-  const file = [...input.attachmentFileNames, ...(input.workspaceFileNames ?? [])]
-    .map(collapse)
-    .find((name) => name.length > 0);
+  const file = input.attachmentFileNames.map(collapse).find((name) => name.length > 0);
   return file ? capLength(file) : m.chat_title_new_chat({}, { locale });
 };
 

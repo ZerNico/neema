@@ -33,6 +33,9 @@ import { KnowledgeRepo } from "~/modules/knowledge/server/repo.ts";
 import { KnowledgeService } from "~/modules/knowledge/server/service.ts";
 import { KnowledgeSearch } from "~/modules/knowledge/server/search.ts";
 import { MemoryRepo } from "~/modules/memory/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
 import { MemoryService } from "~/modules/memory/server/service.ts";
 import { SidebarPinsService } from "~/modules/navigation/server/service.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
@@ -82,6 +85,7 @@ const ReposLayer = Layer.mergeAll(
   ChatRepo.layer,
   CustomToolRepo.layer,
   MemoryRepo.layer,
+  ComputerRepo.layer,
   OAuthRepo.layer,
   SignupRepo.layer,
   ProviderRepo.layer,
@@ -121,9 +125,13 @@ const CustomToolsLayer = CustomToolBuilder.layer.pipe(
 // own DraftService + repo layers with Db, SyncBus, and the provider/agent
 // repos taken from CoreLayer's services, so the bus and the database stay
 // single instances.
+const ComputerLayer = ComputerCalls.layer.pipe(
+  Layer.provideMerge(MachineHub.layer),
+  Layer.provideMerge(ExternalCompletion.layer),
+);
 const CoreLayer = Layer.mergeAll(
   AiGateway.layer,
-  ExternalCompletion.layer,
+  ComputerLayer,
   ToolsLayer,
   CustomToolsLayer,
   AttachmentService.layer,

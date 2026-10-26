@@ -1,6 +1,4 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { PROTOCOL_VERSION, type BridgeReply } from "@chat/desktop-rpc";
-import type { ConversationMode } from "../schema.ts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Suspense, use, useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,16 +9,12 @@ import { useSync } from "~/modules/sync/client/use-sync.ts";
 import { FakeEventSource } from "../../../../tests/fixtures/event-source.ts";
 import { ChatView } from "./chat-view.tsx";
 import { toActivity } from "./stored-activities.ts";
-import { sendReservedWorkspaceTurn } from "./workspace-turn.ts";
 import {
-  abortWorkTurn,
   answerQuestion,
   branchConversation,
   getConversationHistory,
   getConversationWithMessages,
   editMessage,
-  getWorkTurnReservation,
-  reserveWorkTurn,
   resumeMessage,
   retryMessage,
   sendMessage,
@@ -47,7 +41,6 @@ import {
 } from "../../../../tests/fixtures/document-server.ts";
 import { DocumentActivityBlock } from "./document-activity-block.tsx";
 import { FileCommentContext } from "~/modules/attachments/ui/file-comment.ts";
-import type { WorkspaceImports } from "~/modules/desktop/client/use-workspace-imports.ts";
 import { createLiveText } from "../client/live-text.ts";
 
 const { navigate, markClaimed, resetUploads, seedUploads, streamProbe, transcriptProbe } =
@@ -94,13 +87,9 @@ vi.mock("~/modules/skills/ui/text-editor.tsx", () => ({
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 vi.mock("../server/functions.ts", () => ({
-  abortWorkTurn: vi.fn(),
-  activateWorkTurn: vi.fn(),
   getConversationWithMessages: vi.fn(),
   getConversationHistory: vi.fn(),
-  getWorkTurnReservation: vi.fn(),
   listConversations: vi.fn(),
-  reserveWorkTurn: vi.fn(),
   listChatModels: vi.fn(),
   branchConversation: vi.fn(),
   sendMessage: vi.fn(),
@@ -439,11 +428,8 @@ vi.mock("~/modules/attachments/client/use-attachment-uploads.ts", () => ({
   }),
 }));
 
-const abortReservationMock = vi.mocked(abortWorkTurn);
 const branchMock = vi.mocked(branchConversation);
 const conversationMock = vi.mocked(getConversationWithMessages);
-const reservationStatusMock = vi.mocked(getWorkTurnReservation);
-const reserveMock = vi.mocked(reserveWorkTurn);
 const sendMock = vi.mocked(sendMessage);
 const retryMock = vi.mocked(retryMessage);
 const resumeMock = vi.mocked(resumeMessage);
@@ -476,7 +462,7 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
     id: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
     userId: "u1",
     title: "Current chat",
-    mode: "chat" as ConversationMode,
+    machineId: null as string | null,
     modelId: "m1",
     branchedFrom: branchedFrom?.conversationId ?? null,
     createdAt: BASE,
@@ -512,7 +498,6 @@ const basePayload = (branchedFrom: { conversationId: string; title: string | nul
   window: { anchorId: "m-user" as string | null, olderCursor: null as string | null },
   priorSources: [] as ToolSource[],
   uiStates: [],
-  latestMachineAttempt: null,
   queue: [],
   queueState: null,
   branchedFrom,
@@ -631,7 +616,6 @@ const renderView = (
   };
 };
 
-const desktopRequest = vi.fn<(tag: string, payload: unknown) => Promise<BridgeReply>>();
 // The panel and its connection load lazily. Load their modules here so assertions wait on
 // document state, not first-time compilation of the editor or its connection dependencies.
 beforeAll(async () => {
@@ -646,27 +630,6 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  desktopRequest.mockReset();
-  desktopRequest.mockImplementation(async (tag) =>
-    tag === "executionSession"
-      ? {
-          ok: true,
-          value: { id: "executor", machineId: "machine", machineName: "Test Mac" },
-        }
-      : {
-          ok: true,
-          value: {
-            folders: [],
-            workspace: { path: "/workspaces/01990f4e-6650-7a33-a768-611e2e4bf4c7" },
-            sandbox: { kind: "ready" },
-          },
-        },
-  );
-  vi.stubGlobal("__chatDesktop", {
-    protocolVersion: PROTOCOL_VERSION,
-    request: desktopRequest,
-    stageDroppedFile: async () => null,
-  });
   liveDraft.tools = [];
   liveDraft.status = "complete";
   FakeEventSource.instances = [];
@@ -674,123 +637,6 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
-
-const stagedImports = () => {
-  const promote = vi.fn(async (reservationId: string) => ({
-    reservationId,
-    files: [{ stagedName: "report.pdf", finalName: "report.pdf", bytes: 12 }],
-  }));
-  const commit = vi.fn(async () => {});
-  const rollback = vi.fn(async () => {});
-  const imports: WorkspaceImports = {
-    items: [],
-    fileNames: ["report.pdf"],
-    importing: false,
-    hasError: false,
-    isFull: false,
-    notice: null,
-    queued: false,
-    submissionId: "550e8400-e29b-41d4-a716-446655440000",
-    addFiles: vi.fn(),
-    remove: vi.fn(),
-    submit: vi.fn(),
-    cancelQueue: vi.fn(),
-    promote,
-    commit,
-    rollback,
-    beginSubmission: vi.fn(() => vi.fn()),
-    markClaimed: vi.fn(),
-    reset: vi.fn(),
-    dismissNotice: vi.fn(),
-  };
-  return { imports, commit, rollback };
-};
-
-describe("reserved workspace sends", () => {
-  it("aborts and rolls back after a confirmed failed activation retry", async () => {
-    reserveMock.mockResolvedValue({} as never);
-    reservationStatusMock.mockResolvedValue({
-      conversationId: "conversation",
-      status: "reserved",
-      assistantMessageId: null,
-    } as never);
-    abortReservationMock.mockResolvedValue({
-      conversationId: "conversation",
-      status: "aborted",
-      assistantMessageId: null,
-    } as never);
-    const activationError = new Error("Activation rejected");
-    const activate = vi.fn().mockRejectedValue(activationError);
-    const staged = stagedImports();
-
-    await expect(
-      sendReservedWorkspaceTurn({
-        conversation: { kind: "existing", id: "conversation" },
-        imports: staged.imports,
-        activate,
-      }),
-    ).rejects.toBe(activationError);
-
-    expect(activate).toHaveBeenCalledTimes(2);
-    expect(reservationStatusMock).toHaveBeenCalledTimes(2);
-    expect(abortReservationMock).toHaveBeenCalledTimes(1);
-    expect(staged.rollback).toHaveBeenCalledTimes(1);
-    expect(staged.commit).not.toHaveBeenCalled();
-  });
-
-  it("keeps the files of a turn that activated before its abort landed", async () => {
-    reserveMock.mockResolvedValue({} as never);
-    reservationStatusMock.mockResolvedValue({
-      conversationId: "conversation",
-      status: "reserved",
-      assistantMessageId: null,
-    } as never);
-    abortReservationMock.mockResolvedValue({
-      conversationId: "conversation",
-      status: "activated",
-      assistantMessageId: "assistant",
-    } as never);
-    const activate = vi.fn().mockRejectedValue(new Error("Response lost"));
-    const staged = stagedImports();
-
-    await expect(
-      sendReservedWorkspaceTurn({
-        conversation: { kind: "existing", id: "conversation" },
-        imports: staged.imports,
-        activate,
-      }),
-    ).resolves.toEqual({ conversationId: "conversation", assistantMessageId: "assistant" });
-    expect(staged.rollback).not.toHaveBeenCalled();
-    expect(staged.commit).toHaveBeenCalledTimes(1);
-  });
-
-  it("retains promotion evidence when the activation retry is ambiguous", async () => {
-    reserveMock.mockResolvedValue({} as never);
-    reservationStatusMock
-      .mockResolvedValueOnce({
-        conversationId: "conversation",
-        status: "reserved",
-        assistantMessageId: null,
-      } as never)
-      .mockRejectedValueOnce(new Error("Server unreachable"));
-    const activationError = new Error("Connection lost");
-    const activate = vi.fn().mockRejectedValue(activationError);
-    const staged = stagedImports();
-
-    await expect(
-      sendReservedWorkspaceTurn({
-        conversation: { kind: "existing", id: "conversation" },
-        imports: staged.imports,
-        activate,
-      }),
-    ).rejects.toBe(activationError);
-
-    expect(activate).toHaveBeenCalledTimes(2);
-    expect(abortReservationMock).not.toHaveBeenCalled();
-    expect(staged.rollback).not.toHaveBeenCalled();
-    expect(staged.commit).not.toHaveBeenCalled();
-  });
-});
 
 it("sends a comment on a file into this chat, and refuses it while an answer runs", async () => {
   sendMock.mockResolvedValueOnce({} as never);
@@ -841,44 +687,6 @@ const askRow = {
   callIndex: 2,
   error: null,
 };
-
-it("guards Work initiation while folder IPC is unresolved, then enables ready-empty actions", async () => {
-  let resolve!: (reply: BridgeReply) => void;
-  const pending = new Promise<BridgeReply>((done) => {
-    resolve = done;
-  });
-  desktopRequest.mockReturnValue(pending);
-  const data = basePayload(null);
-  renderView(null, { conversation: { ...data.conversation, mode: "work" }, toolCalls: [askRow] });
-  expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Edit m-user" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Branch off m-answer" })).toBeEnabled();
-  // The composer test double bypasses UI gating, so this exercises the view's handler.
-  fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
-  await waitFor(() =>
-    expect(toast.error).toHaveBeenCalledWith(
-      "Wait for the folder check before continuing this work chat.",
-    ),
-  );
-  expect(sendMock).not.toHaveBeenCalled();
-  expect(retryMock).not.toHaveBeenCalled();
-  expect(editMessage).not.toHaveBeenCalled();
-  expect(answerQuestion).not.toHaveBeenCalled();
-  expect(desktopRequest).not.toHaveBeenCalledWith("executionSession", expect.anything());
-  await act(async () =>
-    resolve({
-      ok: true,
-      value: {
-        folders: [],
-        workspace: { path: "/workspaces/01990f4e-6650-7a33-a768-611e2e4bf4c7" },
-        sandbox: { kind: "ready" },
-      },
-    }),
-  );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Retry m-answer" })).toBeEnabled());
-  expect(screen.getByRole("button", { name: "Edit m-user" })).toBeEnabled();
-});
 
 it("draws a steer inside the answer it changed, and names it before a retry removes it", async () => {
   renderView(null, {

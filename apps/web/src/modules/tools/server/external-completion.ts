@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Clock, Context, Deferred, Duration, Effect, Layer, type Scope } from "effect";
 
+/**
+ * The executor a computer call is registered under. No page ever checks in with it, so no page
+ * claims a computer call; the chat's machine is sent it instead (docs/internals/desktop.md).
+ */
+export const COMPUTER_EXECUTOR = "computer";
+
 export interface ExternalWait<A> {
   readonly onTimeout: () => A;
   readonly timeout: Duration.Duration;

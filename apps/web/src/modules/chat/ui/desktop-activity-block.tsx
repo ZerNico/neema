@@ -4,14 +4,13 @@ import {
   Delete02Icon,
   Download04Icon,
   FileImportIcon,
+  FolderAddIcon,
   Edit02Icon,
   File01Icon,
   Folder01Icon,
   FolderSearchIcon,
   FolderTransferIcon,
   NoInternetIcon,
-  FolderShared01Icon,
-  ComputerIcon,
   Key01Icon,
   PencilEdit02Icon,
   SearchList01Icon,
@@ -55,8 +54,7 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   delete_local_file: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
-  request_path_access: FolderShared01Icon,
-  request_local_services: ComputerIcon,
+  request_folder: FolderAddIcon,
   request_ssh_agent: Key01Icon,
 };
 
@@ -75,8 +73,6 @@ const argText = (activity: DesktopToolActivity) => {
       const port = typeof args.port === "number" ? args.port : 443;
       return host ? `${host}:${port}` : "";
     }
-    case "request_path_access":
-      return text(args.path);
     case "find_files":
     case "search_files":
       return text(args.pattern);
@@ -204,12 +200,10 @@ const runningLabel = (
       return what
         ? m.chat_desktop_requesting_network_to({ host: what })
         : m.chat_desktop_requesting_network();
-    case "request_path_access":
+    case "request_folder":
       return what
-        ? m.chat_desktop_requesting_read_to({ path: what })
-        : m.chat_desktop_requesting_read();
-    case "request_local_services":
-      return m.chat_desktop_requesting_local();
+        ? m.chat_desktop_requesting_folder_path({ path: what })
+        : m.chat_desktop_requesting_folder();
     case "request_ssh_agent":
       return m.chat_desktop_requesting_ssh();
   }
@@ -280,12 +274,6 @@ const approvalTitle = (
           : m.chat_desktop_ask_read();
     case "command":
       return m.chat_desktop_ask_command();
-    case "path":
-      return m.chat_desktop_ask_path();
-    case "local":
-      return m.chat_desktop_ask_local();
-    case "ssh-agent":
-      return m.chat_desktop_ask_ssh();
     case "network":
       return activity.args?.privateNetwork === true
         ? m.chat_desktop_ask_private_network()
@@ -431,27 +419,10 @@ function ApprovalCard({
             {what}
           </pre>
         ) : null}
-        {approval.kind === "ssh-agent" ? (
-          <>
-            <p className="text-muted-foreground text-xs">{m.chat_desktop_ssh_note()}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => approval.decide("allow-chat")}>
-                {m.chat_desktop_allow_chat()}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
-                {m.chat_desktop_deny()}
-              </Button>
-            </div>
-          </>
-        ) : approval.kind === "site" ? (
+        {approval.kind === "site" ? (
           <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_once()} />
-        ) : approval.kind === "network" || approval.kind === "path" || approval.kind === "local" ? (
-          <>
-            {approval.kind === "local" ? (
-              <p className="text-muted-foreground text-xs">{m.chat_desktop_local_note()}</p>
-            ) : null}
-            <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_answer()} />
-          </>
+        ) : approval.kind === "network" ? (
+          <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_answer()} />
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>

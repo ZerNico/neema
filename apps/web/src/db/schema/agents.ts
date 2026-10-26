@@ -214,29 +214,8 @@ export const messageGenerationConfig = pgTable(
      */
     imageModelId: text("image_model_id"),
     imageModelName: text("image_model_name"),
-    /**
-     * The folders attached on the machine this attempt was sent from, by name.
-     * Null means the tools that reach a machine were not offered. Only names:
-     * the paths stay on the machine that granted them, so the same conversation
-     * continued elsewhere resolves its own folders or none.
-     */
-    desktopFolders: text("desktop_folders").array(),
-    /**
-     * Files the composer copied into the chat's workspace for this send, by
-     * basename. The marker used to be part of the user message text; it is data
-     * now, so the transcript can render it as chips and retry replays it.
-     */
-    workspaceFiles: jsonb("workspace_files").$type<string[]>().notNull().default([]),
-    /** Whether that machine could sandbox a command when this was sent. */
-    desktopCommands: boolean("desktop_commands").notNull().default(false),
+    /** Whether the sending app could drive embedded pages, which offers the browser tools. */
     desktopBrowser: boolean("desktop_browser").notNull().default(false),
-    /**
-     * The machine this attempt was sent from. A reinstall mints a new id, so
-     * the client treats an unknown one exactly like another device: "last
-     * worked on X" plus take-over. Names are display text, never an address.
-     */
-    desktopMachineId: text("desktop_machine_id"),
-    desktopMachineName: text("desktop_machine_name"),
     /**
      * The effective union of agent dependencies and standalone inputs, in order. Kept beside the resolved
      * document manifest because an empty or fully-pending collection resolves to
