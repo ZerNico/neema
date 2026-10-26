@@ -141,7 +141,9 @@ When the message comes from the desktop app, the model gets `browser_tabs`, `bro
 `browser_evaluate` to act. They are desktop tools in family, envelope and result shape, but
 unlike the computer's tools they are run by the page (`browser/client/execute-browser.ts`)
 through `ExternalCompletion`, and offered only when the sending app reports `desktop.browser`,
-meaning its shell has the bridge's `agent` surface. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
+meaning its shell has the bridge's `agent` surface. They are a lazy family (`browser`,
+[prompt caching](prompt-caching.md#lazy-tool-families)): most chats never open a page, so their
+schemas are paid only once one does. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
 ([files](files.md#files-into-tools)), shown to a vision model and offered by reference. The
 user sees one only when the snapshot is taken with `share`, which attaches it to the answer
 and stores it with the chat; the result's first line tells the model which happened, since a

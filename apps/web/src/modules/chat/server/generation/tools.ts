@@ -844,7 +844,9 @@ export const prepareGenerationTools = (
             ? permissions.agentsCreate
             : family === "schedule-draft"
               ? permissions.schedules
-              : offeredOffice.has(family),
+              : family === "browser"
+                ? browserTools !== null
+                : offeredOffice.has(family),
         )
         .map((family) => ({ family, summary: fixedFamilySummary(family) })),
       ...(integrationTools?.lazy ?? []),

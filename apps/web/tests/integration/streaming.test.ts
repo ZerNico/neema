@@ -9242,6 +9242,16 @@ describe("desktop calls run by the sending app", () => {
       expect(offered[0]).not.toContain("browser_open");
       expect(offered[1]).toEqual(expect.arrayContaining(["browser_open", "browser_snapshot"]));
       expect(JSON.stringify(prompts[1]!.prompt)).toContain("web browser on the user's computer");
+      // A lazy family: named in the catalogue, its schemas advertised once a call loads it.
+      const advertised = (input: GatewayInput) =>
+        typeof input.toolChoice === "object"
+          ? [...input.toolChoice.oneOf]
+          : Object.keys(input.toolkit?.tools ?? {});
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("- browser: ");
+      expect(advertised(prompts[1]!)).not.toContain("browser_open");
+      expect(advertised(prompts[2]!)).toEqual(
+        expect.arrayContaining(["browser_open", "browser_snapshot"]),
+      );
       expect(seen.map((call) => [call.args.url, call.meta?.preauthorized])).toEqual([
         ["https://example.com/docs", true],
         // An address the model came up with asks first.

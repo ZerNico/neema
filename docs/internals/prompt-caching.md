@@ -96,7 +96,7 @@ the cost is the whole input again, at the write price, on every request.
 ## Lazy tool families
 
 - Tool schemas are part of the prefix and are paid on every uncached request. Families that
-  are large or rarely needed (the Office editors, agent and schedule drafting) are offered by
+  are large or rarely needed (the Office editors, agent and schedule drafting, the browser) are offered by
   name only: a stable system section lists every offered family, and `load_tools` loads one.
   `tool-load.ts` is the registry.
 - A remote MCP server is a family of its own (`integration:<id>`) once what it lists passes
