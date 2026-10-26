@@ -63,18 +63,10 @@ function StoredReference({ attachment }: { attachment: Attachment }) {
 }
 
 function LocalReference({ path }: { path: string }) {
-  const { aliases, machineId } = use(FileReferenceContext);
+  const { machineId } = use(FileReferenceContext);
   const originMachineId = use(FileReferenceMachine);
   const local = useLocalFileConversation();
-  const resolved = local
-    ? resolveLocalReference({
-        path,
-        ...local,
-        workspaceAncestors: aliases?.workspaceAncestors ?? [],
-        machineId,
-        originMachineId,
-      })
-    : null;
+  const resolved = local ? resolveLocalReference({ path, machineId, originMachineId }) : null;
   const preview = useLocalFilePreview(resolved);
   return (
     <>

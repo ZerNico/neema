@@ -26,18 +26,13 @@ import { m } from "~/paraglide/messages.js";
 
 export function LocalFileConversationProvider({
   conversationId,
-  workspaceRoot,
   children,
 }: {
   conversationId: string;
-  workspaceRoot?: string | null;
   children: ReactNode;
 }) {
   // One object per conversation, so consumers re-render only when it changes.
-  const value = useMemo(
-    () => ({ conversationId, workspaceRoot: workspaceRoot ?? null }),
-    [conversationId, workspaceRoot],
-  );
+  const value = useMemo(() => ({ conversationId }), [conversationId]);
   return (
     <LocalFileConversationContext.Provider value={value}>
       {children}

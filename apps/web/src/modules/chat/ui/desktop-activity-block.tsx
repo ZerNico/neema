@@ -354,7 +354,11 @@ function ScopeChoices({
             {once}
           </Button>
         ) : null}
-        <Button size="sm" variant={once ? "outline" : "default"} onClick={() => decide("allow-chat")}>
+        <Button
+          size="sm"
+          variant={once ? "outline" : "default"}
+          onClick={() => decide("allow-chat")}
+        >
           {m.chat_desktop_allow_chat()}
         </Button>
         <Button size="sm" variant="outline" onClick={() => decide("allow-always")}>

@@ -1,6 +1,5 @@
 export interface FileReferenceAliases {
   attachments: Record<string, string>;
-  workspaceAncestors: readonly string[];
 }
 
 /** Only the actual prefix clone can give a historical reference a current target. */
@@ -19,11 +18,5 @@ export function composeFileReferenceAliases(input: {
     }
     attachments.set(historicalId, targetId);
   }
-  return {
-    attachments: Object.fromEntries(attachments),
-    // Unlike branchedFrom, this provenance must survive deletion of every source chat.
-    workspaceAncestors: [
-      ...new Set([input.sourceConversationId, ...(input.inherited?.workspaceAncestors ?? [])]),
-    ],
-  };
+  return { attachments: Object.fromEntries(attachments) };
 }

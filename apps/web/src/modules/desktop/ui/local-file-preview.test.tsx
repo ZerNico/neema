@@ -288,17 +288,13 @@ describe("a work file row on the desktop", () => {
 });
 
 const branchId = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
-const sourceId = "01a0df3a-9159-75d9-9270-2348eeeca617";
 const inlineView = (content: string, origin: string | null = "machine", streaming = false) => (
   <QueryClientProvider client={new QueryClient()}>
-    <LocalFileConversationProvider
-      conversationId={branchId}
-      workspaceRoot={`/workspaces/${branchId}`}
-    >
+    <LocalFileConversationProvider conversationId={branchId}>
       <FileReferenceContext
         value={{
           attachments: new Map(),
-          aliases: { attachments: {}, workspaceAncestors: [sourceId] },
+          aliases: { attachments: {} },
           machineId: "machine",
         }}
       >
@@ -312,11 +308,11 @@ const inlineView = (content: string, origin: string | null = "machine", streamin
 const inlineLink = (path: string) => `[file](/local-file?path=${encodeURIComponent(path)})`;
 
 describe("inline Work file references over the desktop bridge", () => {
-  it("previews all five command-created images after streaming, reload and branching without attachment rows", async () => {
+  it("previews all five command-created images after streaming and reload without attachment rows", async () => {
     const paths = Array.from({ length: 5 }, (_, index) => `downloaded_images/image_${index}.jpg`);
     for (const path of paths)
-      files[`/workspaces/${branchId}/${path}`] = { mediaType: "image/jpeg", base64: "AAAA" };
-    const content = paths.map((path) => inlineLink(`/workspaces/${sourceId}/${path}`)).join("\n\n");
+      files[`/workspace/${path}`] = { mediaType: "image/jpeg", base64: "AAAA" };
+    const content = paths.map((path) => inlineLink(`/workspace/${path}`)).join("\n\n");
     const first = render(inlineView(content, "machine", true));
     expect(asked).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "Preview image_0.jpg" }));
@@ -336,28 +332,15 @@ describe("inline Work file references over the desktop bridge", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     }
     expect(asked).toEqual(
-      [paths[0]!, ...paths].map((path) => ({
-        tag: "readBinary",
-        path: `/workspaces/${branchId}/${path}`,
-      })),
+      [paths[0]!, ...paths].map((path) => ({ tag: "readBinary", path: `/workspace/${path}` })),
     );
     expect(revoked).toEqual(handed);
-  });
-
-  it("does not fall back to a surviving source file when the branch copy is missing", async () => {
-    const path = `/workspaces/${sourceId}/missing.png`;
-    files[path] = { mediaType: "image/png", base64: "AAAA" };
-    render(inlineView(inlineLink(path)));
-    await userEvent.click(screen.getByRole("button", { name: "Preview missing.png" }));
-    await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
-    expect(asked).toEqual([{ tag: "readBinary", path: `/workspaces/${branchId}/missing.png` }]);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it.each([null, "other-machine"])(
     "refuses unknown or foreign machine provenance: %s",
     async (origin) => {
-      render(inlineView(inlineLink(`/workspaces/${sourceId}/image.png`), origin));
+      render(inlineView(inlineLink("/workspace/image.png"), origin));
       const chip = screen.getByRole("button", { name: "Unavailable file: image.png" });
       expect(chip).toBeDisabled();
       await userEvent.click(chip);
@@ -368,7 +351,7 @@ describe("inline Work file references over the desktop bridge", () => {
   it.each(["svg", "html"])(
     "keeps inline %s files in the existing safe preview",
     async (extension) => {
-      const path = `/attached/file.${extension}`;
+      const path = `/folders/attached/file.${extension}`;
       files[path] = {
         text:
           extension === "svg"

@@ -56,33 +56,18 @@ export const localFileName = (path: string) => {
   return normalized.slice(normalized.lastIndexOf("/") + 1);
 };
 
+/**
+ * The path a local file link opens, or null. Paths are the chat computer's guest paths, the same
+ * on every machine and in every branch, so nothing is rewritten; a link opens only on the
+ * machine that chat's computer runs on.
+ */
 export function resolveLocalReference(input: {
   path: string;
-  conversationId: string;
-  workspaceRoot: string | null;
-  workspaceAncestors: readonly string[];
   machineId: string | null;
   originMachineId: string | null;
 }): string | null {
   if (!input.machineId || input.machineId !== input.originMachineId) return null;
-  const path = absoluteFilePath(input.path);
-  if (!path) return null;
-  const workspace = input.workspaceRoot && absoluteFilePath(input.workspaceRoot);
-  // Wait for the current workspace before resolving an inherited path.
-  if (!workspace || workspace.windows !== path.windows) return null;
-  const cut = workspace.normalized.lastIndexOf("/");
-  // Workspaces are siblings keyed by conversation id (desktop/workspaces.ts).
-  if (workspace.normalized.slice(cut + 1) !== input.conversationId) return null;
-  const base = workspace.normalized.slice(0, cut + 1);
-  for (const ancestor of input.workspaceAncestors) {
-    if (!/^[a-zA-Z0-9_-]+$/.test(ancestor)) continue;
-    const source = `${base}${ancestor}/`;
-    const matches = path.windows
-      ? path.normalized.toLowerCase().startsWith(source.toLowerCase())
-      : path.normalized.startsWith(source);
-    if (matches) return `${workspace.normalized}/${path.normalized.slice(source.length)}`;
-  }
-  return input.path;
+  return /^\/(?:workspace|folders\/[^/]+)(?:\/|$)/.test(input.path) ? input.path : null;
 }
 
 export function referenceAttachment(

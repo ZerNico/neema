@@ -761,7 +761,12 @@ export const prepareAttemptPrompt = (env: {
         : null,
       research: !!researchTool,
       desktop: desktopTools
-        ? yield* computerState(deps.computerRepo, deps.machineHub, input.userId, input.conversationId)
+        ? yield* computerState(
+            deps.computerRepo,
+            deps.machineHub,
+            input.userId,
+            input.conversationId,
+          )
         : null,
       browser: !!browserTools,
       interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)

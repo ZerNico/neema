@@ -21,12 +21,12 @@ const context = {
     [image.id, image],
     ["other", { ...image, id: "other", fileName: "other.png" }],
   ]),
-  aliases: { attachments: { old: "image" }, workspaceAncestors: ["source"] },
+  aliases: { attachments: { old: "image" } },
   machineId: "machine",
 };
 const view = (content: string, streaming = false) => (
   <QueryClientProvider client={queryClient}>
-    <LocalFileConversationProvider conversationId="branch" workspaceRoot="/work/branch">
+    <LocalFileConversationProvider conversationId="branch">
       <FileReferenceContext value={context}>
         <FileReferenceMachine value="machine">
           <AssistantMarkdown content={content} streaming={streaming} />

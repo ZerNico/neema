@@ -680,7 +680,6 @@ describe("branching a conversation", () => {
         expect(Object.keys(firstAliases.attachments).toSorted()).toEqual(
           [early!.id, late!.id].toSorted(),
         );
-        expect(firstAliases.workspaceAncestors).toEqual([source.conversation.id]);
         yield* purgeConversation(userId, source.conversation.id);
         expect(
           (yield* repo.getConversation(userId, first.conversation.id)).branchedFrom,
@@ -698,7 +697,6 @@ describe("branching a conversation", () => {
             [early!.id]: secondFiles[0]!.id,
             [firstAliases.attachments[early!.id]!]: secondFiles[0]!.id,
           },
-          workspaceAncestors: [first.conversation.id, source.conversation.id],
         };
         expect(second.fileReferenceAliases).toEqual(expected);
         expect(secondMessages[1]).toMatchObject({ content, providerReplay: replay });
@@ -737,10 +735,7 @@ describe("branching a conversation", () => {
         yield* db
           .update(conversationsTable)
           .set({
-            fileReferenceAliases: {
-              attachments: { [files[0]!.id]: files[1]!.id },
-              workspaceAncestors: [],
-            },
+            fileReferenceAliases: { attachments: { [files[0]!.id]: files[1]!.id } },
           })
           .where(eq(conversationsTable.id, source.conversation.id));
         const outcome = yield* Effect.exit(
