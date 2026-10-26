@@ -1,6 +1,6 @@
 # The Linux guest every chat's computer runs in (docs/internals/desktop.md). Commands run as
-# root: the VM is the boundary, not users inside it. The desktop pins a published build by
-# digest, so a change here ships with a desktop release.
+# root: the VM is the boundary, not users inside it. A release builds the desktop with the image
+# of this folder, so a change here ships with a desktop release and resets every chat's installs.
 
 FROM node:24-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea AS node
 FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
@@ -32,6 +32,18 @@ RUN apt-get update \
       fonts-crosextra-carlito fonts-crosextra-caladea \
  && rm -rf /var/lib/apt/lists/*
 
+# Mounted folders belong to the person's host account, not root, and git refuses a repository
+# owned by someone else. First contact with a new SSH host is trusted, per chat VM.
+RUN git config --system --add safe.directory '*' \
+ && git config --system init.defaultBranch main \
+ && printf 'Host *\n  StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-sandbox.conf
+
+# apt over HTTPS: the egress proxy grants destinations by name and port, and the built-in grants
+# cover the Ubuntu archives on 443 only.
+RUN sed -i 's#http://#https://#g' /etc/apt/sources.list.d/ubuntu.sources
+
+# Layers from here on change most often (Node, then the Python lock), so a refresh downloads
+# them and keeps the system layers above.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
@@ -50,16 +62,6 @@ RUN python3 -m venv /opt/venv \
  && rm /tmp/requirements.txt \
  # Commands run in a login shell, whose /etc/profile resets root's PATH.
  && printf 'export VIRTUAL_ENV=/opt/venv\nexport PATH="/opt/venv/bin:$PATH"\n' > /etc/profile.d/10-venv.sh
-
-# Mounted folders belong to the person's host account, not root, and git refuses a repository
-# owned by someone else. First contact with a new SSH host is trusted, per chat VM.
-RUN git config --system --add safe.directory '*' \
- && git config --system init.defaultBranch main \
- && printf 'Host *\n  StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-sandbox.conf
-
-# apt over HTTPS: the egress proxy grants destinations by name and port, and the built-in grants
-# cover the Ubuntu archives on 443 only.
-RUN sed -i 's#http://#https://#g' /etc/apt/sources.list.d/ubuntu.sources
 
 COPY ssh-agent-bridge /usr/local/bin/ssh-agent-bridge
 COPY smoke.sh /usr/local/share/sandbox/smoke.sh
