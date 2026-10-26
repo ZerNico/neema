@@ -1,5 +1,16 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Duration, Effect, Exit, Fiber, Layer, Option, Queue, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import type { MachineEvent, MachineHello } from "@chat/desktop-rpc";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -13,7 +24,11 @@ const USER = "u";
 const CHAT = "c";
 
 /** An in-memory stand-in for the database side, holding one chat and its grants. */
-const fakeRepo = (initial: Partial<ChatComputer> = {}) => {
+const fakeRepo = (
+  initial: Partial<ChatComputer> = {},
+  /** Holds `sentFiles` until released: the database read right before a call is sent. */
+  gate?: Deferred.Deferred<void>,
+) => {
   const chat: { -readonly [K in keyof ChatComputer]: ChatComputer[K] } = {
     conversationId: CHAT,
     machineId: null,
@@ -54,7 +69,8 @@ const fakeRepo = (initial: Partial<ChatComputer> = {}) => {
       grants: () => Effect.succeed(grants.map((grant, index) => ({ id: `g${index}`, ...grant }))),
       addGrant: (_userId, grant) => Effect.sync(() => void grants.push(grant)),
       removeGrant: () => Effect.succeed(true),
-      sentFiles: () => Effect.succeed([{ id: "a1", name: "data.csv" }]),
+      sentFiles: () =>
+        Effect.as(gate ? Deferred.await(gate) : Effect.void, [{ id: "a1", name: "data.csv" }]),
     }),
   );
   return { chat, grants, layer };
@@ -345,6 +361,24 @@ describe("ComputerCalls", () => {
         summary: "Laptop is still getting ready",
         detail: expect.stringContaining("(64%)"),
       });
+    }),
+  );
+
+  it.effect("a Stop while an approval is being carried out never lets the call run", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const { calls, open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }, gate));
+      const laptop = yield* connect("laptop");
+      const { scope } = yield* open("call-1", "run_command", { command: "rm -rf build" }, "laptop");
+      const deciding = yield* Effect.forkChild(calls.decide(USER, "call-1", "allow"), {
+        startImmediately: true,
+      });
+      yield* Scope.close(scope, Exit.void);
+      yield* Deferred.succeed(gate, undefined);
+      yield* Fiber.join(deciding);
+      // Events arrive in order: had call-1 reached the machine, it would come first.
+      yield* open("call-2", "list_folder", { path: "." }, "laptop");
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ type: "call", callId: "call-2" });
     }),
   );
 

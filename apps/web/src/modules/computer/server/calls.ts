@@ -144,6 +144,8 @@ export class ComputerCalls extends Context.Service<
       const blanket = new Set<string>();
 
       const changed = (userId: string) => bus.publish(userId, { type: "computer.changed" });
+      /** Read through a call so TypeScript does not keep a narrowing an await may have broken. */
+      const ended = (entry: Entry) => entry.state.kind === "done";
 
       const finish = (entry: Entry, result: DesktopToolResult) =>
         Effect.gen(function* () {
@@ -169,6 +171,7 @@ export class ComputerCalls extends Context.Service<
         machine?: { id: string; name: string },
       ) =>
         Effect.gen(function* () {
+          if (ended(entry)) return;
           entry.state = machine
             ? { kind: "waiting", approval, machine }
             : { kind: "waiting", approval };
@@ -284,6 +287,7 @@ export class ComputerCalls extends Context.Service<
        */
       const hold = (entry: Entry, machineId: string) =>
         Effect.gen(function* () {
+          if (ended(entry)) return;
           const already = entry.state.kind === "preparing";
           entry.state = { kind: "preparing", machineId };
           yield* changed(entry.userId);
@@ -313,9 +317,12 @@ export class ComputerCalls extends Context.Service<
           );
         });
 
+      // Every await before a state change may let Stop close the call's scope, whose finalizer
+      // marks it done. A call that ended meanwhile is never sent, or is cancelled if it was.
       const send = (entry: Entry, machineId: string) =>
         Effect.gen(function* () {
           const files = yield* repo.sentFiles(entry.userId, entry.conversationId);
+          if (ended(entry)) return;
           const delivered = yield* hub.send(entry.userId, machineId, {
             type: "call",
             callId: entry.callId,
@@ -334,6 +341,10 @@ export class ComputerCalls extends Context.Service<
                 "The desktop app disconnected before the call could run. Do not assume it ran.",
               ),
             );
+            return;
+          }
+          if (ended(entry)) {
+            yield* hub.send(entry.userId, machineId, { type: "cancel", callId: entry.callId });
             return;
           }
           entry.state = { kind: "sent", machineId };
