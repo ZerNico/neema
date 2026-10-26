@@ -270,7 +270,7 @@ describe("ComputerCalls", () => {
         fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
       );
       yield* connect("laptop");
-      yield* open("call-1", "delete_local_file", { paths: ["/workspace/a"] }, "laptop");
+      yield* open("call-1", "delete_files", { paths: ["/workspace/a"] }, "laptop");
       expect((yield* calls.pending(USER)).map((call) => call.approval)).toEqual(["delete"]);
     }),
   );
@@ -281,7 +281,7 @@ describe("ComputerCalls", () => {
       const laptop = yield* connect("laptop");
       const { waiting } = yield* open(
         "call-1",
-        "write_local_file",
+        "write_file",
         { path: "/workspace/a", text: "x" },
         "laptop",
       );

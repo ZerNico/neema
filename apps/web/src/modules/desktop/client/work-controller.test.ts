@@ -10,7 +10,7 @@ const call = (id: string, conversationId = "a"): ExternalOperation => ({
   generationId: `g-${conversationId}`,
   executorId: "e",
   callId: id,
-  name: "write_local_file",
+  name: "write_file",
   args: { path: "site/a", text: "$&" },
   expiresAt: Date.now() + 1000,
   claimed: false,
@@ -86,14 +86,14 @@ describe("app-owned Work execution", () => {
       const { controller } = setup();
       const current = snapshot(
         call("edit"),
-        { ...call("read"), name: "read_local_file" },
+        { ...call("read"), name: "read_file" },
         { ...call("command"), name: "run_command" },
         {
           ...call("network"),
           name: "request_network_access",
           args: { host: "example.com" },
         },
-        { ...call("delete"), name: "delete_local_file" },
+        { ...call("delete"), name: "delete_files" },
       );
       current.settings[0]!.approval = approval;
       controller.reconcile(current);
@@ -110,9 +110,9 @@ describe("app-owned Work execution", () => {
     const { controller, completed } = setup();
     const current = snapshot(
       call("edit"),
-      { ...call("read"), name: "read_local_file" },
+      { ...call("read"), name: "read_file" },
       { ...call("command"), name: "run_command" },
-      { ...call("delete"), name: "delete_local_file" },
+      { ...call("delete"), name: "delete_files" },
     );
     controller.reconcile(current);
     controller.decide("edit", "allow-rest");

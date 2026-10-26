@@ -286,7 +286,7 @@ export async function editTextFile(
     // Written back whole, so a byte that is not UTF-8 would come back as U+FFFD everywhere.
     throw new Refusal(
       "not-text",
-      `${placed.path} is not UTF-8 text, so editing it would damage it. Rewrite it whole with write_local_file if that is what you mean.`,
+      `${placed.path} is not UTF-8 text, so editing it would damage it. Rewrite it whole with write_file if that is what you mean.`,
     );
   }
   // Models write lines with \n; a file with Windows line endings keeps its own. Lines that

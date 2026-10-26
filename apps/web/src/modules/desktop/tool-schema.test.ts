@@ -63,10 +63,10 @@ describe("approvalKind", () => {
   it("asks for nothing when a chat's own file is saved into the workspace", () => {
     // The workspace is app-owned and a drop lands there unasked; the copy
     // never overwrites, so there is nothing for a person to weigh.
-    expect(approvalKind("save_to_workspace", {})).toBeNull();
+    expect(approvalKind("copy_to_computer", {})).toBeNull();
     // Saving to a chosen place can replace a file, so it asks like a write.
-    expect(approvalKind("save_to_workspace", { path: "/Users/a/out.pdf" })).toBe("edit");
-    expect(approvalKind("write_local_file", {})).toBe("edit");
+    expect(approvalKind("copy_to_computer", { path: "/Users/a/out.pdf" })).toBe("edit");
+    expect(approvalKind("write_file", {})).toBe("edit");
     expect(approvalKind("request_network_access", {})).toBe("network");
     // Only a navigation with an address is a new site; back and reload stay put.
     expect(approvalKind("browser_navigate", { url: "https://a.test" })).toBe("site");
@@ -80,11 +80,11 @@ describe("desktopToolTimeout", () => {
   it("gives a tool that asks nobody the long wait when it moves bytes", () => {
     // Registered by approval kind, these two once expired on the page after two minutes
     // while the server waited ten.
-    expect(approvalKind("import_local_file", {})).toBeNull();
-    expect(approvalKind("save_to_workspace", {})).toBeNull();
-    expect(desktopToolTimeout("import_local_file")).toBe(DESKTOP_TIMEOUTS.command);
-    expect(desktopToolTimeout("save_to_workspace")).toBe(DESKTOP_TIMEOUTS.command);
-    expect(desktopToolTimeout("read_local_file")).toBe(DESKTOP_TIMEOUTS.quick);
+    expect(approvalKind("copy_from_computer", {})).toBeNull();
+    expect(approvalKind("copy_to_computer", {})).toBeNull();
+    expect(desktopToolTimeout("copy_from_computer")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("copy_to_computer")).toBe(DESKTOP_TIMEOUTS.command);
+    expect(desktopToolTimeout("read_file")).toBe(DESKTOP_TIMEOUTS.quick);
   });
 });
 
@@ -93,9 +93,9 @@ describe("unusableDesktopResult", () => {
     // Built as the toolkit builds it when a call's parameters do not decode.
     const refused = AiError.make({
       module: "Toolkit",
-      method: "read_local_file.handle",
+      method: "read_file.handle",
       reason: new AiError.ToolParameterValidationError({
-        toolName: "read_local_file",
+        toolName: "read_file",
         description: 'Expected a value with a length of at least 1, got ""\n  at ["path"]',
       }),
     });

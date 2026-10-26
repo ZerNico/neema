@@ -778,7 +778,7 @@ export const observePart = (
           // but an import is also shown to the model when it can
           // take that kind (docs/internals/files.md).
           const returned = result.ok ? result.file : undefined;
-          const imported = part.name === "import_local_file";
+          const imported = part.name === "copy_from_computer";
           const created = returned
             ? yield* Effect.try({
                 try: () =>

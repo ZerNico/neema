@@ -103,7 +103,7 @@ const connect = (): DesktopClient => {
   });
 };
 
-const wrote = (path: string, name: DesktopToolActivity["name"] = "write_local_file") =>
+const wrote = (path: string, name: DesktopToolActivity["name"] = "write_file") =>
   ({
     family: "desktop",
     callId: `call-${path}`,

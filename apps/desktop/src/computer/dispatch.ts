@@ -238,7 +238,7 @@ async function run(
         listing.truncated,
       );
     }
-    case "read_local_file": {
+    case "read_file": {
       const path = str(args.path);
       const extension = posix.extname(path).toLowerCase();
       if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"].includes(extension)) {
@@ -267,7 +267,7 @@ async function run(
             : file.text;
       return ok(summary, detail, file.truncated);
     }
-    case "import_local_file": {
+    case "copy_from_computer": {
       const file = await readBinaryFile(guest, mounts, str(args.path), "import");
       return {
         ...ok(`Imported ${file.path}`, `${file.mediaType}, ${sizeOf(file.bytes.length)}`),
@@ -293,14 +293,14 @@ async function run(
         hits.truncated,
       );
     }
-    case "write_local_file": {
+    case "write_file": {
       const receipt = await writeTextFile(guest, mounts, str(args.path), str(args.text));
       return ok(
         `${receipt.created ? "Created" : "Updated"} ${receipt.path}`,
         `${receipt.bytes} bytes written.`,
       );
     }
-    case "edit_local_file": {
+    case "edit_file": {
       const receipt = await editTextFile(guest, mounts, {
         path: str(args.path),
         old: str(args.old),
@@ -313,7 +313,7 @@ async function run(
         receipt.truncated,
       );
     }
-    case "delete_local_file": {
+    case "delete_files": {
       const paths = Array.isArray(args.paths)
         ? args.paths.filter((path) => typeof path === "string")
         : [];
@@ -334,7 +334,7 @@ async function run(
         ok: n > 0 || receipt.failed.length === 0,
       };
     }
-    case "save_to_workspace": {
+    case "copy_to_computer": {
       const file = await deps.attachment(call.key, str(args.attachmentId));
       if (!file)
         return failure(

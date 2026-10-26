@@ -35,7 +35,7 @@ export const listFolderTool = Tool.make("list_folder", {
 
 const LineNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
-export const readLocalFileTool = Tool.make("read_local_file", {
+export const readFileTool = Tool.make("read_file", {
   description:
     "Read a file on this chat's computer by its absolute path. Text comes back as text; a " +
     "long file comes back in part, saying the offset to continue from. Give offset and limit " +
@@ -54,7 +54,7 @@ export const readLocalFileTool = Tool.make("read_local_file", {
   failureMode: "return",
 });
 
-export const importLocalFileTool = Tool.make("import_local_file", {
+export const copyFromComputerTool = Tool.make("copy_from_computer", {
   description:
     "Bring a PNG, JPEG, PowerPoint (.pptx), Excel workbook (.xlsx) or Word document (.docx) " +
     "from this chat's computer into this answer so other tools can use it. Returns a working: " +
@@ -94,7 +94,7 @@ export const searchFilesTool = Tool.make("search_files", {
   failureMode: "return",
 });
 
-export const editLocalFileTool = Tool.make("edit_local_file", {
+export const editFileTool = Tool.make("edit_file", {
   description:
     "Replace text inside a file on this chat's computer, by its absolute path. `old` must match " +
     "exactly, whitespace included, and exactly once unless `all` is true; include enough " +
@@ -110,7 +110,7 @@ export const editLocalFileTool = Tool.make("edit_local_file", {
   failureMode: "return",
 });
 
-export const deleteLocalFileTool = Tool.make("delete_local_file", {
+export const deleteFilesTool = Tool.make("delete_files", {
   description:
     "Delete files or folders by absolute path, and everything inside a folder, within " +
     `/workspace and the attached folders. Pass every path in one call rather than one call per file, up to ` +
@@ -123,7 +123,7 @@ export const deleteLocalFileTool = Tool.make("delete_local_file", {
   failureMode: "return",
 });
 
-export const writeLocalFileTool = Tool.make("write_local_file", {
+export const writeFileTool = Tool.make("write_file", {
   description:
     "Create or replace a text file on this chat's computer by its absolute path. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
@@ -133,7 +133,7 @@ export const writeLocalFileTool = Tool.make("write_local_file", {
   failureMode: "return",
 });
 
-export const saveToWorkspaceTool = Tool.make("save_to_workspace", {
+export const copyToComputerTool = Tool.make("copy_to_computer", {
   description:
     "Copy a file this chat already holds on the server onto this chat's computer, by the " +
     "attachment id a tool result gave you. Without path it lands in the chat's workspace under " +
@@ -267,12 +267,12 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
     listFolderTool,
     findFilesTool,
     searchFilesTool,
-    readLocalFileTool,
-    importLocalFileTool,
-    writeLocalFileTool,
-    saveToWorkspaceTool,
-    editLocalFileTool,
-    deleteLocalFileTool,
+    readFileTool,
+    copyFromComputerTool,
+    writeFileTool,
+    copyToComputerTool,
+    editFileTool,
+    deleteFilesTool,
   ] as const;
   // Offered whenever the person may use a computer, machine online or not, so the prompt's
   // tool list stays the same and an offline machine is an answer, not a missing tool.
@@ -289,12 +289,12 @@ export const prepareDesktopTools = (deps: DesktopToolDeps): ToolGroup => {
       list_folder: handle("list_folder"),
       find_files: handle("find_files"),
       search_files: handle("search_files"),
-      read_local_file: handle("read_local_file"),
-      import_local_file: handle("import_local_file"),
-      write_local_file: handle("write_local_file"),
-      save_to_workspace: handle("save_to_workspace"),
-      edit_local_file: handle("edit_local_file"),
-      delete_local_file: handle("delete_local_file"),
+      read_file: handle("read_file"),
+      copy_from_computer: handle("copy_from_computer"),
+      write_file: handle("write_file"),
+      copy_to_computer: handle("copy_to_computer"),
+      edit_file: handle("edit_file"),
+      delete_files: handle("delete_files"),
       run_command: handle("run_command"),
       request_network_access: handle("request_network_access"),
       request_folder: handle("request_folder"),

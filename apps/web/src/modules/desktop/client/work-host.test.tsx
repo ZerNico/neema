@@ -59,7 +59,7 @@ const owner = {
 const call = (callId: string) => ({
   ...owner,
   callId,
-  name: "write_local_file",
+  name: "write_file",
   args: JSON.stringify({ path: "site/file", text: "hello" }),
   claimed: false,
   expiresAt: Date.now() + 60000,

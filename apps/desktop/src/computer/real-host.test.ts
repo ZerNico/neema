@@ -196,13 +196,13 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
   }, 120_000);
 
   test("file tools answer in the model's words", async () => {
-    const edit = await call("c4", "edit_local_file", {
+    const edit = await call("c4", "edit_file", {
       path: "/folders/notes/todo.md",
       old: "ship it",
       new: "shipped",
     });
     expect(edit).toMatchObject({ ok: true, summary: "Edited /folders/notes/todo.md" });
-    const outside = await call("c5", "read_local_file", { path: "/etc/passwd" });
+    const outside = await call("c5", "read_file", { path: "/etc/passwd" });
     expect(outside).toMatchObject({
       ok: false,
       summary: "That path is outside this chat's folders",

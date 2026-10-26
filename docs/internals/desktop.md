@@ -300,9 +300,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   once, and never over a file already at its path: an edit the model made is never put back, and
   a file it deleted or moved stays gone. The machine remembers what it placed, per chat. The hint
   names the paths.
-- **`save_to_workspace`** downloads a file the chat holds with the machine's own session and
+- **`copy_to_computer`** downloads a file the chat holds with the machine's own session and
   lands it in the workspace, or exactly at a path the person approves.
-- **`import_local_file`** reads a picture or an Office file from the computer into the answer
+- **`copy_from_computer`** reads a picture or an Office file from the computer into the answer
   as a working file for the server's tools. Its bytes are never stored.
 - **A browser download** lands in the workspace under a fresh name.
 

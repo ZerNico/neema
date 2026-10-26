@@ -27,7 +27,7 @@ describe("DesktopActivityBlock", () => {
   it("names a file by its folder and the rest, or just its name, with the whole path on hover", () => {
     const roots = [{ name: "Downloads", path: "/Users/me/Downloads" }];
     const read = (path: string, over: Partial<DesktopToolActivity> = {}) =>
-      running({ name: "read_local_file", args: { path }, ...over });
+      running({ name: "read_file", args: { path }, ...over });
     const { unmount } = show(
       <DesktopActivityBlock activity={read("/Users/me/Downloads/q3/report.pdf")} roots={roots} />,
     );
@@ -150,7 +150,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf", "Downloads/old.zip"] },
         })}
         approval={{ kind: "delete", decide }}
@@ -170,7 +170,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3b",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf", "site/tmp.log"] },
         })}
         approval={{ kind: "delete", decide: vi.fn() }}
@@ -190,7 +190,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3c",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf"] },
         })}
         approval={{ kind: "delete", decide: vi.fn() }}
@@ -206,7 +206,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3d",
-          name: "delete_local_file",
+          name: "delete_files",
           args: {
             paths: [
               "/workspaces/abc/notes.txt",
@@ -237,7 +237,7 @@ describe("DesktopActivityBlock", () => {
   it("still names a delete that used the older single path argument", () => {
     show(
       <DesktopActivityBlock
-        activity={running({ callId: "call-4", name: "delete_local_file", args: { path: "old/" } })}
+        activity={running({ callId: "call-4", name: "delete_files", args: { path: "old/" } })}
       />,
     );
     expect(screen.getByText("Deleting old/")).toBeInTheDocument();
@@ -248,7 +248,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-5",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["a.txt", "b.txt"] },
         })}
       />,

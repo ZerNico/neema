@@ -83,13 +83,13 @@ const approvalFor = (
   args: Readonly<Record<string, unknown>>,
 ): ComputerApproval | null => {
   switch (name) {
-    case "write_local_file":
-    case "edit_local_file":
+    case "write_file":
+    case "edit_file":
       return "edit";
     // Into the workspace under a fresh name nothing is overwritten; to a chosen path it is a write.
-    case "save_to_workspace":
+    case "copy_to_computer":
       return typeof args.path === "string" && args.path ? "edit" : null;
-    case "delete_local_file":
+    case "delete_files":
       return "delete";
     case "run_command":
       return "command";

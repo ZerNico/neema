@@ -44,12 +44,12 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
-  read_local_file: File01Icon,
-  import_local_file: FileImportIcon,
-  write_local_file: PencilEdit02Icon,
-  save_to_workspace: Download04Icon,
-  edit_local_file: Edit02Icon,
-  delete_local_file: Delete02Icon,
+  read_file: File01Icon,
+  copy_from_computer: FileImportIcon,
+  write_file: PencilEdit02Icon,
+  copy_to_computer: Download04Icon,
+  edit_file: Edit02Icon,
+  delete_files: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
   request_folder: FolderAddIcon,
@@ -79,7 +79,7 @@ const argText = (activity: DesktopToolActivity) => {
     case "find_files":
     case "search_files":
       return text(args.pattern);
-    case "delete_local_file":
+    case "delete_files":
       return deletePathsOf(args).join("\n");
     default:
       return text(args.path);
@@ -91,11 +91,11 @@ const previewablePath = (activity: DesktopToolActivity): string | null => {
   if (activity.status !== "complete") return null;
   const args = activity.args ?? {};
   switch (activity.name) {
-    case "read_local_file":
-    case "import_local_file":
-    case "write_local_file":
-    case "edit_local_file":
-    case "save_to_workspace":
+    case "read_file":
+    case "copy_from_computer":
+    case "write_file":
+    case "edit_file":
+    case "copy_to_computer":
       return text(args.path) || null;
     default:
       return null;
@@ -118,11 +118,11 @@ const shortPath = (path: string, roots: ReadonlyArray<{ name: string; path: stri
 };
 
 const PATH_TOOLS = new Set([
-  "read_local_file",
-  "import_local_file",
-  "write_local_file",
-  "save_to_workspace",
-  "edit_local_file",
+  "read_file",
+  "copy_from_computer",
+  "write_file",
+  "copy_to_computer",
+  "edit_file",
 ]);
 
 /** What a call that ended without a result tried, in reader words, with its path where it names one. */
@@ -135,15 +135,15 @@ const FAILED: Partial<
   list_folder: { bare: m.chat_desktop_failed_list },
   find_files: { bare: m.chat_desktop_failed_find },
   search_files: { bare: m.chat_desktop_failed_search },
-  read_local_file: { bare: m.chat_desktop_failed_read, path: m.chat_desktop_failed_read_path },
-  import_local_file: {
+  read_file: { bare: m.chat_desktop_failed_read, path: m.chat_desktop_failed_read_path },
+  copy_from_computer: {
     bare: m.chat_desktop_failed_import,
     path: m.chat_desktop_failed_import_path,
   },
-  write_local_file: { bare: m.chat_desktop_failed_write, path: m.chat_desktop_failed_write_path },
-  save_to_workspace: { bare: m.chat_desktop_failed_save, path: m.chat_desktop_failed_save_path },
-  edit_local_file: { bare: m.chat_desktop_failed_edit, path: m.chat_desktop_failed_edit_path },
-  delete_local_file: { bare: m.chat_desktop_failed_delete },
+  write_file: { bare: m.chat_desktop_failed_write, path: m.chat_desktop_failed_write_path },
+  copy_to_computer: { bare: m.chat_desktop_failed_save, path: m.chat_desktop_failed_save_path },
+  edit_file: { bare: m.chat_desktop_failed_edit, path: m.chat_desktop_failed_edit_path },
+  delete_files: { bare: m.chat_desktop_failed_delete },
   run_command: { bare: m.chat_desktop_failed_run },
 };
 
@@ -171,17 +171,17 @@ const runningLabel = (
       return what ? m.chat_desktop_finding_path({ path: what }) : m.chat_desktop_finding();
     case "search_files":
       return what ? m.chat_desktop_searching_path({ path: what }) : m.chat_desktop_searching();
-    case "read_local_file":
+    case "read_file":
       return what ? m.chat_desktop_reading_path({ path: what }) : m.chat_desktop_reading();
-    case "import_local_file":
+    case "copy_from_computer":
       return what ? m.chat_desktop_importing_path({ path: what }) : m.chat_desktop_importing();
-    case "write_local_file":
+    case "write_file":
       return what ? m.chat_desktop_writing_path({ path: what }) : m.chat_desktop_writing();
-    case "save_to_workspace":
+    case "copy_to_computer":
       return what ? m.chat_desktop_saving_path({ path: what }) : m.chat_desktop_saving();
-    case "edit_local_file":
+    case "edit_file":
       return what ? m.chat_desktop_editing_path({ path: what }) : m.chat_desktop_editing();
-    case "delete_local_file": {
+    case "delete_files": {
       const listed = deletePathsOf(activity.args);
       if (listed.length === 1) return m.chat_desktop_deleting_path({ path: listed[0]! });
       if (listed.length > 1) return m.chat_desktop_deleting_count({ count: listed.length });
@@ -283,7 +283,7 @@ const approvalTitle = (
         : m.chat_desktop_ask_delete_count({ count: listed.length });
     }
     default:
-      return activity.name === "write_local_file"
+      return activity.name === "write_file"
         ? m.chat_desktop_ask_write()
         : m.chat_desktop_ask_change();
   }
@@ -389,7 +389,7 @@ function ApprovalCard({
   approval: DesktopApprovalRequest;
   roots: ReadonlyArray<{ name: string; path: string }>;
 }) {
-  const listed = activity.name === "delete_local_file" ? deletePathsOf(activity.args) : [];
+  const listed = activity.name === "delete_files" ? deletePathsOf(activity.args) : [];
   // A site question may come from a click: the address is what is asked about.
   const what =
     approval.kind === "site"

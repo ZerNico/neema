@@ -8025,7 +8025,7 @@ describe("custom tool calls", () => {
       const call = detail.toolCalls.find((row) => row.messageId === assistantMessageId)!;
       expect(JSON.stringify(call.result)).not.toContain(csv.toString("base64"));
       // The model is handed each file's attachment id, the handle
-      // save_to_workspace takes; the bytes stay on the server.
+      // copy_to_computer takes; the bytes stay on the server.
       const second = JSON.stringify(prompts[1]!.prompt);
       for (const row of stored) expect(second).toContain(`"attachmentId":"${row.id}"`);
       // Only the shared CSV reached the model's next round, as an inline fence.

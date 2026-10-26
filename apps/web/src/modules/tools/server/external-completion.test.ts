@@ -30,7 +30,7 @@ const owner = {
 };
 const operation = {
   ...owner,
-  name: "write_local_file",
+  name: "write_file",
   args: { path: "site/a", text: "hello" },
   timeoutMs: 5000,
 };
