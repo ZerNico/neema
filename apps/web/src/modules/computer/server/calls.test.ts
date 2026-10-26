@@ -77,10 +77,12 @@ const fakeRepo = (
   return { chat, grants, layer };
 };
 
+/** What every open client of the person would have been told to refetch. */
+const published: string[] = [];
 const bus = Layer.succeed(
   SyncBus,
   SyncBus.of({
-    publish: () => Effect.void,
+    publish: (_userId, event) => Effect.sync(() => void published.push(event.type)),
     publishGlobal: () => Effect.void,
     subscribe: () => Stream.empty,
     signals: Stream.empty,
@@ -397,6 +399,38 @@ describe("ComputerCalls", () => {
       expect(yield* Queue.take(after.queue)).toEqual({ type: "running", callIds: ["call-1"] });
       expect(yield* nextCall(after.queue)).toMatchObject({ type: "call", callId: "call-1" });
     }),
+  );
+
+  it.effect(
+    "clients hear of a call only when it waits for a person, and of downloads in steps",
+    () =>
+      Effect.gen(function* () {
+        const { calls, open, connect, hub } = yield* setup(fakeRepo({ machineId: "laptop" }));
+        const laptop = yield* connect("laptop", { computer: { status: "preparing", progress: 0 } });
+        const told = () => published.length;
+        let before = told();
+        for (let percent = 1; percent <= 12; percent += 1)
+          yield* hub.update(
+            USER,
+            hello("laptop", { computer: { status: "preparing", progress: percent / 100 } }),
+          );
+        expect(told() - before).toBe(2);
+        yield* hub.update(USER, hello("laptop"));
+        before = told();
+        yield* open("call-1", "list_folder", { path: "." }, "laptop");
+        yield* calls.result(USER, "laptop", "call-1", {
+          v: 1,
+          ok: true,
+          summary: "Listed",
+          detail: "",
+          truncated: false,
+        });
+        expect(told() - before).toBe(0);
+        yield* open("call-2", "run_command", { command: "ls" }, "laptop");
+        yield* calls.decide(USER, "call-2", "allow");
+        expect(yield* nextCall(laptop.queue)).toMatchObject({ callId: "call-1" });
+        expect(told() - before).toBe(2);
+      }),
   );
 
   it.effect("ending the call's scope cancels it on the machine", () =>

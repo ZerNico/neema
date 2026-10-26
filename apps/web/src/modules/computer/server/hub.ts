@@ -19,6 +19,20 @@ interface Connection extends Presence {
 const key = (userId: string, machineId: string) => `${userId}\u0000${machineId}`;
 
 /**
+ * Whether clients should hear of a new hello. A download reports every percent; every open
+ * client refetches on each change, so progress is told in steps of five.
+ */
+const worthTelling = (before: MachineHello, after: MachineHello) => {
+  if (before.name !== after.name || before.remote !== after.remote) return true;
+  const was = before.computer;
+  const now = after.computer;
+  if (was.status !== now.status) return true;
+  if (was.status === "preparing" && now.status === "preparing")
+    return Math.floor(was.progress * 20) !== Math.floor(now.progress * 20);
+  return was.status === "unavailable" && now.status === "unavailable" && was.reason !== now.reason;
+};
+
+/**
  * Which machines are connected and the way to each. Presence is in memory: there is one server
  * process, and a machine that loses its stream is offline until it reconnects. A second stream
  * from the same machine replaces the first, so a reconnect after a network change never leaves
@@ -90,7 +104,7 @@ export class MachineHub extends Context.Service<
             const current = connections.get(id);
             if (!current) return false;
             connections.set(id, { ...current, hello });
-            yield* changed(userId);
+            if (worthTelling(current.hello, hello)) yield* changed(userId);
             return true;
           }),
         send: (userId, machineId, event) =>

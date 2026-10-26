@@ -148,6 +148,8 @@ export class ComputerCalls extends Context.Service<
       /** Kinds a person allowed for the rest of a chat, until the server restarts. */
       const blanket = new Set<string>();
 
+      // Clients see only calls waiting for a person (`pending`), so they hear a change only when
+      // one starts or stops waiting: every open client refetches on each.
       const changed = (userId: string) => bus.publish(userId, { type: "computer.changed" });
       /** Read through a call so TypeScript does not keep a narrowing an await may have broken. */
       const ended = (entry: Entry) => entry.state.kind === "done";
@@ -155,9 +157,10 @@ export class ComputerCalls extends Context.Service<
       const finish = (entry: Entry, result: DesktopToolResult) =>
         Effect.gen(function* () {
           if (entry.state.kind === "done") return false;
+          const waited = entry.state.kind === "waiting";
           entry.state = { kind: "done" };
           const accepted = yield* external.complete(entry.callId, result);
-          yield* changed(entry.userId);
+          if (waited) yield* changed(entry.userId);
           return accepted;
         });
 
@@ -295,7 +298,6 @@ export class ComputerCalls extends Context.Service<
           if (ended(entry)) return;
           const already = entry.state.kind === "preparing";
           entry.state = { kind: "preparing", machineId };
-          yield* changed(entry.userId);
           if (already) return;
           const now = yield* Clock.currentTimeMillis;
           yield* Effect.forkIn(
@@ -353,7 +355,6 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           entry.state = { kind: "sent", machineId };
-          yield* changed(entry.userId);
         });
 
       /** What approving a server tool does, and what the model is told. */
@@ -415,7 +416,7 @@ export class ComputerCalls extends Context.Service<
                     type: "cancel",
                     callId: entry.callId,
                   });
-                if (state.kind !== "done") yield* changed(entry.userId);
+                if (state.kind === "waiting") yield* changed(entry.userId);
               }),
             );
             yield* advance(entry);
@@ -426,6 +427,7 @@ export class ComputerCalls extends Context.Service<
             if (!entry || entry.userId !== userId || entry.state.kind !== "waiting") return false;
             const { approval, machine } = entry.state;
             entry.state = { kind: "deciding" };
+            yield* changed(userId);
             if (choice === "deny") {
               yield* finish(entry, declined());
               return true;
