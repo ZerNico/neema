@@ -131,7 +131,10 @@ and of `process.argv` on a cold start; both are read.
 ## A chat may have a computer
 
 - **A machine** is one desktop install a person signed in on, keyed by its own id
-  (`machine.json`) together with the person, in `machines`. A reinstall is a new machine. It
+  (`machine.json`) together with the person, in `machines`. A reinstall is a new machine, and so
+  is a profile copied to another computer (Migration Assistant, a restored backup): the file
+  keeps a hash of the hardware's own id, and a mismatch mints a new one, or two computers would
+  take turns being one machine. It
   reports its own name on every connect; the person may give it one of theirs (`label`), from
   any device, which is shown in its place everywhere, the hub's presence included, so two of
   the same model can be told apart.
@@ -190,6 +193,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   caps and classifies it like any untrusted result (`acceptDesktopToolResult`). A finished
   call's result is kept on the machine for ten minutes, so a call sent again after a reconnect
   gets the same answer, not a second run.
+- **Quitting the app** stops its running calls and waits up to two seconds for their "stopped"
+  answers to reach the server before disconnecting, so the model hears it then, not at the
+  deadline.
 - **Stop and a lost lease** end the call's scope on the server, which sends the machine a
   `cancel` for a call still running there. A question nobody answers ends just before the call's
   own wait, so a later click runs nothing the model was told did not happen. The machine starts
