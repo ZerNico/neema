@@ -46,7 +46,8 @@ actor Driver {
     case "open":
       return try await open(try param(params, "appId", as: String.self))
     case "look":
-      return try await look(try param(params, "appId", as: String.self))
+      return try await look(
+        try param(params, "appId", as: String.self), pid: (params["pid"] as? Int).map(pid_t.init))
     case "zoom":
       return try await zoom(try rect(params, "region"))
     case "click":
@@ -99,9 +100,10 @@ actor Driver {
     return ["name": app.localizedName ?? appId, "pid": Int(app.processIdentifier)]
   }
 
-  private func look(_ appId: String) async throws -> [String: Any] {
-    let app = try runningApp(appId)
+  private func look(_ appId: String, pid: pid_t?) async throws -> [String: Any] {
+    let app = try runningApp(appId, pid: pid)
     let window = try mainWindow(app)
+    await MainActor.run { enableWebContent(app, window: window) }
     let box = frame(window)
     let tree = snapshot.take(window: window, pid: app.processIdentifier)
     let shareable = try await shareableWindow(pid: app.processIdentifier, frame: box)
@@ -141,8 +143,12 @@ actor Driver {
     for name in params["modifiers"] as? [String] ?? [] {
       flags.formUnion(try parseChord("\(name)+a").flags)
     }
-    // A plain click on an element that can be pressed is a press: no pointer at all.
-    if params["node"] != nil, button == .left, count == 1, flags.isEmpty {
+    // A plain click on an element that can be pressed is a press: no pointer at all. Not in
+    // Chromium, whose page answers a press with success and does nothing in the accessibility
+    // mode the driver turns on; its pointer route arrives as trusted input instead.
+    if params["node"] != nil, button == .left, count == 1, flags.isEmpty,
+      try !current().chromium
+    {
       let element = try node(params)
       if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }
     }
@@ -154,13 +160,15 @@ actor Driver {
     guard let looked, !looked.app.isTerminated else {
       throw DriverError(code: "no_look", message: "Look at the app first")
     }
-    guard !isOffLimits(looked.app.bundleIdentifier) else {
+    guard !isOffLimits(looked.app) else {
       throw DriverError(code: "off_limits", message: "That app is never used")
     }
     guard let box = frame(looked.window) else {
       throw DriverError(code: "no_window", message: "The window is gone")
     }
-    return Target(pid: looked.app.processIdentifier, window: looked.shareable.windowID, frame: box)
+    return Target(
+      pid: looked.app.processIdentifier, window: looked.shareable.windowID, frame: box,
+      chromium: isChromium(looked.app))
   }
 
   private func node(_ params: [String: Any]) throws -> AXUIElement {
@@ -170,7 +178,8 @@ actor Driver {
     }
     var pid: pid_t = 0
     AXUIElementGetPid(element, &pid)
-    guard pid == snapshot.pid, !isOffLimits(NSRunningApplication(processIdentifier: pid)?.bundleIdentifier)
+    guard pid == snapshot.pid, let owner = NSRunningApplication(processIdentifier: pid),
+      !isOffLimits(owner)
     else { throw DriverError(code: "off_limits", message: "\(id) left the app") }
     return element
   }

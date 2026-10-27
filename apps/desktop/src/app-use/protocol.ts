@@ -141,7 +141,11 @@ export type DriverErrorCode = typeof DriverErrorCode.Type;
 export const Methods = {
   permissions: { params: Schema.Struct({}), result: Permissions },
   apps: { params: Schema.Struct({}), result: Schema.Struct({ apps: Schema.Array(RunningApp) }) },
-  look: { params: Schema.Struct({ appId: Schema.String }), result: Look },
+  /** `pid` picks one instance where several share a bundle id, as Electron apps in development do. */
+  look: {
+    params: Schema.Struct({ appId: Schema.String, pid: Schema.optionalKey(Schema.Number) }),
+    result: Look,
+  },
   open: {
     params: Schema.Struct({ appId: Schema.String }),
     result: Schema.Struct({ name: Schema.String, pid: Schema.Number }),

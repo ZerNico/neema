@@ -66,12 +66,15 @@ enum SkyLight {
 
   /// Posts a mouse event to one process, stamped with the fields AppKit and Chromium route a
   /// background window's input by.
+  /// `location` is window-local for AppKit and the screen point for Chromium, which hit-tests
+  /// it itself. `phase` marks Chromium's gesture: move 2, primer down 1, primer up 2, click 3.
   static func postMouse(
-    _ event: CGEvent, pid: pid_t, window: CGWindowID, local: CGPoint, clickState: Int64,
-    button: Int64, group: Int64
+    _ event: CGEvent, pid: pid_t, window: CGWindowID, location: CGPoint, clickState: Int64,
+    button: Int64, group: Int64, phase: Int64? = nil
   ) {
-    setWindowLocation?(event, local)
+    setWindowLocation?(event, location)
     if let set = setIntegerField {
+      if let phase { set(event, 0, phase) }
       set(event, 1, clickState)  // click state
       set(event, 3, button)  // button number
       set(event, 7, 3)  // subtype
@@ -82,6 +85,21 @@ enum SkyLight {
       set(event, 40, Int64(pid))  // target pid, which Chromium filters synthetic events by
     }
     if let postToPid { postToPid(pid, event) } else { event.postToPid(pid) }
+  }
+
+  /// Posts a wheel event to one process. Unlike a click it carries only the routing fields, and
+  /// goes both ways: SkyLight reaches Chromium, the public route AppKit's scroll views (after
+  /// cua-driver, whose scrolls stopped arriving with a click's stamps).
+  static func postScroll(_ event: CGEvent, pid: pid_t, window: CGWindowID, local: CGPoint) {
+    setWindowLocation?(event, local)
+    if let set = setIntegerField {
+      set(event, 51, Int64(window))
+      set(event, 91, Int64(window))
+      set(event, 92, Int64(window))
+      set(event, 40, Int64(pid))
+    }
+    postToPid?(pid, event)
+    event.postToPid(pid)
   }
 
   // An 8-byte ProcessSerialNumber, as two 32-bit halves.

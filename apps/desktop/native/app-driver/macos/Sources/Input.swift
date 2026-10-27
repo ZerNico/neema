@@ -7,6 +7,8 @@ struct Target {
   let window: CGWindowID
   /// Global top-left points, as AX and CGEvent use them.
   let frame: CGRect
+  /// Chromium and Electron take clicks by their own recipe; see `clickChromium`.
+  let chromium: Bool
 }
 
 private func pause(_ milliseconds: UInt32) { usleep(milliseconds * 1000) }
@@ -30,6 +32,10 @@ func click(
   _ = SkyLight.focusWithoutRaise(pid: target.pid, window: target.window)
   // AppKit updates which window takes input before the events arrive.
   pause(50)
+  if target.chromium, button == .left {
+    try clickChromium(target, at: screen, count: count, flags: flags, source: source, group: group)
+    return
+  }
   // A background window hit-tests a press against where it last saw the cursor, so it first
   // sees the cursor arrive.
   if let move = CGEvent(
@@ -37,7 +43,7 @@ func click(
     mouseButton: .left)
   {
     SkyLight.postMouse(
-      move, pid: target.pid, window: target.window, local: local, clickState: 0, button: 0,
+      move, pid: target.pid, window: target.window, location: local, clickState: 0, button: 0,
       group: group)
   }
   pause(12)
@@ -50,7 +56,7 @@ func click(
       else { throw DriverError(code: "action_failed", message: "Could not make a click") }
       event.flags = flags
       SkyLight.postMouse(
-        event, pid: target.pid, window: target.window, local: local, clickState: Int64(index),
+        event, pid: target.pid, window: target.window, location: local, clickState: Int64(index),
         button: Int64(button.rawValue), group: group)
       // A button's tracking loop polls for the release; too tight a gap drops the click.
       pause(type == down ? 28 : 0)
@@ -63,16 +69,14 @@ func click(
 func scroll(_ target: Target, at local: CGPoint, lines: (x: Int32, y: Int32)) throws {
   let screen = CGPoint(x: target.frame.minX + local.x, y: target.frame.minY + local.y)
   let source = CGEventSource(stateID: .hidSystemState)
-  let group = gesture()
-  _ = SkyLight.focusWithoutRaise(pid: target.pid, window: target.window)
-  pause(50)
+  // A background window hit-tests the wheel against where it last saw the cursor.
   if let move = CGEvent(
     mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: screen,
     mouseButton: .left)
   {
     SkyLight.postMouse(
-      move, pid: target.pid, window: target.window, local: local, clickState: 0, button: 0,
-      group: group)
+      move, pid: target.pid, window: target.window, location: local, clickState: 0, button: 0,
+      group: gesture())
   }
   pause(12)
   // One event per line so apps animate each step instead of jumping. Positive y reveals what
@@ -85,9 +89,7 @@ func scroll(_ target: Target, at local: CGPoint, lines: (x: Int32, y: Int32)) th
         wheel1: lines.y.signum(), wheel2: lines.x.signum(), wheel3: 0)
     else { throw DriverError(code: "action_failed", message: "Could not make a scroll") }
     event.location = screen
-    SkyLight.postMouse(
-      event, pid: target.pid, window: target.window, local: local, clickState: 0, button: 0,
-      group: group)
+    SkyLight.postScroll(event, pid: target.pid, window: target.window, local: local)
     pause(30)
   }
 }
@@ -108,7 +110,7 @@ func drag(_ target: Target, from start: CGPoint, to end: CGPoint) throws {
         mouseButton: .left)
     else { throw DriverError(code: "action_failed", message: "Could not make a drag") }
     SkyLight.postMouse(
-      event, pid: target.pid, window: target.window, local: local, clickState: clickState,
+      event, pid: target.pid, window: target.window, location: local, clickState: clickState,
       button: 0, group: group)
   }
   try post(.mouseMoved, start, 0)
@@ -153,5 +155,36 @@ func press(_ chord: Chord, pid: pid_t) {
     event.flags = chord.flags
     event.postToPid(pid)
     pause(down ? 20 : 0)
+  }
+}
+
+/// Chromium swallows the first click into a window it does not consider active, so a press and
+/// release at (-1, -1), which no element hit-tests, passes its user-activation check first.
+/// After cua-driver's Chromium route: screen-point locations and a phase on every event.
+private func clickChromium(
+  _ target: Target, at screen: CGPoint, count: Int, flags: CGEventFlags, source: CGEventSource?,
+  group: Int64
+) throws {
+  let offScreen = CGPoint(x: -1, y: -1)
+  var steps: [(CGEventType, CGPoint, Int64, Int64, UInt32)] = [
+    (.mouseMoved, screen, 0, 2, 15),
+    (.leftMouseDown, offScreen, 1, 1, 1),
+    (.leftMouseUp, offScreen, 1, 2, 100),
+  ]
+  let pairs = min(max(count, 1), 2)
+  for index in 1...pairs {
+    steps.append((.leftMouseDown, screen, Int64(index), 3, 1))
+    steps.append((.leftMouseUp, screen, Int64(index), 3, index < pairs ? 80 : 0))
+  }
+  for (type, point, clickState, phase, delay) in steps {
+    guard
+      let event = CGEvent(
+        mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+    else { throw DriverError(code: "action_failed", message: "Could not make a click") }
+    event.flags = flags
+    SkyLight.postMouse(
+      event, pid: target.pid, window: target.window, location: point, clickState: clickState,
+      button: 0, group: group, phase: phase)
+    pause(delay)
   }
 }

@@ -67,7 +67,8 @@ Every action returns a fresh look unless it asks not to, so the model sees what 
   machine allows remote use.
 - **Some apps are never offered**, whatever the person allows: terminals (Terminal, iTerm,
   Windows Terminal, PowerShell, cmd), password managers and Keychain Access, System Settings
-  and Windows Settings, the registry editor, and neema itself. The model can run commands in
+  and Windows Settings, the registry editor, and neema itself, known as the driver's parent,
+  since in development it shares Electron's bundle id with every other Electron app. The model can run commands in
   the chat's VM, so a terminal on the real machine would sidestep everything there.
 - **It never answers the system's own questions.** macOS authorization dialogs
   (SecurityAgent), Windows UAC prompts and permission prompts are out of reach, by process,
@@ -117,6 +118,26 @@ window deaf to typing until they clicked it, which Cua shipped and had to undo.
 Every symbol is looked up by name. A macOS release that drops one turns `background` false in
 `permissions`, and coordinate input falls back to the public route, which most apps ignore.
 References keep working either way, since a press is accessibility, not a click.
+
+### Chromium and Electron
+
+Chrome and every Electron app need three things more, each measured against an Electron page
+that reports what it receives (`fixtures/chromium-target.cjs`):
+
+- **Their page is not in the tree until asked for.** Reading the application's role turns it
+  on at once, which Apple advises for assistive tools and Chromium implements. The two older
+  switches follow: Electron 45 says yes to `AXManualAccessibility` and stays off, and Chrome
+  takes `AXEnhancedUserInterface` only after two quiet seconds, restarted whenever anything
+  flips it, as window managers do. The driver asks once per process and waits for the page,
+  turning its run loop: a page asked for from a sleeping thread never came.
+- **Their first click into an inactive window is swallowed.** A press and release at (-1, -1),
+  which nothing hit-tests, passes Chromium's user-activation check first; the events carry
+  screen points and a gesture phase (after cua-driver).
+- **A press by reference does nothing.** In the mode the driver turns on, the page answers an
+  accessibility press with success and ignores it, so a reference is clicked at its centre.
+
+Cua's `_AXObserverAddNotificationAndCheckRemote`, for keeping a covered Electron window's tree
+live, no longer exists in macOS 26; nothing here needed it.
 
 ## The drivers
 

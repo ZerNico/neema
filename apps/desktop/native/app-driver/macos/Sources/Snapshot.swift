@@ -44,9 +44,10 @@ final class Snapshot {
       if attribute(element, kAXEnabledAttribute, as: Bool.self) == false { node["disabled"] = true }
       if attribute(element, kAXFocusedAttribute, as: Bool.self) == true { node["focused"] = true }
       nodes.append(node)
-      let children: [AXUIElement] =
-        attribute(element, kAXVisibleChildrenAttribute)
-        ?? attribute(element, kAXChildrenAttribute) ?? []
+      // Visible children keep long lists short, but Chromium answers them with an empty list
+      // where the page is, so an empty answer falls through to all children.
+      let visible: [AXUIElement] = attribute(element, kAXVisibleChildrenAttribute) ?? []
+      let children = visible.isEmpty ? attribute(element, kAXChildrenAttribute) ?? [] : visible
       for child in children { walk(child, depth: depth + 1) }
     }
 

@@ -1,3 +1,5 @@
+import AppKit
+
 // Apps app use never touches, whatever the person allows. Checked here rather than only in the
 // desktop app so a confused caller cannot reach them either.
 let offLimitsBundleIds: Set<String> = [
@@ -23,12 +25,17 @@ let offLimitsBundleIds: Set<String> = [
   "com.apple.SecurityAgentHelper",
   "com.apple.UserNotificationCenter",
   "com.apple.ScreenContinuity",
-  // neema itself, and Electron in development.
+  // neema itself, when installed. In development it is the parent, refused below.
   "app.neema.desktop",
-  "com.github.Electron",
 ]
 
 func isOffLimits(_ bundleId: String?) -> Bool {
   guard let bundleId else { return true }
   return offLimitsBundleIds.contains(bundleId)
+}
+
+/// The app that started the driver is neema, whatever its bundle id: in development it is the
+/// generic Electron app, which other apps share, so the id alone cannot name it.
+func isOffLimits(_ app: NSRunningApplication) -> Bool {
+  isOffLimits(app.bundleIdentifier) || app.processIdentifier == getppid()
 }

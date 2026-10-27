@@ -12,19 +12,25 @@ func listApps() -> [[String: Any]] {
         "name": app.localizedName ?? app.bundleIdentifier ?? "",
         "pid": Int(app.processIdentifier),
         "front": app.processIdentifier == front,
-        "offLimits": isOffLimits(app.bundleIdentifier),
+        "offLimits": isOffLimits(app),
       ]
     }
 }
 
-func runningApp(_ bundleId: String) throws -> NSRunningApplication {
+/// The running app by bundle id. `pid` picks one instance where several share it, as
+/// Electron apps in development do.
+func runningApp(_ bundleId: String, pid: pid_t? = nil) throws -> NSRunningApplication {
   if isOffLimits(bundleId) {
     throw DriverError(code: "off_limits", message: "\(bundleId) is never used")
   }
-  guard
-    let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first(
-      where: { !$0.isTerminated })
-  else { throw DriverError(code: "not_running", message: "\(bundleId) is not running") }
+  let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+    .filter { !$0.isTerminated && (pid == nil || $0.processIdentifier == pid) }
+  if running.contains(where: isOffLimits), running.count == 1 {
+    throw DriverError(code: "off_limits", message: "\(bundleId) is never used")
+  }
+  guard let app = running.first(where: { !isOffLimits($0) }) else {
+    throw DriverError(code: "not_running", message: "\(bundleId) is not running")
+  }
   return app
 }
 
@@ -60,6 +66,62 @@ func appElement(_ app: NSRunningApplication) -> AXUIElement {
   // A hung app would otherwise hold every call for the system's six seconds.
   AXUIElementSetMessagingTimeout(element, 1.5)
   return element
+}
+
+/// Processes whose web content was asked for, by pid and launch, since pids are reused.
+private var enabled = Set<String>()
+
+/// Chromium apps (Chrome, Electron) leave their page out of the tree until an assistive client
+/// asks for it. Reading the application's role turns native accessibility on at once, as Apple
+/// advises for assistive tools other than VoiceOver and Chromium implements. The two switches
+/// follow for builds that still need them: Chrome takes AXEnhancedUserInterface only after two
+/// quiet seconds and restarts that wait whenever anything flips it, as window managers do, so
+/// the request is repeated once. On the main thread: the page arrives only while the asking
+/// thread's run loop turns (measured).
+@MainActor
+func enableWebContent(_ app: NSRunningApplication, window: AXUIElement) {
+  let key = "\(app.processIdentifier):\(app.launchDate?.timeIntervalSince1970 ?? 0)"
+  guard !enabled.contains(key), isChromium(app) else { return }
+  enabled.insert(key)
+  let element = appElement(app)
+  let ask = {
+    _ = attribute(element, kAXRoleAttribute, as: String.self)
+    AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+  }
+  ask()
+  let start = Date()
+  var askedAgain = false
+  while Date().timeIntervalSince(start) < 5, !hasPopulatedWebArea(window) {
+    if !askedAgain, Date().timeIntervalSince(start) > 2.5 {
+      ask()
+      askedAgain = true
+    }
+    CFRunLoopRunInMode(.defaultMode, 0.1, false)
+  }
+}
+
+func isChromium(_ app: NSRunningApplication) -> Bool {
+  guard let frameworks = app.bundleURL?.appendingPathComponent("Contents/Frameworks"),
+    let names = try? FileManager.default.contentsOfDirectory(atPath: frameworks.path)
+  else { return false }
+  return names.contains { $0.hasSuffix(".framework") && ($0.contains("Electron") || $0.contains("Chrom")) }
+}
+
+private func hasPopulatedWebArea(_ root: AXUIElement) -> Bool {
+  var queue: [(AXUIElement, Int)] = [(root, 0)]
+  var visits = 0
+  while !queue.isEmpty, visits < 400 {
+    let (element, depth) = queue.removeFirst()
+    visits += 1
+    let children: [AXUIElement] = attribute(element, kAXChildrenAttribute) ?? []
+    if attribute(element, kAXRoleAttribute, as: String.self) == "AXWebArea" {
+      if !children.isEmpty { return true }
+      continue
+    }
+    if depth < 12 { queue.append(contentsOf: children.map { ($0, depth + 1) }) }
+  }
+  return false
 }
 
 // The window a look is of: the app's main window, else its focused one, else its first.
