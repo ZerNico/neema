@@ -18,7 +18,8 @@ final class Snapshot {
     elements = [:]
     webNodes = []
     self.pid = pid
-    let origin = frame(window)?.origin ?? .zero
+    let bounds = frame(window)
+    let origin = bounds?.origin ?? .zero
     var nodes: [[String: Any]] = []
     var truncated = false
 
@@ -32,6 +33,12 @@ final class Snapshot {
       let hash = CFHash(element)
       if seen[hash, default: []].contains(where: { CFEqual($0, element) }) { return }
       seen[hash, default: []].append(element)
+      // Scrolled out of the window, with all it holds: a Downloads list of 386 rows took 12 s
+      // to walk where 20 were shown. Elements without a size are often wrappers of visible ones.
+      let box = frame(element)
+      if depth > 0, let box, let bounds, box.width > 0, box.height > 0, !box.intersects(bounds) {
+        return
+      }
       let id = "n\(nodes.count + 1)"
       elements[id] = element
       let axRole: String = attribute(element, kAXRoleAttribute) ?? ""
@@ -44,7 +51,7 @@ final class Snapshot {
       ]
       if let name = label(element) { node["name"] = name }
       if let value = valueText(element) { node["value"] = value }
-      if let box = frame(element) {
+      if let box {
         node["frame"] = [
           "x": box.minX - origin.x, "y": box.minY - origin.y,
           "width": box.width, "height": box.height,
