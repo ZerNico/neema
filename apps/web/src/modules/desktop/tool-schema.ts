@@ -113,8 +113,20 @@ export const DesktopToolResult = Schema.Struct({
   ),
   /** The web page a browser call left its tab on, for the transcript to link. */
   page: Schema.optionalKey(Schema.Struct({ url: Schema.String, title: Schema.String })),
+  /** The app an app call used, as macOS names it, for the transcript row. */
+  app: Schema.optionalKey(Schema.Struct({ name: Schema.String })),
 });
 export type DesktopToolResult = typeof DesktopToolResult.Type;
+
+const APP_NAME_CHARS = 200;
+
+/** An app's name as the transcript may keep it: capped and non-empty, else nothing. */
+export const storableApp = (
+  app: DesktopToolResult["app"],
+): NonNullable<DesktopToolResult["app"]> | undefined => {
+  const name = app ? storable(app.name).trim().slice(0, APP_NAME_CHARS) : "";
+  return name ? { name } : undefined;
+};
 
 const PAGE_URL_CHARS = 2_048;
 const PAGE_TITLE_CHARS = 300;
@@ -153,6 +165,7 @@ export const storable = (text: string) => text.replaceAll("\u0000", "");
 
 export const forTranscript = (result: DesktopToolResult): DesktopToolResult => {
   const page = storablePage(result.page);
+  const app = storableApp(result.app);
   return {
     v: 1,
     ok: result.ok,
@@ -169,6 +182,7 @@ export const forTranscript = (result: DesktopToolResult): DesktopToolResult => {
         }
       : {}),
     ...(page ? { page } : {}),
+    ...(app ? { app } : {}),
   };
 };
 

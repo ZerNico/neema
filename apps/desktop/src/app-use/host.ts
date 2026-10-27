@@ -165,19 +165,23 @@ export class AppUse {
         "Apps can't be used here",
         "This computer cannot use apps for the user: app use needs the desktop app on a Mac.",
       );
+    // The app's name as macOS gives it, once resolved: the row shows it, not the model's id.
+    const named: { name?: string } = {};
+    const withApp = (result: ToolResult): ToolResult =>
+      named.name ? { ...result, app: { name: named.name } } : result;
     try {
       await this.ensurePermitted(call);
-      return await this.dispatch(call);
+      return withApp(await this.dispatch(call, named));
     } catch (error) {
-      if (error instanceof Refusal) return error.result;
+      if (error instanceof Refusal) return withApp(error.result);
       if (error instanceof AppDriverError) {
         if (error.code === "driver_exited") this.options.driver.exited();
-        const app = str(call.args.app) || "The app";
+        const app = named.name ?? (str(call.args.app) || "The app");
         const words = DRIVER_WORDS[error.code];
-        return failure(`Couldn't use ${app}`, words ? words(app) : error.message);
+        return withApp(failure(`Couldn't use ${app}`, words ? words(app) : error.message));
       }
       this.options.log(`app use failed: ${error instanceof Error ? error.message : String(error)}`);
-      return failure("That did not work", "App use failed unexpectedly. Try again once.");
+      return withApp(failure("That did not work", "App use failed unexpectedly. Try again once."));
     }
   }
 
@@ -210,16 +214,19 @@ export class AppUse {
     );
   }
 
-  private async dispatch(call: AppCall): Promise<ToolResult> {
+  private async dispatch(call: AppCall, named: { name?: string }): Promise<ToolResult> {
     if (call.name === "app_list") return this.list(call.conversationId);
-    const named = str(call.args.app);
-    if (!named) return failure("Which app?", "Name the app with app, as app_list shows it.");
-    const resolved = await this.call("resolve", { app: named });
+    const asked = str(call.args.app);
+    if (!asked) return failure("Which app?", "Name the app with app, as app_list shows it.");
+    const resolved = await this.call("resolve", { app: asked });
+    named.name = resolved.name;
     await this.consent(call, resolved);
     const { appId, name } = resolved;
     switch (call.name) {
       case "app_open":
-        if (!resolved.running) await this.call("open", { appId });
+        // Also when running: macOS then asks the app to reopen, which brings a window back to
+        // one that has none, and the driver waits for it.
+        await this.call("open", { appId });
         return this.look(call.conversationId, appId, name, `Opened ${name}`);
       case "app_look":
         return this.look(call.conversationId, appId, name, `Looked at ${name}`);

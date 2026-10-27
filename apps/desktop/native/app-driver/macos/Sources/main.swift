@@ -111,6 +111,11 @@ actor Driver {
     // Opened behind the person's work, like everything else app use does.
     configuration.activates = false
     let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    // An app is launched before its first window exists, and a look right away found none.
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline, (try? mainWindow(app)) == nil {
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
     return [
       "name": app.localizedName ?? appId, "pid": Int(app.processIdentifier),
       "appId": app.bundleIdentifier ?? appId,

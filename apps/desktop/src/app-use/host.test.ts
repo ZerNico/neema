@@ -1,10 +1,20 @@
 import type { ToolResult } from "@chat/desktop-rpc";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { AppGrants } from "./grants.ts";
 import { type AppCall, AppUse, SharedAppDriver } from "./host.ts";
+
+const running = (name: string) => {
+  try {
+    execFileSync("pgrep", ["-x", name]);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const call = (
   name: string,
@@ -98,8 +108,15 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")("app use on this M
   test("allowed in the chat, it opens, looks, and acts by reference and by pixel", async () => {
     answer = "chat";
     asked.length = 0;
-    const opened = await apps.run(call("app_open", { app: "Calculator" }));
+    // Not running: an app is launched before its window exists, and the look must wait for it.
+    execFileSync("osascript", ["-e", 'quit app "Calculator"']);
+    // Quitting returns before the app has gone; opening it meanwhile would find the old one.
+    for (let tries = 0; running("Calculator") && tries < 100; tries++)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    const opened = await apps.run(call("app_open", { app: "com.apple.calculator" }));
     expect(opened.ok).toBe(true);
+    // The row names the app as macOS does, not by the id the model used.
+    expect(opened.app).toEqual({ name: "Calculator" });
     expect(opened.file?.mediaType).toBe("image/png");
     expect(await grants.allowed("chat-1", "com.apple.calculator")).toBe(true);
 

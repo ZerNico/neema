@@ -26,6 +26,8 @@ export const ToolResult = Schema.Struct({
   ),
   /** The web page a browser call left its tab on, for the transcript to link. */
   page: Schema.optionalKey(Schema.Struct({ url: Schema.String, title: Schema.String })),
+  /** The app an app call used, as macOS names it, for the transcript row. */
+  app: Schema.optionalKey(Schema.Struct({ name: Schema.String })),
 });
 export type ToolResult = typeof ToolResult.Type;
 

@@ -164,7 +164,12 @@ const runningLabel = (
   if (isBrowserTool(activity.name))
     return BROWSER_ACTIVITY[activity.name].running(activity.args ?? {});
   if (isAppTool(activity.name))
-    return appActivityLabel(activity.name, activity.args ?? {}, activity.status === "error");
+    return appActivityLabel(
+      activity.name,
+      // The machine's name for the app once it has one, not the id the model used.
+      { ...activity.args, ...(activity.result?.app ? { app: activity.result.app.name } : {}) },
+      activity.status === "error",
+    );
   const raw = argText(activity);
   const what = PATH_TOOLS.has(activity.name) && raw ? shortPath(raw, roots) : raw;
   if (activity.status === "error") {
