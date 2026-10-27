@@ -63,7 +63,7 @@ import { ComputerHost } from "./computer/host.ts";
 import { microsandbox } from "./computer/hypervisor.ts";
 import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
 import { computerDialogs } from "./computer/dialogs.ts";
-import { RememberedFolders } from "./computer/folder-access.ts";
+import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
   SIGN_IN_TICKET,
@@ -259,6 +259,7 @@ const startComputer = (origin: string) => {
       runtime.runPromise(
         Effect.flatMap(WorkspaceRegistry, (workspaces) => workspaces.ensure(conversationId)),
       ),
+    stillMountable: (mount) => stillMountable(mount.hostPath, app.getPath("userData")),
     folders: async (conversationId) =>
       mountsOf(
         await runtime.runPromise(

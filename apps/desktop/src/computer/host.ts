@@ -25,6 +25,11 @@ export interface ComputerHostOptions {
   /** The chat's workspace on the host, created when missing: the VM mounts it as /workspace. */
   readonly workspace: (conversationId: string) => Promise<string>;
   readonly folders: (conversationId: string) => Promise<readonly Mount[]>;
+  /**
+   * Whether a granted folder may still be mounted, asked each time a VM is made: one replaced
+   * since by a link elsewhere (to credentials, say) is left out, as the strip shows it moved.
+   */
+  readonly stillMountable: (mount: Mount) => Promise<boolean>;
   readonly discardWorkspace: (conversationId: string) => Promise<void>;
   /** Chats of this server with something kept here: a workspace or an attached folder. */
   readonly localChats: () => Promise<readonly string[]>;
@@ -193,6 +198,12 @@ export class ComputerHost {
     await this.proxy.close();
   }
 
+  private async mountable(conversationId: string) {
+    const mounts = await this.options.folders(conversationId);
+    const usable = await Promise.all(mounts.map((mount) => this.options.stillMountable(mount)));
+    return mounts.filter((_, index) => usable[index]);
+  }
+
   /** Tells the server the chat's folder names after an attach or detach here. */
   async foldersChanged(conversationId: string) {
     const mounts = await this.options.folders(conversationId);
@@ -234,7 +245,7 @@ export class ComputerHost {
             seen: this.seen,
             setup: async (key) => ({
               workspace: await this.options.workspace(key.conversationId),
-              mounts: await this.options.folders(key.conversationId),
+              mounts: await this.mountable(key.conversationId),
             }),
             attachment: (key, id) => this.attachment(key, id),
             agentAllowed: (key) => this.agent.isAllowed(key),
@@ -310,8 +321,9 @@ export class ComputerHost {
     const key = this.key(conversationId);
     try {
       await this.vms.discard(key);
-      this.seen.forget(conversationId);
+      // A reset leaves the folders as they were, so what the model saw of them still holds.
       if (!everything) return;
+      this.seen.forget(conversationId);
       await this.options.discardWorkspace(conversationId);
       await this.sentFiles.forget(conversationId);
       if (this.agent.isAllowed(key)) {

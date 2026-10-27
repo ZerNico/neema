@@ -19,7 +19,7 @@ import type { Guest } from "./hypervisor.ts";
 import { place, WORKSPACE, type Mount } from "./paths.ts";
 import { AGENT_VSOCK_PORT, type ChatKey, type ChatSetup, type ChatVms } from "./vms.ts";
 import type { SentFiles } from "./sent-files.ts";
-import { hostFileOf, stampOf, type SeenFiles } from "./seen-files.ts";
+import { hostFileOf, observe, type SeenFiles } from "./seen-files.ts";
 
 /** A call as the machine received it, its deadline already on this machine's clock. */
 export interface ComputerCall {
@@ -228,27 +228,32 @@ async function run(
   args: Readonly<Record<string, unknown>>,
 ): Promise<ToolResult> {
   const chat = call.key.conversationId;
+  /** Null outside an attached folder: only the model writes in the workspace. */
   const stampAt = (path: string) => {
     const hostFile = hostFileOf(path, mounts);
-    return hostFile ? stampOf(hostFile) : Promise.resolve(null);
+    return hostFile ? observe(hostFile) : Promise.resolve(null);
   };
-  const saw = async (path: string) => deps.seen.note(chat, path, await stampAt(path));
+  const saw = async (path: string) => {
+    const now = await stampAt(path);
+    if (now) deps.seen.note(chat, now.file, now.stamp);
+  };
   /**
    * A read is stamped before it happens: a save while it ran then counts as a change, never as
    * seen. `place` for the path the read will name.
    */
   const reading = async <T>(path: string, read: () => Promise<T>) => {
     const placed = place(path, mounts);
-    const stamp = placed.ok ? await stampAt(placed.path) : null;
+    const before = placed.ok ? await stampAt(placed.path) : null;
     const result = await read();
-    if (placed.ok) deps.seen.note(chat, placed.path, stamp);
+    if (before) deps.seen.note(chat, before.file, before.stamp);
     return result;
   };
   /** A refusal when the folder file at `path` changed since the model last read or wrote it. */
   const changedSinceSeen = async (path: string) => {
     const placed = place(path, mounts);
     if (!placed.ok) return null;
-    if (!deps.seen.changedSince(chat, placed.path, await stampAt(placed.path))) return null;
+    const now = await stampAt(placed.path);
+    if (!now || !deps.seen.changedSince(chat, now.file, now.stamp)) return null;
     return failure(
       "The file changed since it was read",
       `${placed.path} changed since you last read it, by a command you ran or by the user saving it. Read it again and make your change on top of what is there now; writing now could undo that change. Do not tell the user they changed it unless you know.`,

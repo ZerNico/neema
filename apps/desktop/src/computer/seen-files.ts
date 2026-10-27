@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { guestRoot, type Mount } from "./paths.ts";
 
@@ -15,12 +15,22 @@ export const hostFileOf = (path: string, mounts: readonly Mount[]) => {
   return null;
 };
 
-/** When and how big the file is now, or null when there is none. */
-export const stampOf = (hostFile: string) =>
-  stat(hostFile).then(
+/** macOS and Windows disks ignore case by default: Report.xlsx and report.xlsx are one file. */
+const CASE_BLIND = process.platform === "darwin" || process.platform === "win32";
+
+/**
+ * The file as it is now: which one it is, by its real path (a link resolved, case folded where
+ * the disk ignores it), and when and how big it is, null when there is none. Not its inode: a
+ * save in Excel replaces the file, and a new inode would look like a file never seen.
+ */
+export const observe = async (hostFile: string) => {
+  const real = await realpath(hostFile).catch(() => hostFile);
+  const stamp = await stat(real).then(
     (info) => `${info.mtimeMs}:${info.size}`,
     () => null,
   );
+  return { file: CASE_BLIND ? real.toLowerCase() : real, stamp };
+};
 
 /**
  * What the model last saw of each folder file it read or wrote, per chat, so a rewrite of one

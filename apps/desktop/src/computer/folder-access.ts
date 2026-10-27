@@ -1,3 +1,4 @@
+import { isOwnRealPath } from "../folders.ts";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
@@ -63,6 +64,16 @@ export async function checkFolder(
   }
   return { path };
 }
+
+/**
+ * Whether a folder granted earlier may still be mounted into a VM: it passes the checks of
+ * attaching again, and is still its own real path. A folder replaced since by a link elsewhere
+ * (to credentials, say) is left out, as the strip shows it moved.
+ */
+export const stillMountable = async (hostPath: string, appData: string) => {
+  const checked = await checkFolder(hostPath, appData);
+  return "path" in checked && isOwnRealPath(hostPath, checked.path);
+};
 
 /** Folders the person said not to be asked about again on this machine, per server. */
 export class RememberedFolders {

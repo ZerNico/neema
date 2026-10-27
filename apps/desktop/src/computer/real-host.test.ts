@@ -125,6 +125,7 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       localChats: async () => ["chat-1", "purged"],
       cloneWorkspace: async () => {},
       agentSocket: () => null,
+      stillMountable: async () => true,
       remote: () => true,
       ask: {
         folder: async ({ path }) =>
@@ -229,6 +230,14 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       await call("s4", "write_file", { path: "/folders/notes/plan.md", text: "merged\n" }),
     ).toMatchObject({ ok: true });
     expect(await readFile(onHost, "utf8")).toBe("merged\n");
+    // Another spelling of the same file on a disk that ignores case is the same file.
+    if (process.platform === "darwin") {
+      await writeFile(onHost, "saved again by the person\n");
+      expect(
+        await call("s4b", "write_file", { path: "/folders/notes/PLAN.md", text: "overwrite\n" }),
+      ).toMatchObject({ ok: false });
+      await call("s4c", "read_file", { path: "/folders/notes/plan.md" });
+    }
     // Its own writes are what it last saw, so writing again needs no new read.
     expect(
       await call("s5", "write_file", { path: "/folders/notes/plan.md", text: "merged twice\n" }),
