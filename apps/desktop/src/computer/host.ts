@@ -82,6 +82,9 @@ const fileName = (response: Response, fallback: string) => {
  * This machine's computer for one server: the VMs of that server's chats, the egress proxy and
  * agent relay they use, and the connection their calls arrive on. See docs/internals/desktop.md.
  */
+/** How long quitting waits for the answers of the calls it stopped to reach the server. */
+const QUIT_WAIT_MS = 2_000;
+
 export class ComputerHost {
   private current: Status = { status: "preparing", progress: 0 };
   private readonly proxy: EgressProxy;
@@ -103,7 +106,13 @@ export class ComputerHost {
   private readonly launch = randomUUID();
   private readonly calls = new Map<
     string,
-    { abort: AbortController; result: Promise<ToolResult>; settled: boolean }
+    {
+      abort: AbortController;
+      result: Promise<ToolResult>;
+      settled: boolean;
+      /** The answer on its way to the server, so quitting can wait for it briefly. */
+      posted?: Promise<void>;
+    }
   >();
 
   constructor(private readonly options: ComputerHostOptions) {
@@ -209,7 +218,14 @@ export class ComputerHost {
   }
 
   async stop() {
-    for (const call of this.calls.values()) call.abort.abort();
+    const running = [...this.calls.values()].filter((call) => !call.settled);
+    for (const call of running) call.abort.abort();
+    // The "stopped" answers go out before the connection closes, so the model hears now that
+    // they were cut off, not at their deadline; a couple of seconds at most, since this is quit.
+    await Promise.race([
+      Promise.all(running.map((call) => call.posted)),
+      new Promise((resolve) => setTimeout(resolve, QUIT_WAIT_MS)),
+    ]);
     await this.client.stop();
     await this.vms.stopAll();
     this.agent.close();
@@ -303,9 +319,14 @@ export class ComputerHost {
             signal: abort.signal,
           },
         );
-        const entry = { abort, result, settled: false };
+        const entry: {
+          abort: AbortController;
+          result: Promise<ToolResult>;
+          settled: boolean;
+          posted?: Promise<void>;
+        } = { abort, result, settled: false };
         this.calls.set(event.callId, entry);
-        void result.then(async (answer) => {
+        entry.posted = result.then(async (answer) => {
           entry.settled = true;
           await this.client.postResult(event.callId, answer, deadline);
           setTimeout(() => this.calls.delete(event.callId), KEPT_MS).unref();

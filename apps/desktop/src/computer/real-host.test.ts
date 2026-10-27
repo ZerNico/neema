@@ -329,4 +329,14 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     expect(answer.ok).toBe(false);
     expect(answer.detail).toMatch(/stopped/);
   }, 120_000);
+
+  // Last: it stops the host. Quitting tells the server a running command was cut off.
+  test("quitting answers a running command as stopped before it disconnects", async () => {
+    const pending = call("c-quit", "run_command", { command: "sleep 120" });
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await host.stop();
+    const answer = await pending;
+    expect(answer.ok).toBe(false);
+    expect(answer.detail).toMatch(/stopped/);
+  }, 120_000);
 });
