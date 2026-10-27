@@ -1,0 +1,110 @@
+import { describe, expect, test } from "vitest";
+import { buildOutline } from "./outline.ts";
+import type { Look, UiNode } from "./protocol.ts";
+
+const node = (id: string, depth: number, fields: Partial<UiNode> = {}): UiNode => ({
+  id,
+  depth,
+  role: "group",
+  actions: [],
+  ...fields,
+});
+
+const look = (nodes: UiNode[], fields: Partial<Look> = {}): Look => ({
+  app: "Calculator",
+  title: "Calculator",
+  window: { width: 200, height: 400 },
+  image: { data: "", width: 200, height: 400 },
+  nodes,
+  truncated: false,
+  ...fields,
+});
+
+describe("the outline of a look", () => {
+  test("numbers what is worth showing and maps each reference to its node", () => {
+    const outline = buildOutline(
+      look([
+        node("n1", 0, { role: "window", name: "Calculator" }),
+        // An unnamed group with no action adds nothing; its children move up a level.
+        node("n2", 1),
+        node("n3", 2, { role: "text", value: "‎42" }),
+        node("n4", 2, {
+          role: "button",
+          name: "7",
+          actions: ["press"],
+          frame: { x: 10, y: 200, width: 40, height: 40 },
+        }),
+        node("n5", 1, { role: "closeButton", actions: ["press"], disabled: true }),
+      ]),
+    );
+    expect(outline.text).toBe(
+      [
+        'e1 window "Calculator"',
+        '  e2 text = "42"',
+        '  e3 button "7" @30,220',
+        "  e4 closeButton disabled",
+      ].join("\n"),
+    );
+    expect([...outline.refs]).toEqual([
+      ["e1", "n1"],
+      ["e2", "n3"],
+      ["e3", "n4"],
+      ["e4", "n5"],
+    ]);
+    expect(outline.truncated).toBe(false);
+  });
+
+  test("gives positions in picture pixels", () => {
+    const outline = buildOutline(
+      look(
+        [
+          node("n1", 0, {
+            role: "button",
+            name: "Save",
+            actions: ["press"],
+            frame: { x: 100, y: 50, width: 20, height: 10 },
+          }),
+        ],
+        { image: { data: "", width: 100, height: 200 } },
+      ),
+    );
+    expect(outline.text).toBe('e1 button "Save" @55,28');
+  });
+
+  test("leaves out what is scrolled out of the window, with everything inside it", () => {
+    const outline = buildOutline(
+      look([
+        node("n1", 0, { role: "window" }),
+        node("n2", 1, { role: "list", frame: { x: 0, y: 500, width: 200, height: 100 } }),
+        node("n3", 2, { role: "listItem", name: "Hidden" }),
+        node("n4", 1, { role: "button", name: "Shown", actions: ["press"] }),
+      ]),
+    );
+    expect(outline.text).toBe('e1 window\n  e2 button "Shown"');
+  });
+
+  test("stops at its budget and says so", () => {
+    const rows = Array.from({ length: 2000 }, (_, index) =>
+      node(`n${index + 2}`, 1, { role: "cell", value: `row ${index} ${"x".repeat(20)}` }),
+    );
+    const outline = buildOutline(look([node("n1", 0, { role: "table" }), ...rows]));
+    expect(outline.truncated).toBe(true);
+    expect(outline.text.length).toBeLessThanOrEqual(12_000);
+    expect(outline.refs.size).toBe(outline.text.split("\n").length);
+  });
+
+  test("passes on the driver's own truncation", () => {
+    expect(
+      buildOutline(look([node("n1", 0, { role: "window" })], { truncated: true })).truncated,
+    ).toBe(true);
+  });
+
+  test("shortens long names and keeps quotes readable", () => {
+    const outline = buildOutline(
+      look([node("n1", 0, { role: "text", value: `say "hi"\n${"a".repeat(200)}` })]),
+    );
+    const line = outline.text;
+    expect(line.startsWith('e1 text = "say \\"hi\\" aaa')).toBe(true);
+    expect(line.endsWith('…"')).toBe(true);
+  });
+});

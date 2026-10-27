@@ -355,7 +355,7 @@ skipped one on purpose.
   and remote use.
 - `docs/internals/app-use.md`: planned. The model operating the person's own apps through our
   own tools: looks as a window picture plus an accessibility outline, consent per app, apps
-  never offered, the floating view, the native helpers.
+  never offered, the floating view, the native drivers.
 
 ## Version pins
 
