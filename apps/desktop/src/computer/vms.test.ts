@@ -222,8 +222,16 @@ test("a chat's calls run in the order they came, however long each takes to know
   const order: string[] = [];
   let release: () => void = () => {};
   const slowSetup = new Promise<typeof plain>((resolve) => (release = () => resolve(plain)));
-  const first = vms.use(KEY, () => slowSetup, async () => void order.push("first"));
-  const second = vms.use(KEY, async () => plain, async () => void order.push("second"));
+  const first = vms.use(
+    KEY,
+    () => slowSetup,
+    async () => void order.push("first"),
+  );
+  const second = vms.use(
+    KEY,
+    async () => plain,
+    async () => void order.push("second"),
+  );
   release();
   await Promise.all([first, second]);
   expect(order).toEqual(["first", "second"]);

@@ -64,11 +64,7 @@ export class ComputerRepo extends Context.Service<
     /** Binds an unbound chat; false when it already has a machine or is not the person's. */
     bind(userId: string, conversationId: string, machineId: string): Effect.Effect<boolean>;
     /** Every chat of the person on one machine moved to another; the ids moved. */
-    moveChats(
-      userId: string,
-      from: string,
-      to: string,
-    ): Effect.Effect<ReadonlyArray<string>>;
+    moveChats(userId: string, from: string, to: string): Effect.Effect<ReadonlyArray<string>>;
     /** Points the chat at another machine; its folders belong to the old one and go. */
     rebind(
       userId: string,

@@ -38,7 +38,15 @@ describe.skipIf(!hasOpenSsh || process.platform === "win32")("the person's SSH a
     const home = join(dir, "home");
     await mkdir(join(home, ".ssh"), { recursive: true });
     expect(await defaultKey(home)).toBeNull();
-    execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(home, ".ssh/id_ed25519")]);
+    execFileSync("ssh-keygen", [
+      "-q",
+      "-t",
+      "ed25519",
+      "-N",
+      "",
+      "-f",
+      join(home, ".ssh/id_ed25519"),
+    ]);
     const key = await defaultKey(home);
     expect(key).toBe(join(home, ".ssh/id_ed25519"));
 

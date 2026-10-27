@@ -94,7 +94,8 @@ function PermissionPicker({
   level: PermissionLevel;
   onChange: (level: PermissionLevel) => void;
 }) {
-  const current = PERMISSION_LEVELS.find((option) => option.value === level) ?? PERMISSION_LEVELS[0]!;
+  const current =
+    PERMISSION_LEVELS.find((option) => option.value === level) ?? PERMISSION_LEVELS[0]!;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

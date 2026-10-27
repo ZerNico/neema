@@ -141,7 +141,13 @@ const copyAttachments = async (
       const file = await deps.attachment(call.key, attachment.id, call.signal).catch(() => null);
       if (!file) continue;
       await guest.run({ argv: ["/bin/mkdir", "-p", posix.dirname(placed.path)] });
-      if (!(await guest.write(placed.path, file.bytes).then(() => true, () => false))) continue;
+      if (
+        !(await guest.write(placed.path, file.bytes).then(
+          () => true,
+          () => false,
+        ))
+      )
+        continue;
     }
     done.push(attachment.id);
   }
