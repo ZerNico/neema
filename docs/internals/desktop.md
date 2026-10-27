@@ -219,15 +219,23 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   Reads never ask: the VM bounds what they reach. The delete tool and a new network
   destination always ask, but under `allow` a command runs unasked and may delete files
   itself, which the level's description says rather than promise otherwise. "Allow in this
-  chat" is kept in memory per chat and kind, until the server restarts, and skips the review
-  too. The level is changed in the strip under the composer on the chat's own machine, where
+  chat" is kept in memory per chat and kind, until the server restarts or the chat's level or
+  machine changes, and skips the review too. An approval counts for the machine its card was
+  shown for: the call is then decided again with it, so that machine's own checks still run,
+  and a chat moved to another machine meanwhile asks again. The level is changed in the strip under the composer on the chat's own machine, where
   its work shows, and in the computer chip anywhere else.
 - **A folder file changed since the model read it is not replaced.** `write_file`, and
   `copy_to_computer` to a path, refuse when the file's time or size on the host differs from
   what the model last read or wrote (`seen-files.ts`), so a save in Excel or a sync is not
   silently undone; the model reads again. Asked on the host, since the guest caches a file's
-  details. `edit_file` applies to the file as it is, so it needs no check, and the workspace is
-  the model's alone. Kept in memory: after a restart a write goes through as before.
+  details, and stamped before a read, so a save during it counts as a change. A file is known by
+  its real path, a link resolved and case folded where the disk ignores it, not by its inode,
+  since a save in Excel replaces the file. `edit_file` applies to the file as it is, so it
+  needs no check, and the workspace is the model's alone. Kept in memory, and through a reset
+  of the environment: after a restart a write goes through as before.
+- **`copy_to_computer` takes only one of the chat's own files**, sent in it or made by an
+  answer in it, checked on the server: the machine fetches it with the person's session, which
+  reaches every file of theirs.
 - **The review** (`review.ts`) shows a model the action and which folders are the person's,
   and reads RUN, or ASK with a reason the approval card then shows in the person's language.
   It runs on the admin's review model, else the answer's own. Anything that keeps it from
@@ -260,7 +268,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   plus menu, through the native picker. Attached folders stay with the chat, so they show in a
   strip under the composer, not among a message's files. It refuses a folder that is
   a disk root, the home folder itself, the app's own data, or holds or lies inside credentials
-  (`folder-access.ts`), judged by where links lead. A folder may be attached read-only.
+  (`folder-access.ts`), judged by where links lead. A folder may be attached read-only. The
+  checks run again each time a VM is made (`stillMountable`): a folder since replaced by a link,
+  to credentials say, is left out, as the strip shows it moved.
 - **A folder is a use of the machine.** Folders are offered only where the chat's computer is
   this machine or none yet, and the first one binds a chat without a computer to it. A new chat
   has its id before its first message, so the machine holds a folder picked for it. The first
@@ -347,7 +357,9 @@ The VM's only way out is the egress proxy, which decides by name. See [egress pr
   Windows) that microsandbox exposes over vsock, and the image's `ssh-agent-bridge` presents it
   as `/run/ssh-agent.sock`, set as `SSH_AUTH_SOCK` for commands of a chat allowed the agent.
   The relay passes a connection only while the chat is allowed, and revoking cuts the open
-  ones. Commands can ask the agent to sign but never read a key.
+  ones. Of the agent protocol it passes only what a login needs, listing keys, signing and
+  OpenSSH's session binding, one request at a time; adding, removing or locking keys gets the
+  protocol's failure. Commands can sign with the person's keys, never read or change them.
 - **Which agent:** the socket chosen in Settings › This computer, else `SSH_AUTH_SOCK`, else
   Windows' OpenSSH agent pipe. Windows' agent service is disabled by default, and Pageant and
   Git for Windows' own agent are not supported.
