@@ -425,6 +425,60 @@ describe("ComputerCalls", () => {
     }),
   );
 
+  it.effect(
+    "a question nobody answers ends before the call's wait, and a late click runs nothing",
+    () =>
+      Effect.gen(function* () {
+        const { calls, open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }));
+        const laptop = yield* connect("laptop");
+        const { waiting } = yield* open(
+          "call-1",
+          "delete_files",
+          { paths: ["/workspace/a"] },
+          "laptop",
+        );
+        expect(yield* calls.pending(USER)).toHaveLength(1);
+        yield* TestClock.adjust(Duration.seconds(56));
+        expect(yield* Fiber.join(waiting)).toMatchObject({
+          ok: false,
+          summary: "Nobody answered in time",
+        });
+        expect(yield* calls.pending(USER)).toEqual([]);
+        expect(yield* calls.decide(USER, "call-1", "allow")).toBe(false);
+        expect(
+          Option.isNone(
+            yield* Queue.poll(laptop.queue).pipe(
+              Effect.map((event) =>
+                Option.flatMap(event, (value) =>
+                  value.type === "call" ? Option.some(value) : Option.none(),
+                ),
+              ),
+            ),
+          ),
+        ).toBe(true);
+      }),
+  );
+
+  it.effect("a call sent to an app that has quit since is answered, not run again", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "allow" }),
+      );
+      const before = yield* connect("laptop", { launch: "launch-1" });
+      const { waiting } = yield* open("call-1", "run_command", { command: "make" }, "laptop");
+      expect(yield* nextCall(before.queue)).toMatchObject({ callId: "call-1" });
+      yield* Scope.close(before.scope, Exit.void);
+      const after = yield* connect("laptop", { launch: "launch-2" });
+      yield* calls.machineConnected(USER, "laptop");
+      expect(yield* Fiber.join(waiting)).toMatchObject({
+        ok: false,
+        summary: "The desktop app restarted",
+      });
+      const running = yield* Queue.take(after.queue);
+      expect(running).toEqual({ type: "running", callIds: [] });
+    }),
+  );
+
   it.effect("ask when risky never reviews a delete: it asks", () =>
     Effect.gen(function* () {
       let asked = 0;

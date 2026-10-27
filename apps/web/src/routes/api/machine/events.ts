@@ -33,7 +33,10 @@ export const Route = createFileRoute("/api/machine/events")({
                 const events = yield* hub.connect(userId, shown, session.session.id);
                 yield* Effect.addFinalizer(() => repo.touchMachine(userId, hello.machineId));
                 yield* calls.pushPolicy(userId, hello.machineId);
-                yield* calls.machineConnected(userId, hello.machineId);
+                // On its own fiber: resending and deciding held calls can take a review's seconds
+                // each, and the stream should flow meanwhile; a drop must not strand a call
+                // halfway through its decision.
+                yield* Effect.forkDetach(calls.machineConnected(userId, hello.machineId));
                 return events;
               }),
             ).pipe(Stream.interruptWhen(ended));

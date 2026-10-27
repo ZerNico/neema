@@ -56,7 +56,7 @@ interface Entry {
         readonly machine?: { id: string; name: string };
         readonly reason?: string;
       }
-    | { readonly kind: "sent"; readonly machineId: string }
+    | { readonly kind: "sent"; readonly machineId: string; readonly launch?: string }
     /**
      * Held until the machine has its environment, or is back (null: any of the person's), so the
      * model is not answered meanwhile.
@@ -374,7 +374,9 @@ export class ComputerCalls extends Context.Service<
           }
           if (changes && chat.permissionLevel === "review" && !allowedHere) {
             // No longer held while the review takes its seconds, so a status update or the
-            // reconnect timer cannot start a second decision for the same call.
+            // reconnect timer cannot start a second decision for the same call. Not over a Stop
+            // that landed during the reads above.
+            if (ended(entry)) return;
             entry.state = { kind: "deciding" };
             const verdict = yield* reviewer.review({
               userId: entry.userId,
@@ -480,7 +482,8 @@ export class ComputerCalls extends Context.Service<
             yield* hub.send(entry.userId, machineId, { type: "cancel", callId: entry.callId });
             return;
           }
-          entry.state = { kind: "sent", machineId };
+          const launch = (yield* hub.presence(entry.userId, machineId))?.hello.launch;
+          entry.state = { kind: "sent", machineId, ...(launch ? { launch } : {}) };
         });
 
       /** What approving a server tool does, and what the model is told. */
@@ -511,7 +514,14 @@ export class ComputerCalls extends Context.Service<
               entry.state.kind === "preparing" &&
               (entry.state.machineId === machineId || entry.state.machineId === null),
           ),
-          advance,
+          (entry) =>
+            Effect.suspend(() => {
+              // Claimed before deciding, so a status post or a timer arriving meanwhile does
+              // not decide the same call a second time.
+              if (entry.state.kind !== "preparing") return Effect.void;
+              entry.state = { kind: "deciding" };
+              return advance(entry);
+            }),
           { discard: true },
         );
 
@@ -531,6 +541,24 @@ export class ComputerCalls extends Context.Service<
               state: { kind: "deciding" },
             };
             entries.set(input.callId, entry);
+            // A question nobody answers ends just before the call's own wait does, so a click
+            // later can never run what the model was already told did not happen.
+            yield* Effect.forkIn(
+              Effect.gen(function* () {
+                yield* Effect.sleep(
+                  Duration.millis(Math.max(0, input.timeoutMs - DEADLINE_MARGIN_MS)),
+                );
+                if (entry.state.kind !== "waiting") return;
+                yield* finish(
+                  entry,
+                  desktopFailure(
+                    "Nobody answered in time",
+                    "The user did not answer the question in time, so nothing ran. Ask again if it is still needed.",
+                  ),
+                );
+              }),
+              yield* Effect.scope,
+            );
             // The call's scope ends with its result, Stop, or the generation ending: a call still
             // on a machine is cancelled there, and the card disappears everywhere.
             yield* Effect.addFinalizer(() =>
@@ -615,16 +643,40 @@ export class ComputerCalls extends Context.Service<
         pushPolicy,
         machineConnected: (userId, machineId) =>
           Effect.gen(function* () {
-            const sent = [...entries.values()].filter(
+            const launch = (yield* hub.presence(userId, machineId))?.hello.launch;
+            // Read and told in one step: a call sent in between would be missing from the list,
+            // and the machine would stop it as no longer wanted.
+            const ours = [...entries.values()].filter(
               (entry) =>
                 entry.userId === userId &&
                 entry.state.kind === "sent" &&
                 entry.state.machineId === machineId,
             );
+            // Sent to an app that has quit since: it may have run partly, so it is not run again.
+            const lost = ours.filter(
+              (entry) =>
+                entry.state.kind === "sent" &&
+                entry.state.launch !== undefined &&
+                launch !== undefined &&
+                entry.state.launch !== launch,
+            );
+            const sent = ours.filter((entry) => !lost.includes(entry));
             yield* hub.send(userId, machineId, {
               type: "running",
               callIds: sent.map((entry) => entry.callId),
             });
+            yield* Effect.forEach(
+              lost,
+              (entry) =>
+                finish(
+                  entry,
+                  desktopFailure(
+                    "The desktop app restarted",
+                    "The desktop app quit while this ran, so it may have stopped partway. Check what it changed before running it again.",
+                  ),
+                ),
+              { discard: true },
+            );
             yield* Effect.forEach(sent, (entry) => send(entry, machineId), { discard: true });
             yield* advanceHeld(userId, machineId);
           }),

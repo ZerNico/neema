@@ -42,6 +42,11 @@ export const MachineHello = Schema.Struct({
   ]),
   /** Whether this machine lets calls started on other devices run. */
   remote: Schema.Boolean,
+  /**
+   * New each time the app starts. A call sent to an earlier launch died with it, maybe halfway,
+   * so it is answered as interrupted, never sent again to run a second time.
+   */
+  launch: Schema.optionalKey(Id),
 });
 export type MachineHello = typeof MachineHello.Type;
 
