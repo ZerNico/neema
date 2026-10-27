@@ -77,11 +77,20 @@ actor Driver {
       return [:]
     case "type":
       let target = try current()
+      let text = try param(params, "text", as: String.self)
+      var field: AXUIElement?
       if params["node"] != nil {
-        AXUIElementSetAttributeValue(try node(params), kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        field = try node(params)
+        AXUIElementSetAttributeValue(field!, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+      } else if let looked {
+        field = attribute(appElement(looked.app), kAXFocusedUIElementAttribute)
       }
-      type(try param(params, "text", as: String.self), pid: target.pid)
-      return [:]
+      // A native text field takes the text at its cursor in one step, exactly as given: typed
+      // key by key, TextEdit's autocorrect and capitals rewrote it, and keys the person pressed
+      // meanwhile mixed in. A page ignores text set this way, so it is typed there.
+      if let field, !isWebField(field), insert(text, into: field) { return ["inserted": true] }
+      type(text, pid: target.pid)
+      return ["inserted": false]
     case "key":
       press(try parseChord(try param(params, "keys", as: String.self)), pid: try current().pid)
       return [:]
@@ -97,6 +106,28 @@ actor Driver {
     default:
       throw DriverError(code: "unknown_method", message: "No method \(method)")
     }
+  }
+
+  /// Inserts at the field's cursor, replacing its selection, if the field allows it.
+  private func insert(_ text: String, into field: AXUIElement) -> Bool {
+    var settable = DarwinBoolean(false)
+    guard
+      AXUIElementIsAttributeSettable(field, kAXSelectedTextAttribute as CFString, &settable)
+        == .success, settable.boolValue
+    else { return false }
+    return AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, text as CFString)
+      == .success
+  }
+
+  /// A field inside a web page, which ignores text set through accessibility.
+  private func isWebField(_ field: AXUIElement) -> Bool {
+    var element: AXUIElement? = field
+    for _ in 0..<40 {
+      guard let current = element else { return false }
+      if attribute(current, kAXRoleAttribute, as: String.self) == "AXWebArea" { return true }
+      element = attribute(current, kAXParentAttribute)
+    }
+    return false
   }
 
   private func open(_ appId: String) async throws -> [String: Any] {
