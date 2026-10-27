@@ -200,6 +200,23 @@ export const Methods = {
     result: Schema.Struct({}),
   },
   drag: { params: Schema.Struct({ from: Place, to: Place }), result: Schema.Struct({}) },
+  /**
+   * A panel inside System Settings to drag `bundle` into a privacy list. Answers once the grant
+   * shows, the person closes it, `cancelGuide` arrives or ten minutes pass. `preview` shows it
+   * whatever is granted, to check it by eye.
+   */
+  guide: {
+    params: Schema.Struct({
+      permission: Schema.Literals(["accessibility", "screenRecording"]),
+      bundle: Schema.String,
+      title: Schema.String,
+      instruction: Schema.String,
+      preview: Schema.optionalKey(Schema.Boolean),
+    }),
+    result: Schema.Struct({ outcome: Schema.Literals(["granted", "closed", "timeout"]) }),
+  },
+  /** Closes a guide at once: the driver answers it ahead of the guide it ends. */
+  cancelGuide: { params: Schema.Struct({}), result: Schema.Struct({}) },
 } as const;
 export type Method = keyof typeof Methods;
 

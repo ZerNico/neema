@@ -83,6 +83,18 @@ latest look.
   (SecurityAgent), Windows UAC prompts and permission prompts are out of reach, by process,
   not by politeness. Logins, two-factor codes and payments hand over to the person.
 
+## Permissions are a guided step
+
+App use needs Accessibility and Screen Recording for neema. On macOS 26 the system's prompts
+no longer add a new app to either list (measured by agent-desktop), so the person must drag
+neema in. The driver shows a small panel for that, pinned under the list in System Settings,
+with neema's bundle as the thing to drag, as LobeHub does (`Guide.swift`). It never takes
+focus, follows the window, hides when Settings is not in front, and answers once the grant
+shows. Screen Recording is read from other apps' window titles becoming readable, since the
+check meant for it keeps its first answer until the process ends; it counts only after neema
+reopens, which neema then offers. A cancel overtakes the guide it ends, numbered so it also
+ends one not yet on screen. It runs only for a message sent from the machine itself.
+
 ## Only the allowed app is seen
 
 A look captures that app's own windows, never the whole screen (ScreenCaptureKit on macOS,
@@ -214,8 +226,7 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
 2. Done: the tools, the machine route, consent and the host (`host.test.ts`). Left: the
    always-allowed list in Settings, and better outline pruning (Outlook's fills the
    12,000-character budget).
-3. Permissions as a guided step: a panel beside System Settings to drag neema into
-   Accessibility and Screen Recording, since on macOS 26 the prompts do not add a new app to
-   either list, and the direct-capture approval with them.
+3. Done: the permission guide. Left: proving with a packaged build that a list accepts the
+   dropped bundle, and asking for the direct-capture approval in the same step.
 4. The floating view, the cursor, pausing on the person's input.
 5. The Windows driver on the same protocol.

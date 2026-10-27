@@ -250,6 +250,8 @@ const startComputer = (origin: string) => {
     locale: () => shellLocale(origin),
     appData: userData,
     agentSocket: () => settings().agentSocket(),
+    // .../neema.app/Contents/MacOS/neema; in development, Electron's own app.
+    appBundle: resolve(process.execPath, "../../.."),
     remembered: new RememberedFolders(
       join(
         userData,

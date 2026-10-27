@@ -55,7 +55,7 @@ export interface ComputerHostOptions {
     agent(input: { allowed: boolean }, signal: AbortSignal): Promise<AgentAnswer>;
     /** Whether a chat may use an app here; see docs/internals/app-use.md. */
     app(app: { name: string }, signal: AbortSignal): Promise<"chat" | "always" | "deny">;
-    appPermissions(): Promise<void>;
+    appPermissions(driver: SharedAppDriver, signal: AbortSignal): Promise<void>;
   };
   /** This desktop app's one app driver, shared with any later host; see `SharedAppDriver`. */
   readonly appDriver: SharedAppDriver;
@@ -142,7 +142,7 @@ export class ComputerHost {
         join(options.directory, `app-grants-${originLabel(options.origin)}.json`),
       ),
       ask: (app, signal) => options.ask.app(app, signal),
-      explainPermissions: () => options.ask.appPermissions(),
+      explainPermissions: (signal) => options.ask.appPermissions(options.appDriver, signal),
       log: options.log,
     });
     this.vms = new ChatVms({

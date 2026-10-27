@@ -242,3 +242,31 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
     });
   },
 );
+
+describe.skipIf(!EXECUTABLE || process.platform !== "darwin")("the permission guide", () => {
+  let driver: AppDriver;
+  beforeAll(() => {
+    driver = startAppDriver(EXECUTABLE!);
+  });
+  afterAll(() => driver.close());
+
+  const guide = (preview: boolean) =>
+    driver.call("guide", {
+      permission: "accessibility",
+      bundle: "/System/Applications/Calculator.app",
+      title: "Allow it to use apps",
+      instruction: "Drag it into the list above",
+      preview,
+    });
+
+  test("answers at once for what is already granted", async () => {
+    expect(await guide(false)).toEqual({ outcome: "granted" });
+  });
+
+  test("closes on a cancel that overtakes the guide it ends", async () => {
+    const shown = guide(true);
+    // The guide's answer is pending: the cancel is answered first, then the guide's own.
+    expect(await driver.call("cancelGuide", {})).toEqual({});
+    expect(await shown).toEqual({ outcome: "closed" });
+  });
+});

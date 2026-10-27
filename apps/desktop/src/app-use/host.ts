@@ -67,8 +67,8 @@ export interface AppUseOptions {
     app: { name: string; appId: string },
     signal: AbortSignal,
   ) => Promise<"chat" | "always" | "deny">;
-  /** Tells the person what to grant in System Settings, and takes them there. */
-  readonly explainPermissions: () => Promise<void>;
+  /** Leads the person at this machine through the grants in System Settings. */
+  readonly explainPermissions: (signal: AbortSignal) => Promise<void>;
   readonly log: (message: string) => void;
 }
 
@@ -191,12 +191,20 @@ export class AppUse {
       this.options.driver.permitted = true;
       return;
     }
-    if (call.local) await this.options.explainPermissions();
+    if (call.local) {
+      await this.options.explainPermissions(call.signal);
+      // Accessibility counts at once; Screen Recording only after neema reopens.
+      const now = await this.call("permissions", {});
+      if (now.accessibility && now.capture) {
+        this.options.driver.permitted = true;
+        return;
+      }
+    }
     throw new Refusal(
       failure(
         "neema needs permission to use apps",
         call.local
-          ? "The user was just asked to allow neema under Accessibility and Screen Recording in System Settings and to reopen neema afterwards. Tell them so and wait; nothing ran."
+          ? "The user was shown how to allow neema under Accessibility and Screen Recording in System Settings; Screen Recording counts once neema reopens. Nothing ran. Tell them so and try again when they say."
           : "neema on the user's computer is not allowed to use apps yet. Tell the user to allow it under Accessibility and Screen Recording in System Settings there.",
       ),
     );

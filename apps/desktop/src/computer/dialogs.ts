@@ -1,4 +1,5 @@
-import { desktopCapturer, dialog, shell, systemPreferences, type BrowserWindow } from "electron";
+import { app, dialog, type BrowserWindow } from "electron";
+import type { SharedAppDriver } from "../app-use/host.ts";
 import { m } from "../paraglide/messages.js";
 import { basename } from "node:path";
 import { checkFolder, type RememberedFolders } from "./folder-access.ts";
@@ -22,6 +23,8 @@ export const computerDialogs = (input: {
   remembered: RememberedFolders;
   /** The agent chats are relayed to, asked how many keys it holds. */
   agentSocket: () => string | null;
+  /** neema's own app bundle, which a privacy list takes when dragged onto it. */
+  appBundle: string;
 }) => {
   const parent = () => input.window() ?? undefined;
   /** Closed by `signal`, as if cancelled, when the call is stopped meanwhile. */
@@ -32,13 +35,13 @@ export const computerDialogs = (input: {
   };
   return {
     /** Whether a chat may use an app: here only, or in every chat (docs/internals/app-use.md). */
-    async app(app: { name: string }, signal?: AbortSignal): Promise<"chat" | "always" | "deny"> {
+    async app(target: { name: string }, signal?: AbortSignal): Promise<"chat" | "always" | "deny"> {
       const locale = await input.locale();
       const answer = await show(
         {
           type: "question",
-          title: m.computer_app_title({ app: app.name }, { locale }),
-          message: m.computer_app_message({ app: app.name }, { locale }),
+          title: m.computer_app_title({ app: target.name }, { locale }),
+          message: m.computer_app_message({ app: target.name }, { locale }),
           detail: m.computer_app_detail({}, { locale }),
           buttons: [
             m.computer_dialog_cancel({}, { locale }),
@@ -53,34 +56,56 @@ export const computerDialogs = (input: {
       return answer.response === 1 ? "chat" : answer.response === 2 ? "always" : "deny";
     },
     /**
-     * App use needs Accessibility and Screen Recording for neema. macOS's own prompts put neema
-     * on both lists; this says what to switch on there, and that neema must reopen after.
+     * Leads the person through the grants app use needs, with a panel in System Settings to drag
+     * neema into each list: on macOS 26 the system's prompts no longer add a new app to either.
+     * Screen Recording counts only after neema reopens, which it offers. Stop closes the panel.
      */
-    async appPermissions() {
+    async appPermissions(driver: SharedAppDriver, signal: AbortSignal) {
       const locale = await input.locale();
-      systemPreferences.isTrustedAccessibilityClient(true);
-      if (systemPreferences.getMediaAccessStatus("screen") !== "granted")
-        await desktopCapturer
-          .getSources({ types: ["window"], thumbnailSize: { width: 1, height: 1 } })
-          .catch(() => []);
-      const answer = await show({
-        type: "info",
-        title: m.computer_app_permissions_title({}, { locale }),
-        message: m.computer_app_permissions_title({}, { locale }),
-        detail: m.computer_app_permissions_detail({}, { locale }),
-        buttons: [
-          m.computer_dialog_cancel({}, { locale }),
-          m.computer_app_open_settings({}, { locale }),
-        ],
-        defaultId: 1,
-        cancelId: 0,
-      });
-      if (answer.response === 1)
-        await shell.openExternal(
-          systemPreferences.isTrustedAccessibilityClient(false)
-            ? "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-            : "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+      const cancel = () => void driver.call("cancelGuide", {}).catch(() => {});
+      signal.addEventListener("abort", cancel, { once: true });
+      try {
+        const instruction = m.computer_app_guide_instruction({}, { locale });
+        const granted = await driver.call("permissions", {});
+        if (!granted.accessibility) {
+          const { outcome } = await driver.call("guide", {
+            permission: "accessibility",
+            bundle: input.appBundle,
+            title: m.computer_app_guide_accessibility({}, { locale }),
+            instruction,
+          });
+          if (outcome !== "granted") return;
+        }
+        if (granted.capture) return;
+        const { outcome } = await driver.call("guide", {
+          permission: "screenRecording",
+          bundle: input.appBundle,
+          title: m.computer_app_guide_screen({}, { locale }),
+          instruction,
+        });
+        if (outcome !== "granted" || signal.aborted) return;
+        const answer = await show(
+          {
+            type: "question",
+            title: m.computer_app_reopen_title({}, { locale }),
+            message: m.computer_app_reopen_title({}, { locale }),
+            detail: m.computer_app_reopen_detail({}, { locale }),
+            buttons: [
+              m.computer_app_reopen_later({}, { locale }),
+              m.computer_app_reopen_now({}, { locale }),
+            ],
+            defaultId: 1,
+            cancelId: 0,
+          },
+          signal,
         );
+        if (answer.response === 1) {
+          app.relaunch();
+          app.quit();
+        }
+      } finally {
+        signal.removeEventListener("abort", cancel);
+      }
     },
     async folder({ path, reason }: { path?: string; reason?: string }, signal?: AbortSignal) {
       const locale = await input.locale();

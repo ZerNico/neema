@@ -43,6 +43,17 @@ actor Driver {
       ]
     case "apps":
       return ["apps": listApps()]
+    case "guide":
+      guard let permission = Permission(rawValue: try param(params, "permission", as: String.self))
+      else { throw DriverError(code: "invalid_params", message: "Unknown permission") }
+      let bundle = URL(fileURLWithPath: try param(params, "bundle", as: String.self))
+      let title = try param(params, "title", as: String.self)
+      let instruction = try param(params, "instruction", as: String.self)
+      let outcome = await PermissionGuide.shared.run(
+        permission, bundle: bundle, title: title, instruction: instruction,
+        preview: params["preview"] as? Bool ?? false,
+        ticket: params["ticket"] as? Int ?? GuideTickets.shared.issue())
+      return ["outcome": outcome]
     case "resolve":
       return try resolve(try param(params, "app", as: String.self))
     case "open":
@@ -270,6 +281,30 @@ let driver = Driver()
 Thread.detachNewThread {
   var previous: Task<Void, Never>?
   while let line = readLine() {
+    var line = line
+    if let data = line.data(using: .utf8),
+      var request = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    {
+      switch request["method"] as? String {
+      // A guide waits on the person, so closing it cannot queue behind it.
+      case "cancelGuide":
+        GuideTickets.shared.cancelAll()
+        let id = request["id"] ?? NSNull()
+        Task { @MainActor in
+          PermissionGuide.shared.close("closed")
+          send(["id": id, "result": [:] as [String: Any]])
+        }
+        continue
+      case "guide":
+        var params = request["params"] as? [String: Any] ?? [:]
+        params["ticket"] = GuideTickets.shared.issue()
+        request["params"] = params
+        if let numbered = try? JSONSerialization.data(withJSONObject: request) {
+          line = String(decoding: numbered, as: UTF8.self)
+        }
+      default: break
+      }
+    }
     let before = previous
     previous = Task {
       await before?.value
