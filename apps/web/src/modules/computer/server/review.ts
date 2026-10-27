@@ -26,7 +26,8 @@ export type ReviewVerdict =
 const ASK: ReviewVerdict = { run: false, reason: null };
 /** Longer than this and the person is asked; they were going to be under plain "ask" anyway. */
 const REVIEW_TIMEOUT = Duration.seconds(20);
-const ARGUMENT_CAP = 4_000;
+/** About 5,000 tokens: a whole ordinary file is seen; past it the person is asked instead. */
+const ARGUMENT_CAP = 20_000;
 /** Room to think before the one line, which a reasoning model needs; asked to keep it low. */
 const OUTPUT_BUDGET = 2_000;
 

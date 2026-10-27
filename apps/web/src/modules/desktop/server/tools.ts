@@ -98,8 +98,8 @@ export const editFileTool = Tool.make("edit_file", {
   description:
     "Replace text inside a file on this chat's computer, by its absolute path. `old` must match " +
     "exactly, whitespace included, and exactly once unless `all` is true; include enough " +
-    "surrounding lines to make it unique. Returns a diff of what changed. The user is asked " +
-    "before it happens and may refuse.",
+    "surrounding lines to make it unique. Returns a diff of what changed. The user may be " +
+    "asked before it happens and may refuse.",
   parameters: Schema.Struct({
     path: Path,
     old: Schema.String.check(Schema.isMinLength(1)),
@@ -128,7 +128,7 @@ export const writeFileTool = Tool.make("write_file", {
     "Create or replace a text file on this chat's computer by its absolute path. " +
     "This writes the whole file, so include its complete contents; read it first unless you are " +
     "creating it. A file in an attached folder that changed since you read it is not replaced: " +
-    "read it again and redo your change. The user is asked before it happens and may refuse.",
+    "read it again and redo your change. The user may be asked before it happens and may refuse.",
   parameters: Schema.Struct({ path: Path, text: Schema.String }),
   success: DesktopToolResult,
   failureMode: "return",
@@ -140,7 +140,7 @@ export const copyToComputerTool = Tool.make("copy_to_computer", {
     "attachment id a tool result gave you. Without path it lands in the chat's workspace under " +
     "a new name if needed, so a command or another local tool can reach it. With path, an " +
     "absolute path inside the workspace or an attached folder, it is saved exactly there, " +
-    "replacing a file of that name; the user is asked first, like any write. Use path to put a " +
+    "replacing a file of that name; the user may be asked first, like any write. Use path to put a " +
     "finished file (a published deck, a created CSV) where the user wants it in one step.",
   parameters: Schema.Struct({
     attachmentId: Schema.String.check(Schema.isMinLength(1)),

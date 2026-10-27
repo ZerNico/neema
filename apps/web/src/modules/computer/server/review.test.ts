@@ -139,7 +139,7 @@ describe("CommandReviewer", () => {
     Effect.gen(function* () {
       const long = reviewer({ models: { "chat-model": { enabled: true } } });
       const verdict = yield* Effect.flatMap(CommandReviewer, (service) =>
-        service.review({ ...input, args: { command: `echo ok; ${"x".repeat(5_000)}` } }),
+        service.review({ ...input, args: { command: `echo ok; ${"x".repeat(25_000)}` } }),
       ).pipe(Effect.provide(long.layer));
       expect(verdict).toEqual({ run: false, reason: null });
       expect(long.asked).toEqual([]);
