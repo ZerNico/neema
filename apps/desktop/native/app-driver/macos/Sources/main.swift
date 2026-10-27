@@ -205,11 +205,11 @@ actor Driver {
     for name in params["modifiers"] as? [String] ?? [] {
       flags.formUnion(try parseChord("\(name)+a").flags)
     }
-    // A plain click on an element that can be pressed is a press: no pointer at all. Not in
-    // Chromium, whose page answers a press with success and does nothing in the accessibility
+    // A plain click on an element that can be pressed is a press: no pointer at all. Not on a
+    // Chromium page, which answers a press with success and does nothing in the accessibility
     // mode the driver turns on; its pointer route arrives as trusted input instead.
-    if params["node"] != nil, button == .left, count == 1, flags.isEmpty,
-      try !current().chromium
+    if let id = params["node"] as? String, button == .left, count == 1, flags.isEmpty,
+      !(try current().chromium && snapshot.webNodes.contains(id))
     {
       let element = try node(params)
       if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }

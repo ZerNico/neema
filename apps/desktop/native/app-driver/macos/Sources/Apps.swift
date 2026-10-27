@@ -125,13 +125,26 @@ private func hasPopulatedWebArea(_ root: AXUIElement) -> Bool {
 }
 
 // The window a look is of: the app's main window, else its focused one, else its first.
+/// The window a look is of: the app's main window, else its focused one, else its largest. Each
+/// must really be a window: with an alert open, Electron named an element containing itself.
+/// A sheet or alert of the window shows inside it.
 func mainWindow(_ app: NSRunningApplication) throws -> AXUIElement {
   let element = appElement(app)
-  if let window: AXUIElement = attribute(element, kAXMainWindowAttribute) { return window }
-  if let window: AXUIElement = attribute(element, kAXFocusedWindowAttribute) { return window }
-  if let windows: [AXUIElement] = attribute(element, kAXWindowsAttribute), let first = windows.first
-  {
-    return first
+  let isWindow = { (window: AXUIElement) in
+    attribute(window, kAXRoleAttribute, as: String.self) == kAXWindowRole
   }
+  for key in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+    if let window: AXUIElement = attribute(element, key), isWindow(window),
+      (frame(window)?.width ?? 0) > 1
+    {
+      return window
+    }
+  }
+  let windows: [AXUIElement] = attribute(element, kAXWindowsAttribute) ?? []
+  if let largest = windows.filter(isWindow).max(by: { area($0) < area($1) }) { return largest }
   throw DriverError(code: "no_window", message: "\(app.localizedName ?? "The app") has no window")
+}
+
+private func area(_ window: AXUIElement) -> CGFloat {
+  frame(window).map { $0.width * $0.height } ?? 0
 }

@@ -6,6 +6,9 @@ import Foundation
 // walks. Node ids name elements until the next snapshot.
 final class Snapshot {
   private(set) var elements: [String: AXUIElement] = [:]
+  /// Nodes inside a web area. Chromium's page ignores an accessibility press there, while the
+  /// app's native controls around it (a sheet's buttons) take one.
+  private(set) var webNodes = Set<String>()
   private(set) var pid: pid_t = 0
 
   private static let maxNodes = 4000
@@ -13,16 +16,22 @@ final class Snapshot {
 
   func take(window: AXUIElement, pid: pid_t) -> (nodes: [[String: Any]], truncated: Bool) {
     elements = [:]
+    webNodes = []
     self.pid = pid
     let origin = frame(window)?.origin ?? .zero
     var nodes: [[String: Any]] = []
     var truncated = false
 
-    func walk(_ element: AXUIElement, depth: Int) {
+    // An element met again is not walked again: some apps' trees contain cycles.
+    var seen: [CFHashCode: [AXUIElement]] = [:]
+    func walk(_ element: AXUIElement, depth: Int, inWeb: Bool) {
       if nodes.count >= Self.maxNodes || depth > Self.maxDepth {
         truncated = true
         return
       }
+      let hash = CFHash(element)
+      if seen[hash, default: []].contains(where: { CFEqual($0, element) }) { return }
+      seen[hash, default: []].append(element)
       let id = "n\(nodes.count + 1)"
       elements[id] = element
       let axRole: String = attribute(element, kAXRoleAttribute) ?? ""
@@ -48,10 +57,12 @@ final class Snapshot {
       // where the page is, so an empty answer falls through to all children.
       let visible: [AXUIElement] = attribute(element, kAXVisibleChildrenAttribute) ?? []
       let children = visible.isEmpty ? attribute(element, kAXChildrenAttribute) ?? [] : visible
-      for child in children { walk(child, depth: depth + 1) }
+      if inWeb { webNodes.insert(id) }
+      let below = inWeb || axRole == "AXWebArea"
+      for child in children { walk(child, depth: depth + 1, inWeb: below) }
     }
 
-    walk(window, depth: 0)
+    walk(window, depth: 0, inWeb: false)
     return (nodes, truncated)
   }
 

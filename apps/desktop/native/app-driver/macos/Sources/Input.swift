@@ -18,9 +18,13 @@ private func gesture() -> Int64 { Int64(DispatchTime.now().uptimeNanoseconds & 0
 /// A click at a point of the window, in window points, without raising it or moving the
 /// person's cursor.
 func click(
-  _ target: Target, at local: CGPoint, button: CGMouseButton, count: Int, flags: CGEventFlags
+  _ looked: Target, at point: CGPoint, button: CGMouseButton, count: Int, flags: CGEventFlags
 ) throws {
-  let screen = CGPoint(x: target.frame.minX + local.x, y: target.frame.minY + local.y)
+  let screen = CGPoint(x: looked.frame.minX + point.x, y: looked.frame.minY + point.y)
+  // The app's own window in front at that point: a sheet, menu or popover is a window of its
+  // own, and a click stamped with the main window's id never reached it.
+  let target = windowAt(looked, screen) ?? looked
+  let local = CGPoint(x: screen.x - target.frame.minX, y: screen.y - target.frame.minY)
   let (down, up): (CGEventType, CGEventType) =
     switch button {
     case .right: (.rightMouseDown, .rightMouseUp)
@@ -63,6 +67,22 @@ func click(
     }
     if index < count { pause(80) }
   }
+}
+
+/// The frontmost on-screen window of the target's app containing a screen point, if any.
+private func windowAt(_ looked: Target, _ screen: CGPoint) -> Target? {
+  let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+    as? [[String: Any]] ?? []
+  // The list runs front to back.
+  for info in windows {
+    guard (info[kCGWindowOwnerPID as String] as? pid_t) == looked.pid,
+      let number = info[kCGWindowNumber as String] as? CGWindowID,
+      let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+      let frame = CGRect(dictionaryRepresentation: bounds), frame.contains(screen)
+    else { continue }
+    return Target(pid: looked.pid, window: number, frame: frame, chromium: looked.chromium)
+  }
+  return nil
 }
 
 /// Scrolls whatever is under a point of the window, by lines.
