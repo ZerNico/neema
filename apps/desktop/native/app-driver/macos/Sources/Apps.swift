@@ -156,6 +156,33 @@ func mainWindow(_ app: NSRunningApplication) throws -> AXUIElement {
   throw DriverError(code: "no_window", message: "\(app.localizedName ?? "The app") has no window")
 }
 
+private typealias GetWindow = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) ->
+  AXError
+private let getWindow = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow")
+  .map { unsafeBitCast($0, to: GetWindow.self) }
+
+/// The window server's id for an accessibility window, through the private call every window
+/// tool uses; nil when it is gone.
+func windowID(_ window: AXUIElement) -> CGWindowID? {
+  var id: CGWindowID = 0
+  guard let getWindow, getWindow(window, &id) == .success, id != 0 else { return nil }
+  return id
+}
+
+/// The window the app sends keys to.
+func keyWindow(_ app: NSRunningApplication) -> CGWindowID? {
+  attribute(appElement(app), kAXFocusedWindowAttribute, as: AXUIElement.self).flatMap(windowID)
+}
+
+/// Asks the app, through accessibility, to send its keys to one of its windows.
+func focusWindow(_ app: NSRunningApplication, _ id: CGWindowID) -> Bool {
+  let element = appElement(app)
+  let windows: [AXUIElement] = attribute(element, kAXWindowsAttribute) ?? []
+  guard let window = windows.first(where: { windowID($0) == id }) else { return false }
+  return AXUIElementSetAttributeValue(element, kAXFocusedWindowAttribute as CFString, window)
+    == .success
+}
+
 private func area(_ window: AXUIElement) -> CGFloat {
   frame(window).map { $0.width * $0.height } ?? 0
 }

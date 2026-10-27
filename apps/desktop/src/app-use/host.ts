@@ -135,6 +135,8 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
     "That reference is not in the latest look. Look again and use a reference from it.",
   no_frame: () => "That element has no position on screen. Look again, or use x and y.",
   action_failed: (app) => `${app} did not accept that. Look again and try another way.`,
+  window_not_key: (app) =>
+    `${app} kept its keys in another of its windows, so nothing was typed. Click into the window first, then try again.`,
   capture_failed: (app) => `${app}'s window could not be captured. Try again.`,
 };
 

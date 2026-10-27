@@ -138,6 +138,12 @@ where the app thinks the cursor is, and the press and release go to the process 
 window's id. Only the target gets a focus record. Defocusing the person's front app left their
 window deaf to typing until they clicked it, which Cua shipped and had to undo.
 
+An app hands posted keys to its key window, which may be another document or a panel. So
+before typing the driver moves key status inside the app to the window looked at, with records
+to that app alone (a defocus, a focus, the make-key pair, after cua-driver), confirms it by
+reading the focused window back, and returns it afterwards. When it cannot confirm, nothing is
+typed: a key in a sibling window is worse than none.
+
 Every symbol is looked up by name. A macOS release that drops one turns `background` false in
 `permissions`, and coordinate input falls back to the public route, which most apps ignore.
 References keep working either way, since a press is accessibility, not a click.

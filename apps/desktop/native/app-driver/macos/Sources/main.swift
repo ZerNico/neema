@@ -78,22 +78,28 @@ actor Driver {
     case "type":
       let target = try current()
       let text = try param(params, "text", as: String.self)
-      var field: AXUIElement?
-      if params["node"] != nil {
-        field = try node(params)
-        AXUIElementSetAttributeValue(field!, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-      } else if let looked {
-        field = attribute(appElement(looked.app), kAXFocusedUIElementAttribute)
+      return try await withKeys(target) {
+        var field: AXUIElement?
+        if params["node"] != nil {
+          field = try node(params)
+          AXUIElementSetAttributeValue(field!, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        } else if let looked {
+          field = attribute(appElement(looked.app), kAXFocusedUIElementAttribute)
+        }
+        // A native text field takes the text at its cursor in one step, exactly as given: typed
+        // key by key, TextEdit's autocorrect and capitals rewrote it, and keys the person pressed
+        // meanwhile mixed in. A page ignores text set this way, so it is typed there.
+        if let field, !isWebField(field), insert(text, into: field) { return ["inserted": true] }
+        type(text, pid: target.pid)
+        return ["inserted": false]
       }
-      // A native text field takes the text at its cursor in one step, exactly as given: typed
-      // key by key, TextEdit's autocorrect and capitals rewrote it, and keys the person pressed
-      // meanwhile mixed in. A page ignores text set this way, so it is typed there.
-      if let field, !isWebField(field), insert(text, into: field) { return ["inserted": true] }
-      type(text, pid: target.pid)
-      return ["inserted": false]
     case "key":
-      press(try parseChord(try param(params, "keys", as: String.self)), pid: try current().pid)
-      return [:]
+      let target = try current()
+      let chord = try parseChord(try param(params, "keys", as: String.self))
+      return try await withKeys(target) {
+        press(chord, pid: target.pid)
+        return [:]
+      }
     case "scroll":
       let lines = (
         x: Int32(params["x"] as? Int ?? 0), y: Int32(params["y"] as? Int ?? 0)
@@ -249,6 +255,44 @@ actor Driver {
       if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }
     }
     try click(try current(), at: try point(params, "at"), button: button, count: count, flags: flags)
+  }
+
+  /// Runs `body` with the looked window as the one its app sends keys to, then hands them back
+  /// to the window that had them. Keys otherwise reach the app's key window, which may be
+  /// another document or a panel; refused when the move cannot be confirmed, since a key that
+  /// lands in a sibling window is worse than none. After cua-driver.
+  private func withKeys(
+    _ target: Target, _ body: () throws -> [String: Any]
+  ) async throws -> [String: Any] {
+    guard let app = looked?.app else { return try body() }
+    let before = keyWindow(app)
+    if before == nil || before == target.window { return try body() }
+    let settled = { (budget: Double) async in
+      let deadline = Date().addingTimeInterval(budget)
+      while keyWindow(app) != target.window, Date() < deadline {
+        try? await Task.sleep(for: .milliseconds(40))
+      }
+      return keyWindow(app) == target.window
+    }
+    var moved = false
+    // The records arrive asynchronously; a second pass catches an app still handling the first.
+    for _ in 0..<2 where !moved {
+      if SkyLight.moveKey(pid: target.pid, from: before, to: target.window) {
+        moved = await settled(0.4)
+      }
+    }
+    if !moved, focusWindow(app, target.window) { moved = await settled(0.2) }
+    guard moved else {
+      throw DriverError(
+        code: "window_not_key",
+        message: "The window would not take keys, so none were sent")
+    }
+    defer {
+      if let before, !SkyLight.moveKey(pid: target.pid, from: target.window, to: before) {
+        _ = focusWindow(app, before)
+      }
+    }
+    return try body()
   }
 
   /// The window to send input to, where it is now: it may have moved since the look.

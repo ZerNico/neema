@@ -71,14 +71,47 @@ enum SkyLight {
   /// Makes the window take input without raising it. Only the target gets a record: defocusing
   /// the person's front app left their window deaf to typing until they clicked it (Cua #4024).
   static func focusWithoutRaise(pid: pid_t, window: CGWindowID) -> Bool {
+    var record = record(kind: 0x0D, window: window)
+    record[0x8A] = 0x01
+    return post(record, pid: pid, window: window)
+  }
+
+  /// Moves key status inside one app from `current` to `target`, so its keys go there, without
+  /// activating the app or raising a window. Every record goes to that app only. After
+  /// cua-driver, measured there on LibreOffice, where each step alone was ignored: a defocus of
+  /// the current key window, a focus of the target, then the make-key pair.
+  static func moveKey(pid: pid_t, from current: CGWindowID?, to target: CGWindowID) -> Bool {
+    var ok = true
+    if let current {
+      var defocus = record(kind: 0x0D, window: current)
+      defocus[0x8A] = 0x02
+      ok = post(defocus, pid: pid, window: target) && ok
+      // The app dropped the focus while still handling the defocus (Cua measured half).
+      usleep(120_000)
+    }
+    ok = focusWithoutRaise(pid: pid, window: target) && ok
+    usleep(120_000)
+    for kind: UInt8 in [0x01, 0x02] {
+      var makeKey = record(kind: kind, window: target)
+      makeKey[0x3A] = 0x10
+      makeKey.replaceSubrange(0x20..<0x30, with: [UInt8](repeating: 0xFF, count: 0x10))
+      ok = post(makeKey, pid: pid, window: target) && ok
+    }
+    return ok
+  }
+
+  private static func record(kind: UInt8, window: CGWindowID) -> [UInt8] {
+    var record = [UInt8](repeating: 0, count: 0xF8)
+    record[0x04] = 0xF8
+    record[0x08] = kind
+    withUnsafeBytes(of: window.littleEndian) { record.replaceSubrange(0x3C..<0x40, with: $0) }
+    return record
+  }
+
+  private static func post(_ record: [UInt8], pid: pid_t, window: CGWindowID) -> Bool {
     guard let postEventRecordTo, var psn = processSerialNumber(pid: pid, window: window) else {
       return false
     }
-    var record = [UInt8](repeating: 0, count: 0xF8)
-    record[0x04] = 0xF8
-    record[0x08] = 0x0D
-    withUnsafeBytes(of: window.littleEndian) { record.replaceSubrange(0x3C..<0x40, with: $0) }
-    record[0x8A] = 0x01
     return withUnsafeBytes(of: &psn) { psnBytes in
       record.withUnsafeBytes { postEventRecordTo(psnBytes.baseAddress!, $0.baseAddress!) == 0 }
     }

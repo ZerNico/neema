@@ -133,6 +133,7 @@ export const DriverErrorCode = Schema.Literals([
   "no_frame",
   "stale_node",
   "action_failed",
+  "window_not_key",
   "capture_failed",
   "failed",
 ]);

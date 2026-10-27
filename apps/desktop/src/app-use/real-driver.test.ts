@@ -1,5 +1,8 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
@@ -245,6 +248,69 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
     test("scrolls what is under a point", async () => {
       await driver.call("scroll", { at: centre('button "Go"'), y: -2 });
       await received((event) => event.type === "wheel");
+    });
+  },
+);
+
+/**
+ * Keys go to an app's key window, which need not be the window looked at: a document behind
+ * its own utility panel. The fixture is compiled into a throwaway bundle, since a look finds an
+ * app by bundle id.
+ */
+describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
+  "the macOS app driver with two windows",
+  () => {
+    let driver: AppDriver;
+    let app: ChildProcess;
+    let pid: number;
+    let state: Record<string, string> = {};
+    let changed = () => {};
+
+    beforeAll(async () => {
+      const bundle = join(mkdtempSync(join(tmpdir(), "two-windows-")), "TwoWindows.app");
+      mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
+      writeFileSync(
+        join(bundle, "Contents/Info.plist"),
+        `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>app.neema.test.two-windows</string><key>CFBundleExecutable</key><string>two-windows</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`,
+      );
+      execFileSync("swiftc", [
+        "-O",
+        "-o",
+        join(bundle, "Contents/MacOS/two-windows"),
+        fileURLToPath(new URL("fixtures/two-windows.swift", import.meta.url)),
+      ]);
+      app = spawn(join(bundle, "Contents/MacOS/two-windows"), [], {
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      pid = await new Promise<number>((resolve) => {
+        createInterface({ input: app.stdout! }).on("line", (line) => {
+          if (line.startsWith("READY ")) resolve(Number(line.slice(6)));
+          if (line.startsWith("STATE ")) {
+            state = JSON.parse(line.slice(6));
+            changed();
+          }
+        });
+      });
+      driver = startAppDriver(EXECUTABLE!);
+    }, 120_000);
+    afterAll(() => {
+      driver.close();
+      app.kill();
+    });
+
+    /** Resolves once the app reports a state like this; the test's timeout bounds it. */
+    const reaches = async (match: (state: Record<string, string>) => boolean) => {
+      while (!match(state)) await new Promise<void>((resolve) => (changed = resolve));
+    };
+
+    test("types and presses keys into the window looked at, then hands its keys back", async () => {
+      const look = await driver.call("look", { appId: "app.neema.test.two-windows", pid });
+      expect(look.title).toBe("Document");
+      await driver.call("type", { text: "hi" });
+      await driver.call("key", { keys: "x" });
+      await reaches((now) => now.document === "hix");
+      expect(state.panel).toBe("");
+      await reaches((now) => now.key === "Panel");
     });
   },
 );
