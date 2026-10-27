@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
+  APP_USE_OPEN_CHAT,
   BROWSER_ALLOW_SITE,
   BROWSER_ACT,
   BROWSER_BEGIN,
@@ -17,6 +18,7 @@ import {
   BROWSER_OPEN_TAB,
   PROTOCOL_VERSION,
   type BrowserOpenTab,
+  type DesktopAppUse,
   type DesktopAuth,
   type DesktopBrowser,
   type DesktopChrome,
@@ -187,6 +189,8 @@ describe("restricted bundled preloads", () => {
     const { exposed } = probe("preload.ts", "https:");
     const bridge = exposed.get("__chatDesktop")!;
     expect(Object.keys(bridge).toSorted()).toEqual([
+      // Only a Mac has an app driver whose work the page could show.
+      ...(process.platform === "darwin" ? ["appUse"] : []),
       "auth",
       "browser",
       "build",
@@ -196,6 +200,23 @@ describe("restricted bundled preloads", () => {
       "systemLocale",
     ]);
   });
+
+  it.runIf(process.platform === "darwin")(
+    "hands the page app use's chats to open as strings only, until unsubscribed",
+    () => {
+      const { exposed, ipc } = probe("preload.ts", "https:");
+      const appUse = exposed.get("__chatDesktop")!.appUse as DesktopAppUse;
+      const listener = vi.fn();
+      const unsubscribe = appUse.onOpenChat(listener);
+      const electronEvent = { sender: { privileged: true } };
+      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, { conversationId: "object" });
+      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, "c1");
+      expect(listener).toHaveBeenCalledExactlyOnceWith("c1");
+      unsubscribe();
+      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, "c2");
+      expect(listener).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("withholds the server switch from every document while the server is pinned", () => {
     const remote = probe("preload.ts", "https:", [FIXED_SERVER_ARGUMENT]);

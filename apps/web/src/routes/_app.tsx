@@ -36,6 +36,7 @@ import { HeaderSlot, HeaderSlotProvider } from "~/ui/header-slot.tsx";
 import { useDesktopBrowser } from "~/modules/browser/client/use-desktop-browser.ts";
 import { BrowserHost } from "~/modules/browser/ui/browser-host.tsx";
 import { browserNewTab } from "~/modules/browser/ui/browser-request.tsx";
+import { AppViewReturns } from "~/modules/app-use/ui/app-view-owner.tsx";
 import { BrowserPanelOwner } from "~/modules/browser/ui/browser-tab.tsx";
 import { CommandPaletteProvider, SearchButton } from "~/modules/search/ui/command-palette.tsx";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/ui/primitives/sidebar";
@@ -126,6 +127,7 @@ function AuthenticatedLayout({
                   >
                     <BrowserHost />
                     <BrowserPanelOwner />
+                    <AppViewReturns />
                     <HeaderSlotProvider>
                       {/* The detail rail is a sibling of the page column, header
                           included, so it runs the full height and opening it

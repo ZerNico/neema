@@ -105,6 +105,23 @@ export interface AppUseOptions {
   /** Leads the person at this machine through the grants in System Settings. */
   readonly explainPermissions: (signal: AbortSignal) => Promise<void>;
   readonly log: (message: string) => void;
+  readonly watch?: AppWatch;
+}
+
+/**
+ * The person's floating view: what app use is doing, and their word to pause it. Chats are
+ * named as `AppUse.key` names them, across servers.
+ */
+export interface AppWatch {
+  started(chat: string, call: { name: string; args: AppCall["args"]; app: string }): void;
+  /** The app as macOS names it, once the model's name for it is resolved. */
+  named(chat: string, app: string): void;
+  /** Where a click landed, in window points. */
+  clicked(chat: string, at: { x: number; y: number }): void;
+  finished(chat: string): void;
+  paused(chat: string): boolean;
+  /** The chat is gone: nothing kept for it outlives it. */
+  forget(chat: string): void;
 }
 
 /** A chat's latest look: what its references and picture pixels mean. */
@@ -116,6 +133,8 @@ interface ChatLook {
   readonly scale: number;
   /** The window's size in points. */
   readonly window: { readonly width: number; readonly height: number };
+  /** Each node's centre in window points, for the floating view to mark a click. */
+  readonly centres: ReadonlyMap<string, { readonly x: number; readonly y: number }>;
 }
 
 /** Where pointer input lands, as the driver takes it: a node, or a point in window points. */
@@ -192,6 +211,7 @@ export class AppUse {
   forgetChat(conversationId: string) {
     this.looks.delete(conversationId);
     this.books.delete(conversationId);
+    this.options.watch?.forget(this.key(conversationId));
     if (this.options.driver.holder === this.key(conversationId)) this.options.driver.holder = null;
     return this.options.grants.forgetChat(conversationId);
   }
@@ -211,6 +231,14 @@ export class AppUse {
     const named: { name?: string } = {};
     const withApp = (result: ToolResult): ToolResult =>
       named.name ? { ...result, app: { name: named.name } } : result;
+    const chat = this.key(call.conversationId);
+    const watch = this.options.watch;
+    if (watch?.paused(chat))
+      return failure(
+        "Paused by the user",
+        "The user paused app use in this chat. Use no app until they say to go on; ask them what they want.",
+      );
+    watch?.started(chat, { name: call.name, args: call.args, app: str(call.args.app) });
     try {
       await this.ensurePermitted(call);
       return withApp(await this.dispatch(call, named));
@@ -224,6 +252,8 @@ export class AppUse {
       }
       this.options.log(`app use failed: ${error instanceof Error ? error.message : String(error)}`);
       return withApp(failure("That did not work", "App use failed unexpectedly. Try again once."));
+    } finally {
+      watch?.finished(chat);
     }
   }
 
@@ -262,6 +292,7 @@ export class AppUse {
     if (!asked) return failure("Which app?", "Name the app with app, as app_list shows it.");
     const resolved = await this.call("resolve", { app: asked });
     named.name = resolved.name;
+    this.options.watch?.named(this.key(call.conversationId), resolved.name);
     await this.consent(call, resolved);
     const { appId, name } = resolved;
     switch (call.name) {
@@ -338,6 +369,21 @@ export class AppUse {
       outline,
       scale: look.window.width / look.image.width,
       window: look.window,
+      centres: new Map(
+        look.nodes.flatMap((node) =>
+          node.frame
+            ? [
+                [
+                  node.id,
+                  {
+                    x: node.frame.x + node.frame.width / 2,
+                    y: node.frame.y + node.frame.height / 2,
+                  },
+                ] as const,
+              ]
+            : [],
+        ),
+      ),
     });
     this.options.driver.holder = this.key(conversationId);
     const detail = [
@@ -410,6 +456,8 @@ export class AppUse {
         const modifiers = Array.isArray(args.modifiers)
           ? args.modifiers.filter((entry): entry is string => typeof entry === "string")
           : [];
+        const at = "node" in place ? look.centres.get(place.node) : place;
+        if (at) this.options.watch?.clicked(this.key(call.conversationId), at);
         await this.call("click", {
           ...("node" in place ? { node: place.node } : { at: place }),
           ...(button === "right" || button === "middle" ? { button } : {}),

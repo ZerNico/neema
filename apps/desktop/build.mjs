@@ -53,7 +53,12 @@ const sandboxImage = () => {
 };
 
 export const buildOptions = () => ({
-  entryPoints: ["src/main.ts", "src/preload.ts", "src/connect-preload.ts"],
+  entryPoints: [
+    "src/main.ts",
+    "src/preload.ts",
+    "src/connect-preload.ts",
+    "src/app-view-preload.ts",
+  ],
   outdir: "dist",
   bundle: true,
   platform: "node",

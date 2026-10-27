@@ -108,15 +108,26 @@ vision model and not stored, like the browser's screenshots, unless the model sh
 
 ## The person stays in control
 
-- **A floating view.** While a chat uses an app, a small always-on-top window shows that
-  app's window live, a few frames a second, with what is happening ("Clicking Save") and a
-  Stop button. It opens from the chat too, as a panel tab.
-- **Its own cursor.** Where neema clicks, a small marked cursor is drawn over the app,
-  separate from the person's.
-- **The person's input wins.** Any keyboard or mouse input from the person pauses app use
-  until they resume it from the floating view. A global shortcut stops it.
-- **Stop is Stop.** The answer's Stop, the floating view's and the shortcut all end the
-  call, and the driver drops anything queued.
+- **A live view in the chat.** While a chat uses an app, its panel gets a tab named after the
+  app (`AppViewOwner`): the app's window a few times a second, what is happening in the
+  rows' own words ("Clicking in Calculator"), a ring where it last clicked, Pause, and the
+  answer's Stop. It opens once per spell of app use, comes back unselected when the person
+  returns to the chat, and stays closed once they close it, as Codex keeps its view in the
+  chat's side panel.
+- **A floating window when the chat is out of sight.** The person can move the view to a
+  small window above every app, and it goes there by itself while neema's own window is
+  minimized or hidden, as Codex's picture in picture comes up on minimize. It never takes
+  focus; it takes the view back into the chat, or hides until the next spell.
+- **The picture comes from the driver.** `peek` copies the looked window from the window
+  server, as PNG so rounded corners stay clear: about 15 ms, and nothing goes out while the
+  window sits still. Capturing it a second time from neema's own process would risk the stall
+  two capturers of one identity cause (see the drivers). Codex's helper likewise captures and
+  hands frames to its app.
+- **Pause is per chat.** A paused chat's next app calls are refused with words telling the
+  model to stop and ask; Resume lifts it. The call already running finishes.
+- **Not yet: its own cursor over the app, and the person's input winning.** Codex draws an agent
+  cursor over the app and watches physical input only around its lock screen; a global
+  shortcut and pausing on the person's own keys and clicks are still to come.
 
 ## macOS and Windows differ in one way
 
@@ -246,5 +257,6 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
    12,000-character budget).
 3. Done: the permission guide. Left: proving with a packaged build that a list accepts the
    dropped bundle, and asking for the direct-capture approval in the same step.
-4. The floating view, the cursor, pausing on the person's input.
+4. Done: the live view in the chat's panel, the floating window and Pause. Left: a cursor drawn
+   over the app, pausing on the person's input, a global shortcut.
 5. The Windows driver on the same protocol.

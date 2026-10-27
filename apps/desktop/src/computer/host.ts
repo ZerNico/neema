@@ -14,7 +14,7 @@ import type { Mount } from "./paths.ts";
 import { SentFiles } from "./sent-files.ts";
 import { ChatVms, originLabel, type ChatKey } from "./vms.ts";
 import { AppGrants } from "../app-use/grants.ts";
-import { AppUse, type SharedAppDriver } from "../app-use/host.ts";
+import { AppUse, type AppWatch, type SharedAppDriver } from "../app-use/host.ts";
 
 export interface ComputerHostOptions {
   readonly origin: string;
@@ -59,6 +59,8 @@ export interface ComputerHostOptions {
   };
   /** This desktop app's one app driver, shared with any later host; see `SharedAppDriver`. */
   readonly appDriver: SharedAppDriver;
+  /** The person's floating view of app use, shared like the driver. */
+  readonly appWatch?: AppWatch;
   /** Attaches a folder to a chat here, refusing the ones no chat may have. */
   readonly attach: (
     conversationId: string,
@@ -144,6 +146,7 @@ export class ComputerHost {
       ask: (app, signal) => options.ask.app(app, signal),
       explainPermissions: (signal) => options.ask.appPermissions(options.appDriver, signal),
       log: options.log,
+      ...(options.appWatch ? { watch: options.appWatch } : {}),
     });
     this.vms = new ChatVms({
       hypervisor: options.hypervisor,

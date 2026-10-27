@@ -30,6 +30,7 @@ import { ConversationCrumbs } from "./conversation-crumbs.tsx";
 import { withHistory } from "./conversation-window.ts";
 import { FileReferenceContext, FileReferenceMachine } from "./file-reference-context.ts";
 import { associateQuestionResponses } from "./question-responses.ts";
+import { AppViewOwner } from "~/modules/app-use/ui/app-view-owner.tsx";
 import { ResearchPanelOwner } from "./research-panel-owner.tsx";
 import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
 import { useAttemptMutations } from "./use-attempt-mutations.ts";
@@ -237,6 +238,15 @@ export function ChatView({
 
   // Only offered for a generation this client can actually see running.
   const stoppableId = stream.status === "streaming" ? streamingMessage?.id : undefined;
+  const stopAnswer = stoppableId
+    ? () =>
+        stopMutation.mutate({
+          messageId: stoppableId,
+          ...(streamingMessage?.generationId
+            ? { generationId: streamingMessage.generationId }
+            : {}),
+        })
+    : undefined;
 
   const conversationQueue = useConversationQueue({
     conversationId,
@@ -333,6 +343,7 @@ export function ChatView({
             <div className="min-h-0 flex-1">
               <ResearchPanelOwner messages={display} />
               <SourcesPanelOwner messages={display} />
+              <AppViewOwner conversationId={conversationId} stop={stopAnswer} />
               <LocalFileConversationProvider
                 conversationId={
                   data.conversation.machineId !== null &&
@@ -399,17 +410,7 @@ export function ChatView({
                   }
                   {...(generating ? { onQueue: conversationQueue.submit } : {})}
                   queue={conversationQueue.queue}
-                  {...(stoppableId
-                    ? {
-                        onStop: () =>
-                          stopMutation.mutate({
-                            messageId: stoppableId,
-                            ...(streamingMessage?.generationId
-                              ? { generationId: streamingMessage.generationId }
-                              : {}),
-                          }),
-                      }
-                    : {})}
+                  {...(stopAnswer ? { onStop: stopAnswer } : {})}
                   // A live answer locks destructive transcript actions, not the
                   // next draft. The composer submits that draft to the queue.
                   disabled={

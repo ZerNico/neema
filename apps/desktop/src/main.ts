@@ -45,7 +45,19 @@ import { guardWindowPermissions } from "./window-permissions.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
-import { DesktopTheme, NoPayload, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import {
+  APP_USE_OPEN_CHAT,
+  APP_USE_PAUSE,
+  APP_USE_PLACE,
+  APP_USE_STATE,
+  AppUseChat,
+  AppUsePause,
+  AppUsePlace,
+  DesktopTheme,
+  NoPayload,
+  makeDesktopResponder,
+  refusalReply,
+} from "@chat/desktop-rpc";
 import { attachBrowserGuests } from "./browser/guests.ts";
 import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import { browserProfile } from "./browser/profile.ts";
@@ -66,6 +78,7 @@ import { microsandbox } from "./computer/hypervisor.ts";
 import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
 import { computerDialogs } from "./computer/dialogs.ts";
 import { SharedAppDriver } from "./app-use/host.ts";
+import { AppView, appViewFiles } from "./app-use/view.ts";
 import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
@@ -233,6 +246,23 @@ const appDriver = new SharedAppDriver(
     return () => powerSaveBlocker.stop(blocker);
   },
 );
+/**
+ * The live view of app use, one like the driver: each chat's on its panel tab, and a floating
+ * window it can move to, in the connected server's language.
+ */
+const appView = new AppView({
+  driver: appDriver,
+  page: () =>
+    mainWindow && !mainWindow.isDestroyed() && serverOrigin !== null
+      ? { origin: serverOrigin, window: mainWindow }
+      : null,
+  showChat: (conversationId) => {
+    restoreWindow();
+    mainWindow?.webContents.send(APP_USE_OPEN_CHAT, conversationId);
+  },
+  locale: () => (serverOrigin ? shellLocale(serverOrigin) : Promise.resolve("en")),
+  ...appViewFiles(here),
+});
 const stopComputer = async () => {
   const current = computer;
   computer = null;
@@ -336,6 +366,7 @@ const startComputer = (origin: string) => {
     remote: () => settings().get().remote,
     ask: dialogs,
     appDriver,
+    appWatch: appView,
     attach: async (conversationId, hostPath) => {
       const key = { origin, conversationId };
       const attached = await runtime.runPromise(
@@ -561,6 +592,9 @@ const openMainWindow = (origin: string) => {
 
   mainWindow = window;
   windowChrome.set(window, attachChrome(window, nativeTheme, platform));
+  // A chat using apps floats its view while this window is out of sight.
+  for (const change of ["minimize", "restore", "hide", "show"] as const)
+    window.on(change as "show", () => appView.windowChanged());
   const recovery = attachLoadRecovery(window, origin, recoveryFile, (cause) =>
     console.error("[desktop] recovery page failed", cause),
   );
@@ -787,6 +821,16 @@ void app.whenReady().then(async () => {
   });
   // Only the server's page asks, when someone clicks one of its notifications.
   onPage(CHROME_SHOW_WINDOW, NoPayload, () => restoreWindow());
+  // A chat's page sees and steers only its own server's chats.
+  onPage(APP_USE_STATE, AppUseChat, ({ conversationId }) =>
+    serverOrigin ? appView.state(serverOrigin, conversationId) : null,
+  );
+  onPage(APP_USE_PAUSE, AppUsePause, ({ conversationId, paused }) => {
+    if (serverOrigin) appView.pause(serverOrigin, conversationId, paused);
+  });
+  onPage(APP_USE_PLACE, AppUsePlace, ({ conversationId, placement }) => {
+    if (serverOrigin) appView.place(serverOrigin, conversationId, placement);
+  });
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {

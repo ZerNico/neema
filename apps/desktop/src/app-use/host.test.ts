@@ -42,6 +42,30 @@ test("a machine without a driver says app use is not available", async () => {
   expect(result).toMatchObject({ ok: false, summary: "Apps can't be used here" });
 });
 
+test("a chat the person paused uses no app until they resume", async () => {
+  const paused = new Set(["https://chat.example\u0000chat-1"]);
+  const started: string[] = [];
+  const apps = new AppUse({
+    driver: new SharedAppDriver("/nonexistent/driver"),
+    scope: "https://chat.example",
+    grants: new AppGrants(join(tmpdir(), "never-written.json")),
+    ask: async () => "chat",
+    explainPermissions: async () => {},
+    log: () => {},
+    watch: {
+      started: (chat) => started.push(chat),
+      named: () => {},
+      clicked: () => {},
+      finished: () => {},
+      paused: (chat) => paused.has(chat),
+      forget: (chat) => paused.delete(chat),
+    },
+  });
+  const result = await apps.run(call("app_click", { app: "Calculator", ref: "e1" }));
+  expect(result).toMatchObject({ ok: false, summary: "Paused by the user" });
+  expect(started).toEqual([]);
+});
+
 test("the display stays on through app calls and a while after the last", async () => {
   vi.useFakeTimers();
   try {

@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:"
+    />
+    <title>neema</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --muted: #737373;
+        --border: rgba(0, 0, 0, 0.1);
+        --hover: rgba(0, 0, 0, 0.06);
+        --stage: #f4f4f5;
+        --accent: #6352e5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #18181b;
+          --foreground: #fafafa;
+          --muted: #a1a1aa;
+          --border: rgba(255, 255, 255, 0.1);
+          --hover: rgba(255, 255, 255, 0.08);
+          --stage: #0f0f11;
+          --accent: #8b7cff;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--background);
+        color: var(--foreground);
+        user-select: none;
+        cursor: default;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 40px;
+        padding: 0 6px 0 12px;
+        flex: none;
+        -webkit-app-region: drag;
+      }
+      .dot {
+        position: relative;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex: none;
+      }
+      body[data-live="true"][data-paused="false"] .dot::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.3;
+        animation: halo 1.8s ease-out infinite;
+      }
+      body[data-paused="true"] .dot,
+      body[data-live="false"] .dot {
+        background: var(--muted);
+      }
+      @keyframes halo {
+        from {
+          transform: scale(0.6);
+          opacity: 0.45;
+        }
+        to {
+          transform: scale(1.6);
+          opacity: 0;
+        }
+      }
+      #label {
+        flex: 1;
+        min-width: 0;
+        font-size: 12.5px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      button {
+        -webkit-app-region: no-drag;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--foreground);
+        background: transparent;
+        border: 0;
+        border-radius: 7px;
+        height: 26px;
+        transition: background 120ms ease;
+      }
+      button:hover {
+        background: var(--hover);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      #toggle {
+        padding: 0 10px;
+        background: var(--hover);
+      }
+      #toggle:hover {
+        background: var(--border);
+      }
+      .icon {
+        width: 26px;
+        color: var(--muted);
+      }
+      .icon:hover {
+        color: var(--foreground);
+      }
+      svg {
+        width: 15px;
+        height: 15px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      main {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        padding: 8px;
+        box-sizing: border-box;
+        margin: 0 6px 6px;
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--stage);
+        box-shadow: inset 0 0 0 1px var(--border);
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        /* The window's own outline casts it, rounded corners and all. */
+        filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
+      }
+      #click {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        margin: -11px 0 0 -11px;
+        pointer-events: none;
+        display: none;
+      }
+      #click::before,
+      #click::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 2px solid var(--accent);
+      }
+      /* Two rings, light in dark, so it shows on any app's colours. */
+      #click::before {
+        border-color: var(--background);
+        box-shadow: 0 0 0 2px var(--accent);
+      }
+      #click::after {
+        animation: ripple 700ms ease-out both;
+      }
+      @keyframes ripple {
+        from {
+          transform: scale(0.4);
+          opacity: 0.9;
+        }
+        to {
+          transform: scale(2.2);
+          opacity: 0;
+        }
+      }
+      #waiting {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #shade {
+        position: absolute;
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: color-mix(in srgb, var(--background) 72%, transparent);
+        backdrop-filter: blur(2px);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      body[data-paused="true"] #shade {
+        display: flex;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dot::after,
+        #click::after {
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body data-live="true" data-paused="false">
+    <header>
+      <span class="dot" aria-hidden="true"></span>
+      <span id="label" aria-live="polite"></span>
+      <button id="toggle" type="button"></button>
+      <button id="dock" class="icon" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <path d="M15 4v16" />
+          <path d="M8 12h4m-2-2 2 2-2 2" />
+        </svg>
+      </button>
+      <button id="close" class="icon" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </header>
+    <main>
+      <img id="frame" alt="" />
+      <span id="click"></span>
+      <div id="waiting"></div>
+      <div id="shade"><span id="shade-label"></span></div>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const label = $("label");
+      const toggle = $("toggle");
+      const dock = $("dock");
+      const close = $("close");
+      const frame = $("frame");
+      let click = $("click");
+      const waiting = $("waiting");
+      const shadeLabel = $("shade-label");
+      let state = null;
+      let clickAt = 0;
+
+      // The click is a fraction of the window; the picture keeps its shape inside the stage.
+      const placeClick = () => {
+        if (!state?.click || !state.frame) {
+          click.style.display = "none";
+          return;
+        }
+        const box = frame.getBoundingClientRect();
+        const scale = Math.min(box.width / state.frame.width, box.height / state.frame.height);
+        const width = state.frame.width * scale;
+        const height = state.frame.height * scale;
+        // A new click plays its ripple again, which only a fresh element does.
+        if (state.click.at !== clickAt) {
+          clickAt = state.click.at;
+          const fresh = click.cloneNode();
+          click.replaceWith(fresh);
+          click = fresh;
+        }
+        click.style.left = `${frame.offsetLeft + (box.width - width) / 2 + state.click.x * width}px`;
+        click.style.top = `${frame.offsetTop + (box.height - height) / 2 + state.click.y * height}px`;
+        click.style.display = "block";
+      };
+
+      window.__appView.onState((next) => {
+        state = next;
+        document.title = next.title;
+        document.body.dataset.paused = String(next.paused);
+        document.body.dataset.live = String(next.live);
+        label.textContent = next.label;
+        label.title = next.title;
+        toggle.textContent = next.paused ? next.words.resume : next.words.pause;
+        toggle.hidden = !next.live && !next.paused;
+        dock.title = next.words.dock;
+        dock.setAttribute("aria-label", next.words.dock);
+        close.title = next.words.close;
+        close.setAttribute("aria-label", next.words.close);
+        shadeLabel.textContent = next.words.paused;
+        waiting.textContent = next.frame ? "" : next.words.waiting;
+        waiting.hidden = !!next.frame;
+        if (next.frame) {
+          const source = `data:image/png;base64,${next.frame.data}`;
+          if (frame.src !== source) frame.src = source;
+          frame.alt = next.title;
+        }
+        placeClick();
+      });
+      toggle.addEventListener("click", () =>
+        window.__appView.act(state?.paused ? "resume" : "pause"),
+      );
+      dock.addEventListener("click", () => window.__appView.act("dock"));
+      close.addEventListener("click", () => window.__appView.act("close"));
+      frame.addEventListener("load", placeClick);
+    </script>
+  </body>
+</html>
