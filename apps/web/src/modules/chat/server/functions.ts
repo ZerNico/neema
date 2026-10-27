@@ -1,6 +1,7 @@
 import { notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect, Schema } from "effect";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
 import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
 import { ProviderRepo } from "~/modules/providers/server/repo.ts";
@@ -462,6 +463,10 @@ export const setPermissionLevel = createServerFn({ method: "POST" })
           conversationId: data.conversationId,
           permissionLevel: data.permissionLevel,
         }),
+      ).pipe(
+        Effect.tap(() =>
+          ComputerCalls.use((calls) => calls.forgetAllowances(data.conversationId)),
+        ),
       ),
     ),
   );

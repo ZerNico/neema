@@ -68,6 +68,7 @@ const fakeRepo = (
         }),
       rebind: () => Effect.succeed(true),
       setFolders: () => Effect.succeed(true),
+      holdsAttachment: (_userId, _conversationId, id) => Effect.succeed(id === "a1"),
       setPermissionLevel: () => Effect.succeed(true),
       grants: () => Effect.succeed(grants.map((grant, index) => ({ id: `g${index}`, ...grant }))),
       addGrant: (_userId, grant) => Effect.sync(() => void grants.push(grant)),
@@ -230,7 +231,10 @@ describe("ComputerCalls", () => {
     Effect.gen(function* () {
       const { connect, hub } = yield* setup(fakeRepo({ machineId: "laptop" }));
       const laptop = yield* connect("laptop");
-      yield* hub.update(USER, hello("laptop", { computer: { status: "preparing", progress: 0.5 } }));
+      yield* hub.update(
+        USER,
+        hello("laptop", { computer: { status: "preparing", progress: 0.5 } }),
+      );
       yield* hub.rename(USER, "laptop", "Work laptop");
       expect((yield* hub.presence(USER, "laptop"))?.hello.name).toBe("Work laptop");
       yield* Scope.close(laptop.scope, Exit.void);
@@ -365,6 +369,59 @@ describe("ComputerCalls", () => {
       yield* Fiber.join(first);
       expect(reviews).toBe(1);
       expect(yield* nextCall(laptop.queue)).toMatchObject({ callId: "call-1" });
+    }),
+  );
+
+  it.effect("an approval counts for its card's machine: after a switch it asks again", () =>
+    Effect.gen(function* () {
+      const repo = fakeRepo({ machineId: "laptop" });
+      const { calls, open, connect } = yield* setup(repo);
+      yield* connect("laptop");
+      const desk = yield* connect("desk", { name: "Desk" });
+      yield* open("call-1", "run_command", { command: "ls" }, "laptop");
+      expect((yield* calls.pending(USER))[0]).toMatchObject({ machine: { id: "laptop" } });
+      repo.chat.machineId = "desk";
+      yield* calls.decide(USER, "call-1", "allow");
+      // Asked again, now naming the machine it would run on; nothing reached it.
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({
+          callId: "call-1",
+          approval: "command",
+          machine: { id: "desk", name: "Desk" },
+        }),
+      ]);
+      yield* calls.decide(USER, "call-1", "allow");
+      expect(yield* nextCall(desk.queue)).toMatchObject({ callId: "call-1" });
+    }),
+  );
+
+  it.effect("allow in this chat is forgotten when the level or machine changes", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }));
+      const laptop = yield* connect("laptop");
+      yield* open("call-1", "run_command", { command: "ls" }, "laptop");
+      yield* calls.decide(USER, "call-1", "allow-rest");
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ callId: "call-1" });
+      yield* calls.forgetAllowances(CHAT);
+      yield* open("call-2", "run_command", { command: "pwd" }, "laptop");
+      expect((yield* calls.pending(USER)).map((call) => call.callId)).toEqual(["call-2"]);
+    }),
+  );
+
+  it.effect("copies only a file that is this chat's own onto its computer", () =>
+    Effect.gen(function* () {
+      const { open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }));
+      yield* connect("laptop");
+      const { waiting } = yield* open(
+        "call-1",
+        "copy_to_computer",
+        { attachmentId: "elsewhere" },
+        "laptop",
+      );
+      expect(yield* Fiber.join(waiting)).toMatchObject({
+        ok: false,
+        summary: "That file is not in this chat",
+      });
     }),
   );
 

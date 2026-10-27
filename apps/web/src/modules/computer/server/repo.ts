@@ -87,6 +87,12 @@ export class ComputerRepo extends Context.Service<
       grant: { conversationId: string | null; host: string; port: number; privateNetwork: boolean },
     ): Effect.Effect<void>;
     removeGrant(userId: string, grantId: string): Effect.Effect<boolean>;
+    /** Whether a stored file is one of this chat's own: sent in it, or made by an answer in it. */
+    holdsAttachment(
+      userId: string,
+      conversationId: string,
+      attachmentId: string,
+    ): Effect.Effect<boolean>;
     /** Files the person sent in the chat, oldest first, by their own names. */
     sentFiles(
       userId: string,
@@ -253,6 +259,20 @@ export class ComputerRepo extends Context.Service<
               },
             })
             .pipe(Effect.orDie, Effect.asVoid),
+        holdsAttachment: (userId, conversationId, attachmentId) =>
+          db
+            .select({ id: messageAttachments.attachmentId })
+            .from(messageAttachments)
+            .innerJoin(messages, eq(messages.id, messageAttachments.messageId))
+            .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+            .where(
+              and(
+                ownedConversationById(conversationId, userId),
+                eq(messageAttachments.attachmentId, attachmentId),
+              ),
+            )
+            .limit(1)
+            .pipe(Effect.orDie, Effect.map(updated)),
         sentFiles: (userId, conversationId) =>
           db
             .select({ id: attachments.id, name: attachments.fileName })

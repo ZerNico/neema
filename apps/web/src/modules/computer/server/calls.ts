@@ -43,6 +43,11 @@ interface Entry {
   readonly scope: Scope.Scope;
   /** It already waited once for a machine to come back, so an absent one is now an answer. */
   waitedForMachine?: true;
+  /**
+   * What the person allowed, for the machine the chat had when they were asked. A switch since
+   * means asking again: the card never named the new one, nor its folders.
+   */
+  approved?: { readonly approval: ComputerApproval; readonly machineId: string };
   state:
     | { readonly kind: "deciding" }
     | {
@@ -139,6 +144,11 @@ export class ComputerCalls extends Context.Service<
     }): Effect.Effect<void, never, Scope.Scope>;
     decide(userId: string, callId: string, choice: ComputerChoice): Effect.Effect<boolean>;
     pending(userId: string): Effect.Effect<ReadonlyArray<PendingCall>>;
+    /**
+     * Drops a chat's "allow in this chat" answers: they were given for its level and machine,
+     * so a change of either asks again.
+     */
+    forgetAllowances(conversationId: string): Effect.Effect<void>;
     /** A machine's answer; refused unless that machine was sent the call. */
     result(
       userId: string,
@@ -231,6 +241,25 @@ export class ComputerCalls extends Context.Service<
           const approval = approvalFor(entry.name, entry.args);
           // Asked now rather than at open: the machine's stream may have reconnected since.
           const sender = yield* hub.machineOfSession(entry.userId, entry.senderSession);
+          // The machine fetches it with the person's own session, which reaches every file of
+          // theirs; only this chat's may cross into its computer.
+          if (
+            entry.name === "copy_to_computer" &&
+            !(yield* repo.holdsAttachment(
+              entry.userId,
+              entry.conversationId,
+              typeof entry.args.attachmentId === "string" ? entry.args.attachmentId : "",
+            ))
+          ) {
+            yield* finish(
+              entry,
+              desktopFailure(
+                "That file is not in this chat",
+                "That attachment is not one of this chat's files. Use an id a result in this chat gave you.",
+              ),
+            );
+            return;
+          }
           if (SERVER_TOOLS.has(entry.name)) {
             if (entry.name === "request_network_access" && !requestedDestination(entry.args)) {
               yield* finish(
@@ -333,9 +362,14 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           const changes = approval === "edit" || approval === "command";
-          const allowedHere = blanket.has(`${entry.conversationId}\u0000${approval}`);
-          if (approval === "delete" || (changes && chat.permissionLevel === "ask" && !allowedHere)) {
-            yield* wait(entry, approval);
+          const answered =
+            entry.approved?.approval === approval && entry.approved.machineId === chat.machineId;
+          const allowedHere = answered || blanket.has(`${entry.conversationId}\u0000${approval}`);
+          if (
+            (approval === "delete" && !answered) ||
+            (changes && chat.permissionLevel === "ask" && !allowedHere)
+          ) {
+            yield* wait(entry, approval, { machine: { id: chat.machineId, name: presence.hello.name } });
             return;
           }
           if (changes && chat.permissionLevel === "review" && !allowedHere) {
@@ -353,7 +387,10 @@ export class ComputerCalls extends Context.Service<
             // The review takes seconds; Stop may have ended the call meanwhile.
             if (ended(entry)) return;
             if (!verdict.run) {
-              yield* wait(entry, approval, { reason: verdict.reason });
+              yield* wait(entry, approval, {
+                machine: { id: chat.machineId, name: presence.hello.name },
+                reason: verdict.reason,
+              });
               return;
             }
           }
@@ -534,16 +571,16 @@ export class ComputerCalls extends Context.Service<
             }
             if (choice === "allow-rest" && (approval === "edit" || approval === "command"))
               blanket.add(`${entry.conversationId}\u0000${approval}`);
-            const chat = yield* repo.chat(userId, entry.conversationId);
-            if (!chat?.machineId) {
-              yield* finish(
-                entry,
-                desktopFailure("That chat has no computer", "The chat's computer was removed."),
-              );
-              return true;
-            }
-            yield* send(entry, chat.machineId);
+            // Decided again with the answer counted, so the machine's own checks (remote use,
+            // readiness, presence) still apply; for another machine than the card's, it asks anew.
+            if (machine) entry.approved = { approval, machineId: machine.id };
+            yield* advance(entry);
             return true;
+          }),
+        forgetAllowances: (conversationId) =>
+          Effect.sync(() => {
+            for (const key of blanket)
+              if (key.startsWith(`${conversationId}\u0000`)) blanket.delete(key);
           }),
         pending: (userId) =>
           Effect.sync(() =>

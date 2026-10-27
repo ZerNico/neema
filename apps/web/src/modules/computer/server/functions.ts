@@ -108,7 +108,10 @@ export const switchChatComputer = createServerFn({ method: "POST" })
         if (data.machineId && !(yield* repo.machine(userId, data.machineId)))
           return { switched: false };
         const switched = yield* repo.rebind(userId, data.conversationId, data.machineId);
-        if (switched) yield* (yield* SyncBus).publish(userId, { type: "computer.changed" });
+        if (switched) {
+          yield* (yield* ComputerCalls).forgetAllowances(data.conversationId);
+          yield* (yield* SyncBus).publish(userId, { type: "computer.changed" });
+        }
         return { switched };
       }),
     ),
