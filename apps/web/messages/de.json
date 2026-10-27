@@ -112,8 +112,8 @@
   "admin_groups_feature_schedules_description": "Prompts erstellen, die von selbst laufen. Jeder Zeitplan gehört allein seiner Person.",
   "admin_groups_feature_web_search": "Websuche",
   "admin_groups_feature_web_search_description": "Im Web suchen und Seiten lesen.",
-  "admin_groups_feature_work": "Arbeitschats",
-  "admin_groups_feature_work_description": "Der Desktop-App erlauben, Dateien auf dem eigenen Computer zu lesen und zu ändern.",
+  "admin_groups_feature_work": "Chat-Computer",
+  "admin_groups_feature_work_description": "Chats einen Computer in der Desktop-App nutzen lassen, mit den Ordnern, die die Person anhängt.",
   "admin_groups_in_chat": "Im Chat",
   "admin_groups_level_create": "Erstellen",
   "admin_groups_level_off": "Aus",
@@ -1294,7 +1294,6 @@
   "chat_day_yesterday": "Gestern",
   "chat_desktop_allow": "Erlauben",
   "chat_desktop_allow_always": "Immer erlauben",
-  "chat_desktop_allow_answer": "Für diese Antwort erlauben",
   "chat_desktop_allow_chat": "In diesem Chat erlauben",
   "chat_desktop_allow_once": "Einmal erlauben",
   "chat_desktop_always_note": "„Immer erlauben“ gilt für jeden Chat auf diesem Computer. Du kannst es unter Einstellungen › Dieser Computer wieder entfernen.",
@@ -2496,7 +2495,6 @@
   "common_copied": "Kopiert",
   "common_copy": "Kopieren",
   "common_copy_details": "Details kopieren",
-  "common_create": "Erstellen",
   "common_delete": "Löschen",
   "common_description": "Beschreibung",
   "common_discard_changes": "Änderungen verwerfen",
@@ -2645,7 +2643,7 @@
   "custom_tools_list_title": "Eigene Tools",
   "custom_tools_test_files_too_large": "Die Testdateien sind zusammen zu groß.",
   "custom_tools_test_invalid_json": "Die Argumente sind kein gültiges JSON.",
-  "desktop_approval_needed": "Ein Arbeitschat wartet auf deine Freigabe",
+  "desktop_approval_needed": "Ein Chat wartet auf deine Freigabe",
   "desktop_approval_review": "Ansehen",
   "desktop_approvals": "Freigaben",
   "desktop_approvals_label": "Freigaben ansehen ({count})",
@@ -2663,8 +2661,8 @@
   "desktop_permission_ask_description": "Lesen läuft ohne Nachfrage. Änderungen und Befehle warten auf deine Freigabe.",
   "desktop_permission_review": "Bei Risiko fragen",
   "desktop_permission_review_description": "Ein Modell prüft jede Änderung und jeden Befehl vorab und fragt dich nur bei riskanten. Das Löschwerkzeug und neuer Netzwerkzugriff fragen immer.",
-  "desktop_work_chat_untitled": "Arbeitschat",
-  "desktop_work_paused": "Der Server ist nicht erreichbar. Die Arbeit auf diesem Computer pausiert, bis die Verbindung wieder steht.",
+  "desktop_work_chat_untitled": "Chat ohne Titel",
+  "desktop_work_paused": "Der Server ist nicht erreichbar. Die Computer der Chats hier pausieren, bis die Verbindung wieder steht.",
   "documents_actions_label": "Dokumentaktionen",
   "documents_actions_more": "Mehr",
   "documents_ask_busy": "Warte, bis die aktuelle Antwort fertig ist, und frag dann noch einmal.",
@@ -5556,11 +5554,11 @@
   "settings_computer_error_remove": "Das konnte nicht entfernt werden.",
   "settings_computer_loading": "Wird geladen…",
   "settings_computer_network_description": "Befehle in jedem Chat erreichen diese, ohne zu fragen. Die eines einzelnen Chats stehen in seinem Computer-Menü.",
-  "settings_computer_network_remove_description": "Arbeitschats fragen, bevor sie sich wieder damit verbinden.",
+  "settings_computer_network_remove_description": "Chats fragen, bevor sie sich wieder damit verbinden.",
   "settings_computer_network_title": "Internetzugriff",
   "settings_computer_private_network": "Dein Netzwerk",
   "settings_computer_remove_title": "{name} entfernen?",
-  "settings_computer_site_remove_description": "Arbeitschats fragen, bevor sie sie wieder öffnen.",
+  "settings_computer_site_remove_description": "Chats fragen, bevor sie sie wieder öffnen.",
   "settings_computer_sites_description": "Chats öffnen diese im Browser, ohne zu fragen.",
   "settings_computer_sites_title": "Websites",
   "settings_devices_add_desktop_description": "Erzeuge einen Code und füge ihn in den Anmeldebildschirm von neema Desktop ein. Er funktioniert nur einmal und nur für ein paar Minuten.",
@@ -5672,26 +5670,6 @@
   "settings_section_profile": "Profil",
   "settings_section_storage": "Speicher",
   "settings_section_usage": "Nutzung",
-  "settings_ssh_added_on_sign_in": [
-    {
-      "declarations": [
-        "input names",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
-      "match": {
-        "countPlural=one": "{names} wird hinzugefügt, wenn sich ein Chat anmeldet",
-        "countPlural=other": "{names} werden hinzugefügt, wenn sich ein Chat anmeldet"
-      }
-    }
-  ],
-  "settings_ssh_change": "Ändern",
-  "settings_ssh_description": "Werden verwendet, wenn du einen Chat per SSH anmelden lässt.",
-  "settings_ssh_error_change": "Der Agent konnte nicht geändert werden.",
-  "settings_ssh_error_load": "Der Agent konnte nicht geladen werden.",
   "settings_ssh_key_count": [
     {
       "declarations": [
@@ -5707,18 +5685,6 @@
       }
     }
   ],
-  "settings_ssh_no_keys": "Keine Schlüssel. Füge deine mit ssh-add hinzu.",
-  "settings_ssh_none": "Kein Agent gefunden",
-  "settings_ssh_not_running": "Läuft nicht",
-  "settings_ssh_other": "Anderer Agent…",
-  "settings_ssh_other_description": "Füge den Pfad seines Sockets ein.",
-  "settings_ssh_other_title": "Anderen Agent verwenden",
-  "settings_ssh_socket": "Socket des Agents",
-  "settings_ssh_stop_adding": "{names} nicht mehr hinzufügen",
-  "settings_ssh_system_agent": "Systemagent",
-  "settings_ssh_title": "SSH-Schlüssel",
-  "settings_ssh_use": "Verwenden",
-  "settings_ssh_windows_agent": "Agent von Windows",
   "settings_storage_delete_description_sent": "Sie wird aus den Nachrichten entfernt, mit denen sie gesendet wurde, und Chats lesen sie nicht mehr.",
   "settings_storage_delete_description_unsent": "Sie wurde nie gesendet, sonst ändert sich also nichts.",
   "settings_storage_delete_title": "„{name}“ löschen?",

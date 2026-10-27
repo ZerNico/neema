@@ -19,7 +19,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DesktopWorkProvider, WorkAttention, WorkConnectionNotice } from "./work-host.tsx";
 import { useWorkApprovals } from "./work-context.ts";
 
-const PAUSED = /work on this computer is paused/;
+const PAUSED = /computers here are paused/;
 
 const api = vi.hoisted(() => ({
   snapshot: vi.fn(),
@@ -110,7 +110,7 @@ it.each([false, true])(
     if (loseResult) api.complete.mockRejectedValueOnce(new Error("Result delivery interrupted"));
     const { queryClient, router } = renderHost("/chat/a");
     await screen.findByRole("button", { name: "Allow one" });
-    expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument();
+    expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument();
     await act(async () => {
       screen.getByRole("button", { name: "Allow one" }).click();
       await router.navigate({ to: "/chat/$conversationId", params: { conversationId: "b" } });
@@ -133,7 +133,7 @@ it.each([false, true])(
       await queryClient.invalidateQueries({ queryKey: ["desktop-work"] });
     });
     expect(await screen.findByRole("button", { name: "Review work approvals (1)" })).toBeTruthy();
-    expect(await screen.findByText("Work needs your approval")).toBeTruthy();
+    expect(await screen.findByText("A chat needs your approval")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByRole("button", { name: "Allow two" })).toBeTruthy();
     expect(api.complete).toHaveBeenCalledTimes(delivered);
@@ -144,32 +144,32 @@ it("keeps dismissed approvals discoverable without repeating notifications on re
   let calls = [call("one")];
   api.snapshot.mockImplementation(async () => ({ attempts: [owner], calls, settings }));
   const { queryClient, router } = renderHost("/settings");
-  await screen.findByText("Work needs your approval");
+  await screen.findByText("A chat needs your approval");
   expect(screen.getByText("First work")).toBeInTheDocument();
   const refresh = () => act(() => queryClient.invalidateQueries({ queryKey: ["desktop-work"] }));
   await userEvent.click(screen.getByRole("button", { name: "Close toast" }));
   await waitFor(() =>
-    expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument(),
+    expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument(),
   );
   await refresh();
-  expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument();
+  expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Review work approvals (1)" }));
   await userEvent.click(await screen.findByRole("menuitem", { name: /First work\s?1/ }));
   await screen.findByRole("button", { name: "Allow one" });
   expect(api.claim).not.toHaveBeenCalled();
   await act(() => router.navigate({ to: "/settings" }));
-  expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument();
+  expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument();
 
   // A new request deserves attention even while an older one is still pending.
   calls = [calls[0]!, call("two")];
   await refresh();
-  await screen.findByText("Work needs your approval");
-  expect(screen.getAllByText("Work needs your approval")).toHaveLength(1);
+  await screen.findByText("A chat needs your approval");
+  expect(screen.getAllByText("A chat needs your approval")).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Review work approvals (2)" })).toBeInTheDocument();
   calls = [];
   await refresh();
   await waitFor(() =>
-    expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument(),
+    expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument(),
   );
   expect(screen.queryByRole("button", { name: /Review work approvals/ })).not.toBeInTheDocument();
 });
@@ -182,7 +182,7 @@ it("notifies for separate chats and clears notifications when the host goes away
     settings: [...settings, { ...settings[0]!, conversationId: "b", title: "Second work" }],
   });
   const { view } = renderHost("/settings");
-  await waitFor(() => expect(screen.getAllByText("Work needs your approval")).toHaveLength(2));
+  await waitFor(() => expect(screen.getAllByText("A chat needs your approval")).toHaveLength(2));
   const secondToast = screen.getByText("Second work").closest("li")!;
   await userEvent.click(within(secondToast).getByRole("button", { name: "Review" }));
   await screen.findByRole("button", { name: "Allow two" });
@@ -191,7 +191,7 @@ it("notifies for separate chats and clears notifications when the host goes away
   expect(api.claim).not.toHaveBeenCalled();
   view.rerender(<Toaster />);
   await waitFor(() =>
-    expect(screen.queryByText("Work needs your approval")).not.toBeInTheDocument(),
+    expect(screen.queryByText("A chat needs your approval")).not.toBeInTheDocument(),
   );
   expect(api.cancel).toHaveBeenCalledWith({ callId: "one" });
   expect(api.cancel).toHaveBeenCalledWith({ callId: "two" });

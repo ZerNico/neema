@@ -112,8 +112,8 @@
   "admin_groups_feature_schedules_description": "Create prompts that run on their own. Each schedule is private to its owner.",
   "admin_groups_feature_web_search": "Web search",
   "admin_groups_feature_web_search_description": "Search the web and read pages.",
-  "admin_groups_feature_work": "Work",
-  "admin_groups_feature_work_description": "Let the desktop app read and change files on their computer.",
+  "admin_groups_feature_work": "Chat computers",
+  "admin_groups_feature_work_description": "Let chats use a computer in the desktop app, with the folders the person attaches.",
   "admin_groups_in_chat": "In chat",
   "admin_groups_level_create": "Create",
   "admin_groups_level_off": "Off",
@@ -1295,7 +1295,6 @@
   "chat_day_yesterday": "Yesterday",
   "chat_desktop_allow": "Allow",
   "chat_desktop_allow_always": "Always allow",
-  "chat_desktop_allow_answer": "Allow for this answer",
   "chat_desktop_allow_chat": "Allow in this chat",
   "chat_desktop_allow_once": "Allow once",
   "chat_desktop_always_note": "“Always allow” applies to every chat on this computer. You can remove it in Settings › This computer.",
@@ -2497,7 +2496,6 @@
   "common_copied": "Copied",
   "common_copy": "Copy",
   "common_copy_details": "Copy details",
-  "common_create": "Create",
   "common_delete": "Delete",
   "common_description": "Description",
   "common_discard_changes": "Discard changes",
@@ -2646,7 +2644,7 @@
   "custom_tools_list_title": "Custom tools",
   "custom_tools_test_files_too_large": "The test files are too large together.",
   "custom_tools_test_invalid_json": "The arguments are not valid JSON.",
-  "desktop_approval_needed": "Work needs your approval",
+  "desktop_approval_needed": "A chat needs your approval",
   "desktop_approval_review": "Review",
   "desktop_approvals": "Approvals",
   "desktop_approvals_label": "Review work approvals ({count})",
@@ -2664,8 +2662,8 @@
   "desktop_permission_ask_description": "Reads run without asking. Edits and commands wait for your approval.",
   "desktop_permission_review": "Ask when risky",
   "desktop_permission_review_description": "A model checks each change and command first and asks you only about risky ones. The delete tool and new network access always ask.",
-  "desktop_work_chat_untitled": "Work chat",
-  "desktop_work_paused": "Can’t reach the server, so work on this computer is paused until the connection is back.",
+  "desktop_work_chat_untitled": "Untitled chat",
+  "desktop_work_paused": "Can’t reach the server, so chats’ computers here are paused until the connection is back.",
   "documents_actions_label": "Document actions",
   "documents_actions_more": "More",
   "documents_ask_busy": "Wait for the current answer to finish, then ask again.",
@@ -5584,11 +5582,11 @@
   "settings_computer_error_remove": "Couldn’t remove it.",
   "settings_computer_loading": "Loading…",
   "settings_computer_network_description": "Commands in every chat reach these without asking. Each chat’s own are in its computer menu.",
-  "settings_computer_network_remove_description": "Work will ask before connecting to it again.",
+  "settings_computer_network_remove_description": "Chats will ask before connecting to it again.",
   "settings_computer_network_title": "Internet access",
   "settings_computer_private_network": "Your network",
   "settings_computer_remove_title": "Remove {name}?",
-  "settings_computer_site_remove_description": "Work chats will ask before opening it again.",
+  "settings_computer_site_remove_description": "Chats will ask before opening it again.",
   "settings_computer_sites_description": "Chats open these in the browser without asking.",
   "settings_computer_sites_title": "Websites",
   "settings_devices_add_desktop_description": "Generate a code and paste it into neema Desktop’s sign-in screen. It works once and only for a few minutes.",
@@ -5700,26 +5698,6 @@
   "settings_section_profile": "Profile",
   "settings_section_storage": "Storage",
   "settings_section_usage": "Usage",
-  "settings_ssh_added_on_sign_in": [
-    {
-      "declarations": [
-        "input names",
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
-      "match": {
-        "countPlural=one": "{names} is added when a chat signs in",
-        "countPlural=other": "{names} are added when a chat signs in"
-      }
-    }
-  ],
-  "settings_ssh_change": "Change",
-  "settings_ssh_description": "Used when you let a chat sign in with SSH.",
-  "settings_ssh_error_change": "Couldn’t change the agent.",
-  "settings_ssh_error_load": "Couldn’t load the agent.",
   "settings_ssh_key_count": [
     {
       "declarations": [
@@ -5735,18 +5713,6 @@
       }
     }
   ],
-  "settings_ssh_no_keys": "No keys. Add yours with ssh-add.",
-  "settings_ssh_none": "No agent found",
-  "settings_ssh_not_running": "Not running",
-  "settings_ssh_other": "Other agent…",
-  "settings_ssh_other_description": "Paste the path of its socket.",
-  "settings_ssh_other_title": "Use another agent",
-  "settings_ssh_socket": "Agent socket",
-  "settings_ssh_stop_adding": "Stop adding {names}",
-  "settings_ssh_system_agent": "System agent",
-  "settings_ssh_title": "SSH keys",
-  "settings_ssh_use": "Use",
-  "settings_ssh_windows_agent": "Windows’ agent",
   "settings_storage_delete_description_sent": "It is taken out of the messages it was sent with, and chats no longer read it.",
   "settings_storage_delete_description_unsent": "It was never sent, so nothing else changes.",
   "settings_storage_delete_title": "Delete “{name}”?",
