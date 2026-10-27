@@ -90,8 +90,11 @@ enum SkyLight {
   /// it itself. `phase` marks Chromium's gesture: move 2, primer down 1, primer up 2, click 3.
   static func postMouse(
     _ event: CGEvent, pid: pid_t, window: CGWindowID, location: CGPoint, clickState: Int64,
-    button: Int64, group: Int64, phase: Int64? = nil
+    button: Int64, group: Int64, phase: Int64? = nil, flags: CGEventFlags = []
   ) {
+    // Always set: an event made from the system's state carries the modifiers the person holds,
+    // and a Cmd held to switch apps turned typed digits into shortcuts.
+    event.flags = flags
     setWindowLocation?(event, location)
     if let set = setIntegerField {
       if let phase { set(event, 0, phase) }
@@ -111,6 +114,8 @@ enum SkyLight {
   /// a window-local location: the screen point never arrived. Posted once, measured: sent both
   /// ways, as cua-driver does, Chromium dropped or doubled four scrolls in ten.
   static func postScroll(_ event: CGEvent, pid: pid_t, window: CGWindowID, local: CGPoint) {
+    // Cmd held by the person would turn a scroll into a zoom; see `postMouse`.
+    event.flags = []
     setWindowLocation?(event, local)
     if let set = setIntegerField {
       set(event, 51, Int64(window))

@@ -58,10 +58,9 @@ func click(
           mouseEventSource: source, mouseType: type, mouseCursorPosition: screen,
           mouseButton: button)
       else { throw DriverError(code: "action_failed", message: "Could not make a click") }
-      event.flags = flags
       SkyLight.postMouse(
         event, pid: target.pid, window: target.window, location: local, clickState: Int64(index),
-        button: Int64(button.rawValue), group: group)
+        button: Int64(button.rawValue), group: group, flags: flags)
       // A button's tracking loop polls for the release; too tight a gap drops the click.
       pause(type == down ? 28 : 0)
     }
@@ -157,6 +156,8 @@ func type(_ text: String, pid: pid_t) {
       guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down) else {
         continue
       }
+      // None of the modifiers the person may be holding: see `SkyLight.postMouse`.
+      event.flags = []
       units.withUnsafeBufferPointer {
         event.keyboardSetUnicodeString(stringLength: $0.count, unicodeString: $0.baseAddress)
       }
@@ -201,10 +202,9 @@ private func clickChromium(
       let event = CGEvent(
         mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
     else { throw DriverError(code: "action_failed", message: "Could not make a click") }
-    event.flags = flags
     SkyLight.postMouse(
       event, pid: target.pid, window: target.window, location: point, clickState: clickState,
-      button: 0, group: group, phase: phase)
+      button: 0, group: group, phase: phase, flags: flags)
     pause(delay)
   }
 }
