@@ -44,7 +44,9 @@ const sandboxImage = () => {
       .trim();
     return `ghcr.io/zernico/neema-sandbox:tree-${tree.slice(0, 16)}`;
   } catch {
-    // Not a checkout, so no sources to name: main's latest image.
+    // Not a checkout, so no sources to name: main's latest image. Said aloud, since it floats;
+    // a release never gets here (it passes SANDBOX_IMAGE_REF, and desktop.yml insists on it).
+    console.warn("build: no git checkout, so chats' VMs use the edge sandbox image");
     return "ghcr.io/zernico/neema-sandbox:edge";
   }
 };
