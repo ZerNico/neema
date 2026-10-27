@@ -91,7 +91,7 @@ describe("useSync", () => {
     },
   );
 
-  it("discovers a missed approval in the real activity card after recovery", async () => {
+  it("discovers a missed approval in the real activity row after recovery", async () => {
     vi.mocked(listPendingIntegrationCalls).mockResolvedValue([
       {
         kind: "approval",
@@ -132,9 +132,10 @@ describe("useSync", () => {
     );
     const source = FakeEventSource.instances.at(-1)!;
     act(() => source.emit("open"));
-    expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
+    const waiting = /^Waiting for your approval/;
+    expect(screen.queryByText(waiting)).not.toBeInTheDocument();
     act(() => source.emit("sync", { type: "sync.ready" }));
-    expect(await screen.findByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(await screen.findByText(waiting)).toBeInTheDocument();
     expect(listPendingIntegrationCalls).toHaveBeenCalledOnce();
   });
   it("refreshes work policy on conversation changes and preserves in-flight invalidations", async () => {

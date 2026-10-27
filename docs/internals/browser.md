@@ -158,7 +158,7 @@ the web and knowledge rows (`chat/ui/browser-activity-block.tsx`, sharing their
 words (`browser/wording.ts`), an element named by what the outline said it was, never `t1`
 or `e12`, with each page linked where the run reached it. Results carry that page as structured
 `page` data for this; their detail is written for the model and never shown. A step waiting on
-the user keeps its approval card under the row. The hint tells the model to keep its handles
+the user says so in the row and is asked above the composer ([ui](ui.md)). The hint tells the model to keep its handles
 out of its replies too.
 
 - **Tabs** are named `t1`, `t2`, … per chat, kept with the tab's stored data. A tab opened by a

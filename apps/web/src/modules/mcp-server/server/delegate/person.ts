@@ -9,7 +9,7 @@ import {
   type ElicitationAnswer,
   type PendingIntegrationCall,
 } from "~/modules/integrations/schema.ts";
-import { toolText } from "~/modules/integrations/tool-text.ts";
+import { approvalAction } from "~/modules/integrations/tool-text.ts";
 import { LanguageRepo } from "~/modules/language/server/repo.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { m } from "~/paraglide/messages.js";
@@ -101,10 +101,7 @@ const approvalMessage = (
 ) =>
   [
     m.integrations_approval_question(
-      {
-        label: toolText(kind, { name: call.tool, label: call.label }, locale).label,
-        name: service,
-      },
+      { action: approvalAction(kind, call, locale), name: service },
       { locale },
     ),
     call.inFull

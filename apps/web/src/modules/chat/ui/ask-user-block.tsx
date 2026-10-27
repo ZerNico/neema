@@ -25,16 +25,21 @@ export interface ResolvedQuestionView extends ResolvedQuestionResponse {
 
 export interface QuestionActions {
   resolved?: ResolvedQuestionView;
-  /** Present only on the exact completed conversation tail. Rejects on failure. */
-  onRespond?: (callId: string, response: QuestionResponse) => Promise<unknown>;
+  /** On the exact completed conversation tail, where the composer's dock asks it. */
+  awaiting?: boolean;
   disabled?: boolean;
 }
 
+/**
+ * Questions as the transcript keeps them. An open one is answered in the
+ * composer's dock, so here it reads as asked; an answered one shows the
+ * answers and is edited in place, since editing rewrites history at this row.
+ */
 export function AskUserBlock({
   activity,
   messageStatus,
-  onRespond,
   resolved,
+  awaiting = false,
   disabled = false,
 }: QuestionActions & { activity: AskToolActivity; messageStatus: string }) {
   const id = useId();
@@ -52,7 +57,6 @@ export function AskUserBlock({
     setAnswers(questions.map(() => ({ selected: [], custom: "" })));
   }
   const [pending, setPending] = useState<QuestionResponse["kind"] | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   if (editing !== wasEditing) {
     setWasEditing(editing);
     if (editing) {
@@ -68,26 +72,18 @@ export function AskUserBlock({
   }
   const submitting = useRef(false);
   const preparing = messageStatus === "streaming";
-  const actionable =
-    messageStatus === "complete" &&
-    activity.status === "complete" &&
-    (editing || (!!onRespond && !submitted && !resolution));
+  const actionable = messageStatus === "complete" && activity.status === "complete" && editing;
   const locked = !actionable || (editState ? editState.disabled : disabled) || pending !== null;
   const response: QuestionResponse = { kind: "answers", answers };
   const valid = questions.length > 0 && formatQuestionResponse(questions, response) !== null;
 
   const submit = async (value: QuestionResponse) => {
-    if (locked || submitting.current || (!onRespond && !editState)) return;
+    if (locked || submitting.current || !editState) return;
     if (formatQuestionResponse(questions, value) === null) return;
     submitting.current = true;
     setPending(value.kind);
     try {
-      if (editState) {
-        await editState.onSave(value);
-      } else {
-        await onRespond!(activity.callId, value);
-        setSubmitted(true);
-      }
+      await editState.onSave(value);
     } catch {
       // The view owns the mutation toast and authoritative refetch. Retain every
       // choice and custom answer so a rejected request never destroys work.
@@ -109,7 +105,9 @@ export function AskUserBlock({
           {preparing ? m.chat_ask_preparing() : m.chat_ask_unavailable()}
         </p>
       ) : !actionable && !resolution ? (
-        <p className="text-muted-foreground px-4 text-xs">{m.chat_ask_read_only()}</p>
+        <p className="text-muted-foreground px-4 text-xs">
+          {awaiting ? m.chat_ask_awaiting() : m.chat_ask_read_only()}
+        </p>
       ) : null}
       {questions.length > 0 ? (
         <CardContent className="px-4">
@@ -142,7 +140,7 @@ export function AskUserBlock({
                     {questions.length > 1 ? `${index + 1}. ` : ""}
                     {question.question}
                   </legend>
-                  {actionable || preparing ? (
+                  {actionable ? (
                     <>
                       {question.options.length > 0 ? (
                         <ToggleGroup
@@ -252,7 +250,7 @@ export function AskUserBlock({
                 </fieldset>
               );
             })}
-            {actionable || preparing ? (
+            {actionable ? (
               <div className="flex flex-wrap gap-2">
                 <PendingButton
                   type="submit"
@@ -260,7 +258,7 @@ export function AskUserBlock({
                   pending={pending === "answers"}
                   disabled={locked || !valid}
                 >
-                  {editing ? m.chat_ask_save() : m.chat_ask_send()}
+                  {m.chat_ask_save()}
                 </PendingButton>
                 <PendingButton
                   size="sm"
@@ -269,19 +267,17 @@ export function AskUserBlock({
                   disabled={locked}
                   onClick={() => void submit({ kind: "skip" })}
                 >
-                  {editing ? m.chat_ask_skip_regenerate() : m.chat_ask_skip_continue()}
+                  {m.chat_ask_skip_regenerate()}
                 </PendingButton>
-                {editState ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={locked}
-                    onClick={editState.onCancel}
-                  >
-                    {m.common_cancel()}
-                  </Button>
-                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={locked}
+                  onClick={editState?.onCancel}
+                >
+                  {m.common_cancel()}
+                </Button>
               </div>
             ) : null}
           </form>

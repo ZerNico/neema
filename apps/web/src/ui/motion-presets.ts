@@ -27,3 +27,16 @@ const collapsePresets = {
  */
 export const collapseMotion = (reduced: boolean, axis: "height" | "width" = "height") =>
   collapsePresets[axis][reduced ? "reduced" : "still"];
+
+/**
+ * One step of a sequence replacing the last, keyed by the step: it enters from
+ * the side the reader went (1 forward, -1 back) while the last one simply goes,
+ * so there is never an empty frame between them.
+ */
+export const stepMotion = (direction: number) =>
+  ({
+    // Never from nothing: a blank frame between two steps reads as a flicker.
+    initial: { opacity: 0.35, x: 16 * direction },
+    animate: { opacity: 1, x: 0 },
+    transition: { duration: 0.2, ease: motionEase },
+  }) as const;

@@ -11,7 +11,7 @@ import {
 } from "~/ui/disclosure-classes.ts";
 import { cn } from "~/ui/utils";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
-import { DesktopActivityBlock, type DesktopApprovalRequest } from "./desktop-activity-block.tsx";
+import type { DesktopApprovalRequest } from "./desktop-activity-block.tsx";
 import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { Favicon } from "./favicon.tsx";
 import { hostOf } from "./host-of.ts";
@@ -56,7 +56,7 @@ function PageLink({ page }: { page: Page }) {
  * One collapsed row for a run of browser calls, like the web and knowledge
  * rows: the header says what happened in a few words, the disclosure lists the
  * steps as a person would put them, with each page linked as it was reached. A
- * step waiting on the user keeps its approval card below the row.
+ * step waiting on the user is asked about above the composer, not here.
  */
 export function BrowserActivityBlock({
   activities,
@@ -99,59 +99,52 @@ export function BrowserActivityBlock({
     const previous = steps.findLast((step) => step.activity.result?.page)?.activity.result?.page;
     steps.push({ activity, reached: page && page.url !== previous?.url ? page : null });
   }
-  const approval = waiting ? approvals?.get(waiting.callId) : undefined;
   return (
-    <>
-      <Disclosure open={expanded} onOpenChange={setExpanded} className="mb-2">
-        <DisclosureTrigger className={disclosureTriggerClassName}>
-          <ActivityFace
-            icon={Globe02Icon}
-            label={headerLabel}
-            status={
-              waiting
-                ? "waiting"
-                : running
-                  ? "running"
-                  : failed === activities.length
-                    ? "failed"
-                    : "done"
-            }
-          />
-          <ActivityChevron open={expanded} />
-        </DisclosureTrigger>
-        <DisclosureContent>
-          <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
-            {steps.map(({ activity, reached }) => {
-              const icon = isBrowserTool(activity.name)
-                ? BROWSER_ACTIVITY[activity.name].icon
-                : Globe02Icon;
-              return (
-                <li key={activity.callId} className="flex min-w-0 flex-col gap-1">
-                  <span
-                    className={cn(
-                      "flex min-w-0 items-center gap-2",
-                      activity.status === "running" && "text-shimmer",
-                    )}
-                  >
-                    <HugeiconsIcon
-                      icon={activity.status === "error" ? Alert02Icon : icon}
-                      strokeWidth={2}
-                      className={cn(
-                        "size-4 shrink-0",
-                        activity.status === "error" && "text-warning",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 truncate">{lineOf(activity)}</span>
-                  </span>
-                  {reached ? <PageLink page={reached} /> : null}
-                </li>
-              );
-            })}
-          </ol>
-        </DisclosureContent>
-      </Disclosure>
-      {waiting && approval ? <DesktopActivityBlock activity={waiting} approval={approval} /> : null}
-    </>
+    <Disclosure open={expanded} onOpenChange={setExpanded} className="mb-2">
+      <DisclosureTrigger className={disclosureTriggerClassName}>
+        <ActivityFace
+          icon={Globe02Icon}
+          label={headerLabel}
+          status={
+            waiting
+              ? "waiting"
+              : running
+                ? "running"
+                : failed === activities.length
+                  ? "failed"
+                  : "done"
+          }
+        />
+        <ActivityChevron open={expanded} />
+      </DisclosureTrigger>
+      <DisclosureContent>
+        <ol className={cn(disclosureBodyRailClassName, "flex flex-col gap-1.5")}>
+          {steps.map(({ activity, reached }) => {
+            const icon = isBrowserTool(activity.name)
+              ? BROWSER_ACTIVITY[activity.name].icon
+              : Globe02Icon;
+            return (
+              <li key={activity.callId} className="flex min-w-0 flex-col gap-1">
+                <span
+                  className={cn(
+                    "flex min-w-0 items-center gap-2",
+                    activity.status === "running" && "text-shimmer",
+                  )}
+                >
+                  <HugeiconsIcon
+                    icon={activity.status === "error" ? Alert02Icon : icon}
+                    strokeWidth={2}
+                    className={cn("size-4 shrink-0", activity.status === "error" && "text-warning")}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 truncate">{lineOf(activity)}</span>
+                </span>
+                {reached ? <PageLink page={reached} /> : null}
+              </li>
+            );
+          })}
+        </ol>
+      </DisclosureContent>
+    </Disclosure>
   );
 }

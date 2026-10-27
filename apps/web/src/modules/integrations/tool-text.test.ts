@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approvalConsequence, type PendingIntegrationCall } from "./schema.ts";
-import { toolText } from "./tool-text.ts";
+import { approvalAction, toolText } from "./tool-text.ts";
 
 const call = (overrides: Partial<PendingIntegrationCall>): PendingIntegrationCall => ({
   kind: "approval",
@@ -30,6 +30,19 @@ describe("a shipped tool's words", () => {
     });
     expect(toolText("mcp", { name: "search", title: "Search docs" }, "de").title).toBe(
       "Search docs",
+    );
+  });
+});
+
+describe("approvalAction", () => {
+  it("asks with a shipped tool's action, never its past-tense transcript label", () => {
+    expect(approvalAction("outlook", call({}), "en")).toBe("Send mail");
+    expect(approvalAction("outlook", call({}), "de")).toBe("Mails senden");
+  });
+
+  it("keeps a server's own words for its tool, which the call carries as its label", () => {
+    expect(approvalAction("mcp", call({ tool: "create_issue", label: "Create issue" }), "en")).toBe(
+      "Create issue",
     );
   });
 });
