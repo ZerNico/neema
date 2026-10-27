@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildOutline } from "./outline.ts";
+import { buildOutline, RefBook } from "./outline.ts";
 import type { Look, UiNode } from "./protocol.ts";
 
 const node = (id: string, depth: number, fields: Partial<UiNode> = {}): UiNode => ({
@@ -147,5 +147,30 @@ describe("the outline of a look", () => {
     const line = outline.text;
     expect(line.startsWith('e1 text = "say \\"hi\\" aaa')).toBe(true);
     expect(line.endsWith('…"')).toBe(true);
+  });
+
+  test("keeps an element's reference across looks, and gives a changed one a new one", () => {
+    const button = (id: string, name: string, x: number) =>
+      node(id, 1, {
+        role: "button",
+        name,
+        actions: ["press"],
+        frame: { x, y: 100, width: 40, height: 40 },
+      });
+    const book = new RefBook();
+    const first = buildOutline(
+      look([node("n1", 0, { role: "window" }), button("n2", "AC", 0), button("n3", "7", 50)]),
+      book,
+    );
+    // Pressing AC renames it and the driver numbers its nodes afresh.
+    const second = buildOutline(
+      look([node("m1", 0, { role: "window" }), button("m2", "C", 0), button("m3", "7", 50)]),
+      book,
+    );
+    const refOf = (outline: ReturnType<typeof buildOutline>, id: string) =>
+      [...outline.refs].find(([, nodeId]) => nodeId === id)?.[0];
+    expect(refOf(second, "m3")).toBe(refOf(first, "n3"));
+    expect(refOf(second, "m2")).not.toBe(refOf(first, "n2"));
+    expect(second.refs.has(refOf(first, "n2")!)).toBe(false);
   });
 });

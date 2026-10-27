@@ -27,8 +27,10 @@ included, and the tools can do better than pixels:
 - **Acting by reference, or by pixel.** Every action takes either a reference from the latest
   look, which is reliable, cheap and works in the background, or a coordinate on that look's
   screenshot, for canvases, games and apps whose accessibility is thin. The model sees both
-  in one look and picks per element. References are valid for the look that made them,
-  as the browser's are for their snapshot.
+  in one look and picks per element. A reference stays with its element from look to look
+  within a chat's use of one app, known by role, name and place: the model sends several
+  actions on one look in a round, and each action looks again. An element that changed gets a
+  new reference, so an old one is refused rather than meaning another.
 - **Precision without a bigger picture.** `app_zoom` returns part of the last look at full
   resolution. Screenshots stay at most 1280 px on the long edge, and the desktop app maps
   coordinates back to the real window.

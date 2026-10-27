@@ -1,7 +1,7 @@
 import type { ToolResult } from "@chat/desktop-rpc";
 import { type AppDriver, AppDriverError, startAppDriver } from "./driver.ts";
 import type { AppGrants } from "./grants.ts";
-import { buildOutline, type Outline } from "./outline.ts";
+import { buildOutline, type Outline, RefBook } from "./outline.ts";
 
 /** An `app_*` call as the machine received it. */
 export interface AppCall {
@@ -180,6 +180,8 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
  */
 export class AppUse {
   private readonly looks = new Map<string, ChatLook>();
+  /** Each chat's references into the app it looks at; a look at another app starts afresh. */
+  private readonly books = new Map<string, { readonly appId: string; readonly book: RefBook }>();
 
   constructor(private readonly options: AppUseOptions) {}
 
@@ -189,6 +191,7 @@ export class AppUse {
 
   forgetChat(conversationId: string) {
     this.looks.delete(conversationId);
+    this.books.delete(conversationId);
     if (this.options.driver.holder === this.key(conversationId)) this.options.driver.holder = null;
     return this.options.grants.forgetChat(conversationId);
   }
@@ -323,7 +326,12 @@ export class AppUse {
     failed?: string,
   ): Promise<ToolResult> {
     const look = await this.call("look", { appId });
-    const outline = buildOutline(look);
+    let entry = this.books.get(conversationId);
+    if (entry?.appId !== appId) {
+      entry = { appId, book: new RefBook() };
+      this.books.set(conversationId, entry);
+    }
+    const outline = buildOutline(look, entry.book);
     this.looks.set(conversationId, {
       appId,
       app: name,

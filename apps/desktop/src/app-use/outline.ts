@@ -20,7 +20,7 @@ const structural = new Set<Role>([
 
 export interface Outline {
   readonly text: string;
-  /** `e12` to the driver's node id, for this look only. */
+  /** `e12` to the driver's node id in this look; see `RefBook` for how long `e12` lasts. */
   readonly refs: ReadonlyMap<string, string>;
   readonly truncated: boolean;
 }
@@ -31,6 +31,31 @@ export interface Outline {
  * lays a page out as one flat run of siblings, and a plain cut hid what ends it, the composer.
  */
 const MAX_OF_A_ROLE = 25;
+
+/**
+ * The references one chat's looks at one app hand out. An element keeps its reference from look
+ * to look, known by role, name and place: the model may send several actions on one look in a
+ * round, and each action looks again. Numbered per look, a pressed AC that became C shifted
+ * every later number, and the round's last click hit the sidebar button (measured). An element
+ * that changed gets a new reference, so an old one is refused instead of meaning another.
+ */
+export class RefBook {
+  private readonly known = new Map<string, string>();
+  private next = 1;
+
+  /** `taken` holds the references this look already gave, for two elements alike. */
+  ref(node: UiNode, taken: { has(ref: string): boolean }) {
+    const frame = node.frame
+      ? [node.frame.x, node.frame.y, node.frame.width, node.frame.height].map(Math.round).join(",")
+      : `depth ${node.depth}`;
+    const identity = `${node.role}|${node.name ?? ""}|${frame}`;
+    const known = this.known.get(identity);
+    if (known && !taken.has(known)) return known;
+    const ref = `e${this.next++}`;
+    this.known.set(identity, ref);
+    return ref;
+  }
+}
 
 /** A shown element whose subtree is still being read. */
 interface Open {
@@ -55,7 +80,7 @@ const opened = (depth: number, indent: number, labels: ReadonlyArray<string>): O
  * platform: drivers send the raw tree, this decides what is worth the tokens. Positions are
  * in picture pixels, the same space a coordinate action uses.
  */
-export const buildOutline = (look: Look): Outline => {
+export const buildOutline = (look: Look, book: RefBook = new RefBook()): Outline => {
   const scale = look.image.width / look.window.width;
   const refs = new Map<string, string>();
   const lines: string[] = [];
@@ -106,7 +131,7 @@ export const buildOutline = (look: Look): Outline => {
       continue;
     }
     parent.children.set(node.role, ofRole + 1);
-    const ref = `e${refs.size + 1}`;
+    const ref = book.ref(node, refs);
     if (!add("  ".repeat(open.length) + describe(ref, node, scale))) break;
     refs.set(ref, node.id);
     open.push(
