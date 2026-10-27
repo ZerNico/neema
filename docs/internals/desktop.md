@@ -177,9 +177,11 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
 - **On connect** the server sends the person's network grants, then, on a fiber of its own so
   the stream flows meanwhile, resumes calls held for the machine. A new status arrives as
   `POST /api/machine/status`, posted one at a time so a late progress report never lands after
-  "ready". Each start asks which of the machine's chats are gone; each reconnect asks again, but
-  only about chats the server has shown exist since the start (a call, an event, saved
-  folders), since a new chat's draft has no row until its first message and would look gone.
+  "ready". After a start, connects ask which of the machine's chats are gone until one such
+  sweep gets an answer, so starting offline does not skip it. Later reconnects ask only about
+  chats the server has shown exist since (a call, an event, saved folders), since a new chat's
+  draft has no row until its first message and would look gone; an unused chat deleted
+  elsewhere while the machine was away waits for the next start.
 - **A call** (`call` event) carries the tool, its arguments, the server's deadline and the
   time it was sent, so the machine measures the deadline on its own clock. It also carries the
   chat's sent files and the guest path the server named for each.

@@ -97,6 +97,8 @@ export class ComputerHost {
    * draft, which has no row until its first message.
    */
   private readonly known = new Set<string>();
+  /** Whether a sweep of every local chat, drafts left from earlier runs included, got an answer. */
+  private swept = false;
   /** This app's start, told the server in every hello; see `MachineHello.launch`. */
   private readonly launch = randomUUID();
   private readonly calls = new Map<
@@ -133,10 +135,12 @@ export class ComputerHost {
       hello: () => this.hello(),
       fetch: options.fetch,
       onEvent: (event) => this.handle(event),
-      // Each time, not only at start: a chat purged while this machine was away is told of here.
+      // Until one sweep of every local chat got an answer, each connect tries it again; after,
+      // a reconnect asks only about chats known to exist, so a draft is never taken for gone.
+      // An unused chat deleted elsewhere while this machine was away waits for the next start.
       onConnected: (connected) => {
         if (connected)
-          void this.forgetGone(this.known).catch((error: unknown) => {
+          void this.forgetGone(this.swept ? this.known : undefined).catch((error: unknown) => {
             this.options.log(`computer: removing purged chats failed: ${String(error)}`);
           });
       },
@@ -183,10 +187,6 @@ export class ComputerHost {
       );
     await this.proxy.listen();
     this.client.start();
-    // At start, every chat with something here: a draft left from an earlier run goes too.
-    void this.forgetGone().catch((error: unknown) => {
-      this.options.log(`computer: removing purged chats failed: ${String(error)}`);
-    });
     let reported = 0;
     try {
       await this.options.hypervisor.prepare(this.options.image, (fraction) => {
@@ -218,7 +218,9 @@ export class ComputerHost {
 
   private async mountable(conversationId: string) {
     const mounts = await this.options.folders(conversationId);
-    const usable = await Promise.all(mounts.map((mount) => this.options.stillMountable(mount)));
+    const usable = await Promise.all(
+      mounts.map((mount) => this.options.stillMountable(mount).catch(() => false)),
+    );
     return mounts.filter((_, index) => usable[index]);
   }
 
@@ -367,8 +369,10 @@ export class ComputerHost {
         (id) => !only || only.has(id),
       ),
     );
-    for (const conversationId of await this.client.gone([...local]))
-      await this.discardChat(conversationId, true);
+    const gone = await this.client.gone([...local]);
+    if (gone === null) return;
+    if (!only) this.swept = true;
+    for (const conversationId of gone) await this.discardChat(conversationId, true);
   }
 
   private async attachment(key: ChatKey, id: string, signal: AbortSignal) {

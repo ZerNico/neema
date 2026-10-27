@@ -95,16 +95,16 @@ export class MachineClient {
     return posted.then(() => {});
   }
 
-  /** Which of these chats the server no longer has; none when it cannot be asked now. */
-  async gone(conversationIds: readonly string[]): Promise<readonly string[]> {
+  /** Which of these chats the server no longer has; null when it could not be asked now. */
+  async gone(conversationIds: readonly string[]): Promise<readonly string[] | null> {
     if (conversationIds.length === 0) return [];
     try {
       const response = await this.post(MACHINE_ROUTES.gone, { conversationIds });
-      if (!response.ok) return [];
+      if (!response.ok) return null;
       const body = decodeGone(await response.json());
-      return body._tag === "Some" ? body.value.conversationIds : [];
+      return body._tag === "Some" ? body.value.conversationIds : null;
     } catch {
-      return [];
+      return null;
     }
   }
 

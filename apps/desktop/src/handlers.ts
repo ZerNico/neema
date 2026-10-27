@@ -183,7 +183,8 @@ export const makeHandlers = (shell: Shell) =>
         // The same test a VM's mounts pass, so a folder the VM leaves out shows as lost here.
         const listed = yield* Effect.forEach(mountsOf(folders), (mount) =>
           Effect.map(
-            Effect.promise(() => stillMountable(mount.hostPath, shell.appData)),
+            // A folder vanishing mid-check, or a disk erroring, is a lost folder, not a fault.
+            Effect.promise(() => stillMountable(mount.hostPath, shell.appData).catch(() => false)),
             (alive) => ({
               name: mount.name,
               path: guestRoot(mount),

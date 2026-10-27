@@ -1,3 +1,4 @@
+import { useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { m } from "~/paraglide/messages.js";
 import {
   ArrowUpRight01Icon,
@@ -365,8 +366,9 @@ function ScopeChoices({
 
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
-  /** For `bind`: the machine the chat's computer would run on. */
+  /** The machine the call would run on: the one to bind for `bind`, else where it runs. */
   readonly machine?: string | undefined;
+  readonly machineId?: string | undefined;
   /** Why the reviewer asked, under "ask when risky". */
   readonly reason?: string | undefined;
   /** The live call's arguments, which may hold what the transcript never stores. */
@@ -391,6 +393,7 @@ function ApprovalCard({
   approval: DesktopApprovalRequest;
   roots: ReadonlyArray<{ name: string; path: string }>;
 }) {
+  const here = useLocalMachineId();
   const listed = activity.name === "delete_files" ? deletePathsOf(activity.args) : [];
   // A site question may come from a click: the address is what is asked about.
   const what =
@@ -414,8 +417,9 @@ function ApprovalCard({
             {approvalTitle(activity, approval.kind, roots, approval.machine)}
           </span>
         </div>
-        {/* Which machine it runs on: a card asked again after the chat moved names the new one. */}
-        {approval.machine && approval.kind !== "bind" ? (
+        {/* Which machine it runs on, when not the one the reader is at: "this computer" in the
+            title would be wrong there, as on a card asked again after the chat moved. */}
+        {approval.machine && approval.kind !== "bind" && approval.machineId !== here ? (
           <p className="text-muted-foreground text-xs">
             {m.chat_desktop_ask_on({ machine: approval.machine })}
           </p>

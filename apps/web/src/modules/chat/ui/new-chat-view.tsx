@@ -120,8 +120,13 @@ export function NewChatView({
             id: conversationId,
             ...(temporary && !projectId ? { temporary: true } : {}),
             ...(projectId ? { projectId } : {}),
-            ...(folders?.items.length
-              ? { folders: folders.items.map(({ name, readOnly }) => ({ name, readOnly })) }
+            // Only folders the VM would mount: a moved one is no folder for the answer either.
+            ...(folders?.items.some((folder) => folder.alive)
+              ? {
+                  folders: folders.items
+                    .filter((folder) => folder.alive)
+                    .map(({ name, readOnly }) => ({ name, readOnly })),
+                }
               : {}),
           },
           modelId: modelId!,

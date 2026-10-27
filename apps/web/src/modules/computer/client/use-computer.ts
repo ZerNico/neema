@@ -25,6 +25,7 @@ export type ComputerChoice = Parameters<typeof decideComputerCall>[0]["data"]["c
 interface ComputerApproval {
   readonly approval: "bind" | "edit" | "command" | "delete" | "network";
   readonly machine: string | undefined;
+  readonly machineId: string | undefined;
   readonly reason: string | undefined;
   readonly args: Record<string, unknown>;
   readonly decide: (choice: ComputerChoice) => void;
@@ -55,6 +56,7 @@ export function useComputerApprovals(conversationId: string) {
         {
           approval: call.approval,
           machine: call.machine?.name,
+          machineId: call.machine?.id,
           reason: call.reason,
           args: JSON.parse(call.args) as Record<string, unknown>,
           decide: (choice: ComputerChoice) => mutate({ callId: call.callId, choice }),
