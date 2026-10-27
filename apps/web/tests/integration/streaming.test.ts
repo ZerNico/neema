@@ -9190,7 +9190,10 @@ describe("desktop calls run by the sending app", () => {
       );
       // Before the machine's own report could land: the answer read the page's names.
       expect(JSON.stringify(prompts[0]!.prompt)).toContain("/folders/site");
-      expect(chat).toMatchObject({ machineId: "laptop", folders: [{ name: "site", readOnly: true }] });
+      expect(chat).toMatchObject({
+        machineId: "laptop",
+        folders: [{ name: "site", readOnly: true }],
+      });
     } finally {
       authoringScript = null;
     }

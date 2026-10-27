@@ -29,10 +29,12 @@ export const agentKeyCount = (socket: string, timeoutMs = 2_000) =>
 export const defaultKey = async (home = homedir()) => {
   for (const name of ["id_ed25519", "id_ecdsa", "id_rsa"]) {
     const path = join(home, ".ssh", name);
-    if (await access(path).then(
-      () => true,
-      () => false,
-    ))
+    if (
+      await access(path).then(
+        () => true,
+        () => false,
+      )
+    )
       return path;
   }
   return null;

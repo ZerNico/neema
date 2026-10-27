@@ -464,9 +464,7 @@ export const setPermissionLevel = createServerFn({ method: "POST" })
           permissionLevel: data.permissionLevel,
         }),
       ).pipe(
-        Effect.tap(() =>
-          ComputerCalls.use((calls) => calls.forgetAllowances(data.conversationId)),
-        ),
+        Effect.tap(() => ComputerCalls.use((calls) => calls.forgetAllowances(data.conversationId))),
       ),
     ),
   );

@@ -118,7 +118,8 @@ export class CommandReviewer extends Context.Service<
             return ASK;
           const model = yield* reviewModel(input);
           if (!model) return ASK;
-          const language = (yield* languages.localeOf(input.userId)) === "de" ? "German" : "English";
+          const language =
+            (yield* languages.localeOf(input.userId)) === "de" ? "German" : "English";
           const result = yield* gateway
             .generateText({
               modelId: model.id,

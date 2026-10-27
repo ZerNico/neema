@@ -362,8 +362,7 @@ export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern:
   const absolute = pattern.startsWith("/");
   const fixed = absolute ? pattern.slice(0, pattern.search(/[*?{]|$/)) : "";
   const all = roots(mounts).filter(
-    (root) =>
-      !absolute || `${root.path}/`.startsWith(fixed) || fixed.startsWith(`${root.path}/`),
+    (root) => !absolute || `${root.path}/`.startsWith(fixed) || fixed.startsWith(`${root.path}/`),
   );
   if (all.length === 0)
     throw new Refusal(
