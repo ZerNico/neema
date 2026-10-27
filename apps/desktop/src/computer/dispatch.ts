@@ -233,6 +233,17 @@ async function run(
     return hostFile ? stampOf(hostFile) : Promise.resolve(null);
   };
   const saw = async (path: string) => deps.seen.note(chat, path, await stampAt(path));
+  /**
+   * A read is stamped before it happens: a save while it ran then counts as a change, never as
+   * seen. `place` for the path the read will name.
+   */
+  const reading = async <T>(path: string, read: () => Promise<T>) => {
+    const placed = place(path, mounts);
+    const stamp = placed.ok ? await stampAt(placed.path) : null;
+    const result = await read();
+    if (placed.ok) deps.seen.note(chat, placed.path, stamp);
+    return result;
+  };
   /** A refusal when the folder file at `path` changed since the model last read or wrote it. */
   const changedSinceSeen = async (path: string) => {
     const placed = place(path, mounts);
@@ -240,7 +251,7 @@ async function run(
     if (!deps.seen.changedSince(chat, placed.path, await stampAt(placed.path))) return null;
     return failure(
       "The file changed since it was read",
-      `${placed.path} changed since you last read it, perhaps saved by the user. Read it again and make your change on top of what is there now; writing now would undo their change.`,
+      `${placed.path} changed since you last read it, by a command you ran or by the user saving it. Read it again and make your change on top of what is there now; writing now could undo that change. Do not tell the user they changed it unless you know.`,
     );
   };
   switch (call.name) {
@@ -268,8 +279,7 @@ async function run(
       const path = str(args.path);
       const extension = posix.extname(path).toLowerCase();
       if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"].includes(extension)) {
-        const file = await readBinaryFile(guest, mounts, path, "view");
-        await saw(file.path);
+        const file = await reading(path, () => readBinaryFile(guest, mounts, path, "view"));
         return {
           ...ok(`Read ${file.path}`, `${file.mediaType}, ${sizeOf(file.bytes.length)}`),
           file: {
@@ -279,8 +289,9 @@ async function run(
           },
         };
       }
-      const file = await readTextFile(guest, mounts, path, line(args.offset), line(args.limit));
-      await saw(file.path);
+      const file = await reading(path, () =>
+        readTextFile(guest, mounts, path, line(args.offset), line(args.limit)),
+      );
       const first = file.startLine;
       const last = (file.nextLine ?? (file.lineCount ?? first) + 1) - 1;
       const summary =
@@ -296,8 +307,9 @@ async function run(
       return ok(summary, detail, file.truncated);
     }
     case "copy_from_computer": {
-      const file = await readBinaryFile(guest, mounts, str(args.path), "import");
-      await saw(file.path);
+      const file = await reading(str(args.path), () =>
+        readBinaryFile(guest, mounts, str(args.path), "import"),
+      );
       return {
         ...ok(`Imported ${file.path}`, `${file.mediaType}, ${sizeOf(file.bytes.length)}`),
         file: { mediaType: file.mediaType, base64: file.bytes.toString("base64"), name: file.path },
