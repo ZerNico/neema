@@ -113,6 +113,8 @@ const setup = (
   repo: ReturnType<typeof fakeRepo>,
   /** The reviewer's answer under "ask when risky", and what it was asked. */
   review: (input: ReviewInput) => ReviewVerdict = () => ({ run: false, reason: null }),
+  /** Holds each review until released, as a model's seconds of thinking would. */
+  reviewGate?: Deferred.Deferred<void>,
 ) =>
   Effect.gen(function* () {
     const external = yield* ExternalCompletion;
@@ -165,7 +167,12 @@ const setup = (
         Layer.provideMerge(
           Layer.succeed(
             CommandReviewer,
-            CommandReviewer.of({ review: (input) => Effect.sync(() => review(input)) }),
+            CommandReviewer.of({
+              review: (input) =>
+                Effect.map(reviewGate ? Deferred.await(reviewGate) : Effect.void, () =>
+                  review(input),
+                ),
+            }),
           ),
         ),
         Layer.provideMerge(MachineHub.layer),
@@ -216,6 +223,18 @@ describe("ComputerCalls", () => {
       expect(yield* calls.result(USER, "someone-else", "call-1", result)).toBe(false);
       expect(yield* calls.result(USER, "laptop", "call-1", result)).toBe(true);
       expect(yield* Fiber.join(waiting)).toEqual(result);
+    }),
+  );
+
+  it.effect("a machine that reported a new status is offline once its stream ends", () =>
+    Effect.gen(function* () {
+      const { connect, hub } = yield* setup(fakeRepo({ machineId: "laptop" }));
+      const laptop = yield* connect("laptop");
+      yield* hub.update(USER, hello("laptop", { computer: { status: "preparing", progress: 0.5 } }));
+      yield* hub.rename(USER, "laptop", "Work laptop");
+      expect((yield* hub.presence(USER, "laptop"))?.hello.name).toBe("Work laptop");
+      yield* Scope.close(laptop.scope, Exit.void);
+      expect(yield* hub.presence(USER, "laptop")).toBeNull();
     }),
   );
 
@@ -319,6 +338,33 @@ describe("ComputerCalls", () => {
         name: "run_command",
         folders: [{ name: "site", readOnly: false }],
       });
+    }),
+  );
+
+  it.effect("a call under review is decided once, however often its machine reports", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      let reviews = 0;
+      const { calls, open, connect, hub } = yield* setup(
+        fakeRepo({ machineId: "laptop", permissionLevel: "review" }),
+        () => {
+          reviews += 1;
+          return { run: true };
+        },
+        gate,
+      );
+      const laptop = yield* connect("laptop", { computer: { status: "preparing", progress: 0.9 } });
+      yield* open("call-1", "run_command", { command: "pnpm test" }, "laptop");
+      // Ready, then ready again while the first decision is still under review.
+      yield* hub.update(USER, hello("laptop"));
+      const first = yield* Effect.forkChild(calls.machineChanged(USER, "laptop"), {
+        startImmediately: true,
+      });
+      yield* calls.machineChanged(USER, "laptop");
+      yield* Deferred.succeed(gate, undefined);
+      yield* Fiber.join(first);
+      expect(reviews).toBe(1);
+      expect(yield* nextCall(laptop.queue)).toMatchObject({ callId: "call-1" });
     }),
   );
 

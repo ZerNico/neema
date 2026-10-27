@@ -339,6 +339,9 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           if (changes && chat.permissionLevel === "review" && !allowedHere) {
+            // No longer held while the review takes its seconds, so a status update or the
+            // reconnect timer cannot start a second decision for the same call.
+            entry.state = { kind: "deciding" };
             const verdict = yield* reviewer.review({
               userId: entry.userId,
               conversationId: entry.conversationId,
