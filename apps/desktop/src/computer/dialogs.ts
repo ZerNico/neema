@@ -1,4 +1,4 @@
-import { dialog, type BrowserWindow } from "electron";
+import { desktopCapturer, dialog, shell, systemPreferences, type BrowserWindow } from "electron";
 import { m } from "../paraglide/messages.js";
 import { basename } from "node:path";
 import { checkFolder, type RememberedFolders } from "./folder-access.ts";
@@ -31,6 +31,57 @@ export const computerDialogs = (input: {
     return window ? dialog.showMessageBox(window, withSignal) : dialog.showMessageBox(withSignal);
   };
   return {
+    /** Whether a chat may use an app: here only, or in every chat (docs/internals/app-use.md). */
+    async app(app: { name: string }, signal?: AbortSignal): Promise<"chat" | "always" | "deny"> {
+      const locale = await input.locale();
+      const answer = await show(
+        {
+          type: "question",
+          title: m.computer_app_title({ app: app.name }, { locale }),
+          message: m.computer_app_message({ app: app.name }, { locale }),
+          detail: m.computer_app_detail({}, { locale }),
+          buttons: [
+            m.computer_dialog_cancel({}, { locale }),
+            m.computer_app_allow_chat({}, { locale }),
+            m.computer_app_allow_always({}, { locale }),
+          ],
+          defaultId: 1,
+          cancelId: 0,
+        },
+        signal,
+      );
+      return answer.response === 1 ? "chat" : answer.response === 2 ? "always" : "deny";
+    },
+    /**
+     * App use needs Accessibility and Screen Recording for neema. macOS's own prompts put neema
+     * on both lists; this says what to switch on there, and that neema must reopen after.
+     */
+    async appPermissions() {
+      const locale = await input.locale();
+      systemPreferences.isTrustedAccessibilityClient(true);
+      if (systemPreferences.getMediaAccessStatus("screen") !== "granted")
+        await desktopCapturer
+          .getSources({ types: ["window"], thumbnailSize: { width: 1, height: 1 } })
+          .catch(() => []);
+      const answer = await show({
+        type: "info",
+        title: m.computer_app_permissions_title({}, { locale }),
+        message: m.computer_app_permissions_title({}, { locale }),
+        detail: m.computer_app_permissions_detail({}, { locale }),
+        buttons: [
+          m.computer_dialog_cancel({}, { locale }),
+          m.computer_app_open_settings({}, { locale }),
+        ],
+        defaultId: 1,
+        cancelId: 0,
+      });
+      if (answer.response === 1)
+        await shell.openExternal(
+          systemPreferences.isTrustedAccessibilityClient(false)
+            ? "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            : "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        );
+    },
     async folder({ path, reason }: { path?: string; reason?: string }, signal?: AbortSignal) {
       const locale = await input.locale();
       if (path) {

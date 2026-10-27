@@ -13,6 +13,8 @@ import { MachineClient } from "./machine-client.ts";
 import type { Mount } from "./paths.ts";
 import { SentFiles } from "./sent-files.ts";
 import { ChatVms, originLabel, type ChatKey } from "./vms.ts";
+import { AppGrants } from "../app-use/grants.ts";
+import { AppUse, type SharedAppDriver } from "../app-use/host.ts";
 
 export interface ComputerHostOptions {
   readonly origin: string;
@@ -51,7 +53,12 @@ export interface ComputerHostOptions {
     ): Promise<{ hostPath: string } | { refused: string }>;
     /** Says whether the agent holds a key too, which the model is told. */
     agent(input: { allowed: boolean }, signal: AbortSignal): Promise<AgentAnswer>;
+    /** Whether a chat may use an app here; see docs/internals/app-use.md. */
+    app(app: { name: string }, signal: AbortSignal): Promise<"chat" | "always" | "deny">;
+    appPermissions(): Promise<void>;
   };
+  /** This desktop app's one app driver, shared with any later host; see `SharedAppDriver`. */
+  readonly appDriver: SharedAppDriver;
   /** Attaches a folder to a chat here, refusing the ones no chat may have. */
   readonly attach: (
     conversationId: string,
@@ -94,6 +101,7 @@ export class ComputerHost {
   private readonly client: MachineClient;
   private readonly sentFiles: SentFiles;
   private readonly seen = new SeenFiles();
+  private readonly apps: AppUse;
   /**
    * Chats the server has shown exist while this app runs: it sent a call or event for them, or
    * saved their folders. A reconnect forgets only those it then calls gone, never a new chat's
@@ -127,6 +135,16 @@ export class ComputerHost {
     this.sentFiles = new SentFiles(
       join(options.directory, `sent-files-${originLabel(options.origin)}.json`),
     );
+    this.apps = new AppUse({
+      driver: options.appDriver,
+      scope: options.origin,
+      grants: new AppGrants(
+        join(options.directory, `app-grants-${originLabel(options.origin)}.json`),
+      ),
+      ask: (app, signal) => options.ask.app(app, signal),
+      explainPermissions: () => options.ask.appPermissions(),
+      log: options.log,
+    });
     this.vms = new ChatVms({
       hypervisor: options.hypervisor,
       egress: this.proxy,
@@ -277,48 +295,57 @@ export class ComputerHost {
         const remainingMs = event.deadlineAt - event.sentAt;
         const deadline = Date.now() + remainingMs;
         const abort = new AbortController();
-        const result = dispatch(
-          {
-            vms: this.vms,
-            egress: this.policy,
-            sentFiles: this.sentFiles,
-            seen: this.seen,
-            setup: async (key) => ({
-              workspace: await this.options.workspace(key.conversationId),
-              mounts: await this.mountable(key.conversationId),
-            }),
-            attachment: (key, id, signal) => this.attachment(key, id, signal),
-            agentAllowed: (key) => this.agent.isAllowed(key),
-            // An answer after Stop, or past the deadline, grants nothing: the call is over.
-            requestFolder: async (key, input, signal) => {
-              const chosen = await this.options.ask.folder(input, signal);
-              if (signal.aborted) return { refused: "The call was stopped before the answer." };
-              if ("refused" in chosen) return chosen;
-              const attached = await this.options.attach(key.conversationId, chosen.hostPath);
-              if ("name" in attached) await this.foldersChanged(key.conversationId);
-              return attached;
-            },
-            requestAgent: async (key, signal) => {
-              const allowed = this.agent.isAllowed(key);
-              const answer = await this.options.ask.agent({ allowed }, signal);
-              if (signal.aborted) return "declined";
-              if (answer !== "declined" && !allowed) {
-                this.agent.allow(key);
-                await this.saveAgentChats();
-              }
-              return answer;
-            },
-          },
-          {
-            callId: event.callId,
-            key: this.key(event.conversationId),
-            name: event.name,
-            args: event.args,
-            deadline,
-            ...(event.attachments ? { attachments: event.attachments } : {}),
-            signal: abort.signal,
-          },
-        );
+        // App use runs on this machine itself, never in the chat's VM.
+        const result = event.name.startsWith("app_")
+          ? this.apps.run({
+              name: event.name,
+              args: event.args,
+              conversationId: event.conversationId,
+              local: event.local === true,
+              signal: abort.signal,
+            })
+          : dispatch(
+              {
+                vms: this.vms,
+                egress: this.policy,
+                sentFiles: this.sentFiles,
+                seen: this.seen,
+                setup: async (key) => ({
+                  workspace: await this.options.workspace(key.conversationId),
+                  mounts: await this.mountable(key.conversationId),
+                }),
+                attachment: (key, id, signal) => this.attachment(key, id, signal),
+                agentAllowed: (key) => this.agent.isAllowed(key),
+                // An answer after Stop, or past the deadline, grants nothing: the call is over.
+                requestFolder: async (key, input, signal) => {
+                  const chosen = await this.options.ask.folder(input, signal);
+                  if (signal.aborted) return { refused: "The call was stopped before the answer." };
+                  if ("refused" in chosen) return chosen;
+                  const attached = await this.options.attach(key.conversationId, chosen.hostPath);
+                  if ("name" in attached) await this.foldersChanged(key.conversationId);
+                  return attached;
+                },
+                requestAgent: async (key, signal) => {
+                  const allowed = this.agent.isAllowed(key);
+                  const answer = await this.options.ask.agent({ allowed }, signal);
+                  if (signal.aborted) return "declined";
+                  if (answer !== "declined" && !allowed) {
+                    this.agent.allow(key);
+                    await this.saveAgentChats();
+                  }
+                  return answer;
+                },
+              },
+              {
+                callId: event.callId,
+                key: this.key(event.conversationId),
+                name: event.name,
+                args: event.args,
+                deadline,
+                ...(event.attachments ? { attachments: event.attachments } : {}),
+                signal: abort.signal,
+              },
+            );
         const entry: {
           abort: AbortController;
           result: Promise<ToolResult>;
@@ -374,6 +401,7 @@ export class ComputerHost {
       this.seen.forget(conversationId);
       await this.options.discardWorkspace(conversationId);
       await this.sentFiles.forget(conversationId);
+      await this.apps.forgetChat(conversationId);
       if (this.agent.isAllowed(key)) {
         this.agent.forget(key);
         await this.saveAgentChats();

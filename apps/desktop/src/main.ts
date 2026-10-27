@@ -13,6 +13,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -63,6 +64,7 @@ import { ComputerHost } from "./computer/host.ts";
 import { microsandbox } from "./computer/hypervisor.ts";
 import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
 import { computerDialogs } from "./computer/dialogs.ts";
+import { SharedAppDriver } from "./app-use/host.ts";
 import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
@@ -218,6 +220,14 @@ const hypervisor = microsandbox(
   },
   { insecureRegistry: SANDBOX_INSECURE_REGISTRY },
 );
+/**
+ * The app driver, one for the app's life whichever server it serves: replayd stalls two capturing
+ * processes of one identity. Built beside the bundle on macOS (build.mjs); elsewhere there is
+ * none. It exits by itself when the app does, its input closing.
+ */
+const appDriver = new SharedAppDriver(
+  existsSync(join(here, "app-driver")) ? join(here, "app-driver") : null,
+);
 const stopComputer = async () => {
   const current = computer;
   computer = null;
@@ -318,6 +328,7 @@ const startComputer = (origin: string) => {
     agentSocket: () => settings().agentSocket(),
     remote: () => settings().get().remote,
     ask: dialogs,
+    appDriver,
     attach: async (conversationId, hostPath) => {
       const key = { origin, conversationId };
       const attached = await runtime.runPromise(

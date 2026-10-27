@@ -36,7 +36,10 @@ up for most of it, and the tool names and descriptions follow what those models 
 
 ## The tools
 
-A lazy family, like the browser's: named in the catalogue, loaded on first need.
+A lazy family, like the browser's: named in the catalogue, loaded on first need. Offered once
+the person has a Mac connected, the one platform with a driver. They are desktop tools in
+family and envelope, run by the chat's machine like the computer's, but never touch its VM, so
+a machine whose VM is still downloading or impossible can still use its apps.
 
 | Tool         | Does                                                                 |
 | ------------ | -------------------------------------------------------------------- |
@@ -50,21 +53,27 @@ A lazy family, like the browser's: named in the catalogue, loaded on first need.
 | `app_drag`   | Drags from one point or reference to another                         |
 | `app_zoom`   | Part of the last look at full resolution                             |
 
-Every action returns a fresh look unless it asks not to, so the model sees what it caused.
+Every action returns a fresh look, after a short pause for the app to redraw, so the model sees
+what it caused. Coordinates are the picture's pixels, scaled to window points by the chat's
+latest look.
 
 ## Consent is per app
 
 - **The person allows an app, not a click.** The first call that touches an app asks at the
   machine, in a native dialog like `request_folder`'s: "Let this chat use Microsoft Excel?"
-  with **Allow once**, **Allow in this chat** and **Always allow**. Always-allowed apps are
-  listed in Settings › This computer, removable there.
+  with **Allow in this chat** and **Always allow**. No "once": a grant for one call would ask
+  again before every click. The app is named as macOS knows it before anything starts it.
+  Answers live on the machine, per server, like folder and site grants, so the server never
+  learns which apps a person trusts; a chat's go with it. Always-allowed apps are to be listed
+  in Settings › This computer, removable there.
 - **Inside an allowed app, actions do not ask one by one.** A card per click would make the
   feature useless. The chat's permission level does not apply to app actions. The model is
   told to stop and hand over before sending, paying, deleting, or anything signed in as the
   person that cannot be undone.
-- **Asked at the machine, like folders.** Allowing an app needs the person there. From
-  another device the chat may use only apps already always allowed, and only when the
-  machine allows remote use.
+- **Asked at the machine, like folders.** Allowing an app needs the person there. The server
+  tells the machine whether a call's message came from it (`local`, judged by the sending
+  session), since the machine cannot know. From another device the chat may use only apps
+  already always allowed, and only when the machine allows remote use.
 - **Some apps are never offered**, whatever the person allows: terminals (Terminal, iTerm,
   Windows Terminal, PowerShell, cmd), password managers and Keychain Access, System Settings
   and Windows Settings, the registry editor, and neema itself, known as the driver's parent,
@@ -154,14 +163,30 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
   is a second driver, not a second outline.
 - **Node ids last one look.** The driver keeps the elements of its latest look and refuses an
   id from an older one.
+- **One driver per desktop app**, shared by whichever server it serves, with calls one at a
+  time. replayd, which every macOS capture path goes through (ScreenCaptureKit, SkyLight and
+  even `CGWindowListCreateImage` on macOS 26), mixes up processes of one identity: two drivers
+  capturing stalled every capture of both until they were gone, while two differently named
+  copies captured side by side (measured). Codex likewise has one service. The host keeps each
+  chat's look, keyed by server and chat, and an action whose chat no longer holds the driver's
+  look looks again instead of acting on another chat's references.
 - **Started by the desktop app, never on its own.** It holds no state beyond the latest look
-  and exits with the app.
+  and exits when its input closes, after answering what was already asked, within two
+  seconds even if a call is stuck. An orphan once kept a stalled capture spinning for minutes.
+- **Captures are bounded.** ScreenCaptureKit gets two seconds, then the window server's own
+  copy through SkyLight three, as cua-driver reads windows on another Space. A capture that
+  never answers fails the look; it does not hold every later call.
 - **The machine's permissions, granted once.** macOS asks for Screen Recording and
   Accessibility for neema, never for the driver: TCC charges a child process to the app that
   spawned it, so an unsigned driver runs on its parent's grants. That holds only while
   it is spawned directly. Launched through LaunchServices (`open`) it would become its own
   responsible process and need grants of its own. Under `pnpm dev` the responsible app is the
   terminal that started it.
+- **Direct capture needs one more approval.** Since macOS 15, the first direct capture by an
+  app makes replayd show "… is requesting to bypass the system private window picker", an
+  alert that takes the front and the keyboard, and records the answer per app bundle. Every
+  capture path raises it (cua-driver's measurement). It is to be asked for with the other
+  permissions, never in the middle of a chat.
 - **A window server connection, no Dock icon.** ScreenCaptureKit asserts without a
   connection, so the macOS driver starts a shared application with the prohibited activation
   policy.
@@ -183,10 +208,14 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
 
 ## Order of work
 
-1. Done: the protocol, the outline, and the macOS driver's look and press, proven by
-   `real-driver.test.ts` on a fully covered Calculator that stays in the background. A look
-   takes about 300 ms on a small app and 700 ms on Outlook.
-2. The tools against the protocol, consent, the remaining actions. Outlines need better
-   pruning: Outlook's fills the 12,000-character budget.
-3. The floating view, the cursor, pausing on the person's input.
-4. The Windows driver on the same protocol.
+1. Done: the protocol, the outline and the macOS driver, every action in the background on
+   AppKit and Chromium (`real-driver.test.ts`). A look takes about 300 ms on a small app and
+   700 ms on Outlook.
+2. Done: the tools, the machine route, consent and the host (`host.test.ts`). Left: the
+   always-allowed list in Settings, and better outline pruning (Outlook's fills the
+   12,000-character budget).
+3. Permissions as a guided step: a panel beside System Settings to drag neema into
+   Accessibility and Screen Recording, since on macOS 26 the prompts do not add a new app to
+   either list, and the direct-capture approval with them.
+4. The floating view, the cursor, pausing on the person's input.
+5. The Windows driver on the same protocol.
