@@ -41,10 +41,11 @@ const SYSTEM = (language: string, fence: string) =>
     `Reply with one line only: RUN, or ASK: followed by a short reason the user will read, in ${language}.`,
   ].join("\n");
 
-const cap = (value: unknown) => {
-  const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
-  return text.length > ARGUMENT_CAP ? `${text.slice(0, ARGUMENT_CAP)}… (cut)` : text;
-};
+const argumentText = (value: unknown) =>
+  typeof value === "string" ? value : JSON.stringify(value ?? null);
+
+/** Longer arguments never reach the model: `review` asks the person for them instead. */
+const cap = (value: unknown) => argumentText(value).slice(0, ARGUMENT_CAP);
 
 export const reviewPrompt = (
   input: ReviewInput,
@@ -111,6 +112,9 @@ export class CommandReviewer extends Context.Service<
 
       const review = (input: ReviewInput) =>
         Effect.gen(function* () {
+          // What it cannot see whole it cannot clear: the rest might be what matters.
+          if (Object.values(input.args).some((value) => argumentText(value).length > ARGUMENT_CAP))
+            return ASK;
           const model = yield* reviewModel(input);
           if (!model) return ASK;
           const language = (yield* languages.localeOf(input.userId)) === "de" ? "German" : "English";
