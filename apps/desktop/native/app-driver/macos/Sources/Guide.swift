@@ -64,14 +64,15 @@ private final class DragIcon: NSView, NSDraggingSource {
   let bundle: URL
   let icon: NSImage
 
-  init(bundle: URL) {
+  init(bundle: URL, size: CGFloat) {
     self.bundle = bundle
     icon = NSWorkspace.shared.icon(forFile: bundle.path)
-    super.init(frame: NSRect(x: 0, y: 0, width: 44, height: 44))
+    super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
   }
 
   required init?(coder: NSCoder) { nil }
 
+  override var intrinsicContentSize: NSSize { frame.size }
   override func draw(_ dirtyRect: NSRect) { icon.draw(in: bounds) }
   override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -85,6 +86,62 @@ private final class DragIcon: NSView, NSDraggingSource {
   func draggingSession(
     _ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext
   ) -> NSDragOperation { .copy }
+}
+
+/// The icon in a dashed accent ring that slowly travels, with an up-arrow badge bobbing toward
+/// the list: what to drag, and where. Both keep still under Reduce Motion.
+private final class DragCue: NSView {
+  init(bundle: URL) {
+    let side: CGFloat = 64
+    super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
+    wantsLayer = true
+    translatesAutoresizingMaskIntoConstraints = false
+    let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    let ring = CAShapeLayer()
+    ring.path = CGPath(
+      roundedRect: bounds.insetBy(dx: 2, dy: 2), cornerWidth: 16, cornerHeight: 16,
+      transform: nil)
+    ring.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+    ring.strokeColor = NSColor.controlAccentColor.cgColor
+    ring.lineWidth = 1.5
+    ring.lineDashPattern = [5, 4]
+    layer?.addSublayer(ring)
+    if !still {
+      let march = CABasicAnimation(keyPath: "lineDashPhase")
+      march.fromValue = 0
+      march.toValue = -18
+      march.duration = 0.8
+      march.repeatCount = .infinity
+      ring.add(march, forKey: "march")
+    }
+
+    let icon = DragIcon(bundle: bundle, size: 44)
+    icon.frame.origin = NSPoint(x: (side - 44) / 2, y: (side - 44) / 2)
+    addSubview(icon)
+
+    let badge = NSImageView(
+      image: NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)!)
+    badge.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+      .applying(.init(paletteColors: [.white, .controlAccentColor]))
+    badge.frame = NSRect(x: side - 22, y: side - 22, width: 22, height: 22)
+    badge.wantsLayer = true
+    addSubview(badge)
+    if !still {
+      let bob = CABasicAnimation(keyPath: "transform.translation.y")
+      bob.fromValue = 0
+      bob.toValue = 3
+      bob.duration = 0.7
+      bob.autoreverses = true
+      bob.repeatCount = .infinity
+      bob.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      badge.layer?.add(bob, forKey: "bob")
+    }
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  override var intrinsicContentSize: NSSize { NSSize(width: 64, height: 64) }
 }
 
 /**
@@ -148,7 +205,7 @@ final class PermissionGuide {
   }
 
   private func makePanel(bundle: URL, title: String, instruction: String) -> NSPanel {
-    let size = NSSize(width: 380, height: 68)
+    let size = NSSize(width: 420, height: 88)
     let panel = NSPanel(
       contentRect: NSRect(origin: .zero, size: size),
       styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
@@ -165,32 +222,50 @@ final class PermissionGuide {
     background.material = .popover
     background.state = .active
     background.wantsLayer = true
-    background.layer?.cornerRadius = 14
+    background.layer?.cornerRadius = 18
     background.layer?.masksToBounds = true
+    background.layer?.borderWidth = 0.5
+    background.layer?.borderColor = NSColor.separatorColor.cgColor
 
-    let icon = DragIcon(bundle: bundle)
-    icon.frame.origin = NSPoint(x: 14, y: (size.height - 44) / 2)
+    let cue = DragCue(bundle: bundle)
 
     let heading = NSTextField(labelWithString: title)
-    heading.font = .boldSystemFont(ofSize: 13)
+    heading.font = .systemFont(ofSize: 14, weight: .semibold)
+    heading.lineBreakMode = .byTruncatingTail
     let line = NSTextField(labelWithString: instruction)
     line.font = .systemFont(ofSize: 12)
     line.textColor = .secondaryLabelColor
+    line.lineBreakMode = .byTruncatingTail
     let text = NSStackView(views: [heading, line])
     text.orientation = .vertical
     text.alignment = .leading
-    text.spacing = 2
-    text.frame = NSRect(x: 70, y: 12, width: size.width - 70 - 40, height: size.height - 24)
+    text.spacing = 3
 
     let dismiss = NSButton(
-      image: NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)!,
+      image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: nil)!,
       target: self, action: #selector(closedByPerson))
     dismiss.isBordered = false
-    dismiss.frame = NSRect(x: size.width - 32, y: (size.height - 20) / 2, width: 20, height: 20)
+    dismiss.contentTintColor = .tertiaryLabelColor
+    dismiss.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
 
-    background.addSubview(icon)
-    background.addSubview(text)
-    background.addSubview(dismiss)
+    // One row, everything on the same vertical centre.
+    let row = NSStackView(views: [cue, text, dismiss])
+    row.orientation = .horizontal
+    row.alignment = .centerY
+    row.spacing = 14
+    row.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 14)
+    row.setHuggingPriority(.defaultLow, for: .horizontal)
+    text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    row.translatesAutoresizingMaskIntoConstraints = false
+    background.addSubview(row)
+    NSLayoutConstraint.activate([
+      row.leadingAnchor.constraint(equalTo: background.leadingAnchor),
+      row.trailingAnchor.constraint(equalTo: background.trailingAnchor),
+      row.topAnchor.constraint(equalTo: background.topAnchor),
+      row.bottomAnchor.constraint(equalTo: background.bottomAnchor),
+      cue.widthAnchor.constraint(equalToConstant: 64),
+      cue.heightAnchor.constraint(equalToConstant: 64),
+    ])
     panel.contentView = background
     return panel
   }
