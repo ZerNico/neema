@@ -211,7 +211,7 @@ export const WORD_OPERATIONS = {
       imageRef: {
         type: "image",
         about:
-          "The picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference import_local_file returned.",
+          "The picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference copy_from_computer returned.",
       },
       width: {
         type: "number",

@@ -20,14 +20,9 @@ export interface AttachmentChipItem {
   readonly fileName: string;
   readonly size: number;
   readonly kind: AttachmentKind;
-  readonly status?: "uploading" | "importing" | "complete" | "error";
+  readonly status?: "uploading" | "complete" | "error";
   readonly previewUrl?: string | null;
   readonly error?: string | null;
-  /**
-   * Where the file landed. Omitted for server attachments; a workspace import
-   * shows the file's home instead of a server round-trip.
-   */
-  readonly location?: "workspace" | undefined;
 }
 
 const KIND_ICON = {
@@ -71,23 +66,13 @@ export function AttachmentChip({
   className?: string;
 }) {
   const status = item.status ?? "complete";
-  const uploading = status === "uploading" || status === "importing";
+  const uploading = status === "uploading";
   const problem =
     status === "error" ? (item.error ?? m.attachments_chip_upload_failed()) : (warning ?? null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const subtitle =
     problem ??
-    (uploading
-      ? status === "importing"
-        ? m.attachments_chip_adding()
-        : m.attachments_chip_uploading()
-      : item.location === "workspace"
-        ? // A sent import earns its size beside the label once the bridge
-          // answers; before that (and for the composer) the home is the fact.
-          item.size > 0
-          ? m.attachments_chip_workspace_size({ size: formatFileSize(item.size, formatLocale()) })
-          : m.attachments_chip_workspace()
-        : formatFileSize(item.size, formatLocale()));
+    (uploading ? m.attachments_chip_uploading() : formatFileSize(item.size, formatLocale()));
 
   const body = (
     <>

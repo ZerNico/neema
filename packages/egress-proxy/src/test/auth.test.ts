@@ -11,10 +11,10 @@ const rejected: Array<[string, (token: string) => string | undefined]> = [
   [
     "decoded credentials must be valid UTF-8",
     (token) =>
-      `Basic ${Buffer.concat([Buffer.from("cmd:"), Buffer.from([0xc0, 0xaf]), Buffer.from(token)]).toString("base64")}`,
+      `Basic ${Buffer.concat([Buffer.from("vm:"), Buffer.from([0xc0, 0xaf]), Buffer.from(token)]).toString("base64")}`,
   ],
   ["wrong username", (token) => auth(token, "user")],
-  ["fixed username is case sensitive", (token) => auth(token, "CMD")],
+  ["fixed username is case sensitive", (token) => auth(token, "VM")],
   ["two colons", (token) => auth(`${token}:extra`)],
   [
     "unknown token with the minted shape",
@@ -89,16 +89,14 @@ test("missing credentials beat a malformed but HTTP-parseable target", async () 
 
 test("issuance produces independent URL-safe tokens with at least 256 encoded bits", async () => {
   const f = await fixture();
-  const another = f.proxy.issue({ ...CONTEXT, command: "command-b" });
+  const another = await f.proxy.issue({ ...CONTEXT, chat: "chat-b" });
+  expect(another.username).toBe("vm");
+  expect(another.proxy).toBe(`127.0.0.1:${f.port}`);
+  expect(another.dns).toMatch(/^127\.0\.0\.1:\d+$/);
+  expect(another.dns).not.toBe(f.dns);
   for (const issued of [f, another]) {
     expect(issued.token).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(Buffer.from(issued.token, "base64url").length).toBeGreaterThanOrEqual(32);
-    const url = new URL(issued.proxyUrl);
-    expect(url.protocol).toBe("http:");
-    expect(url.username).toBe("cmd");
-    expect(url.password).toBe(issued.token);
-    expect(url.hostname).toBe("127.0.0.1");
-    expect(url.port).toBe(String(f.port));
   }
   expect(another.token).not.toBe(f.token);
   await established(f);

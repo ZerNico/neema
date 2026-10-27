@@ -17,11 +17,11 @@ import {
   type Fixture,
 } from "./helpers.ts";
 
-const B = { server: "server-b", chat: "chat-b", attempt: "attempt-b", command: "command-b" };
+const B = { server: "server-b", chat: "chat-b" };
 
 test("command revocation closes all its tunnels in one turn, not other commands", async () => {
   const f = await fixture();
-  const b = f.proxy.issue(B);
+  const b = await f.proxy.issue(B);
   const first = await established(f);
   const second = await established(f);
   const other = await established(f, "example.com:443", b.token);
@@ -91,7 +91,7 @@ test("a removed grant never over-closes tunnels justified by another grant", asy
     decide: (context) =>
       context.chat === B.chat ? allow("always") : chat ? allow("chat") : { allowed: false },
   });
-  const b = f.proxy.issue(B);
+  const b = await f.proxy.issue(B);
   const removed = await established(f);
   const kept = await established(f, "example.com:443", b.token);
   chat = false;
@@ -114,7 +114,7 @@ test("concurrent commands retain their own server/chat/attempt policy", async ()
       reason: "Not granted to this chat",
     }),
   });
-  const b = f.proxy.issue(B);
+  const b = await f.proxy.issue(B);
   const [aYes, aNo, bYes, bNo] = await Promise.all([
     f.open("a.example:443"),
     f.open("b.example:443"),
@@ -150,7 +150,7 @@ test("bearer token identity wins over the process using it until revocation", as
   const f = await fixture({
     decide: (context) => ({ allowed: context.chat === CONTEXT.chat, grantId: "a-only" }),
   });
-  const b = f.proxy.issue(B);
+  const b = await f.proxy.issue(B);
   await response(await f.open("example.com:443", b.token), 403, true);
   const borrowed = await established(f, "example.com:443", f.token);
   expect(f.proxy.tunnels()[0]?.context).toEqual(CONTEXT);

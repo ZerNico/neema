@@ -1,0 +1,8 @@
+#!/bin/sh
+# Presents the person's SSH agent inside the guest. The desktop exposes its relay on a vsock
+# port (CID 2 is the host) only while the chat allows the agent, and points SSH_AUTH_SOCK here.
+set -eu
+port="${1:?usage: ssh-agent-bridge <vsock-port> [socket]}"
+socket="${2:-/run/ssh-agent.sock}"
+rm -f "$socket"
+exec socat "UNIX-LISTEN:${socket},fork,mode=600" "VSOCK-CONNECT:2:${port}"

@@ -27,7 +27,7 @@ describe("DesktopActivityBlock", () => {
   it("names a file by its folder and the rest, or just its name, with the whole path on hover", () => {
     const roots = [{ name: "Downloads", path: "/Users/me/Downloads" }];
     const read = (path: string, over: Partial<DesktopToolActivity> = {}) =>
-      running({ name: "read_local_file", args: { path }, ...over });
+      running({ name: "read_file", args: { path }, ...over });
     const { unmount } = show(
       <DesktopActivityBlock activity={read("/Users/me/Downloads/q3/report.pdf")} roots={roots} />,
     );
@@ -47,6 +47,42 @@ describe("DesktopActivityBlock", () => {
     expect(screen.getByText("Couldn’t read image.png")).toBeInTheDocument();
   });
 
+  it("names the machine a call would run on", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running()}
+        approval={{ kind: "command", machine: "Desk", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("On Desk")).toBeInTheDocument();
+  });
+
+  it("shows why the reviewer asked", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running({ args: { command: "git push --force" } })}
+        approval={{ kind: "command", reason: "It rewrites the remote history.", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("Checked first: It rewrites the remote history.")).toBeInTheDocument();
+  });
+
+  it("still draws a stored row of a tool since removed", () => {
+    const removed: string = "move_local_file";
+    show(
+      <DesktopActivityBlock
+        activity={running({
+          name: removed as DesktopToolActivity["name"],
+          status: "complete",
+          args: { from: "/workspace/a.md", to: "/workspace/b.md" },
+          result: { v: 1, ok: true, summary: "Moved a.md to b.md", detail: "", truncated: false },
+        })}
+      />,
+    );
+    const row = screen.getByText("Moved a.md to b.md").closest("div")!;
+    expect(row.querySelector("svg")).not.toBeNull();
+  });
+
   it("is pressable while the message is still streaming", async () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
@@ -56,32 +92,15 @@ describe("DesktopActivityBlock", () => {
     expect(decide).toHaveBeenCalledWith("allow");
   });
 
-  it("offers a blanket grant naming only its own kind", async () => {
+  it("offers to allow the rest of the call's kind in this chat", async () => {
     const decide = vi.fn();
     show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Let it run programs for this chat" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
     expect(decide).toHaveBeenCalledWith("allow-rest");
-
-    decide.mockClear();
-    show(
-      <DesktopActivityBlock
-        activity={running({
-          callId: "call-2",
-          name: "write_local_file",
-          args: { path: "src/index.ts" },
-        })}
-        approval={{ kind: "edit", decide }}
-      />,
-    );
-    expect(
-      screen.getByRole("button", { name: "Let it change files for this chat" }),
-    ).toBeInTheDocument();
   });
 
-  it("asks for network access for this answer, this chat or every chat", async () => {
+  it("asks for network access for this chat or every chat", async () => {
     const decide = vi.fn();
     show(
       <DesktopActivityBlock
@@ -94,8 +113,8 @@ describe("DesktopActivityBlock", () => {
     );
     expect(screen.getByText("Allow network access on this computer")).toBeInTheDocument();
     expect(screen.getByText("github.com:22")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow for this answer" })).toBeNull();
     for (const [name, choice] of [
-      ["Allow for this answer", "allow"],
       ["Allow in this chat", "allow-chat"],
       ["Always allow", "allow-always"],
       ["Deny", "deny"],
@@ -105,53 +124,17 @@ describe("DesktopActivityBlock", () => {
     }
   });
 
-  it("asks to let commands read a path for this answer, this chat or every chat", async () => {
+  it("asks which machine an unbound chat's computer runs on", async () => {
     const decide = vi.fn();
     show(
       <DesktopActivityBlock
-        activity={running({
-          name: "request_path_access",
-          args: { path: "/Users/alex/Downloads/spec.pdf" },
-        })}
-        approval={{ kind: "path", decide }}
+        activity={running({ name: "list_folder", args: { path: "." } })}
+        approval={{ kind: "bind", machine: "Nico's MacBook", decide }}
       />,
     );
-    expect(screen.getByText("Let commands read this")).toBeInTheDocument();
-    expect(screen.getByText("/Users/alex/Downloads/spec.pdf")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
-    expect(decide).toHaveBeenLastCalledWith("allow-chat");
-  });
-
-  it("warns what local network services open before asking", async () => {
-    const decide = vi.fn();
-    show(
-      <DesktopActivityBlock
-        activity={running({ name: "request_local_services", args: {} })}
-        approval={{ kind: "local", decide }}
-      />,
-    );
-    expect(screen.getByText("Let commands use services on this computer")).toBeInTheDocument();
-    expect(screen.getByText(/could be reached from your network/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Allow for this answer" }));
+    expect(screen.getByText("Use Nico's MacBook for this chat?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(decide).toHaveBeenLastCalledWith("allow");
-  });
-
-  it("offers the SSH agent for this chat only", async () => {
-    const decide = vi.fn();
-    show(
-      <DesktopActivityBlock
-        activity={running({ name: "request_ssh_agent", args: {} })}
-        approval={{ kind: "ssh-agent", decide }}
-      />,
-    );
-    expect(
-      screen.getByText("Let commands in this chat sign in with your SSH keys"),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/key files stay unreadable/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Allow for this answer" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
-    expect(decide).toHaveBeenLastCalledWith("allow-chat");
   });
 
   it("names a private network request as one", () => {
@@ -187,7 +170,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf", "Downloads/old.zip"] },
         })}
         approval={{ kind: "delete", decide }}
@@ -199,7 +182,7 @@ describe("DesktopActivityBlock", () => {
       "old.zip",
     ]);
     expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /for this chat/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow in this chat" })).not.toBeInTheDocument();
   });
 
   it("groups a mixed-folder delete under each folder name", () => {
@@ -207,7 +190,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3b",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf", "site/tmp.log"] },
         })}
         approval={{ kind: "delete", decide: vi.fn() }}
@@ -227,7 +210,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3c",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["Downloads/dup.pdf"] },
         })}
         approval={{ kind: "delete", decide: vi.fn() }}
@@ -243,7 +226,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-3d",
-          name: "delete_local_file",
+          name: "delete_files",
           args: {
             paths: [
               "/workspaces/abc/notes.txt",
@@ -274,7 +257,7 @@ describe("DesktopActivityBlock", () => {
   it("still names a delete that used the older single path argument", () => {
     show(
       <DesktopActivityBlock
-        activity={running({ callId: "call-4", name: "delete_local_file", args: { path: "old/" } })}
+        activity={running({ callId: "call-4", name: "delete_files", args: { path: "old/" } })}
       />,
     );
     expect(screen.getByText("Deleting old/")).toBeInTheDocument();
@@ -285,7 +268,7 @@ describe("DesktopActivityBlock", () => {
       <DesktopActivityBlock
         activity={running({
           callId: "call-5",
-          name: "delete_local_file",
+          name: "delete_files",
           args: { paths: ["a.txt", "b.txt"] },
         })}
       />,

@@ -207,8 +207,8 @@ module; see [files](files.md#files-into-tools).
 next round when supported; it does not save a second file. The durable tool row
 holds bounded result and working status, never the bytes or full output. A
 delivered attachment names its call through `origin.toolCallId` and renders after
-the tool row without another chip inside it. A published attachment ID can be passed to `save_to_workspace`
-in Work or `save_project_file` in a project chat. An admin Test has no chat to
+the tool row without another chip inside it. A published attachment ID can be passed to `copy_to_computer`
+in a chat with a computer or `save_project_file` in a project chat. An admin Test has no chat to
 publish into: its bounded returned bytes come back inline as `data:` URLs with
 stated delivery intent, without claiming a persistent reference.
 

@@ -1,15 +1,14 @@
-import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { BRIDGE_KEY, DROPPED_FILE_CHANNEL, PROTOCOL_VERSION } from "@chat/desktop-rpc";
+import { contextBridge, ipcRenderer } from "electron";
+import { BRIDGE_KEY, PROTOCOL_VERSION } from "@chat/desktop-rpc";
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
 import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
-import { makeNetworkBridge } from "./network-preload.ts";
 import { makeBrowserBridge } from "./browser-preload.ts";
 import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
 import { systemLocaleFromArgv } from "./system-locale.ts";
 
 declare const location: { readonly protocol: string };
 
-// The same window can recover locally, but that document has no Work surface.
+// The same window can recover locally, but that document has no bridge to this machine.
 // Main checks the exact bundled file, window and frame on every recovery call.
 if (location.protocol === "file:") {
   contextBridge.exposeInMainWorld("__chatRecovery", {
@@ -25,16 +24,7 @@ if (location.protocol === "file:") {
     systemLocale: systemLocaleFromArgv(process.argv),
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
-    network: makeNetworkBridge(ipcRenderer),
     browser: makeBrowserBridge(ipcRenderer, process.argv),
-    // The host path never crosses into the remote page. A synthetic File has
-    // no path and returns null so pasted data can use the bounded base64 RPC.
-    stageDroppedFile: (file: File, payload: unknown) => {
-      const sourcePath = webUtils.getPathForFile(file);
-      return sourcePath === ""
-        ? Promise.resolve(null)
-        : ipcRenderer.invoke(DROPPED_FILE_CHANNEL, { payload, sourcePath });
-    },
     request: (tag: unknown, payload: unknown) =>
       ipcRenderer.invoke("chat-desktop:request", { tag, payload }),
   });

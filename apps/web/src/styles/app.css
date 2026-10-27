@@ -760,7 +760,7 @@ html[data-desktop-fullscreen="true"] .desktop-titlebar-content {
 
 /* With the sidebar open, the chat's title starts where the page does; it slides
    back beside the buttons with the sidebar as it collapses. */
-.desktop-header [data-header-slot] {
+.desktop-header [data-header-slot][data-settled] {
   transition: margin-left 200ms linear;
 }
 
@@ -771,6 +771,17 @@ html[data-desktop-chrome][data-sidebar-variant="inset"][data-sidebar-state="expa
     0.5rem,
     calc(var(--app-sidebar-width) + 0.75rem - var(--header-slot-start, 0px))
   );
+}
+
+/* On the sidebar's canvas a tinted tag reads as a hole in it; it takes the page's colour, as
+   the sheet below does. In a browser the header sits on the page, where the tint stands out. */
+html[data-sidebar-variant="inset"] .desktop-header [data-slot="badge"][data-variant="secondary"] {
+  background-color: var(--background);
+}
+html[data-sidebar-variant="inset"]
+  .desktop-header
+  a[data-slot="badge"][data-variant="secondary"]:hover {
+  background-color: var(--muted);
 }
 
 /* The open detail rail owns the titlebar above it (`--detail-panel-inset` is how

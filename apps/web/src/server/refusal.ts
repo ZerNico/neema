@@ -27,7 +27,6 @@ import type {
   QueueFull,
   ResumeNotAllowed,
   RetryNotAllowed,
-  WorkDesktopRequired,
 } from "~/modules/chat/errors.ts";
 import type {
   CustomToolCompileFailed,
@@ -152,7 +151,6 @@ export type Refusable =
   | SkillRejected
   | ToolUnavailable
   | UnhostedImageFamily
-  | WorkDesktopRequired
   | AttachmentBusy
   | UsageLimitReached
   | LimitRejected
@@ -261,10 +259,6 @@ const refusals: RefusalTable = {
   ToolUnavailable: (error) => ({ status: 400, body: unavailableReason(error) }),
   UnhostedImageFamily: because(400),
   UsageLimitReached: because(429),
-  WorkDesktopRequired: () => ({
-    status: 409,
-    body: localized(m.chat_error_work_desktop_required),
-  }),
 };
 
 export const refusalOf = <E extends Refusable>(error: E, overrides?: RefusalOverrides): Refusal => {

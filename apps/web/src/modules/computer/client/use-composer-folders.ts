@@ -1,0 +1,109 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Effect } from "effect";
+import { toast } from "sonner";
+import { DesktopError, type FolderStatus } from "@chat/desktop-rpc";
+import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
+import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
+import { m } from "~/paraglide/messages.js";
+import type { PermissionLevel } from "~/modules/chat/schema.ts";
+import { setPermissionLevel } from "~/modules/chat/server/functions.ts";
+import { COMPUTER_QUERY_KEY } from "./use-computer.ts";
+
+/** The chat's folders in the composer: what is attached, and the ways to change that. */
+export interface ComposerFolders {
+  readonly items: ReadonlyArray<{
+    readonly name: string;
+    readonly readOnly: boolean;
+    /** False when the folder was moved, renamed or deleted since it was attached. */
+    readonly alive: boolean;
+  }>;
+  readonly onAdd: () => void;
+  /** Picks a moved folder again, under the name it had. */
+  readonly onChooseAgain: (name: string) => void;
+  readonly onRemove: (name: string) => void;
+  /** A pick or a detach is under way. */
+  readonly busy: boolean;
+  /** How much the chat asks; only once its computer is this machine, where its work shows. */
+  readonly permission?: {
+    readonly level: PermissionLevel;
+    readonly onChange: (level: PermissionLevel) => void;
+  };
+}
+
+/** Under the computer's key, so `computer.changed` (a folder the model asked for, a rebind) refreshes it. */
+export const desktopFoldersKey = (conversationId: string) =>
+  [...COMPUTER_QUERY_KEY, "folders", conversationId] as const;
+
+/**
+ * Folders are picked at the machine, so the composer offers them only in the desktop app, and
+ * only where the chat's computer is this machine or none yet (a new chat included: its id exists
+ * before the first send, and the machine holds the folder for it). The machine is the source of
+ * truth for what is attached; the server hears the names from it.
+ */
+export function useComposerFolders(
+  conversationId: string,
+  /** Null before the chat exists. */
+  computer: { readonly machineId: string | null; readonly permissionLevel: PermissionLevel } | null,
+): ComposerFolders | undefined {
+  const machineId = computer?.machineId ?? null;
+  const desktop = useDesktop();
+  const here = useLocalMachineId();
+  const queryClient = useQueryClient();
+  const { data: capabilities } = useQuery(capabilitiesQuery);
+  const usable =
+    capabilities?.work === true &&
+    desktop !== null &&
+    here !== null &&
+    (machineId === null || machineId === here);
+  const status = useQuery({
+    queryKey: desktopFoldersKey(conversationId),
+    enabled: usable,
+    queryFn: () => Effect.runPromise(desktop!.folderStatus({ conversationId })),
+  });
+  const settle = (next: FolderStatus) => {
+    queryClient.setQueryData(desktopFoldersKey(conversationId), next);
+    // A first folder binds a chat with no computer yet to this machine.
+    void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+    void queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY });
+  };
+  const add = useMutation({
+    mutationFn: (replace?: string) =>
+      Effect.runPromise(
+        desktop!.chooseFolder(replace ? { conversationId, replace } : { conversationId }),
+      ),
+    onSuccess: settle,
+    onError: (error) =>
+      toast.error(
+        error instanceof DesktopError && error.reason === "already-exists"
+          ? m.chat_composer_folder_name_taken()
+          : m.chat_composer_folder_refused(),
+      ),
+  });
+  const remove = useMutation({
+    mutationFn: (name: string) =>
+      Effect.runPromise(desktop!.detachFolder({ conversationId, name })),
+    onSuccess: settle,
+    onError: () => toast.error(m.computer_folder_detach_failed()),
+  });
+  const level = useMutation({
+    mutationFn: (permissionLevel: PermissionLevel) =>
+      setPermissionLevel({ data: { conversationId, permissionLevel } }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }),
+  });
+  if (!usable) return undefined;
+  return {
+    items: status.data?.folders ?? [],
+    onAdd: () => add.mutate(undefined),
+    onChooseAgain: (name) => add.mutate(name),
+    onRemove: (name) => remove.mutate(name),
+    busy: add.isPending || remove.isPending,
+    ...(computer && machineId === here
+      ? {
+          permission: {
+            level: level.isPending && level.variables ? level.variables : computer.permissionLevel,
+            onChange: (next: PermissionLevel) => level.mutate(next),
+          },
+        }
+      : {}),
+  };
+}

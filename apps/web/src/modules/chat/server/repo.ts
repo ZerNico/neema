@@ -49,7 +49,6 @@ import {
   messageToolCalls,
   messageUiStates,
   schedules,
-  workTurnReservations,
 } from "~/db/schema/index.ts";
 import { deleteMark, ownedConversation, ownedConversationById } from "./owned-conversation.ts";
 import type { ResolvedAgentConfig, UnavailableAgentDependency } from "~/db/schema/agents.ts";
@@ -79,7 +78,6 @@ import {
   MessageNotFound,
   InvalidMessage,
   QuestionUnavailable,
-  WorkDesktopRequired,
 } from "../errors.ts";
 import type { IntegrationGrant } from "~/modules/integrations/grant.ts";
 import type { AccountIneligible } from "~/modules/auth/server/account-eligibility.ts";
@@ -96,7 +94,6 @@ import { attemptClaimMethods } from "./repo/attempt-claims.ts";
 import { branchMethods } from "./repo/branch.ts";
 import { freshLease, generationWriteMethods } from "./repo/generation-writes.ts";
 import { queueMethods, type QueueGate } from "./repo/queue.ts";
-import { workTurnMethods } from "./repo/work-turns.ts";
 import type { DbTx } from "~/server/db.ts";
 import type { UsageLimitReached } from "~/modules/limits/errors.ts";
 export { PLAIN_GENERATION } from "./repo/generation-config.ts";
@@ -133,20 +130,7 @@ export interface GenerationConfig {
   readonly researchEnabled: boolean;
   readonly reasoningEffort: ReasoningEffort | null;
   readonly planEnabled: boolean;
-  /**
-   * Names when this attempt could reach a machine; null when it could not.
-   * Names alone persist: the paths stay on the machine that granted them and
-   * reach the model only through attempt-scoped prompt text and tool traffic.
-   */
-  readonly desktopFolders?: ReadonlyArray<string> | null;
-  /** Whether that machine could sandbox a command at the time. */
-  readonly desktopCommands?: boolean;
   readonly desktopBrowser?: boolean;
-  /** The machine the attempt was sent from; null predates machine stamping. */
-  readonly desktopMachineId?: string | null;
-  readonly desktopMachineName?: string | null;
-  /** Workspace files this turn's send claimed; empty for every other attempt. */
-  readonly workspaceFiles?: ReadonlyArray<string>;
   /** A schedule fire's up-front integration consent; null with a person present. */
   readonly integrationGrants?: ReadonlyArray<IntegrationGrant> | null;
   /** The image model this attempt was offered; null or absent offers no image tool. */
@@ -237,8 +221,6 @@ export interface ConversationDefaults {
   readonly agent: { agentId: string | null } | null;
   /** The chat's project, re-authorized by every attempt; null outside one. */
   readonly projectId?: string | null;
-  /** Fixed at creation. Read by the resolver, which refuses a work send without a folder. */
-  readonly mode?: "chat" | "work";
   /**
    * Every draft this conversation owns, oldest first. Names are already public;
    * the creating answer lets a rewind confirmation name what it removes.
@@ -259,7 +241,6 @@ export type ResolveError =
   | AccountIneligible
   | IntegrationNotAvailable
   | AgentNotAvailable
-  | WorkDesktopRequired
   | SkillNotAvailable
   | SkillRejected
   | KnowledgeNotAvailable
@@ -277,17 +258,16 @@ export type ConversationReference =
   | {
       readonly kind: "new";
       readonly id: string;
-      readonly mode: "chat" | "work";
       readonly temporary?: boolean | undefined;
       readonly projectId?: string | undefined;
+      /** The desktop app's folders for it, picked before it existed; the service records them. */
+      readonly folders?: ReadonlyArray<{ name: string; readOnly: boolean }> | undefined;
     }
   | { readonly kind: "existing"; readonly id: string };
 
 export type TurnFields = {
   userId: string;
   conversation: ConversationReference;
-  /** Present only when a reserved file-bearing Work send activates. */
-  reservationId?: string | undefined;
   modelId: string;
   attachmentIds: ReadonlyArray<string>;
   /** Installs only the association on a new conversation, after live resolution. */
@@ -312,7 +292,6 @@ export type TurnFields = {
   origin?: { clientId: string; clientName: string } | undefined;
 };
 export type CreateTurnInput = TurnFields & TurnContent;
-export type WorkTurnReservationRow = typeof workTurnReservations.$inferSelect;
 
 export type QueueEntry = typeof conversationQueueEntries.$inferSelect;
 /** A queue row with its files, as the queue strip and dispatch read it. */
@@ -526,26 +505,6 @@ export class ChatRepo extends Context.Service<
       conversationId: string,
     ): Effect.Effect<ConversationRow, ConversationNotFound>;
     createConversation(input: { userId: string; modelId: string }): Effect.Effect<ConversationRow>;
-    reserveWorkTurn(input: {
-      id: string;
-      userId: string;
-      conversation: ConversationReference;
-    }): Effect.Effect<
-      WorkTurnReservationRow,
-      ConversationNotFound | ConversationBusy | InvalidMessage
-    >;
-    getWorkTurnReservation(
-      userId: string,
-      reservationId: string,
-    ): Effect.Effect<WorkTurnReservationRow, ConversationNotFound>;
-    /**
-     * Aborts a reservation still reserved and answers with the state it is left in. A turn
-     * activated meanwhile stays activated, and the caller must keep its files.
-     */
-    abortWorkTurn(
-      userId: string,
-      reservationId: string,
-    ): Effect.Effect<WorkTurnReservationRow, ConversationNotFound>;
     /**
      * One atomic turn: resolve (or create) the conversation, write the user
      * message, claim its attachments, and open the assistant row. Claiming has
@@ -559,8 +518,6 @@ export class ChatRepo extends Context.Service<
         userMessage: MessageRow;
         assistant: MessageRow;
         config: GenerationConfig;
-        /** False when an activation retry returned the already-created turn. */
-        activatedNow: boolean;
       },
       | ResolveError
       | ConversationNotFound
@@ -615,7 +572,6 @@ export class ChatRepo extends Context.Service<
      */
     listQueuedConversations(input: {
       limit: number;
-      mode: "chat" | "work";
       userId?: string | undefined;
     }): Effect.Effect<Array<{ userId: string; conversationId: string }>>;
     setQueueEntryError(
@@ -632,6 +588,8 @@ export class ChatRepo extends Context.Service<
       content: string;
       input: QueuedTurnInput;
       attachmentIds: ReadonlyArray<string>;
+      /** Absent when no session queued it; such an entry never counts as sent from a machine. */
+      senderSessionId?: string | undefined;
     }): Effect.Effect<QueueEntry, ConversationNotFound | QueueFull | AttachmentNotAvailable>;
     /**
      * Rewrites a queued message in place, keeping its id and so its position.
@@ -646,6 +604,8 @@ export class ChatRepo extends Context.Service<
       content: string;
       input: QueuedTurnInput;
       attachmentIds: ReadonlyArray<string>;
+      /** Absent when no session queued it; such an entry never counts as sent from a machine. */
+      senderSessionId?: string | undefined;
     }): Effect.Effect<
       ReadonlyArray<string>,
       ConversationNotFound | QueueEntryNotFound | AttachmentNotAvailable
@@ -682,33 +642,12 @@ export class ChatRepo extends Context.Service<
      * no configuration is inferred from history or old tool calls.
      */
     getGenerationConfig(messageId: string): Effect.Effect<GenerationConfig>;
-    /**
-     * One display field for the prompt builder: the workspace files each of
-     * these attempts claimed. Missing rows (a system message, a pre-migration
-     * row) map to none; the line is additive, never load-bearing.
-     */
-    listWorkspaceFilesByMessage(
-      messageIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>>;
     listGenerationDisplay(messageIds: ReadonlyArray<string>): Effect.Effect<
       Array<{
         messageId: string;
         /** The collections the person chose, never the agent's: the agent is shown as itself. */
         collectionIds: ReadonlyArray<string>;
         skills?: ReadonlyArray<{ id: string; name: string }>;
-        /**
-         * The machine this attempt was sent from, when it was. The banner
-         * compares the latest answer's stamp with the local machine id.
-         */
-        desktopMachine?: { id: string; name: string | null } | null;
-        /** Workspace files the turn's send claimed; shown as chips on the question. */
-        workspaceFiles: ReadonlyArray<string>;
-        /**
-         * The attempt's roots, names only. The display layer prefixes them with
-         * the machine's current workspace path, so delete lists group by owner
-         * without the server ever storing one.
-         */
-        desktopRoots?: ReadonlyArray<string>;
         /** What of its agent the answer ran without; the answer says so. */
         agentUnavailable?: ReadonlyArray<Omit<UnavailableAgentDependency, "id">>;
       }>
@@ -719,7 +658,6 @@ export class ChatRepo extends Context.Service<
         title: string;
         modelId: string;
         lastMessageAt: Date;
-        permissionLevel: "manual" | "auto" | "skip";
       }>,
     ): Effect.Effect<void>;
     /** Clears the temporary flag. False when it was already a kept chat. */
@@ -774,9 +712,12 @@ export class ChatRepo extends Context.Service<
      * longer qualifies; otherwise its owner and the storage keys the caller
      * must delete after the commit.
      */
-    purgeExpired(
-      conversationId: string,
-    ): Effect.Effect<{ userId: string; keys: ReadonlyArray<string> } | null>;
+    purgeExpired(conversationId: string): Effect.Effect<{
+      userId: string;
+      keys: ReadonlyArray<string>;
+      /** The chat's machine, which still holds its workspace. */
+      machineId: string | null;
+    } | null>;
     /**
      * Forks the conversation into a new one carrying every message up to and
      * including `throughMessageId`. Messages, tool calls and attachment links
@@ -811,11 +752,6 @@ export class ChatRepo extends Context.Service<
     ): Effect.Effect<WindowMessageRow[]>;
     hasMessagesBefore(conversationId: string, messageId: string): Effect.Effect<boolean>;
     hasMessage(conversationId: string, messageId: string): Effect.Effect<boolean>;
-    /** The newest answer sent from a desktop machine, however far back it is. */
-    latestMachineAttempt(conversationId: string): Effect.Effect<{
-      messageId: string;
-      desktopMachine: { id: string; name: string | null };
-    } | null>;
     /** Sources earlier messages' tool calls registered under these citation numbers. */
     listSourcesBefore(
       conversationId: string,
@@ -1110,7 +1046,7 @@ export class ChatRepo extends Context.Service<
           .transaction((tx) =>
             Effect.gen(function* () {
               const [owned] = yield* tx
-                .select({ userId: conversations.userId })
+                .select({ userId: conversations.userId, machineId: conversations.machineId })
                 .from(conversations)
                 .where(and(eq(conversations.id, conversationId), condition))
                 .for("update");
@@ -1138,7 +1074,11 @@ export class ChatRepo extends Context.Service<
                 queued.map((row) => row.id),
               );
               yield* tx.delete(conversations).where(eq(conversations.id, conversationId));
-              return { userId: owned.userId, keys: [...keys, ...queuedKeys] };
+              return {
+                userId: owned.userId,
+                keys: [...keys, ...queuedKeys],
+                machineId: owned.machineId,
+              };
             }),
           )
           .pipe(Effect.orDie);
@@ -1251,7 +1191,6 @@ export class ChatRepo extends Context.Service<
 
       return ChatRepo.of({
         ...generationWriteMethods(ctx),
-        ...workTurnMethods(ctx),
         ...attemptClaimMethods(ctx),
         ...queueMethods(ctx),
         ...branchMethods(ctx),
@@ -1481,23 +1420,6 @@ export class ChatRepo extends Context.Service<
         getConversationDefaults: (conversationId) => readDefaults(db, conversationId),
 
         getGenerationConfig: (messageId) => readConfig(db, messageId),
-        listWorkspaceFilesByMessage: Effect.fn("ChatRepo.listWorkspaceFilesByMessage")(
-          function* (messageIds) {
-            if (messageIds.length === 0) return new Map<string, ReadonlyArray<string>>();
-            const rows = yield* db
-              .select({
-                messageId: messageGenerationConfig.messageId,
-                workspaceFiles: messageGenerationConfig.workspaceFiles,
-              })
-              .from(messageGenerationConfig)
-              .where(inArray(messageGenerationConfig.messageId, [...messageIds]))
-              .pipe(Effect.orDie);
-            const byMessage = new Map<string, ReadonlyArray<string>>();
-            for (const row of rows)
-              if (row.workspaceFiles.length > 0) byMessage.set(row.messageId, row.workspaceFiles);
-            return byMessage;
-          },
-        ),
         listGenerationDisplay: Effect.fn("ChatRepo.listGenerationDisplay")(function* (messageIds) {
           if (messageIds.length === 0) return [];
           const rows = yield* db
@@ -1513,10 +1435,6 @@ export class ChatRepo extends Context.Service<
               skills: sql<
                 Array<{ id: string; name: string }>
               >`coalesce((select jsonb_agg(jsonb_build_object('id', entry->>'skillId', 'name', entry->>'name')) from jsonb_array_elements(${messageGenerationConfig.skills}) entry where (entry->>'explicit')::boolean), '[]'::jsonb)`,
-              desktopMachineId: messageGenerationConfig.desktopMachineId,
-              desktopMachineName: messageGenerationConfig.desktopMachineName,
-              workspaceFiles: messageGenerationConfig.workspaceFiles,
-              desktopFolders: messageGenerationConfig.desktopFolders,
               agentUnavailable: messageGenerationConfig.agentUnavailable,
             })
             .from(messageGenerationConfig)
@@ -1529,42 +1447,22 @@ export class ChatRepo extends Context.Service<
               (row) =>
                 row.collectionIds.length > 0 ||
                 row.skills.length > 0 ||
-                row.desktopMachineId !== null ||
-                row.workspaceFiles.length > 0 ||
-                (row.desktopFolders?.length ?? 0) > 0 ||
                 row.agentUnavailable.length > 0,
             )
-            .map(
-              ({
-                desktopMachineId,
-                desktopMachineName,
-                desktopFolders,
-                agentUnavailable,
-                ...row
-              }) =>
-                Object.assign(
-                  {},
-                  row,
-                  {
-                    desktopMachine:
-                      desktopMachineId === null
-                        ? null
-                        : { id: desktopMachineId, name: desktopMachineName },
-                  },
-                  // Browser-sent attempts (and work chats with no folder) store null.
-                  desktopFolders && desktopFolders.length > 0
-                    ? { desktopRoots: [...desktopFolders] }
-                    : {},
-                  // Ids stay on the server: the line needs only the kind and a name.
-                  agentUnavailable.length > 0
-                    ? {
-                        agentUnavailable: agentUnavailable.map(({ kind, name }) => ({
-                          kind,
-                          name,
-                        })),
-                      }
-                    : {},
-                ),
+            .map(({ agentUnavailable, ...row }) =>
+              Object.assign(
+                {},
+                row,
+                // Ids stay on the server: the line needs only the kind and a name.
+                agentUnavailable.length > 0
+                  ? {
+                      agentUnavailable: agentUnavailable.map(({ kind, name }) => ({
+                        kind,
+                        name,
+                      })),
+                    }
+                  : {},
+              ),
             );
         }),
 
@@ -1797,31 +1695,6 @@ export class ChatRepo extends Context.Service<
             .pipe(Effect.orDie);
           return row !== undefined;
         }),
-
-        latestMachineAttempt: Effect.fn("ChatRepo.latestMachineAttempt")(
-          function* (conversationId) {
-            const [row] = yield* db
-              .select({
-                messageId: messages.id,
-                id: messageGenerationConfig.desktopMachineId,
-                name: messageGenerationConfig.desktopMachineName,
-              })
-              .from(messageGenerationConfig)
-              .innerJoin(messages, eq(messages.id, messageGenerationConfig.messageId))
-              .where(
-                and(
-                  eq(messages.conversationId, conversationId),
-                  sql`${messageGenerationConfig.desktopMachineId} is not null`,
-                ),
-              )
-              .orderBy(desc(messages.createdAt), desc(messages.id))
-              .limit(1)
-              .pipe(Effect.orDie);
-            return row?.id
-              ? { messageId: row.messageId, desktopMachine: { id: row.id, name: row.name } }
-              : null;
-          },
-        ),
 
         listSourcesBefore: Effect.fn("ChatRepo.listSourcesBefore")(
           function* (conversationId, id, indexes) {

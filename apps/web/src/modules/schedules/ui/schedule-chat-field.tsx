@@ -41,7 +41,6 @@ const firstRun = (): ChatChoice => ({ id: null, title: m.schedules_chat_first_ru
 /**
  * Where a schedule's runs land: a fresh chat each time, or one chat every
  * time. That chat is either one picked here or one the first run creates.
- * Work chats are left out: they need the desktop app, which a run never has.
  */
 export const ScheduleChatField = withForm({
   defaultValues: EMPTY_SCHEDULE_DRAFT,
@@ -56,7 +55,6 @@ export const ScheduleChatField = withForm({
     });
     const chats: ChatChoice[] = (recent.data?.pages ?? [])
       .flatMap((page) => page.conversations)
-      .filter((conversation) => conversation.mode === "chat")
       .map((conversation) => ({
         id: conversation.id,
         title: conversation.title ?? m.schedules_chat_untitled(),

@@ -26,6 +26,7 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { loadConversationDetail } from "~/modules/chat/server/conversation-detail.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
@@ -50,6 +51,7 @@ process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<
   | ChatRepo
+  | ComputerRepo
   | ChatService
   | StreamEngine
   | Db

@@ -2,12 +2,7 @@ import { GenerationFence, lockGeneration } from "../generation-fence.ts";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { uuidv7 } from "uuidv7";
-import {
-  conversations,
-  conversationQueueEntries,
-  messages,
-  workTurnReservations,
-} from "~/db/schema/index.ts";
+import { conversations, conversationQueueEntries, messages } from "~/db/schema/index.ts";
 import { ownedConversationById } from "../owned-conversation.ts";
 import {
   ConversationNotFound,
@@ -38,20 +33,6 @@ export const readQueueGate = Effect.fn("ChatRepo.readQueueGate")(function* (
     .where(and(eq(messages.conversationId, conversationId), eq(messages.status, "streaming")))
     .pipe(Effect.orDie);
   if (streaming.length > 0) return "busy" as const;
-  // A send with workspace files holds its turn before any message exists.
-  const reserved = yield* tx
-    .select({ id: workTurnReservations.id })
-    .from(workTurnReservations)
-    .where(
-      and(
-        eq(workTurnReservations.conversationId, conversationId),
-        eq(workTurnReservations.status, "reserved"),
-        sql`${workTurnReservations.expiresAt} > now()`,
-      ),
-    )
-    .limit(1)
-    .pipe(Effect.orDie);
-  if (reserved.length > 0) return "busy" as const;
   const [tail] = yield* tx
     .select()
     .from(messages)
@@ -121,7 +102,6 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
         .from(conversations)
         .where(
           and(
-            eq(conversations.mode, input.mode),
             isNull(conversations.deletedAt),
             input.userId ? eq(conversations.userId, input.userId) : undefined,
             sql`exists (select 1 from conversation_queue_entries queued where queued.conversation_id = ${conversations.id})`,
@@ -171,6 +151,7 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
                 userId: input.userId,
                 content: input.content,
                 input: input.input,
+                senderSessionId: input.senderSessionId ?? null,
               })
               .returning()
               .pipe(Effect.orDie);
@@ -196,6 +177,7 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
               .set({
                 content: input.content,
                 input: input.input,
+                senderSessionId: input.senderSessionId ?? null,
                 revision: sql`${conversationQueueEntries.revision} + 1`,
                 steerMessageId: null,
                 steerGenerationId: null,

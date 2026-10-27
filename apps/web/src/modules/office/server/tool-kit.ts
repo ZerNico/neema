@@ -34,7 +34,7 @@ export function sourceParameters(family: OfficeFamily) {
   return {
     sourceRef: advertisedParameter({
       type: "string",
-      description: `An authorized .${extension}: attachment:<id>, project:<id>@<version>, a skill template's skill: reference from read_skill_file, or the working: reference import_local_file returned.`,
+      description: `An authorized .${extension}: attachment:<id>, project:<id>@<version>, a skill template's skill: reference from read_skill_file, or the working: reference copy_from_computer returned.`,
     }),
     sourceFingerprint: advertisedParameter({
       type: "string",

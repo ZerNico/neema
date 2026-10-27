@@ -67,6 +67,8 @@ export interface UsageSummary {
   attempts: number;
   titleGenerations: number;
   compactionGenerations: number;
+  /** Checks of computer calls under "ask when risky". */
+  reviewGenerations: number;
   /** Image operations, each its own attempt, and the images they made. */
   imageGenerations: number;
   images: number;
@@ -200,6 +202,7 @@ export class AnalyticsRepo extends Context.Service<
               ...detail,
               titleGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'title')::int`,
               compactionGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'compaction')::int`,
+              reviewGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'review')::int`,
               imageGenerations: sql<number>`count(*) filter (where ${usageEvents.kind} = 'image')::int`,
               abortedAttempts: sql<number>`count(*) filter (where ${usageEvents.status} = 'aborted')::int`,
               ...costCompleteness,
@@ -219,6 +222,7 @@ export class AnalyticsRepo extends Context.Service<
             attempts: row.attempts,
             titleGenerations: row.titleGenerations,
             compactionGenerations: row.compactionGenerations,
+            reviewGenerations: row.reviewGenerations,
             imageGenerations: row.imageGenerations,
             images: row.images,
             errorAttempts: row.errorAttempts,

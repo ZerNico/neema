@@ -474,7 +474,7 @@ describe("attachment claiming", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "look",
           attachmentIds: [second.id, first.id],
@@ -525,7 +525,7 @@ describe("attachment claiming", () => {
           .createTurn({
             resolve: plainResolve,
             userId: bob,
-            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+            conversation: { kind: "new", id: uuidv7() },
             modelId,
             content: "steal",
             attachmentIds: [his.id, hers.id],
@@ -552,7 +552,7 @@ describe("attachment claiming", () => {
           .createTurn({
             resolve: plainResolve,
             userId,
-            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+            conversation: { kind: "new", id: uuidv7() },
             modelId,
             content: "twice",
             attachmentIds: [only.id, only.id],
@@ -580,7 +580,7 @@ describe("attachment replacement on edit", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "first",
           attachmentIds: [kept.id, dropped.id],
@@ -640,7 +640,7 @@ describe("attachment replacement on edit", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "both",
           attachmentIds: [first.id, second.id],
@@ -702,7 +702,7 @@ describe("attachment replacement on edit", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId: alice,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "mine",
           attachmentIds: [hers.id],
@@ -757,7 +757,7 @@ describe("attachment access policy", () => {
         yield* repo.createTurn({
           resolve: plainResolve,
           userId: alice,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "sent",
           attachmentIds: [own.id],
@@ -812,7 +812,7 @@ describe("attachment access policy", () => {
         yield* repo.createTurn({
           resolve: plainResolve,
           userId: alice,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "sent",
           attachmentIds: [claimedLater.id],
@@ -856,7 +856,7 @@ describe("attachment cleanup", () => {
         yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "sent",
           attachmentIds: [claimed.id],
@@ -967,7 +967,7 @@ describe("generated assistant image transactions", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId,
           content: "draw",
           attachmentIds: [],
@@ -1023,7 +1023,6 @@ describe("generated assistant image transactions", () => {
         expect(clonedImage.attachment.id).not.toBe(image.attachment.id);
         expect(branch.fileReferenceAliases).toEqual({
           attachments: { [image.attachment.id]: clonedImage.attachment.id },
-          workspaceAncestors: [turn.conversation.id],
         });
         expect(clonedImage).toEqual({
           ...image,
@@ -1124,7 +1123,7 @@ describe("queued message files", () => {
           .createTurn({
             resolve: plainResolve,
             userId,
-            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+            conversation: { kind: "new", id: uuidv7() },
             modelId,
             content: "x",
             attachmentIds: [file.id],
@@ -1181,7 +1180,7 @@ describe("queued message files", () => {
                 repo.createTurn({
                   resolve: plainResolve,
                   userId,
-                  conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+                  conversation: { kind: "new", id: uuidv7() },
                   modelId,
                   content: "now",
                   attachmentIds: [file.id],

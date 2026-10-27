@@ -22,8 +22,10 @@ import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type MessageRow } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import type { JsonValue } from "~/db/schema/providers.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { AiGateway } from "~/modules/providers/server/gateway.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -43,6 +45,8 @@ process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 let database: TestDatabase;
 type Services =
   | ChatRepo
+  | ComputerRepo
+  | MachineHub
   | ChatService
   | CustomToolRepo
   | AttachmentRepo
@@ -308,7 +312,6 @@ describe("branching a conversation", () => {
         const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
         const repo = yield* ChatRepo;
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
-          mode: "chat",
           projectId: null,
           conversationId: forked.conversation.id,
           imageModelId: null,
@@ -323,7 +326,6 @@ describe("branching a conversation", () => {
           `delete from conversations where id = '${source.conversation.id}'` as never,
         );
         expect(yield* repo.getConversationDefaults(forked.conversation.id)).toEqual({
-          mode: "chat",
           projectId: null,
           conversationId: forked.conversation.id,
           imageModelId: null,
@@ -680,7 +682,6 @@ describe("branching a conversation", () => {
         expect(Object.keys(firstAliases.attachments).toSorted()).toEqual(
           [early!.id, late!.id].toSorted(),
         );
-        expect(firstAliases.workspaceAncestors).toEqual([source.conversation.id]);
         yield* purgeConversation(userId, source.conversation.id);
         expect(
           (yield* repo.getConversation(userId, first.conversation.id)).branchedFrom,
@@ -698,7 +699,6 @@ describe("branching a conversation", () => {
             [early!.id]: secondFiles[0]!.id,
             [firstAliases.attachments[early!.id]!]: secondFiles[0]!.id,
           },
-          workspaceAncestors: [first.conversation.id, source.conversation.id],
         };
         expect(second.fileReferenceAliases).toEqual(expected);
         expect(secondMessages[1]).toMatchObject({ content, providerReplay: replay });
@@ -737,10 +737,7 @@ describe("branching a conversation", () => {
         yield* db
           .update(conversationsTable)
           .set({
-            fileReferenceAliases: {
-              attachments: { [files[0]!.id]: files[1]!.id },
-              workspaceAncestors: [],
-            },
+            fileReferenceAliases: { attachments: { [files[0]!.id]: files[1]!.id } },
           })
           .where(eq(conversationsTable.id, source.conversation.id));
         const outcome = yield* Effect.exit(
@@ -791,6 +788,48 @@ describe("branching a conversation", () => {
     expect(result.survives).toBe(1);
     expect(result.afterSourceDelete).toEqual([result.storageKey]);
     expect(result.remaining).toBe(0);
+  });
+
+  it("keeps the chat's computer, asks its machine to copy it, and waits for its folders", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const hub = yield* MachineHub;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [{ user: "u1", assistant: "a1" }]);
+        yield* db
+          .update(conversationsTable)
+          .set({ machineId: "laptop", computerFolders: [{ name: "proj", readOnly: false }] })
+          .where(eq(conversationsTable.id, source.conversation.id));
+        const events = yield* hub.connect(
+          userId,
+          {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin",
+            computer: { status: "ready" },
+            remote: true,
+          },
+          "laptop-session",
+        );
+        const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
+        const [event] = yield* Stream.take(events, 1).pipe(Stream.runCollect);
+        const [copy] = yield* db
+          .select({ folders: conversationsTable.computerFolders })
+          .from(conversationsTable)
+          .where(eq(conversationsTable.id, forked.conversation.id));
+        return {
+          machineId: forked.conversation.machineId,
+          event,
+          branchId: forked.conversation.id,
+          folders: copy!.folders,
+        };
+      }).pipe(Effect.scoped),
+    );
+    expect(result.machineId).toBe("laptop");
+    expect(result.event).toMatchObject({ type: "clone", to: result.branchId });
+    // The machine names them once it has copied them; until then the branch has none.
+    expect(result.folders).toEqual([]);
   });
 
   it("records the immediate parent and copies a title that already resolved", async () => {

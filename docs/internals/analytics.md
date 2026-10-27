@@ -12,7 +12,7 @@ only with their user, so the dashboard is a set of sums over an append-only ledg
   [resume](resume.md) appends another. A generation that fails before it starts still writes an
   `error` row. One the reaper ends after its process died writes none: what it used was never
   reported.
-- **Title and compaction:** their own kinds, one row per call.
+- **Title, compaction and command review:** their own kinds, one row per call.
 - **Research:** one aggregate `chat` row per run, keyed by the run's id, beside the host
   attempt's own row. Research compaction gets its own row keyed by its call. See
   [research](research.md#usage-and-ledger).

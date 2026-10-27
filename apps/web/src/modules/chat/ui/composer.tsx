@@ -1,3 +1,5 @@
+import { FolderStrip } from "~/modules/computer/ui/folder-strip.tsx";
+import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import { m } from "~/paraglide/messages.js";
 import type { ComposerIntegrations } from "~/modules/integrations/client/use-chat-integrations.ts";
 import type { ComposerFieldHandle } from "./chat-textarea.tsx";
@@ -13,18 +15,7 @@ import { ChatInput, type ImageModelChoice } from "./chat-input.tsx";
 import { extractReferences, restoreReferences, type MessageReference } from "../references.ts";
 import type { ComposerContext } from "./context-picker.tsx";
 import { useAttachmentUploads } from "~/modules/attachments/client/use-attachment-uploads.ts";
-import type { ConversationMode } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
-import {
-  useDesktop,
-  useDesktopOutdated,
-  type FolderState,
-} from "~/modules/desktop/client/bridge.ts";
-import {
-  useWorkspaceImports,
-  type WorkspaceImports,
-} from "~/modules/desktop/client/use-workspace-imports.ts";
-import { FolderStrip, type WorkSettingsControl } from "~/modules/desktop/ui/folder-strip.tsx";
 import { QueueStrip, type QueuedMessage } from "./queue-strip.tsx";
 
 /** What a parent may do to the composer from outside a keystroke. */
@@ -80,8 +71,6 @@ interface ComposerProps {
     attachmentIds: ReadonlyArray<string>,
     researchEnabled: boolean,
     skillIds?: ReadonlyArray<string>,
-    workspaceFiles?: ReadonlyArray<string>,
-    workspaceImports?: WorkspaceImports,
   ) => Promise<unknown>;
   /** Present only while a response is generating; swaps send for stop. */
   onStop?: (() => void) | undefined;
@@ -104,35 +93,10 @@ interface ComposerProps {
   controlsDisabled?: boolean;
   context?: ComposerContext | undefined;
   initialSkillId?: string | null | undefined;
-  /**
-   * A new chat offers the choice; an existing chat's mode is fixed at creation
-   * and passed as a value. Work needs the desktop app: in a browser the
-   * composer says so and refuses to send.
-   */
-  mode?:
-    | { kind: "choose"; value: ConversationMode; onChange: (mode: ConversationMode) => void }
-    | { kind: "fixed"; value: ConversationMode }
-    | undefined;
-  /** A work chat's policy: how much it asks, how far commands reach. */
-  settings?: WorkSettingsControl | undefined;
-  /**
-   * The view's folder state, shared with the send so the strip and the
-   * message agree. Null in a browser.
-   */
-  folder?: FolderState | null | undefined;
-  /**
-   * From `useWorkGate`: the folder check is not ready. Send is blocked; the
-   * textarea stays usable. The parent owns this so the strip and the send
-   * cannot disagree.
-   */
-  readOnly?: boolean | undefined;
-  /**
-   * The conversation's id for workspace imports. Only a work chat inside the
-   * desktop app uses it; anything else uploads to the server.
-   */
-  conversationId?: string | undefined;
   /** This chat's connected services; the view owns them so a send can carry them. */
   integrations?: ComposerIntegrations | undefined;
+  /** The chat's folders on this machine; see `useComposerFolders`. */
+  folders?: ComposerFolders | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -153,28 +117,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     controlsDisabled,
     context,
     initialSkillId,
-    mode,
-    settings,
-    folder = null,
-    readOnly = false,
-    conversationId,
     integrations,
+    folders,
   },
   ref,
 ) {
-  const desktop = useDesktop();
-  const outdated = useDesktopOutdated();
-  const working = mode?.value === "work";
-  // Work needs the desktop app, not a folder: the strip invites one, and the
-  // folder tools are withheld until it is attached.
-  const blockedReason = !working
-    ? null
-    : outdated
-      ? m.chat_composer_desktop_outdated()
-      : !desktop
-        ? m.chat_composer_work_needs_desktop()
-        : null;
-  const sendDisabled = disabled || (working && readOnly);
   const { data: capabilities } = useQuery(capabilitiesQuery);
   const skills = useQuery({ ...skillsQuery, enabled: !!capabilities?.skillsUse });
   const [skillIds, setSkillIds] = useState<string[]>(() =>
@@ -202,13 +149,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const textareaRef = useRef<ComposerFieldHandle>(null);
   const touched = useRef(false);
   const attachments = useAttachmentUploads();
-  // A work chat inside the desktop app keeps files local: drops and pastes
-  // land in the chat's workspace, and the send reports their names instead of
-  // uploading. Everywhere else the server-attachment path is unchanged.
-  const local = working && !!desktop && conversationId !== undefined;
-  const imports = useWorkspaceImports(conversationId ?? "");
-  const workspaceImports = local ? imports : null;
-  const serverAttachments = local ? null : attachments;
   // Seeding happens from the click that chose the starter, never from an
   // effect watching a prop: the state change belongs to that event.
   useImperativeHandle(
@@ -253,8 +193,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onQueue,
     editingId,
     onReplace: queue?.onReplace,
-    blockedReason,
-    disabled: sendDisabled,
+    disabled: disabled,
     modelId,
   });
   useEffect(() => {
@@ -267,8 +206,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onQueue,
       editingId,
       onReplace: queue?.onReplace,
-      blockedReason,
-      disabled: sendDisabled,
+      disabled: disabled,
       modelId,
     };
   });
@@ -319,83 +257,63 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   };
 
   const send = () => {
-    if (dispatching.current || sendDisabled || !modelId || blockedReason) return;
+    if (dispatching.current || disabled || !modelId) return;
     touched.current = true;
     const submitted = requestRef.current;
     const submittedEditSession = editSession.current;
-    // Both rows can be settling at once in a browser work chat that lost its
-    // desktop window mid-session; the imports queue only ever runs in-app.
     attachments.submit((attachmentIds) => {
-      const sendRest = (workspaceFiles: ReadonlyArray<string>) => {
-        const current = requestRef.current;
-        if (
-          dispatching.current ||
-          submitted.blockedReason ||
-          submitted.disabled ||
-          !submitted.modelId
-        )
-          return;
-        const content = restoreReferences(current.draft.trim(), current.references);
-        if (!content && attachmentIds.length === 0 && workspaceFiles.length === 0) return;
-        const submission = [
-          content,
-          attachmentIds,
-          submitted.researchEnabled,
-          current.skillIds,
-        ] as const;
-        // An edit saves in place whether or not a response is running;
-        // otherwise a live response turns the send into a queued snapshot.
-        // Workspace files never queue (their send reserves the turn), and the
-        // input keeps Stop for such a draft, so they always go out as a send.
-        const editing = submitted.editingId;
-        const submittedRevision = draftRevision.current;
-        dispatching.current = true;
-        setRequestPending(true);
-        let releaseImports: (() => void) | undefined;
-        let releaseAttachments: (() => void) | undefined;
-        const finish = () => {
-          releaseAttachments?.();
-          releaseImports?.();
-          dispatching.current = false;
-          setRequestPending(false);
-        };
-        try {
-          releaseAttachments = attachments.beginSubmission(attachmentIds);
-          releaseImports = workspaceImports?.beginSubmission(workspaceFiles);
-        } catch {
-          finish();
-          return;
-        }
-        const request = Promise.resolve().then(() => {
-          return editing && submitted.onReplace
-            ? submitted.onReplace(editing, ...submission)
-            : submitted.onQueue && workspaceFiles.length === 0
-              ? submitted.onQueue(...submission)
-              : workspaceImports
-                ? submitted.onSend(...submission, workspaceFiles, workspaceImports)
-                : submitted.onSend(...submission);
-        });
-        void request.then(() => {
-          if (draftRevision.current === submittedRevision) {
-            updateDraft("");
-            setReferences((value) => (value === current.references ? [] : value));
-            setSkillIds((value) => (value === current.skillIds ? [] : value));
-            setResearchEnabled((value) => (value === submitted.researchEnabled ? false : value));
-          }
-          attachments.markClaimed(attachmentIds);
-          workspaceImports?.markClaimed(workspaceFiles);
-          // Reopening even the same entry starts a new borrowed-settings session.
-          if (editing && editSession.current === submittedEditSession) {
-            editSession.current++;
-            setEditingId(null);
-            queue?.onEditEnd();
-          }
-          finish();
-          textareaRef.current?.focus();
-        }, finish);
+      const current = requestRef.current;
+      if (dispatching.current || submitted.disabled || !submitted.modelId) return;
+      const content = restoreReferences(current.draft.trim(), current.references);
+      if (!content && attachmentIds.length === 0) return;
+      const submission = [
+        content,
+        attachmentIds,
+        submitted.researchEnabled,
+        current.skillIds,
+      ] as const;
+      // An edit saves in place whether or not a response is running;
+      // otherwise a live response turns the send into a queued snapshot.
+      const editing = submitted.editingId;
+      const submittedRevision = draftRevision.current;
+      dispatching.current = true;
+      setRequestPending(true);
+      let releaseAttachments: (() => void) | undefined;
+      const finish = () => {
+        releaseAttachments?.();
+        dispatching.current = false;
+        setRequestPending(false);
       };
-      if (workspaceImports) workspaceImports.submit(sendRest);
-      else sendRest([]);
+      try {
+        releaseAttachments = attachments.beginSubmission(attachmentIds);
+      } catch {
+        finish();
+        return;
+      }
+      const request = Promise.resolve().then(() =>
+        editing && submitted.onReplace
+          ? submitted.onReplace(editing, ...submission)
+          : submitted.onQueue
+            ? submitted.onQueue(...submission)
+            : submitted.onSend(...submission),
+      );
+      void request.then(() => {
+        if (draftRevision.current === submittedRevision) {
+          updateDraft("");
+          setReferences((value) => (value === current.references ? [] : value));
+          setSkillIds((value) => (value === current.skillIds ? [] : value));
+          setResearchEnabled((value) => (value === submitted.researchEnabled ? false : value));
+        }
+        attachments.markClaimed(attachmentIds);
+        // Reopening even the same entry starts a new borrowed-settings session.
+        if (editing && editSession.current === submittedEditSession) {
+          editSession.current++;
+          setEditingId(null);
+          queue?.onEditEnd();
+        }
+        finish();
+        textareaRef.current?.focus();
+      }, finish);
     });
   };
 
@@ -426,6 +344,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(capabilities?.skillsUse
           ? { skills: { items: skills.data ?? [], selectedIds: skillIds, onChange: setSkillIds } }
           : {})}
+        folders={folders}
         references={{
           items: references,
           onRemove: (removed) =>
@@ -447,9 +366,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               onCancel: cancelEdit,
             }
           : {})}
-        disabled={sendDisabled || requestPending}
+        disabled={disabled || requestPending}
         textareaDisabled={textareaDisabled ?? disabled}
-        controlsDisabled={controlsDisabled ?? sendDisabled}
+        controlsDisabled={controlsDisabled ?? disabled}
         modelId={modelId}
         onModelChange={onModelChange}
         searchEnabled={searchEnabled}
@@ -459,21 +378,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(imageModel ? { imageModel } : {})}
         researchEnabled={activeResearch}
         {...(canResearch ? { onResearchEnabledChange: setResearchEnabled } : {})}
-        // Offered only where Work can be honoured: a new chat, in the desktop app.
-        {...(mode?.kind === "choose" && desktop && capabilities?.work
-          ? { mode: { value: mode.value, onChange: mode.onChange } }
-          : {})}
-        blockedReason={blockedReason}
-        {...(serverAttachments && capabilities?.attachments
-          ? { attachments: serverAttachments }
-          : {})}
-        {...(workspaceImports && capabilities?.work ? { workspaceImports } : {})}
+        {...(capabilities?.attachments ? { attachments } : {})}
         {...(context && (capabilities?.agentsUse || capabilities?.knowledgeUse) ? { context } : {})}
         {...(integrations ? { integrations } : {})}
       />
-      {/* Under the composer and inset, so it reads as part of it. Only a work
-          chat has a folder to show, and only the desktop app can show one. */}
-      {working && folder ? <FolderStrip folder={folder} settings={settings} /> : null}
+      {/* Under the composer and inset, so it reads as part of it. */}
+      {folders ? <FolderStrip folders={folders} disabled={controlsDisabled ?? disabled} /> : null}
     </div>
   );
 });

@@ -352,15 +352,13 @@ export const prepareGenerationTools = (
       Effect.suspend(() => Deferred.await(callRowReady(providerCallId))).pipe(
         Effect.map((row) => row?.rowId),
       );
-    // Offered only when the machine that sent this message reported its
-    // folders (a Work attempt always has the app's workspace), so a
-    // browser tab never sees these names.
+    // Offered once the person has connected a desktop app, from any device and machine online or
+    // not, so the list is stable per person. Without the app nobody pays for these schemas.
     const desktopTools =
-      config.desktopFolders && permissions.work
-        ? prepareDesktopTools({ rowIdFor, commands: config.desktopCommands ?? false })
+      permissions.work && (yield* deps.computerRepo.machines(input.userId)).length > 0
+        ? prepareDesktopTools({ rowIdFor })
         : null;
-    // Work attempts from an app that can embed pages, attached folder or
-    // not; they run in the sending app's own tabs.
+    // Attempts from an app that can embed pages; they run in the sending app's own tabs.
     const browserTools =
       permissions.work && config.desktopBrowser ? prepareBrowserTools({ rowIdFor }) : null;
     // The checklist is an agent preference. Retry and edit start from a
@@ -846,7 +844,9 @@ export const prepareGenerationTools = (
             ? permissions.agentsCreate
             : family === "schedule-draft"
               ? permissions.schedules
-              : offeredOffice.has(family),
+              : family === "browser"
+                ? browserTools !== null
+                : offeredOffice.has(family),
         )
         .map((family) => ({ family, summary: fixedFamilySummary(family) })),
       ...(integrationTools?.lazy ?? []),

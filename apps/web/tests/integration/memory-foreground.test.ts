@@ -455,7 +455,7 @@ const runGeneration = (searchEnabled: boolean, withAttachment = false, withSkill
       const turn = yield* repo.createTurn({
         resolve: plainResolve,
         userId,
-        conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+        conversation: { kind: "new", id: uuidv7() },
         modelId,
         content: "Please remember that I prefer concise answers.",
         attachmentIds: [],
@@ -1003,7 +1003,6 @@ describe("StreamEngine temporary chats", () => {
         const temporary = yield* answer({
           kind: "new",
           id: uuidv7(),
-          mode: "chat",
           temporary: true,
         });
         expect(yield* repo.keepConversation(userId, temporary.turn.conversation.id)).toBe(true);

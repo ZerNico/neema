@@ -1,5 +1,5 @@
 /**
- * Optional sign-in capability, independent of the Work protocol version.
+ * Optional sign-in capability, independent of the bridge's protocol version.
  *
  * The shell hands sign-in to the system browser; the ticket the browser page
  * mints comes back through a deep link and is delivered here for redemption.

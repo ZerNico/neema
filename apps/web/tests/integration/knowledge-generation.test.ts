@@ -199,7 +199,7 @@ const send = (input: {
         userId: input.userId,
         conversation: input.conversationId
           ? { kind: "existing", id: input.conversationId }
-          : { kind: "new", id: uuidv7(), mode: "chat" },
+          : { kind: "new", id: uuidv7() },
         modelId: input.modelId ?? smallModelId,
         content: input.content ?? "Summarize the notes.",
         searchEnabled: input.searchEnabled ?? false,
@@ -1449,7 +1449,7 @@ describe("knowledge-backed generations", () => {
           Effect.flatMap(ChatService, (chat) =>
             chat.sendMessage({
               userId: stranger,
-              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+              conversation: { kind: "new", id: uuidv7() },
               modelId: smallModelId,
               content: "Hi",
               searchEnabled: false,

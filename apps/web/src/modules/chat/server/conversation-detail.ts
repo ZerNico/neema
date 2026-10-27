@@ -3,6 +3,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import type { Attachment } from "~/modules/attachments/schema.ts";
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { ChatRepo, type QueueGate, type WindowMessageRow } from "./repo.ts";
 import { mergeSources } from "~/modules/tools/sources.ts";
 import type { Source } from "~/modules/tools/source-schema.ts";
@@ -32,11 +33,7 @@ const reapGenerationsForDetail = (repo: ChatRepo["Service"]) =>
     );
   }).pipe(Effect.catchCause((cause) => Effect.logError("generation reconciliation failed", cause)));
 
-/**
- * Why the queue is or is not moving, from the same gate promotion reads. Only
- * the browser knows whether it is the desktop app a Work entry needs, so that
- * one reason is added there.
- */
+/** Why the queue is or is not moving, from the same gate promotion reads. */
 const queueStateOf = (queue: ReadonlyArray<{ lastError: string | null }>, gate: QueueGate) => {
   if (queue.length === 0) return null;
   if (gate === "busy") return "running" as const;
@@ -204,6 +201,7 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
 ) {
   const repo = yield* ChatRepo;
   const schedules = yield* ScheduleRepo;
+  const computers = yield* ComputerRepo;
   while (true) {
     // Ownership first and alone: an unauthorized id must fail before any of its
     // children are read.
@@ -219,38 +217,35 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
     // on the conversation only, so it rides with the messages.
     const anchored = anchorId ? yield* repo.hasMessage(conversation.id, anchorId) : false;
     const start = anchored ? anchorId! : yield* repo.findWindowStart(conversation.id, HEAD_TURNS);
-    const { messages, olderCursor, branchedFrom, schedule, latestMachineAttempt } =
-      yield* Effect.all(
-        {
-          messages: repo.listMessageWindow(conversation.id, { fromId: start }),
-          olderCursor: start
-            ? repo
-                .hasMessagesBefore(conversation.id, start)
-                .pipe(Effect.map((older) => (older ? start : null)))
-            : Effect.succeed(null),
-          // The window may not reach the newest attempt sent from a machine,
-          // which the foreign-machine banner compares against this one.
-          latestMachineAttempt:
-            conversation.mode === "work"
-              ? repo.latestMachineAttempt(conversation.id)
-              : Effect.succeed(null),
-          branchedFrom: conversation.branchedFrom
-            ? branchSource(repo, userId, conversation.branchedFrom)
-            : Effect.succeed(null),
-          // The schedule behind this chat, for the banner link back: one that keeps
-          // running here first, else the one whose fire created it. Read optionally
-          // like branchedFrom: either may have been deleted since.
-          schedule: Effect.gen(function* () {
-            const runsHere = yield* schedules.findByChat(userId, conversation.id);
-            if (runsHere) return { scheduleId: runsHere.id, name: runsHere.name, runsHere: true };
-            const created = conversation.scheduleId
-              ? yield* schedules.get(userId, conversation.scheduleId)
-              : null;
-            return created ? { scheduleId: created.id, name: created.name, runsHere: false } : null;
-          }),
-        },
-        { concurrency: "unbounded" },
-      );
+    const { messages, olderCursor, branchedFrom, schedule, machine } = yield* Effect.all(
+      {
+        messages: repo.listMessageWindow(conversation.id, { fromId: start }),
+        olderCursor: start
+          ? repo
+              .hasMessagesBefore(conversation.id, start)
+              .pipe(Effect.map((older) => (older ? start : null)))
+          : Effect.succeed(null),
+        // Named as it last reported itself; null once the person forgot it.
+        machine: conversation.machineId
+          ? computers.machine(userId, conversation.machineId)
+          : Effect.succeed(null),
+        branchedFrom: conversation.branchedFrom
+          ? branchSource(repo, userId, conversation.branchedFrom)
+          : Effect.succeed(null),
+        // The schedule behind this chat, for the banner link back: one that keeps
+        // running here first, else the one whose fire created it. Read optionally
+        // like branchedFrom: either may have been deleted since.
+        schedule: Effect.gen(function* () {
+          const runsHere = yield* schedules.findByChat(userId, conversation.id);
+          if (runsHere) return { scheduleId: runsHere.id, name: runsHere.name, runsHere: true };
+          const created = conversation.scheduleId
+            ? yield* schedules.get(userId, conversation.scheduleId)
+            : null;
+          return created ? { scheduleId: created.id, name: created.name, runsHere: false } : null;
+        }),
+      },
+      { concurrency: "unbounded" },
+    );
     // The streaming answer is the newest row, so it is always in the window.
     const streaming = messages.find((m) => m.status === "streaming");
     const attachmentRepo = yield* AttachmentRepo;
@@ -306,7 +301,13 @@ export const loadConversationDetail = Effect.fn("chat.loadConversationDetail")(f
       ...rows,
       referenceAttachments,
       window: { anchorId: messages[0]?.id ?? null, olderCursor },
-      latestMachineAttempt,
+      // The chat's computer, for the chip; a machine id with no name was forgotten.
+      computer: {
+        machineId: conversation.machineId,
+        machineName: machine?.name ?? null,
+        folders: conversation.computerFolders,
+        permissionLevel: conversation.permissionLevel,
+      },
       pendingChunks,
       // The server's clock when the snapshot was taken, for reading its times.
       serverTime: Date.now(),

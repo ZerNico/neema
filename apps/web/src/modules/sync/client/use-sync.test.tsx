@@ -5,10 +5,8 @@ import { listPendingIntegrationCalls } from "~/modules/integrations/server/funct
 import { pendingIntegrationCallsQuery } from "~/modules/integrations/client/queries.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DESKTOP_SESSION_CREATED_EVENT } from "~/modules/auth/ticket-events.ts";
-import { discardWorkspace } from "~/modules/desktop/client/bridge.ts";
 import { useSync } from "./use-sync.ts";
 
-vi.mock("~/modules/desktop/client/bridge.ts", () => ({ discardWorkspace: vi.fn() }));
 vi.mock("~/modules/integrations/server/functions.ts", () => ({
   listPendingIntegrationCalls: vi.fn(),
   listIntegrationDirectory: vi.fn().mockResolvedValue([]),
@@ -422,14 +420,10 @@ describe("useSync", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["memory"] });
   });
 
-  it("discards a work chat's local folder only once the chat is purged, not at its delete", () => {
+  it("refreshes chat lists when a chat is purged", () => {
     const { invalidate, source } = renderSync();
 
-    source.emit("sync", { type: "conversation.deleted", conversationId: "c1" });
-    expect(discardWorkspace).not.toHaveBeenCalled();
-
     source.emit("sync", { type: "conversation.purged", conversationId: "c1" });
-    expect(discardWorkspace).toHaveBeenCalledExactlyOnceWith("c1");
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["conversations"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["search", "recent-chats"] });
   });

@@ -1,5 +1,5 @@
 /**
- * Optional embedded browser, independent of the Work protocol version. The page
+ * Optional embedded browser, independent of the bridge's protocol version. The page
  * renders `<webview>` guests itself; this is only what it cannot do alone: name
  * the profile, pace hidden pages and hear about popups.
  */

@@ -24,8 +24,8 @@ vi.mock("~/modules/chat/server/functions.ts", () => ({
   listChatModels: vi.fn().mockResolvedValue([]),
   listConversations: vi.fn().mockResolvedValue({
     conversations: [
-      { id: "c-news", title: "Morning news", mode: "chat" },
-      { id: "c-work", title: "Repo cleanup", mode: "work" },
+      { id: "c-news", title: "Morning news", machineId: null },
+      { id: "c-computer", title: "Repo cleanup", machineId: "machine-1" },
     ],
     nextCursor: null,
   }),
@@ -159,10 +159,10 @@ describe("ScheduleCreatePage", () => {
   it("runs in a new chat each time unless told to keep using one", async () => {
     const user = renderPage();
     await pick(user, "Chat", "Same chat every time");
-    // A plain chat can be picked; a work chat needs the desktop app and is left out.
+    // Any chat can be picked, one with a computer too.
     await user.click(screen.getByRole("combobox", { name: "Which chat" }));
     expect(await screen.findByRole("option", { name: "Start one on the first run" })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "Repo cleanup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Repo cleanup" })).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Morning news" }));
     expect(screen.getByText(/Runs use this chat’s own agent/)).toBeVisible();
     expect(await submitted()).toMatchObject({ chatMode: "same", chatId: "c-news" });

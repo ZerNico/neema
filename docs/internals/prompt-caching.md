@@ -15,8 +15,9 @@ the cost is the whole input again, at the write price, on every request.
   retained history (skill replays included, see [skills](skills.md)). A compaction summary
   sits between them as a user-role block.
 - After history, the answer's opening, fixed for the whole answer: draft, document and knowledge
-  data, the skill catalogue and pinned roots, kept drafts, the image model the answer draws with
-  and the runtime clock, as its first request saw them, then its first reminder. Then the
+  data, the skill catalogue and pinned roots, kept drafts, the image model the answer draws with,
+  the chat's computer (its machine and whether it is online, folders, sent files) and the runtime
+  clock, as its first request saw them, then its first reminder. Then the
   answer's rounds. The image tool's schema stays the same whichever model it uses, so picking
   another never uncaches the tool list ([images](images.md)).
 - The opening is kept on the answer (`messages.opening`, server only) and history replays it in
@@ -95,7 +96,7 @@ the cost is the whole input again, at the write price, on every request.
 ## Lazy tool families
 
 - Tool schemas are part of the prefix and are paid on every uncached request. Families that
-  are large or rarely needed (the Office editors, agent and schedule drafting) are offered by
+  are large or rarely needed (the Office editors, agent and schedule drafting, the browser) are offered by
   name only: a stable system section lists every offered family, and `load_tools` loads one.
   `tool-load.ts` is the registry.
 - A remote MCP server is a family of its own (`integration:<id>`) once what it lists passes

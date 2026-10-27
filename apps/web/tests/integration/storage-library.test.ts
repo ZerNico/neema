@@ -124,7 +124,7 @@ const sendWith = async (userId: string, attachmentIds: string[]) => {
     Effect.flatMap(ChatService, (chat) =>
       chat.sendMessage({
         userId,
-        conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+        conversation: { kind: "new", id: uuidv7() },
         modelId,
         content: "Look at this",
         searchEnabled: false,

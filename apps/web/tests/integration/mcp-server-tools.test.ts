@@ -707,30 +707,32 @@ describe("delegating to the app", () => {
     await client.close();
   });
 
-  it("reads a Work chat but leaves continuing it to the desktop app", async () => {
+  it("says a chat has a computer and still continues it", async () => {
     const { client } = await writer();
     answer = () => reply("Listed the folder.");
-    const work = await send(client, { content: "What's in this folder?" });
-    // Made Work by hand: a Work chat can only be started from the desktop app.
+    const chat = await send(client, { content: "What's in this folder?" });
     await run(
       Effect.flatMap(Db, (db) =>
-        db.update(conversations).set({ mode: "work" }).where(eq(conversations.id, work.chatId)),
+        db
+          .update(conversations)
+          .set({ machineId: "machine-1" })
+          .where(eq(conversations.id, chat.chatId)),
       ),
     );
     const list = (await call(client, "list_chats", {})).structuredContent as {
-      chats: Array<{ id: string; work: boolean }>;
+      chats: Array<{ id: string; computer: boolean }>;
     };
-    expect(list.chats.find((c) => c.id === work.chatId)?.work).toBe(true);
-    const read = await call(client, "read_chat", { chatId: work.chatId });
-    expect(read.structuredContent).toMatchObject({ work: true });
-    expect(read.content[0]?.text).toContain("continues only in the desktop app");
-    const sent = await call(client, "send_message", { content: "And now?", chatId: work.chatId });
-    expect(sent.content[0]?.text).toContain("can only continue in the desktop app");
-    const retried = await call(client, "retry_message", { messageId: work.messageId });
-    expect(retried.content[0]?.text).toContain("can only continue in the desktop app");
-    expect((await messagesOf(work.chatId)).map((row) => row.content)).toEqual([
+    expect(list.chats.find((c) => c.id === chat.chatId)?.computer).toBe(true);
+    const read = await call(client, "read_chat", { chatId: chat.chatId });
+    expect(read.structuredContent).toMatchObject({ computer: true });
+    expect(read.content[0]?.text).toContain("This chat has a computer");
+    answer = () => reply("Still here.");
+    await send(client, { content: "And now?", chatId: chat.chatId });
+    expect((await messagesOf(chat.chatId)).map((row) => row.content)).toEqual([
       "What's in this folder?",
       "Listed the folder.",
+      "And now?",
+      "Still here.",
     ]);
     await client.close();
   });

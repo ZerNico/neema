@@ -30,7 +30,7 @@ export default defineConfig({
     // the desktop bridge's window global and a Vite build define.
     "no-underscore-dangle": [
       "warn",
-      { allow: ["_tag", "__TSR_index", "__chatDesktop", "__BUILD_STAMP__"] },
+      { allow: ["_tag", "__TSR_index", "__chatDesktop", "__BUILD_STAMP__", "__SANDBOX_IMAGE__"] },
     ],
     // Both ask for in-place mutation, the opposite of the immutable updates used throughout.
     "oxc/no-map-spread": "off",

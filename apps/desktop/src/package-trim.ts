@@ -1,15 +1,13 @@
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-/**
- * The one native library MXC loads per platform. Every backend this app uses
- * (Seatbelt, bubblewrap, the Windows process container) runs in process
- * through it; the executors and daemons beside it serve other backends.
- */
-const MXC_LIBRARY: Readonly<Record<string, string>> = {
-  darwin: "libmxc_ffi.dylib",
-  linux: "libmxc_ffi.so",
-  win32: "mxc_ffi.dll",
+/** microsandbox's native package per target, as its `napi.targets` names them. */
+const MICROSANDBOX_PACKAGE: Readonly<Record<string, string>> = {
+  "darwin-arm64": "microsandbox-darwin-arm64",
+  "linux-x64": "microsandbox-linux-x64-gnu",
+  "linux-arm64": "microsandbox-linux-arm64-gnu",
+  "win32-x64": "microsandbox-win32-x64-msvc",
+  "win32-arm64": "microsandbox-win32-arm64-msvc",
 };
 
 const exists = (path: string) =>
@@ -21,47 +19,26 @@ const exists = (path: string) =>
 const entries = (directory: string) => readdir(directory).catch(() => [] as string[]);
 
 /**
- * Leaves in a packaged app's node_modules only what runs on its platform and
- * architecture: MXC's library for it, koffi's binding for it, and no node-pty,
- * which MXC loads only for terminal sessions this app never opens. Throws when
- * a kept file is missing, so a dependency that moved fails the build rather
- * than the first command.
+ * Leaves in a packaged app's node_modules only microsandbox's native package for its platform and
+ * architecture. CI installs both architectures to cross-package, and each package carries its own
+ * VM runner and kernel. Throws when the kept one is missing, so a build without it fails here
+ * rather than at the first chat VM.
  */
 export const trimPackage = async (
   nodeModules: string,
   platform: string,
   arch: string,
 ): Promise<string[]> => {
-  const library = MXC_LIBRARY[platform];
-  if (!library) throw new Error(`No MXC library is known for ${platform}`);
+  const keep = MICROSANDBOX_PACKAGE[`${platform}-${arch}`];
+  if (!keep) throw new Error(`microsandbox has no native package for ${platform}-${arch}`);
+  const scope = join(nodeModules, "@superradcompany");
   const removed: string[] = [];
-  const remove = async (path: string) => {
-    await rm(path, { recursive: true, force: true });
-    removed.push(path);
-  };
-
-  const bin = join(nodeModules, "@microsoft", "mxc-sdk", "bin");
-  for (const folder of await entries(bin)) {
-    if (folder !== arch) {
-      await remove(join(bin, folder));
-      continue;
-    }
-    for (const file of await entries(join(bin, folder)))
-      if (file !== library) await remove(join(bin, folder, file));
+  for (const name of await entries(scope)) {
+    if (!name.startsWith("microsandbox-") || name === keep) continue;
+    await rm(join(scope, name), { recursive: true, force: true });
+    removed.push(join(scope, name));
   }
-  const kept = join(bin, arch, library);
-  if (!(await exists(kept))) throw new Error(`MXC's ${library} for ${arch} is missing: ${kept}`);
-
-  const koffi = join(nodeModules, "@koromix");
-  const binding = `koffi-${platform}-${arch}`;
-  for (const name of await entries(koffi)) if (name !== binding) await remove(join(koffi, name));
-  if (!(await exists(join(koffi, binding))))
-    throw new Error(
-      `koffi's binding for ${platform}-${arch} is missing; install with --cpu ${arch}`,
-    );
-
-  // node-addon-api only builds node-pty.
-  for (const name of ["node-pty", "node-addon-api"])
-    if (await exists(join(nodeModules, name))) await remove(join(nodeModules, name));
+  if (!(await exists(join(scope, keep))))
+    throw new Error(`microsandbox's ${keep} is missing; install with --cpu ${arch}`);
   return removed;
 };

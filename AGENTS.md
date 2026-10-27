@@ -98,6 +98,12 @@ edit the wrong thing.
 - **temporary chat**: a conversation flagged `temporary` at creation. It is left out of
   lists and search, neither reads nor saves memory, and is swept a day after its last
   activity. Keep clears the flag; nothing sets it later.
+- **machine / computer**: a machine is one desktop install a person signed in on. A chat's
+  computer is a Linux microVM of its own on the machine the chat is bound to
+  (`conversations.machine_id`), bound the first time the chat needs one. There is no chat mode.
+  The model's paths are the guest's (`/workspace`, `/folders/<name>`), never the host's.
+  Approvals and network grants live on the server. The machine runs calls that arrive on its
+  event stream. See [desktop](docs/internals/desktop.md).
 - **image model**: a `models` row of type `image` that `generate_image` draws with. The person
   picks it and the chat keeps it (its lock) until it becomes unusable. Not a chat model with
   native image output, which still draws by itself. See [images](docs/internals/images.md).
@@ -285,8 +291,7 @@ skipped one on purpose.
   turns: accepted whole, watched not owned, read by attempt; approvals put to the app's person
   under sealed request state; documents written as the person, still held to `seen`.
 - `docs/internals/queue.md`: queued messages, atomic promotion, steering at a safe
-  boundary, queued files as a second owner kind, and why only a desktop app can
-  start queued Work.
+  boundary, queued files as a second owner kind.
 - `docs/internals/word.md`: Word files as numbered blocks per revision, templates by
   text replacement, measuring the package before the parser, structured previews.
 - `docs/internals/spreadsheets.md`: Excel operations, our own formula engine on formula.js
@@ -310,8 +315,8 @@ skipped one on purpose.
   and why a schedule's fire does not.
 - `docs/internals/deleted-chats.md`: delete with Undo. The `deleted_at` mark, the one owned-chat
   predicate every reader uses, marking before stopping and early stops, Undo naming its delete,
-  grace versus toast, the shared purge sweep, held rows in the client, and when a work chat's
-  folder goes.
+  grace versus toast, the shared purge sweep, held rows in the client, and when a chat's
+  computer and workspace go.
 - `docs/internals/search.md`: the Cmd+K palette's sources, the `app_search`
   expression index for chat text, and what another search backend would need.
 - `docs/internals/limits.md`: usage limits. Everyone's rules as the baseline that groups replace,
@@ -342,10 +347,12 @@ skipped one on purpose.
   owner and namespace, synchronous reads once warm, owner scoping and clearing on identity change.
 - `docs/internals/images.md`: image models, which one an attempt draws with and the chat's lock,
   the fixed tool schema and trailing model note, staged delivery and budgets, the ledger row.
-- `docs/internals/egress-proxy.md`: the only network path out of a sandboxed command. A token per
-  command, one canonical spelling decided once, the address guard with no exceptions, CONNECT only.
-- `docs/internals/desktop.md`: work chats, the desktop shell, the blocking
-  handler and its timeout, containment, consent levels.
+- `docs/internals/egress-proxy.md`: the only network path out of a chat's VM. One client per VM,
+  placeholder DNS that resolves nothing, one canonical spelling decided once, the address guard
+  with no exceptions.
+- `docs/internals/desktop.md`: chats' computers and the desktop shell. A microVM per chat on the
+  bound machine, the machine connection, server-held approvals and grants, guest paths, offline
+  and remote use.
 
 ## Version pins
 
@@ -399,13 +406,12 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
 - `@babel/core` stays on 7 while `babel-plugin-react-compiler` is 1.0: under Babel 8 the compiler
   reads a destructured default (`{ readOnly = false }`) as an error and silently leaves the
   component uncompiled, which is most of them. On a bump, count compiled components, not test results.
-- `@microsoft/mxc-sdk` (the desktop's command sandbox) is pinned exact; its install-time
-  dependencies `koffi` and `node-pty` are denied scripts in `allowBuilds`. Packages keep only
-  `bin/<arch>/` MXC's in-process library and the target's koffi binding (`after-pack.mjs`). On a
-  bump, run real commands through `makeSandbox` on each OS (the unit tests stub the launcher),
-  check the proxy reaches commands through `networkProxy`, and let the desktop workflow's
-  package smoke test prove the trimmed natives still load.
-  See [desktop](docs/internals/desktop.md#containment-and-command-isolation).
+- `microsandbox` (chats' VMs, pre-1.0 and Windows support in preview) is pinned exact. Its
+  platform package ships the native addon, `msb` and `libkrunfw`, and `msb` needs the hypervisor
+  entitlement on macOS, restored after signing by `after-sign.mjs`. On a bump, run the opt-in
+  real-VM tests (`NEEMA_VM_IMAGE=… pnpm --filter @chat/desktop test src/computer`) on each OS,
+  since the unit tests use a fake hypervisor. The guest image is not a pin: a release builds
+  the desktop with the image of its own sources. See [desktop](docs/internals/desktop.md#the-image).
 - `rolldown` needs no override since 1.2.7 and follows the release cooldown like any other
   package. Re-pin only if the production module check fails again, and then add it to
   `minimumReleaseAgeExclude`.
@@ -502,9 +508,9 @@ Differs from most Effect 3 material online.
 - A desktop session is minted only by `/desktop/session` redeeming a browser
   ticket. The 90-day refresh and the Devices label "neema Desktop on …" key on
   the session's `desktop` mark, which only that redemption sets, never on a
-  user agent, stored or sent. A work attempt additionally stamps the sending
-  install's machine id onto its generation config — attempt metadata for the
-  foreign-chat banner, never auth. See `docs/internals/desktop.md`.
+  user agent, stored or sent. Only a desktop session may act as a machine on
+  `/api/machine/*`, and the machine id it sends names one of that person's own
+  machines, never anyone else's. See `docs/internals/desktop.md`.
 - The first signup claims a durable bootstrap owner before Better Auth inserts
   the user. `/setup` is the page for it and exists only while no claim does;
   sign-in and registration send there until then. Only that owner becomes admin and bypasses closed signup; a failed

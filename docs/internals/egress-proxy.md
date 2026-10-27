@@ -1,73 +1,85 @@
 # Egress proxy
 
-`@chat/egress-proxy` is the only way a sandboxed command reaches the network. The sandbox lets a
-command connect to one loopback address, this proxy, and the proxy decides each HTTPS tunnel. It
-knows nothing about chats, sandboxes or Electron: the desktop gives it a token per command and a
-`decide` callback, and it reports denials back.
+`@chat/egress-proxy` is the only way a chat's VM reaches the network. microsandbox hands every TCP
+connection the guest makes to this proxy as an HTTP CONNECT, and the guest's DNS goes to a
+listener of the proxy's. The proxy decides each connection. It knows nothing about chats, VMs or
+Electron: the desktop gives it a context per client and a `decide` callback, and it reports
+denials back.
 
-## Identity is a token per command
+## A client is one VM
 
-- Each command gets its own token, minted by `issue` and carried as the password in its proxy URL.
-  Every CONNECT must present it. The token names the server, chat, attempt and command, so the
-  callback can apply that chat's grants and a denial reaches the chat that caused it.
-- `issuePort` mints a token and a listener of the command's own that asks for no credentials,
-  for a sandbox that reaches that one port alone and refuses a URL carrying them (bubblewrap).
-  Only there is a port a credential: where commands share loopback, one could dial another's.
-- `revoke` ends a token when its command ends and closes every tunnel it opened, and its own
-  listener if it has one. A command can read
-  its own token and pass it to a process that can reach the proxy; it is only good while the
-  command runs.
-- Loopback authenticates nothing. On Windows any local process can reach the listener, so every
-  request is refused until it authenticates, and connections that have not authenticated are
-  capped and dropped after `headerMs`. A local process can still hold those slots by reopening
-  idle sockets; that is accepted.
+- `issue(context)` mints a token and starts that client's name listener. The VM is configured with
+  the token as its CONNECT password (username `vm`), held by microsandbox on the host and never
+  visible to the guest, and with the listener as its only DNS server.
+- Every CONNECT must present the token. The context it was issued with goes to `decide` and to
+  every denial, so a chat's grants apply to its own VM and a denial reaches that chat.
+- `revoke` ends the token, closes the name listener and closes every tunnel the client opened.
+
+## Names, not addresses
+
+- The name listener resolves nothing. It answers each A query with a placeholder from
+  198.18.0.0/15 (RFC 2544 benchmarking, never routed), unique to that name within the client and
+  stable for its life. AAAA and every other type answer empty.
+- A CONNECT to a placeholder is the connection to its name, and from there it is decided exactly
+  like `CONNECT name:port`. A placeholder this client was never handed is refused without asking
+  `decide`.
+- This is why nothing else is needed:
+  - lookups cannot carry data out, since nothing is resolved until a grant allows a connection
+  - a connection names exactly one host, so a CDN address shared by many names is never
+    ambiguous
+  - nothing in the guest needs proxy settings: Java, ssh and git connect normally
+- A connection to an address the guest did not get from DNS (an IP literal) is decided as that
+  address.
 
 ## Destinations the host serves itself
 
-- `local` may answer an allowed destination with a connector of its own instead of a dial: the
-  desktop serves the SSH agent this way. `decide` still rules first, so a grant id revokes it like
-  any tunnel; the address guard does not apply, since nothing is resolved. `local` learns whether
-  the connection presented the token, which on a command's own port it need not, and answers
-  `null` to refuse; the agent needs that proof, since anyone local can reach such a port. A refusal of
-  a local destination to a caller without that proof is answered but never reported against the
-  command. Other refusals on such a port are reported whoever asked, as the command's own tools
-  present no token there either, so another local user can add lines to its violations.
+`local` may answer an allowed destination with a connector of its own instead of a dial, for a
+service on this computer. `decide` still rules first, so a grant id revokes it like any tunnel. The
+address guard does not apply, since nothing is resolved.
 
 ## One spelling, decided once, dialled as decided
 
 - A host is validated, then canonicalized (lowercase, one trailing dot removed, every IPv4 and
-  IPv6 spelling normalized), and the canonical form is what `decide` sees and what is dialled.
+  IPv6 spelling normalized). The canonical form is what `decide` sees and what is dialled.
   Anything that does not canonicalize is refused, never passed through raw.
 - A grant names `host:port` and must carry a `grantId`. `regrant` closes the tunnels a removed
   grant allowed unless another grant still covers them. A grant is decided once, at establishment.
-- DNS is resolved once and the connection goes to an address that passed the guard, so a changing
-  answer cannot redirect it. Lookups use the system resolver, so VPN, split DNS and the hosts
-  file behave as they do for every other program; c-ares reads the server list directly and
-  waited out dead servers the system skips. They are fully qualified (no search domains, so a
-  bare `git` does not resolve), and at most two run at once: getaddrinfo holds a libuv pool
-  thread for the whole lookup and the pool has four.
+- DNS is resolved by the proxy, once, and the connection goes to an address that passed the guard,
+  so a changing answer cannot redirect it.
+  - Lookups use the system resolver, so VPN, split DNS and the hosts file behave as they do for
+    every other program. c-ares reads the server list directly and waited out dead servers the
+    system skips.
+  - They are fully qualified (no search domains), and at most two run at once: getaddrinfo holds
+    a libuv pool thread for the whole lookup and the pool has four.
 - The addresses are tried in turn. While another remains, each attempt gets `attemptMs` (five
   seconds), so a silent address (an unreachable IPv6 route) cannot spend the whole establishment
-  deadline; the last keeps what is left of it.
+  deadline. The last keeps what is left of it.
 
 ## The address guard has no exceptions
 
-Loopback, link-local, multicast, cloud metadata endpoints and the machine's own interface
-addresses are refused for every name and literal, whatever the grant. Private networks are refused
-unless the grant is a private-network grant for that `host:port`. IPv4 carried inside IPv6
-(mapped, NAT64, 6to4, Teredo) is judged as IPv4. If the machine's addresses cannot be listed, the
-connection fails closed. The server's own fetches (`url-safety.ts`) judge addresses with this
-same guard, with no grant and no interfaces, so the two ways out cannot disagree.
+- **Always refused,** for every name and literal, whatever the grant: loopback, link-local,
+  multicast, cloud metadata endpoints and the machine's own interface addresses.
+- **Private networks** are refused unless the grant is a private-network grant for that
+  `host:port`.
+- **IPv4 carried inside IPv6** (mapped, NAT64, 6to4, Teredo) is judged as IPv4.
+- **If the machine's addresses can't be listed,** the connection fails closed.
+- **The server's own fetches** (`url-safety.ts`) judge addresses with this same guard, with no
+  grant and no interfaces, so the two ways out cannot disagree.
 
 ## What it does not do
 
-- Only CONNECT. Plain HTTP is refused, and a tunnel is an opaque TCP stream: a grant for `:22`
-  allows any protocol to that endpoint.
-- Tools that do not use an HTTP proxy cannot reach the network at all. Java ignores the proxy
-  variables, so Gradle and Maven get their own proxy settings from the desktop.
-- A denial is a `403` with `x-egress-denied: 1`; a network failure is a `502`. When a candidate was
-  skipped by policy and nothing else got through, the answer is the denial. A reported denial
-  says what would `lift` it: a grant when `decide` refused, a private-network grant when the
-  address guard refused a private address among them (one usable address is enough), or nothing (plain HTTP, any other address the
-  guard refuses, a limit, and a destination it would refuse whatever a grant allowed: loopback,
-  `localhost`, `.invalid`), so a caller can tell "ask for a grant" from a refusal no grant changes.
+- **Only TCP.** The VM's network policy allows UDP only to its DNS, so there is no QUIC and no
+  other UDP. A tunnel is an opaque TCP stream: a grant for `:22` allows any protocol to that
+  endpoint.
+- **How a refusal looks:** a `403` with `x-egress-denied: 1`, which the guest sees as a refused
+  connection. A network failure is a `502`.
+  - When a candidate was skipped by policy and nothing else got through, the answer is the
+    denial.
+  - A reported denial says what would `lift` it:
+    - a grant, when `decide` refused
+    - a private-network grant, when the address guard refused a private address among them (one
+      usable address is enough)
+    - nothing, for a destination it would refuse whatever a grant allowed: loopback, `localhost`,
+      `.invalid`, an unknown placeholder
+
+    So a caller can tell "ask for a grant" from a refusal no grant changes.

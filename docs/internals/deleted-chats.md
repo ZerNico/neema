@@ -61,17 +61,15 @@ what a failed one left.
   or an idle temporary chat would be purged under its own Undo. A streaming row inside its
   lease does not hold the purge back either, since the delete already stopped it.
 
-## Events and the desktop workspace
+## Events and the chat's computer
 
 - Delete publishes `conversation.deleted`, Undo `conversation.updated`, the purge
   `conversation.purged`. Every tab refreshes its lists on each, so another tab drops the chat
   and gets it back.
-- A work chat's workspace, grants and folders live on the user's machine, keyed by the chat's
-  id, and must outlive the delete or Undo would bring back a work chat without its folder.
-  Undo is only offered in the deleting window's toast, so that window discards them once the
-  delete has landed and the toast went without its Undo. `conversation.purged` discards them
-  too, for a window that closed first. A machine with no window open at either moment keeps a
-  stray directory.
+- A chat's computer (VM, disk, workspace, folder grants, SSH agent allowance, browser sites)
+  lives on its machine and must outlive the delete, or Undo would bring back a chat without
+  them. The purge sends the machine a `discard`. A machine offline at that moment asks on its next
+  start which of its chats are gone ([desktop](desktop.md#a-chat-may-have-a-computer)).
 
 ## The client
 

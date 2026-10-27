@@ -20,12 +20,14 @@ files:
   - "!static/icons/*.svg"
   - package.json
 
-# The MXC SDK loads its native library from a path beside its own modules,
-# which an asar cannot serve, so the app stays a plain directory, as in dev.
+# microsandbox loads its native addon, its VM runner (msb) and libkrunfw from paths beside its
+# own modules, which an asar cannot serve, so the app stays a plain directory, as in dev.
 asar: false
 
-# Keeps only the target's own natives: MXC ships every platform's binaries.
+# Keeps only the target's own natives.
 afterPack: ./after-pack.mjs
+# Gives msb back the hypervisor entitlement signing the app took away.
+afterSign: ./after-sign.mjs
 
 protocols:
   - name: neema sign-in
@@ -44,8 +46,7 @@ win:
 
 nsis:
   # Installs for the current user unless the person picks everyone, so no
-  # administrator is needed. Commands reach the app under the profile through an
-  # explicit read grant (the ssh bridge runs its executable).
+  # administrator is needed.
   perMachine: false
   oneClick: false
   allowToChangeInstallationDirectory: true

@@ -196,6 +196,24 @@ export const updateUtilityModel = createServerFn({ method: "POST" })
     runServerFn(ProviderRepo.use((repo) => repo.setUtilityModelId(data.modelId))),
   );
 
+export const getReviewModel = createServerFn({ method: "GET" })
+  .middleware([requireAdmin])
+  .handler(() =>
+    runServerFn(
+      ProviderRepo.use((repo) => repo.getReviewModelId()).pipe(
+        Effect.map((modelId) => ({ modelId })),
+      ),
+    ),
+  );
+
+/** The same shape as the utility model's: one chat model, or null. */
+export const updateReviewModel = createServerFn({ method: "POST" })
+  .middleware([requireAdmin])
+  .validator(standard(UpdateUtilityModelInput))
+  .handler(({ data }) =>
+    runServerFn(ProviderRepo.use((repo) => repo.setReviewModelId(data.modelId))),
+  );
+
 export const createModel = createServerFn({ method: "POST" })
   .middleware([requireAdmin])
   .validator(standard(CreateModelInput))

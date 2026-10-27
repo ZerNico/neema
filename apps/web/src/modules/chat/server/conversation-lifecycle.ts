@@ -1,8 +1,9 @@
-import { m } from "~/paraglide/messages.js";
-import { localized } from "~/i18n/localized.ts";
+import type { PermissionLevel } from "../schema.ts";
 import { Duration, Effect, Schedule } from "effect";
-import { InvalidMessage, MessageNotFound } from "~/modules/chat/errors.ts";
+import { ConversationNotFound, MessageNotFound } from "~/modules/chat/errors.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { ChatRepo } from "./repo.ts";
 import { StreamEngine } from "./streaming.ts";
@@ -16,6 +17,8 @@ export const makeConversationLifecycle = Effect.gen(function* () {
   const engine = yield* StreamEngine;
   const sync = yield* SyncBus;
   const attachmentService = yield* AttachmentService;
+  const computers = yield* ComputerRepo;
+  const machines = yield* MachineHub;
 
   const stopGeneration = Effect.fn("ChatService.stopGeneration")(function* (input: {
     generationId?: string | undefined;
@@ -109,19 +112,17 @@ export const makeConversationLifecycle = Effect.gen(function* () {
     return restored;
   });
 
-  const updateWorkSettings = Effect.fn("ChatService.updateWorkSettings")(function* (input: {
+  const setPermissionLevel = Effect.fn("ChatService.setPermissionLevel")(function* (input: {
     userId: string;
     conversationId: string;
-    permissionLevel: "manual" | "auto" | "skip";
+    permissionLevel: PermissionLevel;
   }) {
-    const conversation = yield* repo.getConversation(input.userId, input.conversationId);
-    if (conversation.mode !== "work")
-      return yield* new InvalidMessage({
-        reason: localized(m.chat_error_work_settings_only_work_chat),
-      });
-    yield* repo.updateConversation(input.conversationId, {
-      permissionLevel: input.permissionLevel,
-    });
+    const updated = yield* computers.setPermissionLevel(
+      input.userId,
+      input.conversationId,
+      input.permissionLevel,
+    );
+    if (!updated) return yield* new ConversationNotFound({ conversationId: input.conversationId });
     yield* sync.publish(input.userId, {
       type: "conversation.updated",
       conversationId: input.conversationId,
@@ -203,6 +204,14 @@ export const makeConversationLifecycle = Effect.gen(function* () {
       const purged = yield* repo.purgeExpired(id);
       if (!purged) continue;
       yield* attachmentService.deleteBlobs(purged.keys);
+      // The machine holds the chat's VM and workspace. One offline now asks on its next start
+      // which of its chats are gone (/api/machine/gone).
+      if (purged.machineId !== null)
+        yield* machines.send(purged.userId, purged.machineId, {
+          type: "discard",
+          conversationId: id,
+          workspace: true,
+        });
       yield* sync.publish(purged.userId, { type: "conversation.purged", conversationId: id });
     }
   });
@@ -235,7 +244,7 @@ export const makeConversationLifecycle = Effect.gen(function* () {
     stopGeneration,
     deleteConversation,
     restoreConversation,
-    updateWorkSettings,
+    setPermissionLevel,
     renameConversation,
     keepConversation,
     markRead,

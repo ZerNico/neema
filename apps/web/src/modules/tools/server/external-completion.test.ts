@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { ExternalCompletion, supersededByCheckIn } from "./external-completion.ts";
+import {
+  COMPUTER_EXECUTOR,
+  ExternalCompletion,
+  supersededByCheckIn,
+} from "./external-completion.ts";
 
 // The wait is what makes a blocked handler safe, so the two properties that
 // keep it safe are asserted directly: it always ends, and an answer that
@@ -26,7 +30,7 @@ const owner = {
 };
 const operation = {
   ...owner,
-  name: "write_local_file",
+  name: "write_file",
   args: { path: "site/a", text: "hello" },
   timeoutMs: 5000,
 };
@@ -62,6 +66,17 @@ describe("ExternalCompletion", () => {
             onTimeout: () => "timeout",
           }),
         ).toBe("good");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("no page can claim a computer call, even naming the computer's executor", () =>
+    withService((external) =>
+      Effect.gen(function* () {
+        const computer = { ...owner, executorId: COMPUTER_EXECUTOR };
+        yield* external.track(computer, Effect.void);
+        yield* external.open("on-the-machine", { ...operation, ...computer });
+        expect(yield* external.claim("on-the-machine", computer)).toBeNull();
       }).pipe(Effect.scoped),
     ),
   );

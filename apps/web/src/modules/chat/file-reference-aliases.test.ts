@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composeFileReferenceAliases } from "./file-reference-aliases.ts";
 
 describe("composeFileReferenceAliases", () => {
-  it("records only the actual attachment clones and the source workspace", () => {
+  it("records only the actual attachment clones", () => {
     expect(
       composeFileReferenceAliases({
         sourceConversationId: "source",
@@ -14,14 +14,12 @@ describe("composeFileReferenceAliases", () => {
       }),
     ).toEqual({
       attachments: { upload: "cloned-upload", generated: "cloned-generated" },
-      workspaceAncestors: ["source"],
     });
   });
 
   it("flattens earlier aliases through the copied prefix, dropping missing targets", () => {
     const inherited = {
       attachments: { original: "first", later: "outside-prefix", stale: "deleted" },
-      workspaceAncestors: ["original-chat"],
     };
     expect(
       composeFileReferenceAliases({
@@ -31,29 +29,27 @@ describe("composeFileReferenceAliases", () => {
       }),
     ).toEqual({
       attachments: { original: "second", first: "second" },
-      workspaceAncestors: ["first-chat", "original-chat"],
     });
     expect(inherited.attachments.original).toBe("first");
   });
 
-  it("keeps deduplicated workspace ancestry even when no attachment was cloned", () => {
+  it("keeps nothing when no attachment was cloned", () => {
     expect(
       composeFileReferenceAliases({
         sourceConversationId: "source",
         inherited: {
           attachments: { stale: "missing" },
-          workspaceAncestors: ["ancestor", "source", "ancestor"],
         },
         attachmentIds: new Map(),
       }),
-    ).toEqual({ attachments: {}, workspaceAncestors: ["source", "ancestor"] });
+    ).toEqual({ attachments: {} });
   });
 
   it("rejects conflicting direct and inherited aliases", () => {
     expect(() =>
       composeFileReferenceAliases({
         sourceConversationId: "source",
-        inherited: { attachments: { historical: "current" }, workspaceAncestors: [] },
+        inherited: { attachments: { historical: "current" } },
         attachmentIds: new Map([
           ["historical", "one"],
           ["current", "two"],
@@ -66,7 +62,7 @@ describe("composeFileReferenceAliases", () => {
     expect(
       composeFileReferenceAliases({
         sourceConversationId: "source",
-        inherited: { attachments: { current: "current" }, workspaceAncestors: [] },
+        inherited: { attachments: { current: "current" } },
         attachmentIds: new Map([["current", "clone"]]),
       }).attachments,
     ).toEqual({ current: "clone" });

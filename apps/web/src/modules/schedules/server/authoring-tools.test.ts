@@ -64,6 +64,8 @@ async function setup(timeZone?: string, settings: Partial<ScheduleDraft["setting
       setDefaultModelOrder: unexpected,
       getUtilityModelId: unexpected,
       setUtilityModelId: unexpected,
+      getReviewModelId: unexpected,
+      setReviewModelId: unexpected,
       usableModel: unexpected,
       updateModelAccess: unexpected,
       listModelAccess: unexpected,

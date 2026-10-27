@@ -2,7 +2,7 @@ import { m } from "~/paraglide/messages.js";
 import * as motion from "motion/react-m";
 import { useState } from "react";
 import type { ComponentProps } from "react";
-import { Calendar03Icon, GitBranchIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon, GitBranchIcon, Globe02Icon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ConversationTitle } from "./conversation-title.tsx";
 import { MotionSwap } from "~/ui/motion.tsx";
@@ -15,6 +15,7 @@ export function ConversationStatusTitle({
   browsing = false,
   branched,
   scheduled = false,
+  computer = false,
   unread = false,
   ...title
 }: ComponentProps<typeof ConversationTitle> & {
@@ -26,9 +27,11 @@ export function ConversationStatusTitle({
   scheduled?: boolean;
   /** A scheduled run answered here since its owner last opened the chat. */
   unread?: boolean;
+  /** The chat has a computer, so its files live on one of the person's machines. */
+  computer?: boolean;
 }) {
   const reduced = useAppReducedMotion();
-  const width = generating || browsing || branched || scheduled || unread ? 24 : 0;
+  const width = generating || browsing || branched || scheduled || computer || unread ? 24 : 0;
   const [slot, setSlot] = useState({ target: width, settled: width });
   if (slot.target !== width) setSlot({ ...slot, target: width });
   const moving = !reduced && slot.settled !== width;
@@ -60,9 +63,11 @@ export function ConversationStatusTitle({
                   ? "unread"
                   : scheduled
                     ? "scheduled"
-                    : branched
-                      ? "branched"
-                      : "idle"
+                    : computer
+                      ? "computer"
+                      : branched
+                        ? "branched"
+                        : "idle"
           }
           kind="icon"
           className="size-4 shrink-0 text-muted-foreground"
@@ -90,6 +95,13 @@ export function ConversationStatusTitle({
               strokeWidth={2}
               className="size-4"
               aria-label={m.chat_status_scheduled()}
+            />
+          ) : computer ? (
+            <HugeiconsIcon
+              icon={LaptopIcon}
+              strokeWidth={2}
+              className="size-4"
+              aria-label={m.chat_status_computer()}
             />
           ) : branched ? (
             <HugeiconsIcon

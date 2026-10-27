@@ -51,7 +51,6 @@ const connect = (): DesktopClient => {
     folderStatus: notUsed("folderStatus"),
     chooseFolder: notUsed("chooseFolder"),
     detachFolder: notUsed("detachFolder"),
-    listDirectory: notUsed("listDirectory"),
     fileInfo: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "fileInfo", path });
@@ -59,30 +58,10 @@ const connect = (): DesktopClient => {
           ? refuse("not-found", `${path} does not exist.`)
           : Effect.succeed({ path, bytes: 4 });
       }),
-    writeFile: notUsed("writeFile"),
     saveToWorkspace: notUsed("saveToWorkspace"),
-    editFile: notUsed("editFile"),
-    movePath: notUsed("movePath"),
-    deletePath: notUsed("deletePath"),
-    findFiles: notUsed("findFiles"),
-    searchFiles: notUsed("searchFiles"),
-    runCommand: notUsed("runCommand"),
-    requestNetworkAccess: notUsed("requestNetworkAccess"),
-    requestPathAccess: notUsed("requestPathAccess"),
-    chatPermissions: notUsed("chatPermissions"),
-    requestCapability: notUsed("requestCapability"),
-    revokeChatPermission: notUsed("revokeChatPermission"),
-    setUpSandbox: notUsed("setUpSandbox"),
-    stageFile: notUsed("stageFile"),
-    discardStagedFile: notUsed("discardStagedFile"),
-    discardSubmission: notUsed("discardSubmission"),
-    promoteSubmission: notUsed("promoteSubmission"),
-    commitPromotion: notUsed("commitPromotion"),
-    rollbackPromotion: notUsed("rollbackPromotion"),
-    listPendingPromotions: notUsed("listPendingPromotions"),
-    cloneWorkspace: notUsed("cloneWorkspace"),
-    copyFolderGrants: notUsed("copyFolderGrants"),
-    discardWorkspace: notUsed("discardWorkspace"),
+    computerStatus: notUsed("computerStatus"),
+    setRemoteControl: notUsed("setRemoteControl"),
+    setAgentSocket: notUsed("setAgentSocket"),
     readFile: ({ path }) =>
       Effect.suspend(() => {
         asked.push({ tag: "readFile", path });
@@ -116,7 +95,6 @@ const connect = (): DesktopClient => {
   const respond = makeDesktopResponder(handlers);
   return makeDesktopClient({
     protocolVersion: PROTOCOL_VERSION,
-    stageDroppedFile: async () => null,
     // Round-tripped through JSON, because contextBridge carries nothing else.
     request: async (tag, payload) => {
       const wire = JSON.parse(JSON.stringify(payload)) as unknown;
@@ -125,7 +103,7 @@ const connect = (): DesktopClient => {
   });
 };
 
-const wrote = (path: string, name: DesktopToolActivity["name"] = "write_local_file") =>
+const wrote = (path: string, name: DesktopToolActivity["name"] = "write_file") =>
   ({
     family: "desktop",
     callId: `call-${path}`,
@@ -294,33 +272,20 @@ describe("a work file row on the desktop", () => {
     );
   });
 
-  it("follows a move to where the file now is, and ignores a row with no file", async () => {
-    const moved = {
-      ...wrote("unused", "move_local_file"),
-      args: { from: "site/old.md", to: "site/notes.md" },
-    } satisfies DesktopToolActivity;
-    show(moved);
-    await click(moved);
-    expect(await screen.findByText("still here")).toBeTruthy();
-    expect(asked).toEqual([{ tag: "readFile", path: "site/notes.md" }]);
-
+  it("ignores a row with no file", () => {
     show({ ...wrote("site/notes.md", "run_command"), args: { command: "ls" } });
     expect(screen.queryByRole("button", { name: /Wrote site\/notes\.md/ })).toBeNull();
   });
 });
 
 const branchId = "01990f4e-6650-7a33-a768-611e2e4bf4c7";
-const sourceId = "01a0df3a-9159-75d9-9270-2348eeeca617";
 const inlineView = (content: string, origin: string | null = "machine", streaming = false) => (
   <QueryClientProvider client={new QueryClient()}>
-    <LocalFileConversationProvider
-      conversationId={branchId}
-      workspaceRoot={`/workspaces/${branchId}`}
-    >
+    <LocalFileConversationProvider conversationId={branchId}>
       <FileReferenceContext
         value={{
           attachments: new Map(),
-          aliases: { attachments: {}, workspaceAncestors: [sourceId] },
+          aliases: { attachments: {} },
           machineId: "machine",
         }}
       >
@@ -334,11 +299,11 @@ const inlineView = (content: string, origin: string | null = "machine", streamin
 const inlineLink = (path: string) => `[file](/local-file?path=${encodeURIComponent(path)})`;
 
 describe("inline Work file references over the desktop bridge", () => {
-  it("previews all five command-created images after streaming, reload and branching without attachment rows", async () => {
+  it("previews all five command-created images after streaming and reload without attachment rows", async () => {
     const paths = Array.from({ length: 5 }, (_, index) => `downloaded_images/image_${index}.jpg`);
     for (const path of paths)
-      files[`/workspaces/${branchId}/${path}`] = { mediaType: "image/jpeg", base64: "AAAA" };
-    const content = paths.map((path) => inlineLink(`/workspaces/${sourceId}/${path}`)).join("\n\n");
+      files[`/workspace/${path}`] = { mediaType: "image/jpeg", base64: "AAAA" };
+    const content = paths.map((path) => inlineLink(`/workspace/${path}`)).join("\n\n");
     const first = render(inlineView(content, "machine", true));
     expect(asked).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "Preview image_0.jpg" }));
@@ -358,28 +323,15 @@ describe("inline Work file references over the desktop bridge", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     }
     expect(asked).toEqual(
-      [paths[0]!, ...paths].map((path) => ({
-        tag: "readBinary",
-        path: `/workspaces/${branchId}/${path}`,
-      })),
+      [paths[0]!, ...paths].map((path) => ({ tag: "readBinary", path: `/workspace/${path}` })),
     );
     expect(revoked).toEqual(handed);
-  });
-
-  it("does not fall back to a surviving source file when the branch copy is missing", async () => {
-    const path = `/workspaces/${sourceId}/missing.png`;
-    files[path] = { mediaType: "image/png", base64: "AAAA" };
-    render(inlineView(inlineLink(path)));
-    await userEvent.click(screen.getByRole("button", { name: "Preview missing.png" }));
-    await waitFor(() => expect(sonner.error).toHaveBeenCalledTimes(1));
-    expect(asked).toEqual([{ tag: "readBinary", path: `/workspaces/${branchId}/missing.png` }]);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it.each([null, "other-machine"])(
     "refuses unknown or foreign machine provenance: %s",
     async (origin) => {
-      render(inlineView(inlineLink(`/workspaces/${sourceId}/image.png`), origin));
+      render(inlineView(inlineLink("/workspace/image.png"), origin));
       const chip = screen.getByRole("button", { name: "Unavailable file: image.png" });
       expect(chip).toBeDisabled();
       await userEvent.click(chip);
@@ -390,7 +342,7 @@ describe("inline Work file references over the desktop bridge", () => {
   it.each(["svg", "html"])(
     "keeps inline %s files in the existing safe preview",
     async (extension) => {
-      const path = `/attached/file.${extension}`;
+      const path = `/folders/attached/file.${extension}`;
       files[path] = {
         text:
           extension === "svg"

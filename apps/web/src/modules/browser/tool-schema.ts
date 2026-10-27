@@ -74,7 +74,7 @@ export const shownBrowserArgs = <A extends Readonly<Record<string, unknown>>>(
  * descriptions carry the mechanics, this carries the rules that span them.
  */
 export const BROWSER_TOOLS_SYSTEM_HINT = [
-  "You can use a web browser on the user's computer: real tabs in the side panel, logged in wherever the user is.",
+  "You can use a web browser on the user's computer: real tabs in the side panel, logged in wherever the user is. Its tools are the browser family: load it with load_tools before the first one.",
   "Snapshot before acting and again after, since references change with the page.",
   "Prefer web search and reading pages through the web tools for public information; use the browser for pages that need the user's session, interaction or a real browser.",
   "Opening a site the user has not allowed asks them first, and actions on a page may ask too. A refusal is an answer, not an error to work around.",

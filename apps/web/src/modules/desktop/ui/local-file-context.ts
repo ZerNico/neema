@@ -7,7 +7,6 @@ import { createContext, useContext } from "react";
  */
 export const LocalFileConversationContext = createContext<{
   conversationId: string;
-  workspaceRoot: string | null;
 } | null>(null);
 
 /** The conversation the rendered file paths resolve against; null above the view. */

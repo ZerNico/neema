@@ -358,7 +358,7 @@ const CASES: Case[] = [
   {
     family: "desktop",
     label: "read a file",
-    name: "read_local_file",
+    name: "read_file",
     status: "complete",
     result: desktopResult,
     arguments: { path: "a.ts" },
@@ -368,7 +368,7 @@ const CASES: Case[] = [
   {
     family: "desktop",
     label: "was denied",
-    name: "read_local_file",
+    name: "read_file",
     status: "error",
     result: { ...desktopResult, ok: false, summary: "Denied" },
     error: { code: "DesktopToolFailed", message: "Denied" },

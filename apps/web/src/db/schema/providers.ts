@@ -118,6 +118,9 @@ export const modelSettings = pgTable("model_settings", {
   // Side generations (chat titles) run on this model when set; null, or a
   // model that fails, falls back to the chat's own model.
   utilityModelId: text("utility_model_id").references(() => models.id, { onDelete: "set null" }),
+  // Checks a chat's computer calls under "ask when risky"; null is the chat's own model. A set
+  // model that is unavailable means asking the person, never a quiet fallback.
+  reviewModelId: text("review_model_id").references(() => models.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

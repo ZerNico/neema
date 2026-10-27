@@ -520,7 +520,7 @@ export const PRESENTATION_OPERATIONS = {
       imageRef: {
         type: "image",
         about:
-          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference import_local_file returned.",
+          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference copy_from_computer returned.",
       },
       imageFingerprint: { type: "string", max: 64, about: "Optional SHA-256 pin of the image." },
       ...box,
@@ -548,7 +548,7 @@ export const PRESENTATION_OPERATIONS = {
       imageRef: {
         type: "image",
         about:
-          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference import_local_file returned.",
+          "A picture: attachment:<id>, project:<id>@<version>, a skill image's skill: reference, or the working: reference copy_from_computer returned.",
       },
       imageFingerprint: { type: "string", max: 64, about: "Optional SHA-256 pin of the image." },
     },

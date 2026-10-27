@@ -1,17 +1,16 @@
+import { useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
 import { m } from "~/paraglide/messages.js";
 import {
   ArrowUpRight01Icon,
   Delete02Icon,
   Download04Icon,
   FileImportIcon,
+  FolderAddIcon,
   Edit02Icon,
   File01Icon,
   Folder01Icon,
   FolderSearchIcon,
-  FolderTransferIcon,
   NoInternetIcon,
-  FolderShared01Icon,
-  ComputerIcon,
   Key01Icon,
   PencilEdit02Icon,
   SearchList01Icon,
@@ -46,22 +45,25 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
-  read_local_file: File01Icon,
-  import_local_file: FileImportIcon,
-  write_local_file: PencilEdit02Icon,
-  save_to_workspace: Download04Icon,
-  edit_local_file: Edit02Icon,
-  move_local_file: FolderTransferIcon,
-  delete_local_file: Delete02Icon,
+  read_file: File01Icon,
+  copy_from_computer: FileImportIcon,
+  write_file: PencilEdit02Icon,
+  copy_to_computer: Download04Icon,
+  edit_file: Edit02Icon,
+  delete_files: Delete02Icon,
   run_command: TerminalIcon,
   request_network_access: NoInternetIcon,
-  request_path_access: FolderShared01Icon,
-  request_local_services: ComputerIcon,
+  request_folder: FolderAddIcon,
   request_ssh_agent: Key01Icon,
 };
 
+// A stored row may name a tool since removed: it keeps an icon, a plain one.
 const iconOf = (name: DesktopToolActivity["name"]) =>
-  isBrowserTool(name) ? BROWSER_ACTIVITY[name].icon : ICONS[name];
+  isBrowserTool(name)
+    ? BROWSER_ACTIVITY[name].icon
+    : Object.hasOwn(ICONS, name)
+      ? ICONS[name]
+      : File01Icon;
 
 /** The argument a reader would want to see: the path, the pattern, the command. */
 const argText = (activity: DesktopToolActivity) => {
@@ -75,36 +77,27 @@ const argText = (activity: DesktopToolActivity) => {
       const port = typeof args.port === "number" ? args.port : 443;
       return host ? `${host}:${port}` : "";
     }
-    case "request_path_access":
-      return text(args.path);
     case "find_files":
     case "search_files":
       return text(args.pattern);
-    case "move_local_file":
-      return text(args.from) && text(args.to) ? `${text(args.from)} → ${text(args.to)}` : "";
-    case "delete_local_file":
+    case "delete_files":
       return deletePathsOf(args).join("\n");
     default:
       return text(args.path);
   }
 };
 
-/**
- * The file a finished row leaves behind, when there is one to look at. A move
- * names its destination: the source is the path that no longer exists.
- */
+/** The file a finished row leaves behind, when there is one to look at. */
 const previewablePath = (activity: DesktopToolActivity): string | null => {
   if (activity.status !== "complete") return null;
   const args = activity.args ?? {};
   switch (activity.name) {
-    case "read_local_file":
-    case "import_local_file":
-    case "write_local_file":
-    case "edit_local_file":
-    case "save_to_workspace":
+    case "read_file":
+    case "copy_from_computer":
+    case "write_file":
+    case "edit_file":
+    case "copy_to_computer":
       return text(args.path) || null;
-    case "move_local_file":
-      return text(args.to) || null;
     default:
       return null;
   }
@@ -126,11 +119,11 @@ const shortPath = (path: string, roots: ReadonlyArray<{ name: string; path: stri
 };
 
 const PATH_TOOLS = new Set([
-  "read_local_file",
-  "import_local_file",
-  "write_local_file",
-  "save_to_workspace",
-  "edit_local_file",
+  "read_file",
+  "copy_from_computer",
+  "write_file",
+  "copy_to_computer",
+  "edit_file",
 ]);
 
 /** What a call that ended without a result tried, in reader words, with its path where it names one. */
@@ -143,16 +136,15 @@ const FAILED: Partial<
   list_folder: { bare: m.chat_desktop_failed_list },
   find_files: { bare: m.chat_desktop_failed_find },
   search_files: { bare: m.chat_desktop_failed_search },
-  read_local_file: { bare: m.chat_desktop_failed_read, path: m.chat_desktop_failed_read_path },
-  import_local_file: {
+  read_file: { bare: m.chat_desktop_failed_read, path: m.chat_desktop_failed_read_path },
+  copy_from_computer: {
     bare: m.chat_desktop_failed_import,
     path: m.chat_desktop_failed_import_path,
   },
-  write_local_file: { bare: m.chat_desktop_failed_write, path: m.chat_desktop_failed_write_path },
-  save_to_workspace: { bare: m.chat_desktop_failed_save, path: m.chat_desktop_failed_save_path },
-  edit_local_file: { bare: m.chat_desktop_failed_edit, path: m.chat_desktop_failed_edit_path },
-  move_local_file: { bare: m.chat_desktop_failed_move },
-  delete_local_file: { bare: m.chat_desktop_failed_delete },
+  write_file: { bare: m.chat_desktop_failed_write, path: m.chat_desktop_failed_write_path },
+  copy_to_computer: { bare: m.chat_desktop_failed_save, path: m.chat_desktop_failed_save_path },
+  edit_file: { bare: m.chat_desktop_failed_edit, path: m.chat_desktop_failed_edit_path },
+  delete_files: { bare: m.chat_desktop_failed_delete },
   run_command: { bare: m.chat_desktop_failed_run },
 };
 
@@ -180,19 +172,17 @@ const runningLabel = (
       return what ? m.chat_desktop_finding_path({ path: what }) : m.chat_desktop_finding();
     case "search_files":
       return what ? m.chat_desktop_searching_path({ path: what }) : m.chat_desktop_searching();
-    case "read_local_file":
+    case "read_file":
       return what ? m.chat_desktop_reading_path({ path: what }) : m.chat_desktop_reading();
-    case "import_local_file":
+    case "copy_from_computer":
       return what ? m.chat_desktop_importing_path({ path: what }) : m.chat_desktop_importing();
-    case "write_local_file":
+    case "write_file":
       return what ? m.chat_desktop_writing_path({ path: what }) : m.chat_desktop_writing();
-    case "save_to_workspace":
+    case "copy_to_computer":
       return what ? m.chat_desktop_saving_path({ path: what }) : m.chat_desktop_saving();
-    case "edit_local_file":
+    case "edit_file":
       return what ? m.chat_desktop_editing_path({ path: what }) : m.chat_desktop_editing();
-    case "move_local_file":
-      return what ? m.chat_desktop_moving_path({ path: what }) : m.chat_desktop_moving();
-    case "delete_local_file": {
+    case "delete_files": {
       const listed = deletePathsOf(activity.args);
       if (listed.length === 1) return m.chat_desktop_deleting_path({ path: listed[0]! });
       if (listed.length > 1) return m.chat_desktop_deleting_count({ count: listed.length });
@@ -204,12 +194,10 @@ const runningLabel = (
       return what
         ? m.chat_desktop_requesting_network_to({ host: what })
         : m.chat_desktop_requesting_network();
-    case "request_path_access":
+    case "request_folder":
       return what
-        ? m.chat_desktop_requesting_read_to({ path: what })
-        : m.chat_desktop_requesting_read();
-    case "request_local_services":
-      return m.chat_desktop_requesting_local();
+        ? m.chat_desktop_requesting_folder_path({ path: what })
+        : m.chat_desktop_requesting_folder();
     case "request_ssh_agent":
       return m.chat_desktop_requesting_ssh();
   }
@@ -268,8 +256,10 @@ const approvalTitle = (
   activity: DesktopToolActivity,
   kind: PendingKind,
   roots: ReadonlyArray<{ name: string; path: string }>,
+  machine?: string,
 ) => {
   if (kind === "site") return m.chat_desktop_ask_site();
+  if (kind === "bind") return m.chat_computer_bind({ machine: machine ?? "" });
   if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask();
   switch (kind) {
     case "read":
@@ -280,12 +270,6 @@ const approvalTitle = (
           : m.chat_desktop_ask_read();
     case "command":
       return m.chat_desktop_ask_command();
-    case "path":
-      return m.chat_desktop_ask_path();
-    case "local":
-      return m.chat_desktop_ask_local();
-    case "ssh-agent":
-      return m.chat_desktop_ask_ssh();
     case "network":
       return activity.args?.privateNetwork === true
         ? m.chat_desktop_ask_private_network()
@@ -300,11 +284,9 @@ const approvalTitle = (
         : m.chat_desktop_ask_delete_count({ count: listed.length });
     }
     default:
-      return activity.name === "move_local_file"
-        ? m.chat_desktop_ask_move()
-        : activity.name === "write_local_file"
-          ? m.chat_desktop_ask_write()
-          : m.chat_desktop_ask_change();
+      return activity.name === "write_file"
+        ? m.chat_desktop_ask_write()
+        : m.chat_desktop_ask_change();
   }
 };
 
@@ -342,23 +324,33 @@ function DeletePathList({
   );
 }
 
-/** A site is allowed once, for this chat, or for this desktop, never by a blanket grant. */
-/** Once, for this chat, or for every chat: the scopes a site or a network destination takes. */
+/**
+ * The scopes a site or a network destination takes: a site once, for this chat or for this
+ * desktop; a destination for this chat or for every chat, never by a blanket grant.
+ */
 function ScopeChoices({
   decide,
   once,
+  note,
 }: {
   decide: (choice: ApprovalChoice) => void;
-  once: string;
+  once?: string;
+  note: string;
 }) {
   return (
     <>
-      <p className="text-muted-foreground text-xs">{m.chat_desktop_always_note()}</p>
+      <p className="text-muted-foreground text-xs">{note}</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => decide("allow")}>
-          {once}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => decide("allow-chat")}>
+        {once ? (
+          <Button size="sm" onClick={() => decide("allow")}>
+            {once}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant={once ? "outline" : "default"}
+          onClick={() => decide("allow-chat")}
+        >
           {m.chat_desktop_allow_chat()}
         </Button>
         <Button size="sm" variant="outline" onClick={() => decide("allow-always")}>
@@ -372,15 +364,13 @@ function ScopeChoices({
   );
 }
 
-const blanketLabel = (kind: PendingKind) =>
-  kind === "command"
-    ? m.chat_desktop_blanket_command()
-    : kind === "browser-action"
-      ? m.chat_desktop_blanket_browser()
-      : m.chat_desktop_blanket_files();
-
 export interface DesktopApprovalRequest {
   readonly kind: PendingKind;
+  /** The machine the call would run on: the one to bind for `bind`, else where it runs. */
+  readonly machine?: string | undefined;
+  readonly machineId?: string | undefined;
+  /** Why the reviewer asked, under "ask when risky". */
+  readonly reason?: string | undefined;
   /** The live call's arguments, which may hold what the transcript never stores. */
   readonly args?: Readonly<Record<string, unknown>> | null;
   readonly decide: (choice: ApprovalChoice) => void;
@@ -403,7 +393,8 @@ function ApprovalCard({
   approval: DesktopApprovalRequest;
   roots: ReadonlyArray<{ name: string; path: string }>;
 }) {
-  const listed = activity.name === "delete_local_file" ? deletePathsOf(activity.args) : [];
+  const here = useLocalMachineId();
+  const listed = activity.name === "delete_files" ? deletePathsOf(activity.args) : [];
   // A site question may come from a click: the address is what is asked about.
   const what =
     approval.kind === "site"
@@ -422,50 +413,54 @@ function ApprovalCard({
             className="size-4 shrink-0"
             aria-hidden
           />
-          <span className="min-w-0 truncate">{approvalTitle(activity, approval.kind, roots)}</span>
+          <span className="min-w-0 truncate">
+            {approvalTitle(activity, approval.kind, roots, approval.machine)}
+          </span>
         </div>
-        {listed.length > 1 ? (
+        {/* Which machine it runs on, when not the one the reader is at: "this computer" in the
+            title would be wrong there, as on a card asked again after the chat moved. */}
+        {approval.machine && approval.kind !== "bind" && approval.machineId !== here ? (
+          <p className="text-muted-foreground text-xs">
+            {m.chat_desktop_ask_on({ machine: approval.machine })}
+          </p>
+        ) : null}
+        {approval.reason ? (
+          <p className="text-muted-foreground text-xs">
+            {m.chat_desktop_review_reason({ reason: approval.reason })}
+          </p>
+        ) : null}
+        {approval.kind === "bind" ? (
+          <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
+        ) : listed.length > 1 ? (
           <DeletePathList paths={listed} roots={roots} />
         ) : what ? (
           <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
             {what}
           </pre>
         ) : null}
-        {approval.kind === "ssh-agent" ? (
-          <>
-            <p className="text-muted-foreground text-xs">{m.chat_desktop_ssh_note()}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => approval.decide("allow-chat")}>
-                {m.chat_desktop_allow_chat()}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
-                {m.chat_desktop_deny()}
-              </Button>
-            </div>
-          </>
-        ) : approval.kind === "site" ? (
-          <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_once()} />
-        ) : approval.kind === "network" || approval.kind === "path" || approval.kind === "local" ? (
-          <>
-            {approval.kind === "local" ? (
-              <p className="text-muted-foreground text-xs">{m.chat_desktop_local_note()}</p>
-            ) : null}
-            <ScopeChoices decide={approval.decide} once={m.chat_desktop_allow_answer()} />
-          </>
+        {approval.kind === "site" ? (
+          <ScopeChoices
+            decide={approval.decide}
+            once={m.chat_desktop_allow_once()}
+            note={m.chat_desktop_always_note()}
+          />
+        ) : approval.kind === "network" ? (
+          <ScopeChoices decide={approval.decide} note={m.chat_computer_network_note()} />
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => approval.decide("allow")}>
               {m.chat_desktop_allow()}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => approval.decide("deny")}>
-              {m.chat_desktop_deny()}
-            </Button>
-            {/* Deletes and network destinations are always asked about individually. */}
+            {/* Deletes are always asked about one by one. The title says which kind the chat
+                is allowed, so the button needn't. */}
             {allowsBlanket(approval.kind) ? (
-              <Button size="sm" variant="ghost" onClick={() => approval.decide("allow-rest")}>
-                {blanketLabel(approval.kind)}
+              <Button size="sm" variant="outline" onClick={() => approval.decide("allow-rest")}>
+                {m.chat_desktop_allow_chat()}
               </Button>
             ) : null}
+            <Button size="sm" variant="ghost" onClick={() => approval.decide("deny")}>
+              {m.chat_desktop_deny()}
+            </Button>
           </div>
         )}
       </CardContent>
@@ -491,8 +486,8 @@ export function DesktopActivityBlock({
   const running = activity.status === "running";
   const failed = activity.status === "error";
   const [open, setOpen] = useState(false);
-  // Null in a browser, which is what keeps a Work chat readable there without
-  // offering a machine it cannot reach. Nothing is read until this is called.
+  // Null in a browser or on another machine, which keeps the chat readable there
+  // without offering files it cannot reach. Nothing is read until this is called.
   const preview = useLocalFilePreview(previewablePath(activity));
   if (running && approval)
     return (

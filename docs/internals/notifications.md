@@ -55,8 +55,8 @@ told. Never on load, since browsers quiet the prompt for sites whose prompts get
   A tab shows it through the Notification API unless its window is focused on that chat.
 - In the desktop app that API produces native notifications without a permission prompt,
   and the hidden window keeps its page and its sync connection. A click asks the shell to
-  bring the window forward through the optional `chrome.showWindow`, outside the Work
-  protocol version, so an older shell still runs Work and only stays in the background.
+  bring the window forward through the optional `chrome.showWindow`, outside the bridge's
+  protocol version, so an older shell still works and only stays in the background.
 - Browsers that are closed, and phones with neema on the Home Screen, get Web Push.
   Encryption (RFC 8291) and the server's signed claim (VAPID, RFC 8292) are written on
   `node:crypto` and tested against the RFC's own example, rather than taken from a

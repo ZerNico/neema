@@ -9,6 +9,10 @@ import { KeptWorkingFiles } from "~/modules/chat/server/kept-working-files.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { StreamEngine } from "~/modules/chat/server/streaming.ts";
+import { CommandReviewer } from "~/modules/computer/server/review.ts";
+import { ComputerCalls } from "~/modules/computer/server/calls.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { CustomToolRepo } from "~/modules/custom-tools/server/repo.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { UsageLimits } from "~/modules/limits/server/service.ts";
@@ -51,6 +55,7 @@ const baseLayer = (url: string, maxConnections: number) =>
     ChatRepo.layer,
     CustomToolRepo.layer,
     MemoryRepo.layer,
+    ComputerRepo.layer,
     ProviderRepo.layer,
     ToolsRepo.layer,
     GroupRepo.layer,
@@ -76,9 +81,10 @@ const baseLayer = (url: string, maxConnections: number) =>
 /** Database, repos and the sync bus: what a `services` replacement may build on. */
 export type HarnessBase = Layer.Success<ReturnType<typeof baseLayer>>;
 
-const defaultServices = (gateway: Partial<AiGateway["Service"]> | undefined) =>
-  Layer.mergeAll(
-    fakeGateway(gateway),
+const defaultServices = (gateway: Partial<AiGateway["Service"]> | undefined) => {
+  const providerLayer = fakeGateway(gateway);
+  return Layer.mergeAll(
+    providerLayer,
     FakeWebSearch,
     FakeUrlReader,
     FakeBlobStore,
@@ -86,10 +92,16 @@ const defaultServices = (gateway: Partial<AiGateway["Service"]> | undefined) =>
     FakeCustomToolRuntime,
     NoIntegrations,
     FakeMemoryService,
-    ExternalCompletion.layer,
+    // As in runtime.ts: computer calls complete external waits and reach machines through the hub.
+    ComputerCalls.layer.pipe(
+      Layer.provideMerge(MachineHub.layer),
+      Layer.provideMerge(ExternalCompletion.layer),
+      Layer.provideMerge(CommandReviewer.layer.pipe(Layer.provide(providerLayer))),
+    ),
     ScheduleDraftService.layer,
     AgentDraftService.layer,
   );
+};
 
 /** Everything a `knowledge` replacement may build on: base, services and attachments. */
 export type HarnessCore =

@@ -305,7 +305,7 @@ const seedConversation = Effect.fn("test.seedConversation")(function* (
   const first = yield* repo.createTurn({
     resolve: plainResolve,
     userId,
-    conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+    conversation: { kind: "new", id: uuidv7() },
     modelId,
     content: `question 0 ${"x".repeat(2000)}`,
     attachmentIds: [],
@@ -1142,7 +1142,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId: smallModelId,
           content: `Read ${userUrl}`,
           attachmentIds: [],
@@ -1345,7 +1345,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
@@ -1439,7 +1439,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],
@@ -1491,7 +1491,7 @@ describe("compaction inside a generation", () => {
         const turn = yield* repo.createTurn({
           resolve: plainResolve,
           userId,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId: toolModelId,
           content: "Find the current source.",
           attachmentIds: [],

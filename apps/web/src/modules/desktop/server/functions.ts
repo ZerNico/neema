@@ -4,6 +4,7 @@ import { requireSession } from "~/modules/auth/server/middleware.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
+import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import { acceptDesktopToolResult } from "./result.ts";
 import { DesktopToolResult } from "../tool-schema.ts";
 
@@ -51,14 +52,13 @@ export const desktopWorkSnapshot = createServerFn({ method: "POST" })
               approval: conversation.permissionLevel,
             });
         }
-        // Work chats with a queued message ready to start. The server cannot
-        // name a live machine, so this app starts them with its own executor.
-        const queued = yield* repo.listQueuedConversations({ limit: 20, mode: "work", userId });
+        // Only browser calls run in the app's pages; computer calls go to the chat's machine.
         return {
           ...live,
-          calls: live.calls.map((call) => ({ ...call, args: JSON.stringify(call.args) })),
+          calls: live.calls
+            .filter((call) => isBrowserTool(call.name))
+            .map((call) => ({ ...call, args: JSON.stringify(call.args) })),
           settings,
-          queued: queued.map((row) => row.conversationId),
         };
       }),
     ),

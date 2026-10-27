@@ -74,7 +74,7 @@ const startConversation = Effect.fn("test.startConversation")(function* (
   const turn = yield* repo.createTurn({
     resolve: plainResolve,
     userId,
-    conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+    conversation: { kind: "new", id: uuidv7() },
     modelId,
     content,
     attachmentIds: [],

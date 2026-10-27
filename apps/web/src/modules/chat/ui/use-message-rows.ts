@@ -14,13 +14,6 @@ type ConversationRows = Awaited<ReturnType<typeof getConversationWithMessages>>;
  * result: the display map runs on every stream chunk and must not rescan the flat lists.
  */
 export function useMessageRows(data: ConversationRows) {
-  const machinesByMessage = useMemo(
-    () =>
-      new Map(
-        (data.generations ?? []).map((row) => [row.messageId, row.desktopMachine?.id ?? null]),
-      ),
-    [data.generations],
-  );
   // What of its agent each answer ran without, keyed by the answer itself.
   const agentUnavailableByMessage = useMemo(
     () =>
@@ -152,25 +145,7 @@ export function useMessageRows(data: ConversationRows) {
     }
     return result;
   }, [data.generations, data.messages]);
-  // Workspace imports belong to the send that claimed them: the user message
-  // before the attempt. Names only; the workspace path is this machine's.
-  const workspaceFilesByUserMessage = useMemo(() => {
-    const byAssistant = new Map(
-      (data.generations ?? []).map((row) => [row.messageId, row.workspaceFiles ?? []] as const),
-    );
-    const result = new Map<string, ReadonlyArray<string>>();
-    let previousUser: string | null = null;
-    for (const message of data.messages) {
-      if (message.role === "user") previousUser = message.id;
-      else if (message.role === "assistant" && previousUser) {
-        const files = byAssistant.get(message.id);
-        if (files && files.length > 0) result.set(previousUser, files);
-      }
-    }
-    return result;
-  }, [data.generations, data.messages]);
   return {
-    machinesByMessage,
     agentUnavailableByMessage,
     attachmentsByMessage,
     steersByAnswer,
@@ -181,6 +156,5 @@ export function useMessageRows(data: ConversationRows) {
     modelByMessage,
     collectionsByUserMessage,
     skillsByUserMessage,
-    workspaceFilesByUserMessage,
   };
 }

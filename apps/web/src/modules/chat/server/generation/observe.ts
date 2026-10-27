@@ -63,6 +63,7 @@ import { projectCustomToolResult } from "~/modules/custom-tools/tool-schema.ts";
 import { projectIntegrationToolResult } from "~/modules/integrations/tool-schema.ts";
 import { NotifyToolResult } from "~/modules/schedules/notify-schema.ts";
 import { isBrowserTool, shownBrowserArgs } from "~/modules/browser/tool-schema.ts";
+import { COMPUTER_EXECUTOR } from "~/modules/tools/server/external-completion.ts";
 import { debugArguments, storedArguments } from "../stored-arguments.ts";
 import { mergeSource } from "~/modules/tools/sources.ts";
 import type { ToolChunkEnvelope, WebToolResult } from "~/modules/tools/schema.ts";
@@ -287,7 +288,7 @@ export const observePart = (
 ) =>
   Effect.gen(function* () {
     const { deps, input, ctx, sink, usage, tools, promptDeps, attemptPrompt } = env;
-    const { external, imageAttachments, keptFiles } = deps;
+    const { external, computerCalls, imageAttachments, keptFiles } = deps;
     // Every call settles through one of these two, so each is noted for the
     // round's repeat guard without each family having to remember it.
     const noteSettled = (call: {
@@ -549,22 +550,26 @@ export const observePart = (
           // SDK handlers run concurrently with this observer.
           // Release them only after the owned registration exists.
           const ready = callRowReady(part.id);
-          if (!input.desktop || !input.generationId) {
+          const browser = isBrowserTool(part.name);
+          // Browser calls run in the sending app's pages; without that app nothing can.
+          if (!input.generationId || (browser && !input.desktop)) {
             yield* Deferred.succeed(ready, undefined);
             return;
           }
+          const timeoutMs = desktopToolTimeout(part.name as DesktopToolName);
           yield* external.open(rowId, {
             userId: input.userId,
             conversationId: input.conversationId,
             messageId: input.messageId,
             generationId: input.generationId,
-            executorId: input.desktop.executorId,
+            // A computer call is never claimed by a page: the chat's machine runs it.
+            executorId: browser ? input.desktop!.executorId : COMPUTER_EXECUTOR,
             deviceSessionId: input.deviceSessionId,
             name: part.name,
             args,
             // Only the browser needs to know: whether the user's own
             // text vouched for the address, and whether to keep pages.
-            ...(isBrowserTool(part.name)
+            ...(browser
               ? {
                   meta: {
                     preauthorized:
@@ -573,8 +578,19 @@ export const observePart = (
                   },
                 }
               : {}),
-            timeoutMs: desktopToolTimeout(part.name as DesktopToolName),
+            timeoutMs,
           });
+          if (!browser)
+            yield* computerCalls.open({
+              userId: input.userId,
+              conversationId: input.conversationId,
+              callId: rowId,
+              name: part.name,
+              args,
+              timeoutMs,
+              senderSession: input.deviceSessionId,
+              modelId: input.modelId,
+            });
           yield* Deferred.succeed(ready, {
             rowId,
             turnIndex: turn,
@@ -763,7 +779,7 @@ export const observePart = (
           // but an import is also shown to the model when it can
           // take that kind (docs/internals/files.md).
           const returned = result.ok ? result.file : undefined;
-          const imported = part.name === "import_local_file";
+          const imported = part.name === "copy_from_computer";
           const created = returned
             ? yield* Effect.try({
                 try: () =>

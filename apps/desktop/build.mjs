@@ -1,13 +1,14 @@
 import { execSync } from "node:child_process";
 import { build } from "esbuild";
+import { compileMessages } from "./paraglide.ts";
 
 /**
  * Electron loads plain JS, and the sources import with explicit `.ts`
  * extensions, so the three entry points are bundled rather than emitted.
  *
- * `electron` is provided by the runtime. `@microsoft/mxc-sdk` stays external
- * because it loads its native library and executor binaries from paths inside
- * its own package; bundling would leave those behind and no command could run.
+ * `electron` is provided by the runtime. `microsandbox` stays external because it
+ * loads its native addon, VM runner and libkrunfw from paths inside its own
+ * package; bundling would leave those behind and no chat VM could start.
  */
 
 /**
@@ -27,6 +28,29 @@ const buildStamp = () => {
   return `${sha} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
 };
 
+/**
+ * The guest image chats' VMs boot. A release passes `name:tag@digest` as its sandbox job
+ * resolved it (.github/workflows/release.yml). Other builds name the tag CI gives this
+ * checkout's committed infra/sandbox-image, so they boot the image of their own sources too.
+ * Edits not yet published need `NEEMA_SANDBOX_IMAGE` and a local build.
+ */
+const sandboxImage = () => {
+  if (process.env.SANDBOX_IMAGE_REF) return process.env.SANDBOX_IMAGE_REF;
+  try {
+    const tree = execSync("git rev-parse HEAD:infra/sandbox-image", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    return `ghcr.io/zernico/neema-sandbox:tree-${tree.slice(0, 16)}`;
+  } catch {
+    // Not a checkout, so no sources to name: main's latest image. Said aloud, since it floats;
+    // a release never gets here (it passes SANDBOX_IMAGE_REF, and desktop.yml insists on it).
+    console.warn("build: no git checkout, so chats' VMs use the edge sandbox image");
+    return "ghcr.io/zernico/neema-sandbox:edge";
+  }
+};
+
 export const buildOptions = () => ({
   entryPoints: ["src/main.ts", "src/preload.ts", "src/connect-preload.ts"],
   outdir: "dist",
@@ -38,11 +62,15 @@ export const buildOptions = () => ({
   // ESM and `require` would be undefined. The output really is CommonJS.
   outExtension: { ".js": ".cjs" },
   sourcemap: true,
-  external: ["electron", "@microsoft/mxc-sdk"],
-  define: { __BUILD_STAMP__: JSON.stringify(buildStamp()) },
+  external: ["electron", "microsandbox"],
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+    __SANDBOX_IMAGE__: JSON.stringify(sandboxImage()),
+  },
 });
 
 // Run directly: one build. Imported by dev.mjs: the options only.
 if (import.meta.main) {
+  await compileMessages();
   await build(buildOptions());
 }

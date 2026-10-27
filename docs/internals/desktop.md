@@ -1,18 +1,32 @@
-# Work chats and the desktop shell
+# Chats' computers and the desktop shell
 
 The Electron shell loads the deployed site and exposes an origin-checked,
-schema-derived bridge. The web application owns authentication; Electron owns
-folder grants, sandboxed local execution and native window controls. Folder
-paths stay out of the server database; they live in the desktop profile and in
-attempt-scoped prompt and tool traffic only.
+schema-derived bridge. The web application owns authentication. Electron owns native window
+controls, folder grants and the computers of chats: a Linux microVM per chat, which runs that
+chat's local tools. Host paths stay on the machine. The server and the model only ever see
+folder names and the VM's own paths.
+
+The model in five rules:
+
+1. A chat may have a computer. It binds to one of the person's machines the first time it
+   needs one. There is no chat mode.
+2. Everything local runs in the chat's VM: commands and file tools alike. The VM sees only
+   `/workspace` and the attached folders, and its only way out is the
+   [egress proxy](egress-proxy.md).
+3. The machine is the executor, not a page. The desktop's main process holds one connection
+   to the server as that machine, and calls are routed to the chat's machine from any device.
+4. Decisions live on the server: the permission level, network grants and approvals. The
+   machine keeps what is its own: folders, the SSH agent allowance, its VMs.
+5. Offline is a state. A chat whose machine is offline still works from its context, and a
+   local call is answered at once with that reason.
 
 The window uses `hiddenInset` on macOS and `hidden` with Window Controls Overlay
 on Windows/Linux, retaining standard controls rather than web replacements.
-An optional presentation capability, independent of the Work protocol version,
+An optional presentation capability, independent of the protocol version,
 provides platform, fullscreen state and a validated theme preference. An optional
 `browser` capability, also outside the protocol version, names the server's browser
 profile and paces embedded pages; see [the embedded browser](browser.md). Theme writes
-require the same configured origin, main window and main frame as Work calls.
+require the same configured origin, main window and main frame as bridge calls.
 Electron owns the overlay palette and follows the requested light/dark/system
 appearance; state and OS appearance changes use events, not polling.
 
@@ -29,9 +43,9 @@ original layout; an updated shell needs the updated site for integrated layout.
 Linux decoration still depends on the desktop/window manager.
 
 Connection and initial-load recovery are bundled local pages with their own drag
-strips. Their preloads expose no Work surface, and local actions require the exact
+strips. Their preloads expose no bridge surface, and local actions require the exact
 bundled document, window and main frame. Recovery can retry only the configured
-server. Aborted/subframe failures are ignored, and an established Work renderer
+server. Aborted/subframe failures are ignored, and an established renderer
 is not replaced merely because later network activity fails.
 
 The server chooser is not only a first-run screen. The app, dock and tray menus,
@@ -41,9 +55,9 @@ typed in the chooser, never sent by a page, so a compromised site cannot point t
 bridge at another origin. Connecting writes the config, replaces the main window
 with one for the new origin and destroys the chooser; cancelling the chooser
 while a main window exists just closes it. Local work belongs to the server that
-started it, so opening the chooser or confirming a new address while Work is
+started it, so opening the chooser or confirming a new address while work is
 active asks first, with the same wording family as Quit, and disposes
-executions and owned processes only after a yes. A chooser opened while idle
+the server's computer and its running calls only after a yes. A chooser opened while idle
 does not skip that question if work starts before connect. Folder and other grants
 are keyed by server origin, so the next server inherits none of them.
 `CHAT_DESKTOP_SERVER` pins the server for development: main tells every
@@ -54,7 +68,7 @@ switch at all, the menu item is absent, and the IPC still refuses as a backstop.
 dev runner supplies a checkout-local directory. The installed profile is unchanged.
 See [development isolation](development.md). An address must be https, or plain http
 on this machine, whether typed or saved: whoever sits on the network path of a plain-http
-server could inject the script that drives commands and files. A saved one that is not
+server could inject the script that drives the browser tools and the bridge. A saved one that is not
 opens the chooser.
 
 ## Sign-in happens in the browser
@@ -114,670 +128,333 @@ because the frame loads before the SPA mounts its listener. Windows and Linux
 deliver the link as an argument, of a second instance when the app is running
 and of `process.argv` on a cold start; both are read.
 
-## Execution belongs to the authenticated app, not a chat route
+## A chat may have a computer
 
-`DesktopWorkProvider` lives inside `IdentityBoundary`, above the route outlet.
-It therefore sits above the fixed sidebar and renders no chrome itself: the
-unreachable-server notice is a separate context consumer the layout places in
-the content column, under the header. Because no poll can disprove a failure,
-one schedules its own snapshot refetch on a bounded backoff and on `online`
-and `focus`, and any answered request clears it, not only a delivered result.
-The notice needs the last successful snapshot to have held attempts or calls,
-so a blip with nothing running, or before any snapshot arrived, stays silent.
-Its controller watches the authenticated Work snapshot, refreshed by id-only
-sync notifications, initial subscription readiness and reconnect reconciliation.
-Conversation policy/title changes and terminal message events refresh it too;
-there is no periodic snapshot fetch. The engine's ten-second maintenance cancels
-stale tracked attempts independently of snapshot reads. Message SSE is for display,
-not execution authority. Opening chat B or settings does not stop chat A, reset
-its approvals, or replay its calls. Each conversation has independent consent.
-Off-route approvals use the shared Sonner notifications with a Review action,
-not a blocking dialog. Each pending call is announced once while it remains
-pending; refreshes and dismissal do not repeat it. A persistent approval-count
-menu opens any waiting conversation even after its toast is dismissed. Returning
-to the conversation dismisses its toast, and resolved requests or host teardown
-clear their notifications. Allow and Deny stay in the transcript.
+- **A machine** is one desktop install a person signed in on, keyed by its own id
+  (`machine.json`) together with the person, in `machines`. A reinstall is a new machine, and so
+  is a profile copied to another computer (Migration Assistant, a restored backup): the file
+  keeps a hash of the hardware's own id, and a mismatch mints a new one, or two computers would
+  take turns being one machine. It
+  reports its own name on every connect; the person may give it one of theirs (`label`), from
+  any device, which is shown in its place everywhere, the hub's presence included, so two of
+  the same model can be told apart.
+- **A chat binds to a machine** (`conversations.machine_id`) the first time it needs one. The
+  first local call of an unbound chat asks which machine to use: the one the message was sent
+  from when it is online, else the person's first ready one, else any online. One still
+  getting ready may take the chat; its calls then wait for it as below. The question is an
+  ordinary approval card. A newly bound chat holds only an empty workspace, so binding opens
+  nothing of the person's.
+- **Folder names** are reported by the machine (`computer_folders`): names and read-only only,
+  never paths. They feed the model's hint and the computer tag in the header.
+- **Moving a chat** goes to the computer it is open on, in that desktop app: one chat from its
+  computer chip (`moveChatHere`), or every chat of another machine from Settings › This computer
+  (`moveChatsHere`), as after Migration Assistant. The target is the machine of the request's
+  session, never named by the page, and a browser has none. The folder names go, being the old
+  machine's, and so do "allow in this chat" answers. Nothing is copied between machines.
+- **A branch keeps the source's computer.** The server sends that machine a `clone` event and
+  it copies the workspace's files into the branch's, within the copy limits, and gives the branch
+  the source's folders. Installs stay on the source's disk. The branch starts with no folder
+  names on the server and hears them from the machine once copied, so a machine offline at that
+  moment leaves it with an empty workspace and no folders, never folders it cannot mount.
+- **Purging a chat** sends its machine a `discard` event: the VM, its disk, its workspace, its
+  folder grants, its SSH agent allowance and its browser sites go. A machine offline then
+  misses it, so on start it asks `/api/machine/gone` which of the chats it holds anything for
+  no longer exist, and discards those. Only a chat whose row is gone for everyone counts: a
+  machine may hold another account's chats, and a chat without a computer may still have
+  browser downloads in its workspace.
+- **The tools are offered** to people who may use a computer (the `work` feature) and have
+  connected a desktop app at least once, from any device and whether the machine is online or
+  not. The offer is stable per person, so the cached prompt prefix is too, and nobody without
+  the app pays for the schemas. Chats with a computer show a file icon in the sidebar.
 
-Closing the Electron window hides it, preserving the renderer and its execution
-host. Minimizing and backgrounding also leave it running; background throttling
-is disabled. The tray, application menu and Dock can reopen the window. Explicit
-Quit asks for confirmation when Work is active, then awaits cancellation and
-owned-process cleanup. Closing is not quitting. Development rebuilds deliberately
-interrupt Work: the supervisor owns the actual Electron binary, requests cleanup
-through a private process channel, and waits for the old child to close before
-starting another. This path skips the interactive Quit question, not cleanup.
-A stalled shutdown is reported before escalation; failure to observe exit refuses
-a replacement rather than accumulating desktop instances.
+## The machine connection
 
-## An attempt owns its local calls
+The desktop's main process runs one `ComputerHost` per connected server. Its `MachineClient`
+holds `GET /api/machine/events` open for as long as the app runs, reconnecting with backoff.
 
-A Work submission carries the current main-process execution session ID. That
-ID is random for each app lifetime, not a stored device identifier. The server
-binds each active attempt and call to user, conversation, message, generation
-and executor. This authority is runtime-only: it is neither copied by branching
-nor restored from a saved message configuration.
+- **Only a desktop session may act as a machine.** `/api/machine/*` requires the session's
+  `desktop` mark, which only the desktop sign-in sets. The machine's hello travels in the
+  `x-neema-machine` header on every request: its id, name, platform, computer status and
+  whether it allows remote use. The id is scoped to the person, so it can only name one of
+  their own machines.
+- **Presence is in memory** (`MachineHub`): there is one server process, and a machine whose
+  stream drops is offline until it reconnects. A second stream from the same machine replaces
+  the first.
+- **On connect** the server sends the person's network grants, then, on a fiber of its own so
+  the stream flows meanwhile, resumes calls held for the machine. A new status arrives as
+  `POST /api/machine/status`, posted one at a time so a late progress report never lands after
+  "ready". After a start, connects ask which of the machine's chats are gone until one such
+  sweep gets an answer, so starting offline does not skip it. Later reconnects ask only about
+  chats the server has shown exist since (a call, an event, saved folders), since a new chat's
+  draft has no row until its first message and would look gone; an unused chat deleted
+  elsewhere while the machine was away waits for the next start.
+- **A call** (`call` event) carries the tool, its arguments, the server's deadline and the
+  time it was sent, so the machine measures the deadline on its own clock. It also carries the
+  chat's sent files and the guest path the server named for each.
+- **A result** is posted to `/api/machine/calls/:id/result`, retried until the server answers
+  or the deadline passes. The server accepts it only from the machine it sent the call to, and
+  caps and classifies it like any untrusted result (`acceptDesktopToolResult`). A finished
+  call's result is kept on the machine for ten minutes, so a call sent again after a reconnect
+  gets the same answer, not a second run.
+- **Quitting the app** stops its running calls and waits up to two seconds for their "stopped"
+  answers to reach the server before disconnecting, so the model hears it then, not at the
+  deadline.
+- **Stop and a lost lease** end the call's scope on the server, which sends the machine a
+  `cancel` for a call still running there. A question nobody answers ends just before the call's
+  own wait, so a later click runs nothing the model was told did not happen. The machine starts
+  no call past its deadline, checked on arrival and again in its turn. A native dialog closes on
+  Stop where it can, and an answer after Stop grants nothing.
+- **A reconnect loses what the old stream had not delivered,** calls and cancels alike. So each
+  new stream starts with `running`, the calls the server still waits on from this machine, and
+  each of them again. The machine stops any other call it is running and answers a repeated one
+  from what it has. Each hello carries the app's `launch`: a call sent to an earlier launch died
+  with it, maybe halfway, so it is answered as interrupted and never sent again.
+- **The page is not in the execution path.** Closing, reloading or never opening the window
+  changes nothing for computer calls.
 
-Before local dispatch, the web host claims the call. Before accepting a result,
-the server checks the same tuple and claim token again. Both endpoints check
-streaming status and the generation lease using the database clock, then recheck
-the in-process registration. An owned conversation alone does not authorize an
-unrelated call ID. A second device can observe progress but cannot claim work
-started by the first. A server restart loses authority and fails closed.
+### Offline, preparing, unavailable
 
-The initiating session is a binding mechanism, not cryptographic attestation.
-The `desktop` report on a submission is caller-supplied policy information.
-The connected server is trusted: its page has the bridge, and consent given in that page is the consent.
-Grants scope what a chat or an answer may do; they are not a defence against the
-server itself, so main does not ask a second time what the page already asked.
-Trust is in what the app does, not in everything Chromium can: the window grants
-the server's own pages only the web permissions the app uses (notifications, the
-clipboard, fullscreen), so a frame or script it carries reaches no camera or device.
+- **Offline:** a call to a chat whose machine is not connected is answered at once, naming the
+  machine and when it was last seen. The attempt's hint says the same before any call, so the
+  model works from what the chat holds instead of trying. The exception is a machine likely on
+  its way back: seen in the last two minutes, or any in the server's first minute, since a
+  restart drops every stream at once without recording when. Then the call waits up to 30
+  seconds, the desktop's longest backoff, and is decided again without the wait. An unbound
+  chat waits the same way for any of the person's machines. Failing at once told the model,
+  and through it the person, that no app was open while it was reconnecting.
+- **Preparing:** a machine still downloading its image reports its progress. A call to it is
+  held, not answered, and runs once the machine reports ready. Only if the download outlasts
+  the call's own deadline is it answered, five seconds before, with how far the download got.
+  An instant failure invited the model to work around a half-ready computer.
+- **Unavailable:** a machine that cannot run VMs says why, and calls are answered with that.
 
-## Bounded waits and cancellation
+## Approvals and permissions
 
-Desktop handlers block on `ExternalCompletion` inside the normal tool loop.
-The SDK starts handlers concurrently with consumption of its stream: seeing a
-provider call ID does not mean the tool row or external registration exists yet.
-A per-turn readiness Deferred releases the handler only after both exist; Stop
-or stream failure interrupts the wait. Registration also precedes the public tool
-announcement, so a fast result can arrive before the handler starts waiting.
-Native and Hermes calls share this handoff and the normal prompt-folding loop.
+- **Decisions live on the server,** in `ComputerCalls`. An approval is a state of the call,
+  held while its generation lives, shown to every client of the person through
+  `computerSnapshot` and answerable from any of them with `decideComputerCall`.
+- **The permission level** is the chat's (`permission_level`): `ask` asks before changes and
+  commands, `review` lets a model decide which of them to ask about, `allow` asks about none.
+  Reads never ask: the VM bounds what they reach. The delete tool and a new network
+  destination always ask, but under `allow` a command runs unasked and may delete files
+  itself, which the level's description says rather than promise otherwise. "Allow in this
+  chat" is kept in memory per chat and kind, until the server restarts or the chat's level or
+  machine changes, and skips the review too. An approval counts for the machine its card was
+  shown for: the call is then decided again with it, so that machine's own checks still run,
+  and a chat moved to another machine meanwhile asks again. The level is changed in the strip under the composer on the chat's own machine, where
+  its work shows, and in the computer chip anywhere else.
+- **A folder file changed since the model read it is not replaced.** `write_file`, and
+  `copy_to_computer` to a path, refuse when the file's time or size on the host differs from
+  what the model last read or wrote (`seen-files.ts`), so a save in Excel or a sync is not
+  silently undone; the model reads again. Asked on the host, since the guest caches a file's
+  details, and stamped before a read, so a save during it counts as a change. A file is known by
+  its real path, a link resolved and case folded where the disk ignores it, not by its inode,
+  since a save in Excel replaces the file. `edit_file` applies to the file as it is, so it
+  needs no check, and the workspace is the model's alone. Kept in memory, and through a reset
+  of the environment: after a restart a write goes through as before.
+- **`copy_to_computer` takes only one of the chat's own files**, sent in it or made by an
+  answer in it, checked on the server: the machine fetches it with the person's session, which
+  reaches every file of theirs.
+- **The review** (`review.ts`) shows a model the action and which folders are the person's,
+  and reads RUN, or ASK with a reason the approval card then shows in the person's language.
+  It runs on the admin's review model, else the answer's own. Anything that keeps it from
+  answering (no model, an unavailable chosen one, a timeout, an error, an unreadable reply)
+  asks, the level below, and never runs the call: a chosen model that is down does not
+  quietly hand the decision to the chat's. An argument longer than 20,000 characters asks
+  without a review, since what the reviewer cannot see whole it cannot clear. Each review is a `review` row in the usage ledger.
+- **Network grants** are `network_grants` rows: a `host:port`, for one chat or every chat of
+  the person, with a flag when the approval card showed a private address. Approving
+  `request_network_access` writes one and pushes the whole list to the person's machines,
+  whose proxies decide by it. Removing one closes the tunnels it allowed.
+- **The machine's own resources are asked for at the machine, in native dialogs** that a page
+  cannot draw, fake or answer:
+  - `request_folder` with a path the person named shows a confirm, with "Don't ask again for
+    this folder on this device" kept on the machine. Without a path, the folder picker opens.
+  - `request_ssh_agent` shows a confirm, and a yes is kept on the machine, per server and chat.
+  - Both run only for a message sent from the chat's own machine. From another device they
+    are answered at once, so another device holding the person's session can never open them.
+  - The dialogs' words are the web app's messages, compiled into the desktop's own
+    `src/paraglide`, in the person's language from the page's `language` cookie, else the
+    system's ([languages](i18n.md)).
+- **Remote control** is the machine's switch (on by default): with it off, calls run only for
+  messages sent from that machine.
+- **Which machine a message came from is the session's, never the request's.** A machine's
+  event stream and its own page share one desktop session, so a call counts as sent from the
+  machine whose stream holds the sending session. A request naming a machine would prove
+  nothing: any session of the person could make it. It is asked when the call is decided, so
+  a reconnect in between changes nothing. A queued message the server starts has no request,
+  so it counts as sent from the session that queued it, kept on the entry.
+- **Attaching a folder yourself** happens in the desktop app on that machine, from the composer's
+  plus menu, through the native picker. Attached folders stay with the chat, so they show in a
+  strip under the composer, not among a message's files. It refuses a folder that is
+  a disk root, the home folder itself, the app's own data, or holds or lies inside credentials
+  (`folder-access.ts`), judged by where links lead. A folder may be attached read-only. The
+  checks run again each time a VM is made (`stillMountable`): a folder since replaced by a link,
+  to credentials say, is left out of the VM and of the names the model hears, and the strip,
+  which runs the same test, shows it moved.
+- **A folder is a use of the machine.** Folders are offered only where the chat's computer is
+  this machine or none yet, and the first one binds a chat without a computer to it. A new chat
+  has its id before its first message, so the machine holds a folder picked for it. The first
+  message carries the names the composer shows, so its answer knows them; asking the machine
+  would land after the answer had read the chat. Creating the chat from that machine's session
+  still asks the machine, whose report has the last word. A draft never sent leaves a grant whose chat does not exist, which the machine's
+  check for gone chats removes on its next start.
 
-The wait must have its own deadline: the ordinary generation flusher renews the
-lease even when idle. Reads get two minutes; changes, commands and imports get
-ten. The registration and handler read that deadline from one table per tool
-(`desktopToolTimeout`), never each its own rule, and it starts at
-registration, before anyone has approved. The desktop's own command timeout
-is therefore derived from what is left of it when execution starts, minus a
-delivery margin, never a fixed ten minutes of its own: a command either
-finishes inside the wait that will accept its result or is stopped, and is
-not started at all when approval came too late. Expired or terminal calls
-cannot be newly claimed. Stop revokes the attempt, and generation scope cleanup
-removes authority on completion, failure or interruption.
+## A VM per chat
 
-The host removes stale approvals before applying blanket decisions and rechecks
-liveness after asynchronous claims. Navigation never cancels. Stop, deadline,
-identity teardown and document teardown cancel pending/queued calls and request
-cancellation of running local operations. A document reload can therefore fail
-an interrupted call safely rather than resume it. Abrupt renderer loss may leave
-an operation in Electron; an identical request can recover its retained result.
-Completed filesystem changes cannot be rolled back.
+`ChatVms` runs one microsandbox VM per chat (`computer/vms.ts`).
 
-## Replay is bounded, not distributed exactly-once execution
+- **The VM is disposable, its disk is not.** Each chat has a root disk on the host
+  (`<userData>/computer/disks/`), a sparse ext4 image holding the VM's writable layer: what
+  the chat installed. The VM itself is recreated whenever its mounts change, in about 200 ms,
+  and the installs stay. A disk made from another image starts over, since installs made on
+  one image's files do not belong on another's.
+- **One operation at a time per chat,** which is also what lets a mount change recreate the VM
+  safely between calls.
+- **A running VM stops after five idle minutes** and on quit. The next call restarts it.
+- **Mounts:** the workspace at `/workspace`, each attached folder at `/folders/<name>`,
+  read-only where chosen, with host permissions mirrored. microsandbox refuses a mount path
+  that goes through a symlink. A link inside a folder that points outside it does not resolve
+  in the guest. A link the guest plants is followed by host programs that open it: attaching a
+  folder trusts what runs from it, as with its scripts.
+- **Commands run as root.** The VM is the boundary, not users inside it. `apt`, `pip` and
+  `npm` work through the proxy.
+- **Each command runs in its own cgroup.** Stop and the deadline write `cgroup.kill`, which
+  takes every process it started, `setsid` and `nohup` ones included. When the shell exits on
+  its own, the wrapper steps back out of the group and kills it too, so a server left running
+  in the background ends with its command instead of holding the output open (measured both).
+- **Resources:** 2 vCPUs and 2 GB of memory per VM. Freed guest memory goes back to the host.
+- **microsandbox keeps its data** in a folder per profile (`MSB_HOME`), so a dev profile and an
+  installed app never share VMs. Off Windows that is `~/.neema/<hash of userData>`, not under
+  userData: each VM's sockets sit about 50 bytes below it and macOS caps a socket path at 104,
+  which `~/Library/Application Support/...` already overruns.
 
-Every model-operation RPC includes its call ID, including reads. The schema
-requires it; a missing id is refused before the handler runs. Main keys
-in-flight work by call ID and RPC tag, so a renderer that reloads mid-call
-joins the operation its predecessor started instead of starting a second one.
-A finished side effect (write, edit, move, delete, command) is retained for
-ten minutes, the longest the server would still accept its result, and a
-replay in that window gets the answer rather than a second execution; a
-finished read is dropped at once, since reading twice costs nothing and the
-result may be large. A cancellation is remembered for the same window so a
-request arriving after its Stop is refused, not started. Nothing is keyed on
-payload content: the page is the configured origin's, and a hostile page
-would simply mint a new id. None of this persists through an app crash. A
-new main process has a new execution session and cannot silently replay an
-old attempt.
+## Addresses
 
-The renderer retains a completed result while retrying failed delivery. It does
-not repeat the filesystem operation merely because the HTTP reply was lost.
-Claim and delivery failures schedule their own exponential retry, capped at ten
-seconds and the call deadline. Snapshot refreshes cannot bypass backoff. An
-acknowledged result stops delivery; refusal, removal, expiry and identity teardown
-cancel retries. This retry is failure recovery, not snapshot polling.
-Before the first send, a dispatch barrier is installed for that create. Until
-the create response names the conversation, any local call waits, because the
-destination id is not known yet. After that, only calls for the new conversation
-wait through rebind; other conversations are not stalled. The barrier is
-released after rebinding has been attempted. A failed or interrupted rebind
-does not authorize guessing a path. The create itself has already committed, so
-the first send still navigates; the destination simply has no grant until the
-person attaches again.
+- **The model's paths are the guest's:** `/workspace/...` and `/folders/<name>/...`, the same
+  on every operating system and in every branch. Host paths never reach the server or the
+  model. The hint names the roots, and `list_folder "."` lists them.
+- **`/local-file?path=/workspace/plot.png` links** open only on the chat's own machine. The
+  desktop maps the guest path to the host (the workspace folder, or the attached folder of
+  that name) and reads it there. A guest can swap links while the host reads, so after the
+  realpath check the file is opened, the path resolved again, and the read refused unless the
+  open file is the same device and inode.
 
-Mode and research on a first send are sampled at Submit, not after queued
-uploads settle. Draft text and skill chips stay live through that wait.
+## Files into and out of the chat
 
-## Mode is fixed; capabilities are current
+- **A file sent in a chat is an attachment,** whatever the device. Its path on the computer
+  is decided by the server from the chat's files in order: `/workspace/<name>`, numbered when
+  an earlier file took the name. Every call carries the list, and the machine copies a file
+  once, and never over a file already at its path: an edit the model made is never put back, and
+  a file it deleted or moved stays gone. The machine remembers what it placed, per chat. The hint
+  names the paths.
+- **`copy_to_computer`** downloads a file the chat holds with the machine's own session and
+  lands it in the workspace, or exactly at a path the person approves.
+- **`copy_from_computer`** reads a picture or an Office file from the computer into the answer
+  as a working file for the server's tools. Its bytes are never stored.
+- **A browser download** lands in the workspace under a fresh name.
 
-`conversations.mode` is `chat | work`, fixed at creation and inherited by a
-branch, along with that chat's permission level. Work needs the desktop app and a current [Work grant](feature-policy.md),
-not a folder: every work conversation has an app-managed workspace that
-materializes on demand, so ready-empty means the workspace is there and empty,
-never that the chat is unusable. Send, retry, resume, edit, structured answers
-and queue dispatch all submit one `desktop` report: executor identity, machine,
-folders and current capabilities. Work attempts without it are refused before
-rows are created or reset. Retry never revives an old attached-folder or
-command setting. Plain chat ignores the report. Browser Work history remains
-readable, with continuation actions disabled and server policy enforced
-independently.
+## Network
 
-Each attempt, retry and resume included, is stamped with the sending machine's
-id and display name (`desktop_machine_id` / `desktop_machine_name` on the
-generation config). The id is a per-install UUID the shell keeps in `machine.json`; a reinstall mints a
-new one, which is exactly the point: a chat whose latest attempt came from a
-machine this install does not know shows a dismissible banner naming it, with
-a take-over action that materializes this machine's workspace. Nothing is
-copied between machines, and the stamp is attempt metadata, never an address
-or a credential.
+The VM's only way out is the egress proxy, which decides by name. See [egress proxy](egress-proxy.md).
 
-The server persists folder and workspace-file names per attempt, never paths.
-Absolute paths cross it only in the attempt's system hint and desktop tool
-traffic, like file contents already do, so a conversation opened on another
-machine carries no stale addresses. `folders.json` maps server origin plus
-conversation to local grants: ids are minted by the connected server, so two
-servers can issue the same one and a grant on one must not open the folder to
-the other. Writes are serialized and replaced by an atomic rename, so
-concurrent attach and detach cannot resurrect a removed grant after restart.
-Losing the file remains supported: every conversation asks again.
+- **Every TCP connection** goes through microsandbox's outbound CONNECT proxy to ours, with a
+  credential per VM held on the host and read from the environment only while the VM starts.
+  The guest has no proxy settings, so Java, ssh and git need none.
+- **The guest's DNS** goes to the proxy's name listener for that VM, which answers with
+  placeholders and resolves nothing until a grant allows a connection.
+- **UDP** goes only to the gateway's DNS. There is no QUIC and no direct DNS.
+- **Built-in grants** cover the package registries and the image's Ubuntu archives on 443.
+  Everything else needs a grant. A service on the person's own machine is `host.internal`
+  with its port, served by the proxy's local connector once granted.
+- **A refused connection** fails in the guest as a refused connection, and the command's result
+  names each destination with what would open it.
 
-The composer strip and submission share a conversation-keyed local query,
-cleared with the authenticated identity cache. Route loaders prepare Work
-folder state before the composer mounts. The hook consumes that cache without
-an immediate mount refetch or automatic retry. A failed first read opens the
-conversation with an inline retry rather than a route error or empty grants.
-A later failed refetch keeps the last successful status, so a focus-time blip
-does not look like a missing folder or block send. Ready-empty is valid: a new
-machine has its own empty workspace and can continue Work immediately, with
-user folders re-attached only when wanted. Folder loading and mutation state
-block new attempts without opening a second animated warning inside the input.
-`ChatView` and `NewChatView` share that gate through `useWorkGate`; the composer
-receives `readOnly` rather than recomputing it. Focus refresh does not remount
-the host.
+## SSH
 
-## The workspace
+- **ssh, git and rsync connect normally** through the proxy. `github.com:22` is a grant like
+  any other.
+- **The agent** is relayed, never mounted. Each chat gets a host socket (a named pipe on
+  Windows) that microsandbox exposes over vsock, and the image's `ssh-agent-bridge` presents it
+  as `/run/ssh-agent.sock`, set as `SSH_AUTH_SOCK` for commands of a chat allowed the agent.
+  The relay passes a connection only while the chat is allowed, and revoking cuts the open
+  ones. Of the agent protocol it passes only what a login needs, listing keys, signing and
+  OpenSSH's session binding, one request at a time; adding, removing or locking keys gets the
+  protocol's failure. Commands can sign with the person's keys, never read or change them.
+- **Which agent:** the socket chosen in Settings › This computer, else `SSH_AUTH_SOCK`, else
+  Windows' OpenSSH agent pipe. Windows' agent service is disabled by default, and Pageant and
+  Git for Windows' own agent are not supported.
+- **An empty agent** is the common case on a Mac, where `ssh` reads keys from disk and the agent
+  holds none. Asked for the agent, the machine counts its keys in the agent's own protocol, and
+  when there are none offers to add the default key, also to a chat already allowed. `ssh-add`
+  adds it, so the key never passes through the app; on macOS a native dialog asks for its
+  passphrase and the Keychain keeps it. If that fails the dialog gives the command to run. The
+  model hears whether the agent holds a key, so it asks for that, never a password.
 
-Beside the granted folders, every Work conversation has a local app-owned
-workspace under `<userData>/workspaces/<origin-hash>/<conversation-id>/`. The
-origin hash keeps servers separate. The conversation segment is always a
-canonical UUIDv7 and is validated again at the filesystem boundary. A new chat
-allocates its final UUIDv7 before its composer, folder state, or local files
-exist, so the first prompt already names the durable path and no draft path is
-ever renamed.
+## Browser calls stay with the page
 
-The workspace is not a grant: the user did not pick it, it does not live in
-`folders.json`, the picker reserves the name `workspace`, and the strip shows
-only user-selected folders. Its directory is created lazily and nothing syncs
-between machines. It is always the first root in the desktop file-tool address
-space and the working directory for `run_command`, so a Work chat without a
-user folder can still read and write local files.
+The embedded browser's tools run in the page's webviews, so they keep the page executor
+(`DesktopWorkProvider`, `work-host.tsx`). A submission from the desktop app carries the app's
+execution session (`executorId`), its machine and whether it can drive pages. Only browser calls
+are registered under that executor and claimed by the page. Computer calls are registered under
+`COMPUTER_EXECUTOR`, which no page claims. A page that reloads joins a browser call already in
+flight by its call id. Closing the window hides it, keeping the renderer and its browser calls,
+and an explicit Quit asks while work is active. See [the embedded browser](browser.md).
 
-Composer files do not enter that root when added. Each mounted Work composer
-owns a submission UUID and stages its files under
-`.staging/<conversation-id>/<submission-id>/`. The chip appears only after the
-copy lands there. Removing a chip removes its staged file, while abandoning a
-submission removes the staging directory. Staging directories are never tool
-roots, command allowances, branch inputs, or prompt paths. A send stores only
-the final basenames in the attempt generation config; the transcript renders
-them as local chips and resolves their metadata through a conversation-scoped
-React Query cache. Browser and foreign-machine chips remain inert.
+## The image
 
-A pasted or synthetic file has no host path, so the renderer sends bounded
-base64 and the decoded limit is 50 MB. A real dropped `File` takes a separate
-preload channel: preload calls `webUtils.getPathForFile`, passes the path only
-to the main process, and returns only the staging receipt. The page never sees
-or submits that path. Main repeats the window, main-frame, and origin checks,
-accepts regular files only, copies rather than moves the source, and applies a
-512 MB limit. Both paths use a random same-filesystem temporary file and an
-exclusive hard link to choose a collision-free staged name atomically.
+- **One image for every chat's computer** (`infra/sandbox-image`): Ubuntu 26.04 LTS with
+  Python 3.14 and the document packages, Node, uv, LibreOffice, pandoc, tesseract, ffmpeg,
+  ImageMagick, poppler, git and build tools.
+- **An image is named by its sources.** CI tags it `tree-` and the start of the git tree id of
+  `infra/sandbox-image`, and reuses an existing tag instead of rebuilding. Rebuilding the same sources
+  would still give a new image, since apt is not pinned, and every new image resets each chat's
+  installs. So the image changes only when its sources do.
+- **A release boots the image of its own commit.** Its sandbox job resolves or builds that tag
+  and hands `name:tag@digest` to the desktop build, which bakes it in (`__SANDBOX_IMAGE__`).
+  The digest is what is pulled, so a published release cannot be moved to other bytes. Other
+  builds name their checkout's tag, computed the same way, so development boots the image of
+  its own sources as well. `edge` is main's latest, for anyone pulling by hand.
+- **Updates come once a month, together.** Renovate groups the base image digests and the
+  Python lock refresh on the first of the month, which is when chats lose their installs. The
+  guest kernel is not in the image: it ships with microsandbox's `libkrunfw`, updated with the
+  app. A guest flaw reaches no more than the model already can, so monthly is enough.
+- **The model hears of a reset once.** The first call after a chat's disk was made over for a
+  new image starts with a note that earlier installs are gone and files are kept, so the model
+  reinstalls instead of puzzling over a missing package.
+- **Layers are ordered by how often they change:** system packages first, Python last, so a
+  refresh that leaves the base alone downloads only the top layers.
+- **Our own image** because the hint promises what is installed, and because the image carries
+  what the computer relies on: the agent bridge, apt over HTTPS and git trusting mounted
+  folders owned by the host account.
+- **Python lives in `/opt/venv`,** first on `PATH` for login shells too. pip cannot replace the
+  modules Debian installs, so neither our packages nor the model's could go into the system
+  Python.
+- **The machine pulls the image when it connects,** reporting the share of bytes done, and
+  booting a throwaway VM of it proves the machine can run one.
 
-A file-bearing send reserves the turn on the server before any staged file
-becomes model-visible. The reservation checks ownership, mode, live generation,
-and competing mutations without creating transcript rows. Promotion then
-hard-links the complete staged batch into the final workspace and records a
-local journal before exposing each link. Activation creates the turn and
-starts generation exactly once; it is idempotent if the response is lost.
-Commit removes the staging directory and journal. A definite rejection rolls
-back only final paths whose device and inode still match the staged file, which
-leaves the staged submission available for retry without deleting a later
-replacement. While a journal exists, neither one staged file nor the complete
-submission may be discarded because rollback needs those inodes as ownership
-proof.
+## Packaging
 
-Promotion journals make ambiguous failures recoverable. Before the desktop
-host accepts tool work, it asks the authenticated server about each pending
-journal. Activated reservations commit locally. A still-reserved orphan is
-rolled back only after its abort response succeeds; an ambiguous abort retains
-the journal, final links, and staging until the server state can be observed.
-Terminal reservations are rolled back. If the server is unavailable or no
-longer authorizes the journal, it is retained rather than guessed away. Stale
-unowned staging, temporary journal files, and partial clones are swept at shell
-startup and whenever the shell connects or switches origin. Pending promotion
-journals are protected from age-based cleanup.
+- **Platforms:** macOS on Apple Silicon, Windows 11 with Windows Hypervisor Platform (preview in
+  microsandbox), Linux with access to `/dev/kvm`. Elsewhere the machine reports itself
+  unavailable.
+- **The app stays a plain directory** (`asar: false`): microsandbox loads its native addon, `msb`
+  and `libkrunfw` from paths beside its own modules. After packing, only the target's platform
+  package is kept.
+- **macOS:** signing the app signs nested binaries with the app's entitlements, which have no
+  hypervisor access, so `after-sign.mjs` signs `msb` again with `build-resources/msb.entitlements`
+  and reseals the app. A root disk on Windows is marked sparse before it is extended.
 
-Branching copies only the committed conversation root. The branch flow awaits
-copied folder grants and `cloneWorkspace` before navigating; failure still
-opens the branch and reports that its local files were omitted. Clone
-measurement independently limits total bytes, visited entries, and nesting
-depth, does not descend through symlink directories, and fails closed when a
-limit truncates the walk. Copying targets a random sibling `.partial-*`
-directory and publishes it with one final rename. All app-owned creation,
-promotion, deletion, and clone publication for a destination share one local
-workspace lock, and cloning refuses even an empty existing destination. A
-failed copy therefore leaves no partial destination blocking retry without
-silently replacing another app operation. Deleting a conversation still fires a
-best-effort `discardWorkspace`; there is deliberately no server-validity sweep
-because the shell cannot safely infer which committed workspace ids are dead.
+## Results and exact edits
 
-Loader preparation holds a query observer so pending route UI cannot cancel a
-read the destination still needs. It respects explicit cancellation and
-pending folder mutations. Mutations cancel older reads and update only their
-original cache entry. Local queries are neither server-rendered nor persisted
-in the web backend.
-
-## Several folders, one absolute address space
-
-Every file tool the model sees takes and returns real absolute paths for the desktop's operating system, the
-way Cursor and Claude Code work. The system hint names each root with its
-path — the workspace first, then the attached folders — and
-`list_folder "."` lists the roots by those paths. Find and search return
-absolute paths, so a result can be fed straight back into any other tool,
-and `cp` between an attached folder and the workspace needs no second
-mechanism. Names survive for display alone: the strip's chips, the
-transcript's short `name/relative` receipts, and the reserved `workspace`
-label the picker refuses for a user folder. Duplicate basenames are refused
-at choose and at rebind so a receipt's owner is unambiguous; a lost folder
-can be replaced by name from Choose it again. `find_files` names a matching
-folder and the files inside it, not only files whose own names match.
-
-Answers can link to `/local-file?path=<absolute-path>` to preview a file, including
-one created by a command with no server attachment. This is a renderer marker, not
-a route or a tool. The per-answer machine stamp must match the current desktop;
-browser-only clients and unknown or foreign machines cannot open it. The preview
-reads current bytes only when clicked, through the ordinary root and symlink checks.
-It never uploads the file, grants access or navigates to a local URL. HTML stays text;
-SVG uses the existing script-free image preview.
-
-A branch retains exact workspace ancestor conversation IDs separately from
-`branchedFrom`, which may disappear when the source is deleted. Workspaces are
-siblings keyed by conversation ID. Only a path under one of those exact ancestors
-relocates to the current workspace with the same suffix. Attached-folder paths stay
-absolute, and unrelated siblings are never rewritten. Until the current workspace is
-known, references are unavailable. A missing branch copy fails on the destination,
-never retries against the source. Paths from a different profile/base directory are
-not guessed; unrelocated paths still require current root grants. The model receives
-the current workspace and is told to use it for inherited workspace files.
-
-`run_command` takes no folder: the command starts in the chat's workspace,
-and the sandbox's write allowance covers the workspace plus every attached
-folder, so `cd` and `cp` across roots work inside one address space. Each
-command is one fresh sandboxed process; activation, environment changes and
-`cd` do not carry into the next call. The shell keeps the desktop process’s
-PATH without loading interactive shell startup files. Runtime names, versions
-and packages therefore depend on that desktop, not the server or another chat's
-machine. The model hint tells it to discover an interpreter when needed, use
-local dependencies, honor authenticated proxies and save headless output to files.
-It distinguishes the file tools' root containment from the command sandbox's
-permitted toolchain reads.
-
-A file a custom tool returned stays a server attachment of the answer in a
-Work chat too, never pushed to the machine on its own: the shell may be
-closed when the result lands, a resumed or retried generation has no page
-listening, and a second machine opening the chat would find a path that means
-nothing there. The attachment is the one home that survives all of those, the
-same trade a drop makes in the other direction. When the model needs the
-bytes on disk it calls `save_to_workspace` with the attachment id its tool
-result carried: the page fetches `/api/files/:id` under its own session, so
-the shell holds no credential and the server's access rule decides, and the
-shell lands the bytes in the workspace root under a collision-free name
-through the same primitive a staged drop uses. No approval is asked: the
-workspace is app-owned, a drop lands there unasked, and the copy never
-overwrites. Given a `path` instead, the bytes are written exactly there, inside
-the chat's roots like any write and replacing a file of that name, so the
-approval asks first, as for `write_local_file`; that is how a finished deck or
-CSV reaches the place the person wants in one step. The tool is a model
-operation on the shell's ledger, retained like a write so a replayed call does
-not land the file twice.
-
-## Containment and command isolation
-
-File paths pass through `resolveAmongRoots` and `resolveInFolder`. The
-requested string is normalized with `resolve()`, matched against each root
-textually, and proven contained with `realpath`; existing ancestors are
-inspected with `lstat`, and a dangling symlink is not treated as an absent
-ordinary path: its resolution fails closed. A root that the requested string
-never textually sat inside answers "not mine" and the next root is tried;
-when the string did sit inside a root and resolved outside anyway — a
-symlink escape or a `..` walk — that refusal is final, so an escape landing
-inside a neighbouring root still fails. Refusals name the path the caller
-supplied, never a host absolute the caller did not already know. Only
-`ENOENT` allows walking to a parent. Moves check both ends. A check and its
-write are not atomic, and the one party able to race them is a sandboxed
-command, so within a chat a file tool, read or write, waits until no command of
-that chat is running, and commands wait for it. Other chats never wait. Other processes of the person's own, and hard-link aliases, are
-outside that claim.
-
-Inside an attached folder, commands and file tools may change anything, `.git`
-included. A hook or `core.fsmonitor` they plant runs outside the sandbox the next
-time git runs there, an editor's background `git status` too. That is accepted:
-attaching a folder trusts the model with what runs from it, as with its scripts and
-source, and guarding one tool's files would not change that.
-
-Commands run in Microsoft's execution containers (`@microsoft/mxc-sdk`), with no
-unsandboxed fallback: Seatbelt on macOS, bubblewrap on Linux, an AppContainer
-process container on Windows. Each command is one request carrying its whole
-policy, so commands run concurrently and share no sandbox state. Availability is
-what MXC reports for the machine; where it has no backend (an Intel Mac, a
-Windows build without process containers) commands are unavailable, never run
-unconfined. All three were exercised end to end: macOS, Windows 26300.9711, and
-Ubuntu 24.04 with bubblewrap 0.9 and slirp4netns 1.2.
-
-Windows also needs two capabilities MXC reports per host, and without either
-commands are unavailable with a request to update Windows. Host-loopback ingress
-is the only way an unpackaged proxy is reachable; the other, `allowedProxyPeer`,
-needs the proxy to run as a package or AppContainer identity. Enumeration lets a
-command query and list the folders above what it may use, never read their files:
-Node's realpath, npm and git stat every one of them up to the drive root and fail
-without it. Both arrived with Process Security Environment 1.1 ingress; 26300.9711
-has them and was exercised end to end, 26300.9457 had neither. On a supported
-build anything not granted is unreadable, a folder made at a drive root included.
-
-The container keeps Win32k on (`ui.disable: false`). MXC's default turns it off,
-and every program linking user32 (PowerShell, `where`, `whoami`) then fails at
-load with `0xC0000142` and no output. Clipboard and input injection stay denied;
-what is given up is that attack surface and the ability to open windows.
-
-Reads are allow-listed: the system's own directories and the toolchain folders
-under home (version managers, package stores, caches, git's identity, and on
-Windows the AppData and scoop folders installers use). The rest of home is
-unreadable, except one exact file or folder the person lets commands read through
-a path request, for the answer, the chat or every chat. A disk root, home itself,
-a folder above it, anything holding credentials, the app's own data (permissions,
-other chats' workspaces, cookies) and the folder of commands' private folders are
-refused before anyone is asked, a stored grant breaking those rules is dropped
-on load, and every grant is checked again before each command, so one a command
-has since replaced with a link is left out. A swap between that check and the
-launch is not covered. A path whose real path differs from the one asked for, a link a command
-could have planted, is refused with the real path named, so what is granted is
-what the card showed. The two must match in case too, since a case-sensitive
-volume may hold a link differing from its target only in case; macOS's own `/tmp`,
-`/var` and `/etc` aliases are not links for this. A substituted or mapped Windows
-drive is a link in this sense: a path on it is refused naming the folder it maps to
-(measured with `subst`), which can then be asked for. Credential files, git's
-credential-cache socket (it answers whoever opens it) and the permission store are
-denied in every policy, and in MXC a denied path outranks every other grant. A
-credential path that is a link (a dotfiles manager links `~/.ssh`) has its target
-denied too, as has every link inside a credential tree (a key kept elsewhere, a
-linked folder), at the real path the system resolves, in the spelling it stores (a link's own
-spelling of a Unicode name may differ). macOS keeps its writable folders under a second spelling
-on the data volume (`/System/Volumes/Data/Users/…`); a target, and the agent's socket, is denied under both (Seatbelt judges only the short one), and path
-checks take either for the same place. Each tree is walked breadth first within its own budget, a level's links
-before its folders, so a link near the root is never crowded out by a large cache
-below it (one deep inside such a cache may go unseen). Only where a link ends counts: a link
-on the way, or a dangling one, that sits in a folder attached writable is not looked for, so
-attaching that folder lets commands decide where the credential leads, as attaching the credential's own folder would
-(accepted: following each link's chain meant guessing at aliases and spellings the system
-resolves, and those guesses kept opening holes). A folder in a credential tree
-that cannot be listed, or a link whose target cannot be reached, stops commands,
-attach and approval until the app may read it,
-since links in it could lead anywhere, as Seatbelt judges the path
-opened. They are resolved before each command, attach and
-approval decides anything, within the command's own deadline. Attach and approval give
-up after ten seconds rather than hang on a stalled mount, and then refuse; the walk at
-startup is not awaited, so such a mount cannot keep the app from opening. A credential target
-inside a writable folder also has the folder between them denied, as for the agent's
-socket, since a rename would otherwise reopen it. A deny
-holds a path, not a file, though: a command that can rename a folder above a denied
-path reaches it by the new name. So a writable folder must never hold one. A folder
-that holds or lies inside credentials, the app's own data or a command root, or is
-home, is refused when attached, judged by where a link leads as well as by its name.
-A command whose writable folders, by their real paths, hold or lie inside one does
-not start; the chat's own workspace is the one exception (app data and the command
-roots cannot simply be denied, as the workspace and the command's own folder sit
-inside them). An attached folder is recorded by its real path and used, by commands
-and every file tool, only while that is still its real path, so one that another
-chat's command swapped for a link shows as gone instead of being followed; the folder is
-pinned to that path where it is used, not only checked beforehand. Sockets inside an
-attached folder are not looked for: a command may connect to one there (a dev tool's
-control socket in the project, like overmind's), the same trust as letting it change
-the scripts the person runs. Denying the sockets found would not hold, since a command
-that may write the folder can rename one past its deny, and refusing such folders would refuse
-ordinary projects (git's fsmonitor keeps one in `.git`). A built-in
-folder (`/opt`, a toolchain's, macOS's per-user temp) that holds app data or a command
-root, by its name or its real path, as a dev profile there would, is left out of the
-policy.
-
-Writes are allowed in the chat's workspace, the attached folders, the command's
-private folder, and on macOS `/dev/null`. macOS's per-user temp and cache folders,
-which developer tools find through confstr rather than TMPDIR, are only readable:
-every app keeps sockets there (an `ssh-agent` started in a terminal, VS Code's git
-credential helper, Chrome's open-this-URL socket), and Seatbelt lets a command
-connect to a socket in any folder it may write. bubblewrap lets a command connect to
-a socket in a folder it may only read (measured), so on Linux the readable folders
-must hold none. Of `/nix` only the store and profiles are readable, never the
-daemon's socket, which would build and fetch for a command on the host, past the
-proxy. `~/.cache` is not readable on Linux at all (IBus keeps a socket in
-`~/.cache/ibus`); commands keep their caches in the workspace through
-`XDG_CACHE_HOME`, where tools look first. The other readable home folders are
-searched a few levels deep for sockets, each denied, every few seconds at most; that
-search is bounded, so those folders are trusted to be toolchains, not sockets. A path
-the person grants on Linux must be no socket or pipe and hold none, judged by a full
-walk at approval and again before each command (an answer is reused for ten seconds);
-a folder that cannot be listed is refused, as it may still be entered by name. System
-socket folders (`/run`, `/var/run`,
-`/tmp/.X11-unix`, `/proc`, `/sys`, `/dev`) and a tree too large to walk are refused
-outright. Read access to `/run/docker.sock` would be root on the host. Measured with them read-only: git,
-xcrun, clang, make and swiftc work, given `CLANG_MODULE_CACHE_PATH` in the workspace
-cache. The Xcode stub tools may print one harmless warning that the cache folder is
-unavailable when xcrun has to look a tool up; `DEVELOPER_DIR`, read once from
-`xcode-select -p`, spares most lookups. Nothing private goes in
-a folder commands can reach: each command's folder (its
-Maven settings and Gradle arguments, token included, and its ssh setup) is made
-in a root made with `mkdtemp` where no command can reach, under `/private/tmp`
-on macOS, and only its own folder is granted. The OS sweeps old temp entries, so a
-root that is gone or no longer plainly the user's own is replaced by a fresh
-`mkdtemp`, never made again by name. Each resource a command takes (its token, its
-listener on Linux, its folder) is released as soon as it is taken, so Stop during
-setup leaves none behind and never waits on a stalled read of the user's files; setup
-abandoned midway cannot bring a removed folder back, as nothing in it is made
-recursively. Setup spends the command's own time limit. bubblewrap gives each command its own `/dev` and `/tmp`, and binding the
-host's `/dev/null` over its own breaks it. Paths to grant that do not exist are
-left out: Windows refuses a policy naming one and bubblewrap fails to start.
-Seatbelt keeps a missing denied path denied, so there a token written mid-command
-into a readable cache stays out of reach; Windows refuses missing denied paths and
-bubblewrap cannot deny one inside a read-only mount, so there it does not. Temporary
-files and the npm, pip and uv caches point at the workspace, since home is
-read-only. On Windows MXC replaces `TEMP` and `TMP` with the container's own
-folder, where git cannot read the signature OpenSSH writes, so `TMPDIR`, which
-Git for Windows reads first, names the workspace there too. A tool installed somewhere unusual fails with a denial naming the path.
-
-The only network destination is the [egress proxy](egress-proxy.md). Each command
-gets a token, and its proxy URL goes in MXC's `networkProxy`: MXC replaces the
-proxy variables with that URL, so a token placed anywhere else never arrives.
-bubblewrap refuses a URL carrying credentials, since bwrap's arguments are
-readable by every local user, and lets a command reach that one endpoint alone,
-so on Linux each command gets a listener of its own and the port is the token.
-Windows proxy mode needs host loopback opened, yet lets a command reach the proxy
-and no other loopback address. A tunnel refused for want of a grant comes back as
-a `deny network-outbound host:port` line, marked `private-network` when only a
-grant that also opts into private-network addresses would do, which the site turns
-into an offer to request access; any other refusal (plain HTTP, loopback, a limit,
-the agent) comes back as a `refused` line with its reason, which no grant would
-change. Either kind fails the command's result, whatever its exit code. Grants are exact `host:port` pairs kept by `egress-grants.ts`, never
-by the proxy, for the asking answer, the chat, or every chat, on the same
-`scoped-grants.ts` store as path and capability grants. Chat and always
-grants live in the profile; answer grants live in memory and end when the page's
-work state stops listing that answer, so a closed page ends them all. A
-private-network grant is its own kind and is the only way a name may reach a
-private address. A chat lists and removes its own grants from the permissions
-menu; every-chat grants are removed in Settings › This computer. Both stores
-forget a chat when its workspace is discarded, which happens once the chat is
-purged and Undo is gone.
-
-Loopback is a grant of its own, services on this computer, in the same three
-scopes. Settings can also turn it on for every chat, after saying what it opens.
-Seatbelt has no private loopback: a command talking to itself, as Gradle
-does with its daemon and file-lock socket, needs the host's, and the inbound
-half cannot be scoped by address, so a server bound to `0.0.0.0` is reachable
-from the network. Without the grant a command can bind nothing. On Linux every
-command has a loopback of its own and talks to itself without the grant, and
-bubblewrap cannot open the host's, so the grant is refused there and Settings
-leaves it out. Windows proxy
-mode refuses even a command's own listener, so there the grant leaves proxy mode:
-loopback opens to the host, direct egress stays denied, and the proxy variables
-the command already carries reach the proxy as an ordinary local service, the
-token keeping one command's grants from another's.
-
-Java ignores the proxy variables. Gradle reads its proxy from an argument file in
-the command's folder, named in `GRADLE_OPTS`: as plain options the token would sit
-in the JVM's arguments, which other processes can list. Java 8 reads no argument files, so
-Gradle on Java 8 does not start; it is not supported. Its user home is the
-workspace cache. Maven gets a settings file there too, naming the proxy and a
-workspace repository, and one download thread: its client answers a proxy
-challenge only on its first connection. Both paths are quoted on Windows, where a
-profile folder may hold spaces; the POSIX launchers split on spaces whatever the
-quoting, so the command root there is under `/tmp` (`/private/tmp` on macOS)
-whatever `TMPDIR` says, which also leaves room for the agent bridge's socket name. `JAVA_TOOL_OPTIONS` carries only
-`-Djava.net.preferIPv4Stack=true`, because every JVM prints it on start and
-IPv6-mapped sockets miss Seatbelt's loopback rules.
-
-ssh, and with it git and rsync, finds a wrapper first on `PATH` with its own
-config: a `ProxyCommand` bridge that opens an authenticated CONNECT, run by the
-app's own executable in Node mode so nothing is installed, no connection sharing
-(a master would outlive the command's token), known hosts from a copy of the
-user's, and no key files, since `~/.ssh` stays denied. The user's own `Host`
-blocks follow, reduced to how to reach each host (aliases, users, ports): keys,
-agents, proxies, includes and `Match` blocks, which can run commands, are dropped,
-and ssh keeps the first value, so the generated settings win. `scp` and `sftp`
-run ssh by its absolute path, so their wrappers hand them ours with `-S`. A
-destination such as `github.com:22` is an ordinary network grant. On macOS the
-sandbox may look up directory services, without which ssh cannot name the current
-user and stops. On Windows the wrappers are `.cmd` files around the system's
-OpenSSH that set `ELECTRON_RUN_AS_NODE` for the tool and its bridges alone. git
-gets the ssh wrapper through `GIT_SSH` there, since Git for Windows runs
-`GIT_SSH_COMMAND` through its MSYS shell and MSYS cannot start in the container,
-and through `GIT_SSH_COMMAND` elsewhere, which also outranks a `core.sshCommand`
-naming another ssh. For the same MSYS reason Git for Windows runs without a
-credential helper, and with OpenSSL rather than Schannel, whose revocation check
-fetches CRLs around the proxy and fails every HTTPS remote. Git for Windows finds
-programs on `PATH` as `.exe` only, so when the agent is relayed `gpg.ssh.program`
-names the ssh-keygen wrapper, or commit signing would bypass the bridge.
-
-Signing in with the user's SSH agent is a switch granted per chat only, never for
-every chat, since the agent signs as the person. The agent is the socket chosen in
-Settings › This computer, else `SSH_AUTH_SOCK`, else on Windows its fixed pipe, looked up before
-each command. No ssh config is read to find it: finding the agent there meant running ssh over a
-config commands might redirect (`Include`s, links, `Match exec`), and every guard on that was
-another place to get wrong. An agent set only in the config (1Password, Secretive) is chosen
-once in Settings instead: the app offers the known ones whose socket it finds at its usual place,
-a fixed list it only looks at, or takes a path. The app takes a socket only when it answers an identities request as an
-agent would (Docker's does not). The socket is kept by its real path, since a link a command made could later
-point elsewhere, and is denied to commands once it has answered. A choice is refused while any
-command runs, or a stopped one's launch is still pending: its policy was made without the socket,
-so it could replace the socket before it is used. A real path too long for a socket address
-(1Password's, for a long user name) is refused rather than kept. Every refusal reads the same. One choice is made at a
-time, from the request to its end. A change cuts off running commands that relay any agent but
-the one now in effect, also SSH_AUTH_SOCK's on a first choice. Every agent found stays denied, by its name and wherever its
-link led, so a changed choice or a retargeted link does not open the old one. A chosen socket
-that is gone means no agent, never a quiet fallback to `SSH_AUTH_SOCK`'s, which may hold other
-keys. A chat that
-allowed the agent while none runs is told so, not asked again. Allowing it where none runs
-is refused at once, and so is allowing an agent that holds no keys, since logins with it only
-fail. An empty system agent is the common case on macOS: ssh reads `~/.ssh/id_rsa` directly, and
-commands cannot. So when a chat is allowed it and the person has default key files, the app asks
-in its own dialog, once, to add them with ssh-add, outside the sandbox (Apple's keeps a
-passphrase in the Keychain, asked for in a system dialog that never passes through the app). The
-agent forgets its keys on a restart, so the agreed files are added again, unasked, before a
-command of a chat that may sign in, until Settings stops it. Commands can sign with a key in the
-agent but never read it, and only in chats allowed to; a key in the agent is no more exposed to
-programs outside the sandbox than its file already was, which is why no time limit is set. A
-chosen agent (1Password) is never added to. Its socket is never named to a container, on any platform:
-ssh, ssh-add and ssh-keygen (git signs commits with it) start under a bridge that listens on a socket (a pipe on Windows)
-of the command's own, names it to them as their agent, and has the egress proxy
-carry each connection to the reserved destination `ssh-agent.invalid:1`, which
-the proxy serves from the user's agent while the chat allows it. On Linux a
-command's port is open to every local user, so there the agent is served only on
-a connection that also presents the command's token, which the bridge reads from
-the command's folder. Revoking closes what is open. The agent's socket, and the one `SSH_AUTH_SOCK`
-names when another is chosen, are denied to every command,
-whatever its chat allows, since it may sit where commands can reach (an
-attached folder): measured, Seatbelt answers `EPERM` and
-bubblewrap mounts `/dev/null` over it. Each is denied by the path given and by its
-real one, since a link (a `~/.ssh/ssh_auth_sock` pointing at the real socket) leads
-past the given path, and Seatbelt judges the path opened. As a deny holds a path, a socket inside a
-writable folder also gets the folder between the two denied, which no command can rename: measured, with
-only the socket denied a Seatbelt command renamed its folder and reached the agent.
-So the agent's socket may sit anywhere, even under `~/.ssh`, and no command can
-open, remove or replace it. A Windows pipe is no
-path to deny, and a container cannot open the user's anyway; it could not be
-granted either, as MXC opens the path and fails the launch.
-
-The environment starts from identity, locale and terminal variables only. MXC
-kills the command's process tree when it exits, and Stop or the deadline kills
-it; a detached server a command starts dies with it.
-
-## Policy is server-held; consent is local
-
-The permission level belongs to the conversation; the host refreshes it from
-the server. The folder strip is where it is changed: “Approve each action”,
-“Auto-approve reads”, or “Auto-approve reads and changes”, with descriptions
-in the picker. The stored values remain `manual`, `auto`, and `skip`.
-
-Manual asks for reads too; automatic asks before changes and commands; skip
-allows those without another question. None of them grants network access:
-that requires a separate model call and explicit consent in its inline approval card.
-The dedicated delete tool always asks,
-once per call, and a call may name several paths so a cleanup is one
-confirmation rather than one per file. An allowed command can also delete
-files; this is not a deletion safeguard. Conversation-scoped
-blanket edit grants never cover commands or deletes, and manual reads have no
-blanket grant. Opening a site in the embedded browser is its own "site" kind,
-decided per registrable domain and never covered by a blanket grant; acting on a
-page is the "browser-action" kind, with change semantics. See
-[the embedded browser](browser.md). These decisions outlive route changes but not
-the authenticated execution host. Approval cards remain actionable while generation is streaming,
-because the handler is waiting rather than finished.
-
-## Results, search and exact edits
-
-Full local file bytes are transient. Text reads and JS search pull a bounded
-prefix from disk rather than buffering the whole file; edits refuse a file
-larger than a write. Images and PDFs become model file parts where supported,
-with server extraction fallback; persisted tool rows and chunks retain only
-bounded summaries. Every returned file also becomes a `local` working file of the
-attempt that tools can take and `publish_file` can deliver ([files](files.md#files-into-tools)).
-`import_local_file` is the same read under the same consent,
-but its bytes are for server tools rather than the model. `readBinary` names its purpose,
-`view` or `import`, on every call, and only an import admits Office files: a PNG, JPEG,
-PowerPoint or Excel workbook becomes a `local` working file of the attempt, and the model
-gets only its `working:` reference, so presentation or spreadsheet tools can place or open it. It is never stored and dies with
-the attempt; the way back to disk is publishing and `save_to_workspace`. The result
-handler rewrites the very part the continuation replays, dropping the bytes and adding the
-reference, before anything can show the file to the model. The page's result is untrusted: summary, detail and file
-bytes are capped at one attachment's size and classified once, like any stored file, in the
-server function that accepts them,
-before they reach the model or process memory; the generation loop only checks
-the shape. Native and Hermes loops share this handling.
-Research keeps its existing server-side investigation and synthesis paths; this
-change does not add local tools to research workers or move their lifetimes into
-the desktop host.
-
-Search uses installed ripgrep when available and the JavaScript walker
-otherwise; no additional native binary is bundled, and the handler picks the
-backend once per call. ripgrep runs outside any container, so it is started by the
-full path found in an absolute `PATH` entry, never by its bare name: Windows looks
-a bare name up in the working directory first, which is the folder searched, where a
-command may have written an `rg.exe`. Like the person's own shell, it trusts the
-folders on `PATH`. The fallback tests lines in a dedicated worker with a
-parent-owned 30-second deadline. Cancellation, failure and completion await
-that exact worker’s termination, so the content-search regexp’s backtracking
-cannot block Electron’s main thread. Its worker source is embedded in the main
-bundle and needs no packaged worker entry point. Both skip symlink traversal,
-include hidden files other than `.git`, and honour `.gitignore` even outside a checkout. They are not
-identical: rg also reads `.ignore`, `.rgignore` and repository excludes, gives
-a deeper `.gitignore` precedence where the walker ORs them, and has its own
-glob and regex dialects. rg runs with `--no-config` so a user's
-`RIPGREP_CONFIG_PATH` cannot add `--follow` or `--no-ignore`. Its exit code 2
-covers any error, including one unreadable file, so a run that produced a
-summary is a partial answer and only a run with none is a failure, with a bad
-pattern or glob told apart by rg's message.
-
-Edits require an exact, unique match unless `all` is set. Replacement text is
-literal, including dollar-substitution tokens. Before constructing output,
-the handler counts nonoverlapping replacements and measures their projected
-UTF-8 bytes, including surrogate pairs at edit boundaries. Both original and
-resulting files must fit the same decimal 2,000,000-byte write limit. Refusal
-leaves the source unchanged and performs no replacement construction, write or
-diff. `diff` supplies a bounded unified
-preview; expensive or oversized previews are marked truncated rather than
-blocking indefinitely. A preview limit does not change the applied replacement.
+- **One result shape** for every tool (`ToolResult`): a summary for the transcript row, a
+  detail for the model, a truncation mark, refused destinations, and bytes for an image or PDF
+  the model can look at. Full file bytes are never persisted.
+- **Edits** require an exact, unique match unless `all` is set. Replacement text is literal. The
+  projected size is measured before anything is built, and a file written back whole must be
+  strict UTF-8, so a file that is not cannot be damaged. A file with Windows line endings keeps
+  them. `diff` gives a bounded preview.
+- **Find and search** run `rg` in the guest with `--no-config`, hidden files included, `.git`
+  skipped and `.gitignore` honoured outside a checkout. A folder whose name matches a glob is
+  listed with the files inside it. rg's exit code 2 covers any error, so a run with a summary
+  is a partial answer and only a run without one is a failure.

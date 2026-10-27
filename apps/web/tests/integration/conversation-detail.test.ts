@@ -29,10 +29,11 @@ import {
 import { AgentRepo } from "~/modules/agents/server/repo.ts";
 import { ScheduleRepo } from "~/modules/schedules/server/repo.ts";
 import { ChatRepo } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
 import { Db } from "~/server/db.ts";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
 import { customToolName } from "~/modules/custom-tools/schema.ts";
-import { DESKTOP_TOOL_NAMES } from "~/modules/desktop/tool-schema.ts";
+import { BROWSER_TOOL_NAMES } from "~/modules/browser/tool-schema.ts";
 import { DocumentToolName } from "~/modules/documents/tool-schema.ts";
 import { MAP_ROUTE_TOOL } from "~/modules/genui/map-tool-schema.ts";
 import { IMAGE_TOOL } from "~/modules/images/tool-schema.ts";
@@ -47,7 +48,7 @@ import { purgeConversation } from "./purge.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 let database: TestDatabase;
-type Services = ChatRepo | AttachmentRepo | AgentRepo | ScheduleRepo | Db;
+type Services = ChatRepo | AttachmentRepo | AgentRepo | ScheduleRepo | ComputerRepo | Db;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
 /** conversations.model_id / messages.model_id are real FKs. */
 let modelId: string;
@@ -66,6 +67,7 @@ beforeAll(async () => {
       ChatRepo.layer.pipe(Layer.provideMerge(AttachmentRepo.layer)),
       AgentRepo.layer,
       ScheduleRepo.layer,
+      ComputerRepo.layer,
     ).pipe(Layer.provideMerge(InfraLayer)),
   );
 
@@ -318,7 +320,6 @@ describe("loadConversationDetail", () => {
         expect(detail.branchedFrom).toBeNull();
         expect(detail.conversation.fileReferenceAliases).toEqual({
           attachments: {},
-          workspaceAncestors: [source.conversationId],
         });
       }),
     );
@@ -878,7 +879,24 @@ describe("loadConversationDetail", () => {
       ...ProjectFileToolName.literals.map((name) => [name, "project-file"] as const),
       ...KnowledgeToolName.literals.map((name) => [name, "knowledge"] as const),
       ...SkillToolName.literals.map((name) => [name, "skill"] as const),
-      ...DESKTOP_TOOL_NAMES.map((name) => [name, "desktop"] as const),
+      // The desktop names as they stood at the backfill: tools added or renamed since wrote
+      // their family from the start.
+      ...[
+        "list_folder",
+        "find_files",
+        "search_files",
+        "read_local_file",
+        "import_local_file",
+        "write_local_file",
+        "save_to_workspace",
+        "edit_local_file",
+        "move_local_file",
+        "delete_local_file",
+        "run_command",
+        "request_network_access",
+        "request_ssh_agent",
+        ...BROWSER_TOOL_NAMES,
+      ].map((name) => [name, "desktop"] as const),
       [IMAGE_TOOL, "image"],
       ["deep_research", "research"],
       ["ask_user", "ask"],

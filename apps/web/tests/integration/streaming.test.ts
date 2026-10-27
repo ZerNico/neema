@@ -23,8 +23,6 @@ import {
   conversationWorkingFiles,
   schedules,
   scheduleRuns,
-  groups,
-  groupMembers,
   attachmentBlobs,
   conversationQueueEntries,
   attachments,
@@ -39,7 +37,6 @@ import {
   skills,
   skillRevisions,
   usageEvents,
-  workTurnReservations,
   documentSteps,
   documents,
   projects,
@@ -67,6 +64,8 @@ import { loadConversationDetail } from "~/modules/chat/server/conversation-detai
 import { openMessageStream } from "~/modules/chat/server/message-stream.ts";
 import { ASSISTANT_FILE_LIMITS } from "~/modules/chat/assistant-output.ts";
 import { ChatRepo, PLAIN_GENERATION } from "~/modules/chat/server/repo.ts";
+import { ComputerRepo } from "~/modules/computer/server/repo.ts";
+import { MachineHub } from "~/modules/computer/server/hub.ts";
 import { hashSource } from "~/modules/genui/fences.ts";
 import { ChatService } from "~/modules/chat/server/service.ts";
 import { EditNotAllowed } from "~/modules/chat/errors.ts";
@@ -101,7 +100,6 @@ import { ToolUnavailable, WebSearchExecutor } from "~/modules/tools/server/web-s
 import { ToolsRepo } from "~/modules/tools/server/repo.ts";
 import { MapLookups } from "~/modules/genui/server/map-lookups.ts";
 import { routeKey } from "~/modules/genui/extract.ts";
-import { ALL_CAPABILITIES } from "~/modules/groups/policy.ts";
 import { createTestDatabase, type TestDatabase } from "./database.ts";
 import { engineLayer } from "./engine-harness.ts";
 
@@ -139,6 +137,8 @@ let runtime: ManagedRuntime.ManagedRuntime<
   | CustomToolRepo
   | DocumentService
   | ChatRepo
+  | ComputerRepo
+  | MachineHub
   | ProviderRepo
   | ChatService
   | StreamEngine
@@ -509,11 +509,8 @@ const setupConversation = Effect.gen(function* () {
   return { userId, conversation, userMessage, assistant };
 });
 
-/**
- * The same seed as a Work chat, which only a desktop app starts: a finished
- * answer does not start its next queued entry by itself.
- */
-const setupWorkConversation = <A extends { conversation: { id: string } }, E, R>(
+/** The same seed as a chat with a computer, bound to a machine of its owner. */
+const setupComputerConversation = <A extends { conversation: { id: string } }, E, R>(
   setup: Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
@@ -521,7 +518,7 @@ const setupWorkConversation = <A extends { conversation: { id: string } }, E, R>
     const db = yield* Db;
     yield* db
       .update(conversations)
-      .set({ mode: "work" })
+      .set({ machineId: "machine-1" })
       .where(eq(conversations.id, seed.conversation.id));
     return seed;
   });
@@ -3982,7 +3979,7 @@ describe("turn acceptance", () => {
         const failure = yield* chat
           .sendMessage({
             userId: seed.userId,
-            conversation: { kind: "new", id: conversationId, mode: "chat" },
+            conversation: { kind: "new", id: conversationId },
             modelId: textModelId,
             content: "first turn",
             attachmentIds: [file.id],
@@ -4167,7 +4164,6 @@ describe("queued turns", () => {
           .pipe(Effect.flip);
         const queue = yield* repo.listQueue(seed.conversation.id);
         const ready = yield* repo.listQueuedConversations({
-          mode: "chat",
           userId: seed.userId,
           limit: 20,
         });
@@ -4514,23 +4510,23 @@ describe("queued turns", () => {
         yield* finished(stopped, "aborted");
         yield* queue(stopped);
 
-        const work = yield* setupWorkConversation(setupConversation);
-        yield* finished(work, "complete");
-        yield* queue(work);
+        const computer = yield* setupComputerConversation(setupConversation);
+        yield* finished(computer, "complete");
+        yield* queue(computer);
 
-        const listed = (mode: "chat" | "work", userId?: string) =>
+        const listed = (userId?: string) =>
           repo
-            .listQueuedConversations({ limit: 1000, mode, userId })
+            .listQueuedConversations({ limit: 1000, userId })
             .pipe(Effect.map((rows) => new Set(rows.map((row) => row.conversationId))));
-        const chat = yield* listed("chat");
+        const all = yield* listed();
         return {
-          ready: chat.has(ready.conversation.id),
-          asking: chat.has(asking.conversation.id),
-          failed: chat.has(failed.conversation.id),
-          stopped: chat.has(stopped.conversation.id),
-          workInChat: chat.has(work.conversation.id),
-          workForItsOwner: (yield* listed("work", work.userId)).has(work.conversation.id),
-          workForAnotherUser: (yield* listed("work", ready.userId)).has(work.conversation.id),
+          ready: all.has(ready.conversation.id),
+          asking: all.has(asking.conversation.id),
+          failed: all.has(failed.conversation.id),
+          stopped: all.has(stopped.conversation.id),
+          computer: all.has(computer.conversation.id),
+          computerForItsOwner: (yield* listed(computer.userId)).has(computer.conversation.id),
+          computerForAnotherUser: (yield* listed(ready.userId)).has(computer.conversation.id),
         };
       }),
     );
@@ -4540,9 +4536,9 @@ describe("queued turns", () => {
       asking: false,
       failed: false,
       stopped: false,
-      workInChat: false,
-      workForItsOwner: true,
-      workForAnotherUser: false,
+      computer: true,
+      computerForItsOwner: true,
+      computerForAnotherUser: false,
     });
   });
 
@@ -4688,52 +4684,6 @@ describe("queued turns", () => {
     );
 
     expect(result).toEqual({ promoted: false, reason: "question" });
-  });
-
-  it("holds queued turns behind a reserved Work send until it ends", async () => {
-    const result = await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const db = yield* Db;
-        const seed = yield* setupConversation;
-        yield* repo.finalizeMessage({
-          messageId: seed.assistant.id,
-          status: "complete",
-          content: "ok",
-        });
-        yield* db
-          .update(conversations)
-          .set({ mode: "work" })
-          .where(eq(conversations.id, seed.conversation.id));
-        const entry = yield* repo.enqueue({
-          userId: seed.userId,
-          conversationId: seed.conversation.id,
-          content: "later",
-          attachmentIds: [],
-          input: queuedInput(),
-        });
-        const reservationId = uuidv7();
-        yield* repo.reserveWorkTurn({
-          id: reservationId,
-          userId: seed.userId,
-          conversation: { kind: "existing", id: seed.conversation.id },
-        });
-        const promote = repo.promoteNextQueuedTurn({
-          userId: seed.userId,
-          conversationId: seed.conversation.id,
-          expectedEntryId: entry.id,
-          expectedRevision: entry.revision,
-          resolve: plain,
-        });
-        const held = yield* promote;
-        yield* repo.abortWorkTurn(seed.userId, reservationId);
-        const released = yield* promote;
-        return { held, released: released.promoted };
-      }),
-    );
-
-    expect(result.held).toEqual({ promoted: false, reason: "busy" });
-    expect(result.released).toBe(true);
   });
 
   const firstRound = "Checking the models. ";
@@ -5367,16 +5317,16 @@ describe("queued turns", () => {
         const chat = yield* ChatService;
         const engine = yield* StreamEngine;
         const repo = yield* ChatRepo;
-        // Work, so the answer it starts does not go on to start the other
-        // entry when it finishes; the desktop fields below name its machine.
-        const seed = yield* setupWorkConversation(setupConversation);
-        yield* repo.enqueue({
+        const seed = yield* setupConversation;
+        const first = yield* repo.enqueue({
           userId: seed.userId,
           conversationId: seed.conversation.id,
           content: "queued first",
           attachmentIds: [],
           input: queuedInput(),
         });
+        // Held, so the answer the chosen entry starts does not go on to start it.
+        yield* repo.setQueueEntryError(first.id, first.revision, "held");
         const chosen = yield* repo.enqueue({
           userId: seed.userId,
           conversationId: seed.conversation.id,
@@ -5401,26 +5351,11 @@ describe("queued turns", () => {
           userId: seed.userId,
           conversationId: seed.conversation.id,
           entryId: chosen.id,
-          desktop: {
-            executorId: "executor-now",
-            machine: { id: "machine-b", name: "Second Mac" },
-            folders: [],
-            commands: false,
-            browser: false,
-          },
         });
         const next = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
         yield* waitForAnswer(next.id);
-        const [stamp] = yield* (yield* Db)
-          .select({
-            id: messageGenerationConfig.desktopMachineId,
-            name: messageGenerationConfig.desktopMachineName,
-          })
-          .from(messageGenerationConfig)
-          .where(eq(messageGenerationConfig.messageId, next.id));
         return {
           sent,
-          stamp,
           stopped: yield* repo.getMessage(seed.assistant.id),
           transcript: (yield* repo.listMessages(seed.conversation.id)).map(
             (message) => `${message.role}:${message.status}:${message.content.slice(0, 17)}`,
@@ -5431,8 +5366,6 @@ describe("queued turns", () => {
     );
 
     expect(result.sent).toEqual({ started: true });
-    // The attempt names the machine that ran it, as every other Work start does.
-    expect(result.stamp).toEqual({ id: "machine-b", name: "Second Mac" });
     // Stopped, keeping what it had written.
     expect(result.stopped?.status).toBe("aborted");
     // The gate holds the second word, so only the first was written.
@@ -5568,19 +5501,12 @@ describe("queued turns", () => {
     expect(result.queue).toEqual([]);
   });
 
-  it("waits for a desktop app to start queued Work, then runs on that app's executor", async () => {
+  it("starts a queued message in a chat with a computer without any desktop app", async () => {
     const result = await runtime.runPromise(
       Effect.gen(function* () {
         const chat = yield* ChatService;
-        const engine = yield* StreamEngine;
         const repo = yield* ChatRepo;
-        const external = yield* ExternalCompletion;
-        const db = yield* Db;
-        const seed = yield* setupConversation;
-        yield* db
-          .update(conversations)
-          .set({ mode: "work" })
-          .where(eq(conversations.id, seed.conversation.id));
+        const seed = yield* setupComputerConversation(setupConversation);
         yield* repo.finalizeMessage({
           messageId: seed.assistant.id,
           status: "complete",
@@ -5593,54 +5519,21 @@ describe("queued turns", () => {
           attachmentIds: [],
           input: queuedInput(),
         });
-        // The server cannot name a live machine, so without one nothing starts.
-        const withoutDesktop = yield* chat.dispatchQueuedMessage({
+        const started = yield* chat.dispatchQueuedMessage({
           userId: seed.userId,
           conversationId: seed.conversation.id,
         });
-        const stillQueued = (yield* repo.listQueue(seed.conversation.id)).length;
-
-        const reached = yield* Deferred.make<void>();
-        const release = yield* Deferred.make<void>();
-        hold = { after: 1, reached, release };
-        const withDesktop = yield* chat.dispatchQueuedMessage({
-          userId: seed.userId,
-          conversationId: seed.conversation.id,
-          desktop: {
-            executorId: "executor-now",
-            folders: [],
-            commands: false,
-            browser: false,
-          },
-          deviceSessionId: "device-1",
-        });
-        yield* Deferred.await(reached);
-        const owners = yield* external.owners();
         const assistant = (yield* repo.listMessages(seed.conversation.id)).at(-1)!;
-        const events = yield* Effect.forkChild(
-          engine.subscribe(assistant.id, 0).pipe(Stream.runCollect),
-        );
-        yield* Deferred.succeed(release, undefined);
-        yield* Fiber.join(events);
-        hold = null;
+        yield* waitForAnswer(assistant.id);
         return {
-          withoutDesktop,
-          stillQueued,
-          withDesktop,
-          owner: owners.find((owner) => owner.messageId === assistant.id),
+          started,
           final: yield* repo.getMessage(assistant.id),
           queue: yield* repo.listQueue(seed.conversation.id),
         };
       }),
     );
 
-    expect(result.withoutDesktop).toEqual({ started: false });
-    expect(result.stillQueued).toBe(1);
-    expect(result.withDesktop).toEqual({ started: true });
-    expect(result.owner).toMatchObject({
-      executorId: "executor-now",
-      deviceSessionId: "device-1",
-    });
+    expect(result.started).toEqual({ started: true });
     expect(result.final?.status).toBe("complete");
     expect(result.queue).toEqual([]);
   }, 60_000);
@@ -5745,12 +5638,7 @@ describe("resumable streaming pipeline", () => {
             conversationId: seed.conversation.id,
             messageId: seed.assistant.id,
             modelId: "fake",
-            desktop: {
-              executorId: "test-executor",
-              folders: [],
-              commands: false,
-              browser: false,
-            },
+            desktop: { executorId: "test-executor", browser: false },
           });
           const events = yield* engine
             .subscribe(seed.assistant.id, 0, seed.assistant.generationId ?? undefined)
@@ -6738,74 +6626,6 @@ describe("scheduled turns", () => {
     expect(result.conversation?.scheduleId).toBeNull();
     expect(result.listed).toMatchObject({ scheduled: true });
     expect(result.agent).toBeNull();
-  }, 60_000);
-});
-
-describe("scheduled turns into a work chat", () => {
-  it("refuses to fire into a work chat, which needs the desktop app", async () => {
-    const result = await runtime.runPromise(
-      Effect.gen(function* () {
-        const seed = yield* setupConversation;
-        const chat = yield* ChatService;
-        const db = yield* Db;
-        yield* db
-          .update(conversations)
-          .set({ mode: "work" })
-          .where(eq(conversations.id, seed.conversation.id));
-        return yield* chat
-          .runScheduledTurn({
-            userId: seed.userId,
-            scheduleId: uuidv7(),
-            // Refused before anything is written, so the run need not exist.
-            scheduleRunId: uuidv7(),
-            prompt: "Tidy the repo.",
-            modelId: textModelId,
-            agentId: null,
-            searchEnabled: false,
-            researchEnabled: false,
-            collectionIds: [],
-            skillIds: [],
-            integrationGrants: [],
-            timeZone: "UTC",
-            target: { kind: "existing", conversationId: seed.conversation.id },
-            onSettled: Effect.void,
-          })
-          .pipe(Effect.flip);
-      }),
-    );
-    expect(english((result as { reason: Localized }).reason)).toBe(
-      "a work chat cannot run a schedule",
-    );
-  }, 60_000);
-});
-
-describe("temporary chats", () => {
-  it("refuses a temporary work chat before creating anything", async () => {
-    const result = await runtime.runPromise(
-      Effect.gen(function* () {
-        const seed = yield* setupConversation;
-        const chat = yield* ChatService;
-        const db = yield* Db;
-        const id = uuidv7();
-        const error = yield* chat
-          .sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "new", id, mode: "work", temporary: true },
-            modelId: textModelId,
-            content: "Tidy the repo.",
-            attachmentIds: [],
-            searchEnabled: false,
-            researchEnabled: false,
-          })
-          .pipe(Effect.flip);
-        const rows = yield* db.select().from(conversations).where(eq(conversations.id, id));
-        return { error, rows };
-      }),
-    );
-    expect(english((result.error as { reason: Localized }).reason)).toBe(
-      "a work chat cannot be temporary",
-    );
-    expect(result.rows).toEqual([]);
   }, 60_000);
 });
 
@@ -8042,9 +7862,9 @@ describe("custom tool calls", () => {
     );
 
   // Only the offer decides a call's family. These names belong to families
-  // this attempt was not offered: no pinned module, no Work folder, no
+  // this attempt was not offered: no pinned module, no desktop browser, no
   // conditional schedule fire. The SDK still forwards each part.
-  it.each(["custom_nope__lookup", "run_command", "notify_user"])(
+  it.each(["custom_nope__lookup", "browser_click", "notify_user"])(
     "treats %s, which this attempt was not offered, as an unknown tool and keeps no row",
     async (name) => {
       const seed = await runtime.runPromise(setupConversation);
@@ -8205,7 +8025,7 @@ describe("custom tool calls", () => {
       const call = detail.toolCalls.find((row) => row.messageId === assistantMessageId)!;
       expect(JSON.stringify(call.result)).not.toContain(csv.toString("base64"));
       // The model is handed each file's attachment id, the handle
-      // save_to_workspace takes; the bytes stay on the server.
+      // copy_to_computer takes; the bytes stay on the server.
       const second = JSON.stringify(prompts[1]!.prompt);
       for (const row of stored) expect(second).toContain(`"attachmentId":"${row.id}"`);
       // Only the shared CSV reached the model's next round, as an inline fence.
@@ -8706,7 +8526,7 @@ describe("custom tool calls", () => {
       expect(first).toBeTruthy();
     });
 
-    it("offers kept drafts only to the editor that made them, and publish_file only with one", async () => {
+    it("offers kept drafts only to the editor that made them", async () => {
       const { seed, conversationId, tool, toolId } = await runtime.runPromise(keptSetup);
       customToolRun = keeperRun;
       try {
@@ -8754,7 +8574,8 @@ describe("custom tool calls", () => {
         expect(JSON.stringify((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
           custom!.workingFileId,
         );
-        // With no editor offered at all there is nothing to continue or deliver.
+        // With no module offered, its kept drafts are not continued. publish_file stays,
+        // since the computer's tools hand files back too.
         const enabled = await runtime.runPromise(
           CustomToolRepo.use((repo) => repo.list()).pipe(
             Effect.map((rows) => rows.filter((row) => row.enabled).map((row) => row.id)),
@@ -8770,7 +8591,6 @@ describe("custom tool calls", () => {
         try {
           const without = await promptOf(seed.userId, conversationId);
           expect(JSON.stringify(without.prompt)).not.toContain("Unpublished working files kept");
-          expect(Object.keys(without.toolkit?.tools ?? {})).not.toContain("publish_file");
         } finally {
           await setAll(true);
         }
@@ -9055,26 +8875,18 @@ describe("custom tool calls", () => {
   });
 });
 
-describe("local tools on the user's machine", () => {
-  const folder = { name: "acme-site", path: "/home/test/acme-site" };
-  const workConversation = (userId: string) =>
-    Effect.gen(function* () {
-      const conversation = yield* (yield* ChatRepo).createConversation({
-        userId,
-        modelId: textModelId,
-      });
-      yield* (yield* Db)
-        .update(conversations)
-        .set({ mode: "work" })
-        .where(eq(conversations.id, conversation.id));
-      return conversation;
-    });
+describe("desktop calls run by the sending app", () => {
+  // A fresh chat: the seed's own answer is still streaming, which would hold every send.
   const desktopChat = Effect.gen(function* () {
     const seed = yield* setupConversation;
-    return { ...seed, conversation: yield* workConversation(seed.userId) };
+    const conversation = yield* (yield* ChatRepo).createConversation({
+      userId: seed.userId,
+      modelId: textModelId,
+    });
+    return { ...seed, conversation };
   });
 
-  const send = (seed: Effect.Success<typeof desktopChat>, desktopCommands = false) =>
+  const send = (seed: Effect.Success<typeof desktopChat>, browser = false) =>
     Effect.flatMap(ChatService, (service) =>
       service.sendMessage({
         userId: seed.userId,
@@ -9084,325 +8896,9 @@ describe("local tools on the user's machine", () => {
         searchEnabled: false,
         researchEnabled: false,
         attachmentIds: [],
-        desktop: {
-          executorId: "desktop-test-session",
-          folders: [folder],
-          commands: desktopCommands,
-          browser: false,
-        },
+        desktop: { executorId: "desktop-test-session", browser },
       }),
     );
-
-  it("reserves without transcript rows and activates a proposed id exactly once", async () => {
-    const promptsBefore = streamPrompts.length;
-    authoringScript = () =>
-      Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "Ready." }),
-        authoringFinish(),
-      );
-    try {
-      const result = await runtime.runPromise(
-        Effect.gen(function* () {
-          const { userId } = yield* setupConversation;
-          const service = yield* ChatService;
-          const repo = yield* ChatRepo;
-          const db = yield* Db;
-          const groupId = uuidv7();
-          yield* db.insert(groups).values({
-            id: groupId,
-            name: `Work without attachments ${groupId}`,
-            capabilities: { ...ALL_CAPABILITIES, attachments: false },
-          });
-          yield* db.insert(groupMembers).values({ groupId, userId });
-          const conversationId = uuidv7();
-          const reservationId = uuidv7();
-          const conversation = { kind: "new" as const, id: conversationId, mode: "work" as const };
-          yield* service.reserveWorkTurn({ id: reservationId, userId, conversation });
-
-          const [beforeConversation, beforeMessages] = yield* Effect.all([
-            db
-              .select({ id: conversations.id })
-              .from(conversations)
-              .where(eq(conversations.id, conversationId)),
-            db
-              .select({ id: messages.id })
-              .from(messages)
-              .where(eq(messages.conversationId, conversationId)),
-          ]);
-
-          const input = {
-            userId,
-            reservationId,
-            conversation,
-            modelId: textModelId,
-            content: "Read the staged report.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [{ name: "workspace", path: `/data/workspaces/${conversationId}` }, folder],
-              commands: true,
-              browser: false,
-            },
-            workspaceFiles: ["report.pdf"],
-          };
-          const first = yield* service.sendMessage(input);
-          const replay = yield* service.sendMessage(input);
-          yield* (yield* StreamEngine).subscribe(first.assistantMessageId, 0).pipe(Stream.runDrain);
-          const status = yield* service.getWorkTurnReservation({ userId, reservationId });
-          // A recovery abort arriving after activation must say so and change nothing.
-          const lateAbort = yield* service.abortWorkTurn({ userId, reservationId });
-          const config = yield* repo.getGenerationConfig(first.assistantMessageId);
-          return { beforeConversation, beforeMessages, first, replay, status, lateAbort, config };
-        }),
-      );
-
-      expect(result.beforeConversation).toEqual([]);
-      expect(result.beforeMessages).toEqual([]);
-      expect(result.replay).toEqual(result.first);
-      expect(result.status).toMatchObject({
-        status: "activated",
-        conversationId: result.first.conversationId,
-        assistantMessageId: result.first.assistantMessageId,
-      });
-      expect(result.lateAbort).toEqual(result.status);
-      expect(result.config.workspaceFiles).toEqual(["report.pdf"]);
-      expect(result.config.desktopFolders).toEqual(["workspace", "acme-site"]);
-      expect(JSON.stringify(result.config)).not.toContain("/data/workspaces/");
-      expect(JSON.stringify(result.config)).not.toContain("/home/test/");
-      expect(streamPrompts).toHaveLength(promptsBefore + 1);
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("allows one live reservation and expires it by the database clock", async () => {
-    const outcome = await runtime.runPromise(
-      Effect.gen(function* () {
-        const seed = yield* desktopChat;
-        const repo = yield* ChatRepo;
-        const db = yield* Db;
-        const firstId = uuidv7();
-        const secondId = uuidv7();
-        const conversation = { kind: "existing" as const, id: seed.conversation.id };
-        const attempts = yield* Effect.all(
-          [
-            repo
-              .reserveWorkTurn({ id: firstId, userId: seed.userId, conversation })
-              .pipe(Effect.result),
-            repo
-              .reserveWorkTurn({ id: secondId, userId: seed.userId, conversation })
-              .pipe(Effect.result),
-          ],
-          { concurrency: "unbounded" },
-        );
-        const winner = attempts.find((attempt) => attempt._tag === "Success");
-        const loser = attempts.find((attempt) => attempt._tag === "Failure");
-        if (!winner || winner._tag !== "Success") return yield* Effect.die("No reservation won");
-        yield* db
-          .update(workTurnReservations)
-          .set({ expiresAt: sql`now() - interval '1 second'` })
-          .where(eq(workTurnReservations.id, winner.success.id));
-        const expired = yield* repo.getWorkTurnReservation(seed.userId, winner.success.id);
-        return { winner: winner.success, loser, expired };
-      }),
-    );
-
-    expect(outcome.loser?._tag).toBe("Failure");
-    if (outcome.loser?._tag === "Failure")
-      expect(outcome.loser.failure._tag).toBe("ConversationBusy");
-    expect(outcome.expired.status).toBe("expired");
-  });
-
-  it("settles only its own chat's lapsed reservation when it reserves", async () => {
-    const statuses = await runtime.runPromise(
-      Effect.gen(function* () {
-        const repo = yield* ChatRepo;
-        const db = yield* Db;
-        const reserveLapsed = Effect.gen(function* () {
-          const seed = yield* desktopChat;
-          const conversation = { kind: "existing" as const, id: seed.conversation.id };
-          const row = yield* repo.reserveWorkTurn({
-            id: uuidv7(),
-            userId: seed.userId,
-            conversation,
-          });
-          yield* db
-            .update(workTurnReservations)
-            .set({ expiresAt: sql`now() - interval '1 second'` })
-            .where(eq(workTurnReservations.id, row.id));
-          return { seed, conversation, row };
-        });
-        const mine = yield* reserveLapsed;
-        const theirs = yield* reserveLapsed;
-        yield* repo.reserveWorkTurn({
-          id: uuidv7(),
-          userId: mine.seed.userId,
-          conversation: mine.conversation,
-        });
-        const status = (id: string) =>
-          db
-            .select({ status: workTurnReservations.status })
-            .from(workTurnReservations)
-            .where(eq(workTurnReservations.id, id))
-            .pipe(Effect.map(([row]) => row?.status));
-        return { mine: yield* status(mine.row.id), theirs: yield* status(theirs.row.id) };
-      }),
-    );
-    expect(statuses).toEqual({ mine: "expired", theirs: "reserved" });
-  });
-
-  it("fences retry, edit, and branch inside their mutation transactions", async () => {
-    authoringScript = () =>
-      Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "Ready." }),
-        authoringFinish(),
-      );
-    try {
-      const outcome = await runtime.runPromise(
-        Effect.gen(function* () {
-          const seed = yield* desktopChat;
-          const service = yield* ChatService;
-          const repo = yield* ChatRepo;
-          const db = yield* Db;
-          const sent = yield* send(seed, true);
-          yield* (yield* StreamEngine).subscribe(sent.assistantMessageId, 0).pipe(Stream.runDrain);
-          const beforeMessages = yield* repo.listMessages(seed.conversation.id);
-          const beforeConversations = yield* db
-            .select({ id: conversations.id })
-            .from(conversations)
-            .where(eq(conversations.userId, seed.userId));
-          const userMessage = beforeMessages.find((message) => message.role === "user")!;
-          const reservationId = uuidv7();
-          yield* service.reserveWorkTurn({
-            id: reservationId,
-            userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
-          });
-
-          const retry = yield* service
-            .retryMessage({
-              userId: seed.userId,
-              conversationId: seed.conversation.id,
-              messageId: sent.assistantMessageId,
-              desktop: {
-                executorId: "reservation-fence-retry",
-                folders: [],
-                commands: true,
-                browser: false,
-              },
-            })
-            .pipe(Effect.result);
-          const edit = yield* service
-            .editMessage({
-              userId: seed.userId,
-              conversationId: seed.conversation.id,
-              messageId: userMessage.id,
-              modelId: textModelId,
-              content: "Edited while reserved",
-              searchEnabled: false,
-              researchEnabled: false,
-              attachmentIds: [],
-              desktop: {
-                executorId: "reservation-fence-edit",
-                folders: [folder],
-                commands: true,
-                browser: false,
-              },
-            })
-            .pipe(Effect.result);
-          const branch = yield* service
-            .branchConversation({
-              userId: seed.userId,
-              conversationId: seed.conversation.id,
-              messageId: sent.assistantMessageId,
-            })
-            .pipe(Effect.result);
-          const afterMessages = yield* repo.listMessages(seed.conversation.id);
-          const afterConversations = yield* db
-            .select({ id: conversations.id })
-            .from(conversations)
-            .where(eq(conversations.userId, seed.userId));
-          const aborted = yield* service.abortWorkTurn({ userId: seed.userId, reservationId });
-          return {
-            aborted: aborted.status,
-            failures: [retry, edit, branch].map((result) =>
-              result._tag === "Failure" ? result.failure._tag : "Success",
-            ),
-            beforeMessages,
-            afterMessages,
-            beforeConversations,
-            afterConversations,
-          };
-        }),
-      );
-
-      expect(outcome.failures).toEqual([
-        "ConversationBusy",
-        "ConversationBusy",
-        "ConversationBusy",
-      ]);
-      expect(outcome.aborted).toBe("aborted");
-      expect(outcome.afterMessages).toEqual(outcome.beforeMessages);
-      expect(outcome.afterConversations).toEqual(outcome.beforeConversations);
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("rejects proposed-id collisions and reservations for another user's chat", async () => {
-    const outcome = await runtime.runPromise(
-      Effect.gen(function* () {
-        const owner = yield* desktopChat;
-        const stranger = yield* setupConversation;
-        const repo = yield* ChatRepo;
-        const service = yield* ChatService;
-        const ordinary = yield* service
-          .sendMessage({
-            userId: owner.userId,
-            conversation: { kind: "new", id: owner.conversation.id, mode: "work" },
-            modelId: textModelId,
-            content: "Do not reuse this id.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "collision-test",
-              folders: [folder],
-              commands: true,
-              browser: false,
-            },
-          })
-          .pipe(Effect.result);
-        const collision = yield* repo
-          .reserveWorkTurn({
-            id: uuidv7(),
-            userId: owner.userId,
-            conversation: { kind: "new", id: owner.conversation.id, mode: "work" },
-          })
-          .pipe(Effect.result);
-        const foreign = yield* repo
-          .reserveWorkTurn({
-            id: uuidv7(),
-            userId: stranger.userId,
-            conversation: { kind: "existing", id: owner.conversation.id },
-          })
-          .pipe(Effect.result);
-        return { ordinary, collision, foreign };
-      }),
-    );
-
-    expect(outcome.ordinary._tag).toBe("Failure");
-    if (outcome.ordinary._tag === "Failure")
-      expect(outcome.ordinary.failure._tag).toBe("InvalidMessage");
-    expect(outcome.collision._tag).toBe("Failure");
-    if (outcome.collision._tag === "Failure")
-      expect(outcome.collision.failure._tag).toBe("InvalidMessage");
-    expect(outcome.foreign._tag).toBe("Failure");
-    if (outcome.foreign._tag === "Failure")
-      expect(outcome.foreign.failure._tag).toBe("ConversationNotFound");
-  });
 
   /**
    * Stands in for the page: subscribes to the same stream the browser does,
@@ -9467,380 +8963,331 @@ describe("local tools on the user's machine", () => {
       return { fiber, seen, first };
     });
 
-  // Longer than the excerpt the transcript keeps, so what is kept and what is
-  // dropped are both observable. The tail is only ever in the prompt.
-  const fileBody = `${"MACHINE_FILE_BODY ".repeat(200)}FILE_TAIL_MARKER`;
-
-  it("preserves current Work authority for structured answers and their edits", async () => {
-    authoringScript = () =>
-      Stream.make(
+  it("keeps the computer's state out of the cached system prompt, in each answer's opening", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    await runtime.runPromise(
+      Effect.flatMap(ComputerRepo, (repo) =>
+        repo.saveMachine(seed.userId, {
+          machineId: "laptop",
+          name: "Laptop",
+          platform: "darwin",
+          computer: { status: "ready" },
+          remote: true,
+        }),
+      ),
+    );
+    const prompts: GatewayInput[] = [];
+    authoringScript = (input) => {
+      prompts.push(input);
+      return Stream.make(
         AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
         authoringFinish(),
       );
-    try {
-      await runtime.runPromise(
+    };
+    const sendAndWait = (content: string) =>
+      runtime.runPromise(
         Effect.gen(function* () {
-          const seed = yield* setupQuestion;
-          const repo = yield* ChatRepo;
           const service = yield* ChatService;
-          const engine = yield* StreamEngine;
-          yield* (yield* Db)
-            .update(conversations)
-            .set({ mode: "work" })
-            .where(eq(conversations.id, seed.conversation.id));
           const sent = yield* service.sendMessage({
-            ...answerInput(seed),
-            desktop: {
-              executorId: "answer-session",
-              folders: [{ name: "answer-folder", path: "/home/test/answer-folder" }],
-              commands: false,
-              browser: false,
-            },
-          });
-          yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
-          expect(
-            (yield* repo.getGenerationConfig(sent.assistantMessageId))?.desktopFolders,
-          ).toEqual(["answer-folder"]);
-          const rows = yield* repo.listMessages(seed.conversation.id);
-          const answer = rows.find((row) => row.questionResponse)!;
-          const edited = yield* service.editMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId: answer.id,
+            conversation: { kind: "existing", id: seed.conversation.id },
             modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
             attachmentIds: [],
-            questionResponse: {
-              kind: "answers",
-              answers: [{ selected: [], custom: "Current choice" }],
-            },
-            desktop: {
-              executorId: "edit-answer-session",
-              folders: [{ name: "edited-folder", path: "/home/test/edited-folder" }],
-              commands: true,
-              browser: false,
-            },
           });
-          yield* Stream.runDrain(engine.subscribe(edited.assistantMessageId, 0));
-          const config = yield* repo.getGenerationConfig(edited.assistantMessageId);
-          expect(config?.desktopFolders).toEqual(["edited-folder"]);
-          expect(config?.desktopCommands).toBe(true);
-          yield* repo.updateConversation(seed.conversation.id, { permissionLevel: "skip" });
-          const branch = yield* repo.cloneConversationPrefix({
-            userId: seed.userId,
-            sourceConversationId: seed.conversation.id,
-            throughMessageId: edited.assistantMessageId,
-          });
-          expect(branch.mode).toBe("work");
-          expect(branch.permissionLevel).toBe("skip");
-          expect(
-            (yield* (yield* ExternalCompletion).snapshot(seed.userId, "edit-answer-session")).calls,
-          ).toEqual([]);
+          const engine = yield* StreamEngine;
+          yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
         }),
       );
+    try {
+      await sendAndWait("Hello");
+      // Between turns the chat binds to a machine that is not connected, with a folder.
+      await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(conversations)
+            .set({ machineId: "laptop", computerFolders: [{ name: "site", readOnly: false }] })
+            .where(eq(conversations.id, seed.conversation.id)),
+        ),
+      );
+      await sendAndWait("And now?");
+      const text = (message: { content: unknown }) => JSON.stringify(message.content);
+      const system = (input: GatewayInput) =>
+        input.prompt.content.filter((message) => message.role === "system").map(text);
+      expect(system(prompts[1]!)).toEqual(system(prompts[0]!));
+      expect(system(prompts[0]!).join()).not.toContain("Laptop");
+      const notices = (input: GatewayInput) =>
+        input.prompt.content
+          .filter((message) => message.role === "user")
+          .map(text)
+          .filter((content) => content.includes("This chat's computer, as of this answer"));
+      expect(notices(prompts[0]!).join()).toContain("none yet");
+      const latest = notices(prompts[1]!).at(-1)!;
+      expect(latest).toContain('\\"Laptop\\", offline right now');
+      expect(latest).toContain("/folders/site");
     } finally {
       authoringScript = null;
     }
   });
 
-  it("uses current desktop capabilities for retries and edits, refusing browser retries before reset", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    const prompts: GatewayInput[] = [];
-    authoringScript = (input) => {
-      prompts.push(input);
-      return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
-        authoringFinish(),
-      );
-    };
-    const settle = (messageId: string) =>
-      runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) => Stream.runDrain(engine.subscribe(messageId, 0))),
-      );
-    try {
-      const sent = await runtime.runPromise(send(seed, true));
-      await settle(sent.assistantMessageId);
-      const before = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId)),
-      );
-      const refused = await runtime.runPromise(
-        Effect.result(
-          ChatService.use((service) =>
-            service.retryMessage({
-              userId: seed.userId,
-              conversationId: seed.conversation.id,
-              messageId: sent.assistantMessageId,
-            }),
-          ),
-        ),
-      );
-      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkDesktopRequired");
-      expect(
-        await runtime.runPromise(ChatRepo.use((repo) => repo.getMessage(sent.assistantMessageId))),
-      ).toEqual(before);
-      await runtime.runPromise(
-        ChatService.use((service) =>
-          service.retryMessage({
-            userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId: sent.assistantMessageId,
-            desktop: {
-              executorId: "another-current-session",
-              folders: [],
-              commands: false,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      await settle(sent.assistantMessageId);
-      const retried = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
-      );
-      expect(retried?.desktopFolders).toBeNull();
-      expect(retried?.desktopCommands).toBe(false);
-      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).not.toContain("read_local_file");
-      const detail = await runtime.runPromise(
-        loadConversationDetail(seed.userId, seed.conversation.id),
-      );
-      const userMessage = detail.messages.find((m) => m.role === "user")!;
-      await runtime.runPromise(
-        ChatService.use((service) =>
-          service.editMessage({
-            userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId: userMessage.id,
-            modelId: textModelId,
-            content: "Edited instruction",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "current-edit-session",
-              folders: [{ name: "current-folder", path: "/home/test/current-folder" }],
-              commands: true,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      await settle(sent.assistantMessageId);
-      const edited = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
-      );
-      expect(edited?.desktopFolders).toEqual(["current-folder"]);
-      expect(edited?.desktopCommands).toBe(true);
-      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).toContain("run_command");
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("stamps the sending machine on a retried and a resumed answer", async () => {
+  it("asks the sending machine for a new chat's folders, and the first folders bind the chat", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = () =>
       Stream.make(
         AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
         authoringFinish(),
       );
-    const fromMachine = (id: string, name: string) => ({
-      executorId: `executor-${id}`,
-      machine: { id, name },
-      folders: [folder],
-      commands: false,
-      browser: false,
-    });
     try {
-      const stamps = await runtime.runPromise(
+      const result = await runtime.runPromise(
         Effect.gen(function* () {
-          const service = yield* ChatService;
-          const repo = yield* ChatRepo;
-          const engine = yield* StreamEngine;
-          const settle = (messageId: string) => Stream.runDrain(engine.subscribe(messageId, 0));
-          const stamp = (messageId: string) =>
-            Effect.map(repo.getGenerationConfig(messageId), (config) => ({
-              id: config.desktopMachineId,
-              name: config.desktopMachineName,
-            }));
-          const sent = yield* send(seed);
-          const messageId = sent.assistantMessageId;
-          yield* settle(messageId);
-          const before = yield* stamp(messageId);
-          yield* service.retryMessage({
+          const hub = yield* MachineHub;
+          const repo = yield* ComputerRepo;
+          const hello = {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin" as const,
+            computer: { status: "ready" as const },
+            remote: true,
+          };
+          yield* repo.saveMachine(seed.userId, hello);
+          const events = yield* hub.connect(seed.userId, hello, "laptop-session");
+          // The folder was picked before the chat existed, under the id the composer holds.
+          const id = uuidv7();
+          const sent = yield* (yield* ChatService).sendMessage({
             userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId,
-            desktop: fromMachine("machine-r", "Retry Mac"),
+            conversation: { kind: "new", id },
+            modelId: textModelId,
+            content: "Look at my site",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+            deviceSessionId: "laptop-session",
           });
-          yield* settle(messageId);
-          const retried = yield* stamp(messageId);
-          // Only a stopped or failed answer can be continued.
-          yield* (yield* Db)
-            .update(messages)
-            .set({ status: "aborted" })
-            .where(eq(messages.id, messageId));
-          yield* service.resumeMessage({
-            userId: seed.userId,
-            conversationId: seed.conversation.id,
-            messageId,
-            desktop: fromMachine("machine-s", "Resume Mac"),
-          });
-          yield* settle(messageId);
-          return { before, retried, resumed: yield* stamp(messageId) };
-        }),
+          const [asked] = yield* Stream.filter(events, (event) => event.type === "folders").pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          );
+          const bound = yield* repo.setFolders(seed.userId, "laptop", id, [
+            { name: "site", readOnly: false },
+          ]);
+          const takenOver = yield* repo.setFolders(seed.userId, "desk", id, [
+            { name: "other", readOnly: false },
+          ]);
+          const chat = yield* repo.chat(seed.userId, id);
+          yield* Stream.runDrain((yield* StreamEngine).subscribe(sent.assistantMessageId, 0));
+          return { asked, id, bound, takenOver, chat };
+        }).pipe(Effect.scoped),
       );
-      expect(stamps.before).toEqual({ id: null, name: null });
-      expect(stamps.retried).toEqual({ id: "machine-r", name: "Retry Mac" });
-      expect(stamps.resumed).toEqual({ id: "machine-s", name: "Resume Mac" });
+      expect(result.asked).toEqual({ type: "folders", conversationId: result.id });
+      expect(result.bound).toBe(true);
+      expect(result.takenOver).toBe(false);
+      expect(result.chat).toMatchObject({
+        machineId: "laptop",
+        folders: [{ name: "site", readOnly: false }],
+      });
     } finally {
       authoringScript = null;
     }
-  }, 60_000);
+  });
 
-  it.each([false, true])(
-    "folds local results into the next turn without persisting the body (Hermes: %s)",
-    async (hermes) => {
-      const seed = await runtime.runPromise(desktopChat);
-      const prompts: GatewayInput[] = [];
-      authoringScript = (input) => {
-        prompts.push(input);
-        if (prompts.length === 1)
-          return authoringTool(input, "read_local_file", { path: "README.md" }, hermes);
-        return Stream.make(
-          AiResponse.makePart("text-delta", { id: "t", delta: "It describes the site." }),
-          authoringFinish(),
-        );
-      };
-      try {
-        const sent = await runtime.runPromise(send(seed));
-        const result = await runtime.runPromise(
-          Effect.gen(function* () {
-            const bridge = yield* fakeBridge(sent.assistantMessageId, (call) => ({
-              v: 1,
-              ok: true,
-              summary: `Read ${call.args.path}`,
-              detail: fileBody,
-              truncated: false,
-            }));
-            yield* Fiber.join(bridge.fiber);
-            return {
-              seen: bridge.seen,
-              detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
-              chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
-            };
-          }),
-        );
+  it("keeps the person's name for a machine across its reconnects, and blank goes back", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const names = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ComputerRepo;
+        const hello = {
+          machineId: "laptop",
+          name: "MacBook Pro",
+          platform: "darwin" as const,
+          computer: { status: "ready" as const },
+          remote: true,
+        };
+        const first = yield* repo.saveMachine(seed.userId, hello);
+        const renamed = yield* repo.renameMachine(seed.userId, "laptop", "Work laptop");
+        // The machine connects again under the name it reports; the person's stays.
+        const reconnected = yield* repo.saveMachine(seed.userId, hello);
+        const listed = (yield* repo.machine(seed.userId, "laptop"))?.name;
+        const notTheirs = yield* repo.renameMachine("someone-else", "laptop", "Mine");
+        const cleared = yield* repo.renameMachine(seed.userId, "laptop", null);
+        return { first, renamed, reconnected, listed, notTheirs, cleared };
+      }),
+    );
+    expect(names).toEqual({
+      first: "MacBook Pro",
+      renamed: "Work laptop",
+      reconnected: "Work laptop",
+      listed: "Work laptop",
+      notTheirs: null,
+      cleared: "MacBook Pro",
+    });
+  });
 
-        // The page was told the tool name and its arguments, which is all it
-        // needs to act; nothing else reaches it before the call is answered.
-        expect(result.seen).toEqual([{ name: "read_local_file", args: { path: "README.md" } }]);
-        // The answer came back through the handler and into the second turn, so
-        // the model read the file without the server ever touching it.
-        expect(prompts).toHaveLength(2);
-        expect(JSON.stringify(prompts[1]!.prompt)).toContain("FILE_TAIL_MARKER");
-        // The folder's real path reaches the prompt as the model's address;
-        // only the name outlives the attempt, in the generation config.
-        expect(JSON.stringify(prompts[0]!.prompt)).toContain(folder.path);
+  it("moves every chat of one machine to another, and only the person's own", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const other = await runtime.runPromise(desktopChat);
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ComputerRepo;
+        yield* repo.rebind(seed.userId, seed.conversation.id, "old");
+        yield* repo.setFolders(seed.userId, "old", seed.conversation.id, [
+          { name: "site", readOnly: false },
+        ]);
+        yield* repo.rebind(other.userId, other.conversation.id, "old");
+        const moved = yield* repo.moveChats(seed.userId, "old", "new");
+        return {
+          moved,
+          mine: yield* repo.chat(seed.userId, seed.conversation.id),
+          theirs: yield* repo.chat(other.userId, other.conversation.id),
+        };
+      }),
+    );
+    expect(result.moved).toEqual([seed.conversation.id]);
+    // Its folders were the old machine's, so they go with the move.
+    expect(result.mine).toMatchObject({ machineId: "new", folders: [] });
+    expect(result.theirs).toMatchObject({ machineId: "old" });
+  });
 
-        const call = result.detail.toolCalls.at(-1)!;
-        expect(call.toolName).toBe("read_local_file");
-        expect(call.status).toBe("complete");
-        expect(call.result).toMatchObject({ summary: "Read README.md", ok: true, truncated: true });
-        const last = result.detail.messages.at(-1)!;
-        expect(last.status).toBe("complete");
-        expect(last.content).toContain("It describes the site.");
-        // Same rule web tools follow: the whole body reaches the model through
-        // the prompt, and only an excerpt of it outlives the generation.
-        expect(JSON.stringify(call.result)).not.toContain("FILE_TAIL_MARKER");
-        expect(JSON.stringify(result.chunks)).not.toContain("FILE_TAIL_MARKER");
-        expect(result.chunks.some((chunk) => chunk.delta.includes('"family":"desktop"'))).toBe(
-          true,
-        );
-      } finally {
-        authoringScript = null;
-      }
-    },
-    60_000,
-  );
-
-  it("tells the model which files a send added to the workspace", async () => {
+  it("tells a new chat's first answer the folders its page named", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];
     authoringScript = (input) => {
       prompts.push(input);
       return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "A dump, plus two more." }),
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
         authoringFinish(),
       );
     };
     try {
-      const sent = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
+      const chat = await runtime.runPromise(
+        Effect.gen(function* () {
+          const hub = yield* MachineHub;
+          const repo = yield* ComputerRepo;
+          const hello = {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin" as const,
+            computer: { status: "ready" as const },
+            remote: true,
+          };
+          yield* repo.saveMachine(seed.userId, hello);
+          yield* hub.connect(seed.userId, hello, "laptop-session");
+          const id = uuidv7();
+          const sent = yield* (yield* ChatService).sendMessage({
             userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
+            conversation: { kind: "new", id, folders: [{ name: "site", readOnly: true }] },
             modelId: textModelId,
-            content: "can you check whats in this file?",
+            content: "Look at my site",
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: false,
-            },
-            workspaceFiles: ["dump.sql.gz"],
-          }),
-        ),
+            deviceSessionId: "laptop-session",
+          });
+          yield* Stream.runDrain((yield* StreamEngine).subscribe(sent.assistantMessageId, 0));
+          return yield* repo.chat(seed.userId, id);
+        }).pipe(Effect.scoped),
       );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
-        ),
-      );
-      // The file is a name on the config row, and the prompt says what it
-      // means: without the line, the model is never told the workspace gained
-      // anything.
-      const config = await runtime.runPromise(
-        ChatRepo.use((repo) => repo.getGenerationConfig(sent.assistantMessageId)),
-      );
-      expect(config?.workspaceFiles).toEqual(["dump.sql.gz"]);
-      expect(JSON.stringify(prompts[0]!.prompt)).toContain(
-        "The user added this file to the workspace: dump.sql.gz",
-      );
-
-      const followUp = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
-            modelId: textModelId,
-            content: "what was the file called?",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: false,
-            },
-            workspaceFiles: [],
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(followUp.assistantMessageId, 0)),
-        ),
-      );
-      expect(JSON.stringify(prompts[1]!.prompt)).toContain(
-        "The user added this file to the workspace: dump.sql.gz",
-      );
+      // Before the machine's own report could land: the answer read the page's names.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain("/folders/site");
+      expect(chat).toMatchObject({ machineId: "laptop", folders: [{ name: "site", readOnly: true }] });
     } finally {
       authoringScript = null;
     }
-  }, 60_000);
+  });
+
+  it("runs a queued message's calls as sent from the machine that queued it", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      // The first answer settles the chat, so the queue may move; the queued one lists.
+      if (round === 2) return authoringTool(input, "list_folder", { path: "." });
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const delivered = await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          yield* (yield* ComputerRepo).saveMachine(seed.userId, {
+            machineId: "laptop",
+            name: "Laptop",
+            platform: "darwin",
+            computer: { status: "ready" },
+            remote: false,
+          });
+          yield* db
+            .update(conversations)
+            .set({ machineId: "laptop", permissionLevel: "allow" })
+            .where(eq(conversations.id, seed.conversation.id));
+          const engine = yield* StreamEngine;
+          const first = yield* (yield* ChatService).sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Hello",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          yield* Stream.runDrain(engine.subscribe(first.assistantMessageId, 0));
+          // Remote use is off: only the machine's own session may run its calls.
+          const events = yield* (yield* MachineHub).connect(
+            seed.userId,
+            {
+              machineId: "laptop",
+              name: "Laptop",
+              platform: "darwin",
+              computer: { status: "ready" },
+              remote: false,
+            },
+            "laptop-session",
+          );
+          // The chat is idle, so the server starts the entry itself, with no request to ask.
+          yield* (yield* ChatService).queueMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            content: "What is in the workspace?",
+            attachmentIds: [],
+            input: { modelId: textModelId, searchEnabled: false, researchEnabled: false },
+            senderSessionId: "laptop-session",
+          });
+          const [event] = yield* Stream.filter(events, (next) => next.type === "call").pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          );
+          if (event?.type !== "call") throw new Error("no call reached the machine");
+          yield* (yield* ExternalCompletion).complete(event.callId, {
+            v: 1,
+            ok: true,
+            summary: "Listed .",
+            detail: "/workspace/",
+            truncated: false,
+          });
+          // The queued message's answer: the newest one.
+          const answers = yield* db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.conversationId, seed.conversation.id),
+                eq(messages.role, "assistant"),
+              ),
+            )
+            .orderBy(messages.createdAt);
+          expect(answers).toHaveLength(2);
+          yield* Stream.runDrain(engine.subscribe(answers.at(-1)!.id, 0));
+          return event;
+        }).pipe(Effect.scoped),
+      );
+      expect(delivered).toMatchObject({ type: "call", name: "list_folder" });
+    } finally {
+      authoringScript = null;
+    }
+  });
 
   it("offers the browser only to an app that can drive one, vouching for the user's own addresses", async () => {
     const seed = await runtime.runPromise(desktopChat);
@@ -9859,7 +9306,7 @@ describe("local tools on the user's machine", () => {
         authoringFinish(),
       );
     };
-    const sendWith = (content: string, desktopBrowser: boolean, folders = [folder]) =>
+    const sendWith = (content: string, desktopBrowser: boolean) =>
       runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
           service.sendMessage({
@@ -9870,12 +9317,7 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders,
-              commands: false,
-              browser: desktopBrowser,
-            },
+            desktop: { executorId: "desktop-test-session", browser: desktopBrowser },
           }),
         ),
       );
@@ -9904,21 +9346,22 @@ describe("local tools on the user's machine", () => {
       expect(offered[0]).not.toContain("browser_open");
       expect(offered[1]).toEqual(expect.arrayContaining(["browser_open", "browser_snapshot"]));
       expect(JSON.stringify(prompts[1]!.prompt)).toContain("web browser on the user's computer");
+      // A lazy family: named in the catalogue, its schemas advertised once a call loads it.
+      const advertised = (input: GatewayInput) =>
+        typeof input.toolChoice === "object"
+          ? [...input.toolChoice.oneOf]
+          : Object.keys(input.toolkit?.tools ?? {});
+      expect(JSON.stringify(prompts[1]!.prompt)).toContain("- browser: ");
+      expect(advertised(prompts[1]!)).not.toContain("browser_open");
+      expect(advertised(prompts[2]!)).toEqual(
+        expect.arrayContaining(["browser_open", "browser_snapshot"]),
+      );
       expect(seen.map((call) => [call.args.url, call.meta?.preauthorized])).toEqual([
         ["https://example.com/docs", true],
         // An address the model came up with asks first.
         ["https://elsewhere.test/", false],
       ]);
       expect(seen[0]?.meta?.temporary).toBe(false);
-      // A Work attempt gets the browser whatever folders it reports.
-      const folderless = await sendWith("Just the browser", true, []);
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(folderless.assistantMessageId, 0)),
-        ),
-      );
-      expect(offered.at(-1)).toContain("browser_open");
-      expect(offered.at(-1)).not.toContain("list_folder");
     } finally {
       authoringScript = null;
     }
@@ -9952,12 +9395,7 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: true,
-            },
+            desktop: { executorId: "desktop-test-session", browser: true },
           }),
         ),
       );
@@ -9981,81 +9419,6 @@ describe("local tools on the user's machine", () => {
       expect(outcome.seen[0]?.operationArgs?.text).toBe("hunter2");
       expect(outcome.seen[0]?.args).toEqual({ tab: "t1", ref: "e2" });
       expect(JSON.stringify(outcome.rows)).not.toContain("hunter2");
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("hands an image to a vision model as a file part, never as text in the row", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    const prompts: GatewayInput[] = [];
-    authoringScript = (input) => {
-      prompts.push(input);
-      if (prompts.length === 1)
-        return authoringTool(input, "read_local_file", { path: "logo.png" });
-      return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "A red square." }),
-        authoringFinish(),
-      );
-    };
-    const png = generatedPng.toString("base64");
-    try {
-      const sent = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
-            modelId: visionModelId,
-            content: "What is in the logo?",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      const result = await runtime.runPromise(
-        Effect.gen(function* () {
-          const bridge = yield* fakeBridge(sent.assistantMessageId, () => ({
-            v: 1,
-            ok: true,
-            summary: "Read logo.png",
-            detail: "image/png, 70 bytes",
-            truncated: false,
-            file: { mediaType: "image/png", base64: png, name: "logo.png" },
-          }));
-          yield* Fiber.join(bridge.fiber);
-          return {
-            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
-            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
-          };
-        }),
-      );
-      expect(prompts).toHaveLength(2);
-      // The bytes ride as a user file part on the round, the way an attached
-      // image does, so the model can look at them.
-      const second = prompts[1]!.prompt.content as ReadonlyArray<{
-        role: string;
-        content: unknown;
-      }>;
-      const fileMessage = second.find(
-        (message) =>
-          message.role === "user" &&
-          Array.isArray(message.content) &&
-          message.content.some((part) => part.type === "file" && part.fileName === "logo.png"),
-      );
-      expect(fileMessage).toBeDefined();
-      // And never as base64 inside the tool result, the row or a chunk.
-      const toolResults = JSON.stringify(second.filter((message) => message.role === "tool"));
-      expect(toolResults).not.toContain(png.slice(0, 40));
-      expect(JSON.stringify(result.detail)).not.toContain(png.slice(0, 40));
-      expect(JSON.stringify(result.chunks)).not.toContain(png.slice(0, 40));
-      expect(result.detail.messages.at(-1)?.content).toContain("A red square.");
     } finally {
       authoringScript = null;
     }
@@ -10094,12 +9457,7 @@ describe("local tools on the user's machine", () => {
             searchEnabled: false,
             researchEnabled: false,
             attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [],
-              commands: false,
-              browser: true,
-            },
+            desktop: { executorId: "desktop-test-session", browser: true },
           }),
         ),
       );
@@ -10148,88 +9506,10 @@ describe("local tools on the user's machine", () => {
     }
   }, 60_000);
 
-  it("imports a local file as a working reference for tools, never as bytes the model sees or the row keeps", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    const prompts: GatewayInput[] = [];
-    authoringScript = (input) => {
-      prompts.push(input);
-      if (prompts.length === 1)
-        return authoringTool(input, "import_local_file", { path: "logo.png" });
-      return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "Imported." }),
-        authoringFinish(),
-      );
-    };
-    const png = generatedPng.toString("base64");
-    try {
-      const sent = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
-            modelId: visionModelId,
-            content: "Use the logo on a slide.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      const result = await runtime.runPromise(
-        Effect.gen(function* () {
-          const bridge = yield* fakeBridge(sent.assistantMessageId, () => ({
-            v: 1,
-            ok: true,
-            summary: "Imported logo.png",
-            detail: "image/png, 70 B",
-            truncated: false,
-            file: { mediaType: "image/png", base64: png, name: "logo.png" },
-          }));
-          yield* Fiber.join(bridge.fiber);
-          return {
-            detail: yield* loadConversationDetail(seed.userId, seed.conversation.id),
-            chunks: yield* ChatRepo.use((repo) => repo.chunksAfter(sent.assistantMessageId, 0)),
-          };
-        }),
-      );
-      expect(prompts).toHaveLength(2);
-      const second = prompts[1]!.prompt.content as ReadonlyArray<{
-        role: string;
-        content: unknown;
-      }>;
-      const toolResults = JSON.stringify(second.filter((message) => message.role === "tool"));
-      // The model is told a reference for its tools, and is not shown the picture.
-      expect(toolResults).toMatch(
-        /Returned file working:[0-9a-f-]+@1: for other tools, or publish_file to give it to the user/,
-      );
-      expect(
-        second.some(
-          (message) =>
-            message.role === "user" &&
-            Array.isArray(message.content) &&
-            message.content.some((part) => part.type === "file"),
-        ),
-      ).toBe(false);
-      for (const text of [
-        toolResults,
-        JSON.stringify(result.detail),
-        JSON.stringify(result.chunks),
-      ])
-        expect(text).not.toContain(png.slice(0, 40));
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
   it("leaves the row terminal when the generation is stopped mid-wait, and drops a late answer", async () => {
     const seed = await runtime.runPromise(desktopChat);
-    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
+    authoringScript = (input) =>
+      authoringTool(input, "browser_open", { url: "https://example.com/" });
     try {
       const sent = await runtime.runPromise(send(seed, true));
       const result = await runtime.runPromise(
@@ -10257,7 +9537,7 @@ describe("local tools on the user's machine", () => {
             late: yield* external.complete(callId, {
               v: 1,
               ok: true,
-              summary: "Ran pnpm test",
+              summary: "Opened example.com",
               detail: "LATE_ANSWER",
               truncated: false,
             }),
@@ -10265,14 +9545,14 @@ describe("local tools on the user's machine", () => {
         }),
       );
 
-      expect(result.waited).toEqual({
-        name: "run_command",
-        args: { command: "pnpm test" },
+      expect(result.waited).toMatchObject({
+        name: "browser_open",
+        args: { url: "https://example.com/" },
       });
       expect(result.stopped).toBe(true);
       expect(result.late).toBe(false);
       const call = result.detail.toolCalls.at(-1)!;
-      expect(call.toolName).toBe("run_command");
+      expect(call.toolName).toBe("browser_open");
       expect(call.status).toBe("error");
       expect(result.detail.messages.at(-1)?.status).toBe("aborted");
       expect(JSON.stringify(result.detail)).not.toContain("LATE_ANSWER");
@@ -10284,7 +9564,8 @@ describe("local tools on the user's machine", () => {
   it("settles active tool and compaction rows when finalization itself fails", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const repo = await runtime.runPromise(ChatRepo);
-    authoringScript = (input) => authoringTool(input, "run_command", { command: "pnpm test" });
+    authoringScript = (input) =>
+      authoringTool(input, "browser_open", { url: "https://example.com/" });
     let renewal: { mockRestore(): void } | undefined;
     try {
       const sent = await runtime.runPromise(send(seed, true));
@@ -10346,10 +9627,7 @@ describe("local tools on the user's machine", () => {
           authoringFinish(),
         );
       asked.add(key);
-      return authoringTool(input, "write_local_file", {
-        path: `${folder.path}/note.md`,
-        text: "hi",
-      });
+      return authoringTool(input, "browser_open", { url: "https://example.com/" });
     };
     try {
       const outcome = await runtime.runPromise(
@@ -10364,7 +9642,10 @@ describe("local tools on the user's machine", () => {
           const devices = ["device-1", "device-2", undefined] as const;
           const started = yield* Effect.forEach(devices, (deviceSessionId) =>
             Effect.gen(function* () {
-              const conversation = yield* workConversation(userId);
+              const conversation = yield* (yield* ChatRepo).createConversation({
+                userId,
+                modelId: textModelId,
+              });
               const sent = yield* service.sendMessage({
                 userId,
                 conversation: { kind: "existing", id: conversation.id },
@@ -10373,12 +9654,7 @@ describe("local tools on the user's machine", () => {
                 searchEnabled: false,
                 researchEnabled: false,
                 attachmentIds: [],
-                desktop: {
-                  executorId: "executor-1",
-                  folders: [folder],
-                  commands: false,
-                  browser: false,
-                },
+                desktop: { executorId: "executor-1", browser: true },
                 deviceSessionId,
               });
               return { conversation, messageId: sent.assistantMessageId };
@@ -10432,219 +9708,12 @@ describe("local tools on the user's machine", () => {
       // The call ends as the deadline would have ended it, but in seconds, and
       // the answer is a real one rather than an interrupted row.
       const call = outcome.detail.toolCalls.at(-1)!;
-      expect(call.toolName).toBe("write_local_file");
+      expect(call.toolName).toBe("browser_open");
       expect(call.status).toBe("error");
       expect(JSON.stringify(call.result)).toContain("may be closed");
       const message = outcome.detail.messages.at(-1)!;
       expect(message.status).toBe("complete");
       expect(message.content).toBe("Your desktop app closed.");
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("withholds only the command tool when the machine cannot sandbox", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    const prompts: GatewayInput[] = [];
-    authoringScript = (input) => {
-      prompts.push(input);
-      return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "I will read it instead." }),
-        authoringFinish(),
-      );
-    };
-    try {
-      const sent = await runtime.runPromise(send(seed));
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
-        ),
-      );
-      // A missing shell prerequisite costs the command tool, never the folder.
-      const offered = Object.keys(prompts[0]!.toolkit?.tools ?? {});
-      expect(offered).toContain("read_local_file");
-      expect(offered).toContain("write_local_file");
-      expect(offered).toContain("save_to_workspace");
-      expect(offered).not.toContain("run_command");
-      // And the model is told, rather than left to discover it by trying.
-      expect(JSON.stringify(prompts[0]!.prompt)).toContain("Running commands is unavailable");
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("refuses a work chat from a browser, allows it without a folder, and stays a work chat", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    authoringScript = () =>
-      Stream.make(AiResponse.makePart("text-delta", { id: "t", delta: "Hi." }), authoringFinish());
-    try {
-      // The first send creates the conversation and fixes its mode.
-      const created = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "new", id: uuidv7(), mode: "work" },
-            modelId: textModelId,
-            content: "Start work.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [folder],
-              commands: false,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(created.assistantMessageId, 0)),
-        ),
-      );
-      const detail = await runtime.runPromise(
-        loadConversationDetail(seed.userId, created.conversationId),
-      );
-      expect(detail.conversation.mode).toBe("work");
-
-      // A browser tab cannot say it is the desktop app. That is refused rather
-      // than run as a plain chat.
-      const refused = await runtime.runPromise(
-        Effect.result(
-          Effect.flatMap(ChatService, (service) =>
-            service.sendMessage({
-              userId: seed.userId,
-              conversation: { kind: "existing", id: created.conversationId },
-              modelId: textModelId,
-              content: "Keep going.",
-              searchEnabled: false,
-              researchEnabled: false,
-              attachmentIds: [],
-            }),
-          ),
-        ),
-      );
-      expect(refused._tag === "Failure" && refused.failure._tag).toBe("WorkDesktopRequired");
-      // Nothing was written: the refusal happened inside the turn, before rows.
-      const after = await runtime.runPromise(
-        loadConversationDetail(seed.userId, created.conversationId),
-      );
-      expect(after.messages).toHaveLength(detail.messages.length);
-
-      // The desktop app without a folder is allowed; the folder tools wait.
-      const prompts: GatewayInput[] = [];
-      authoringScript = (input) => {
-        prompts.push(input);
-        return Stream.make(
-          AiResponse.makePart("text-delta", { id: "t", delta: "Attach a folder and I can look." }),
-          authoringFinish(),
-        );
-      };
-      const bare = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: created.conversationId },
-            modelId: textModelId,
-            content: "Keep going.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [],
-              commands: false,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(bare.assistantMessageId, 0)),
-        ),
-      );
-      expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
-
-      // A later send cannot change the mode; a plain chat stays plain.
-      const plainConversation = await runtime.runPromise(
-        ChatRepo.use((repo) =>
-          repo.createConversation({ userId: seed.userId, modelId: textModelId }),
-        ),
-      );
-      const plainSent = await runtime.runPromise(
-        Effect.flatMap(ChatService, (service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: plainConversation.id },
-            modelId: textModelId,
-            content: "Hello.",
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-            desktop: {
-              executorId: "ignored-session",
-              folders: [{ name: "ignored-folder", path: "/home/test/ignored-folder" }],
-              commands: true,
-              browser: false,
-            },
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(plainSent.assistantMessageId, 0)),
-        ),
-      );
-      expect(
-        (await runtime.runPromise(loadConversationDetail(seed.userId, plainConversation.id)))
-          .conversation.mode,
-      ).toBe("chat");
-      expect(Object.keys(prompts.at(-1)!.toolkit?.tools ?? {})).not.toContain("read_local_file");
-    } finally {
-      authoringScript = null;
-    }
-  }, 60_000);
-
-  it("withholds the tools when no folder is attached", async () => {
-    const seed = await runtime.runPromise(desktopChat);
-    const prompts: GatewayInput[] = [];
-    authoringScript = (input) => {
-      prompts.push(input);
-      return Stream.make(
-        AiResponse.makePart("text-delta", { id: "t", delta: "I cannot reach your files." }),
-        authoringFinish(),
-      );
-    };
-    try {
-      const sent = await runtime.runPromise(
-        ChatService.use((service) =>
-          service.sendMessage({
-            userId: seed.userId,
-            conversation: { kind: "existing", id: seed.conversation.id },
-            modelId: textModelId,
-            content: "Read my readme.",
-            desktop: {
-              executorId: "desktop-test-session",
-              folders: [],
-              commands: false,
-              browser: false,
-            },
-            searchEnabled: false,
-            researchEnabled: false,
-            attachmentIds: [],
-          }),
-        ),
-      );
-      await runtime.runPromise(
-        Effect.flatMap(StreamEngine, (engine) =>
-          Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0)),
-        ),
-      );
-      // A browser tab never sees these names, which is what keeps the model
-      // from proposing work it has no way to do.
-      expect(Object.keys(prompts[0]!.toolkit?.tools ?? {})).not.toContain("read_local_file");
     } finally {
       authoringScript = null;
     }

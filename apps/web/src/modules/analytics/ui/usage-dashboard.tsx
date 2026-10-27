@@ -275,6 +275,7 @@ const GENERATION_KINDS = [
   { key: "chat", label: m.analytics_kind_chat, color: "var(--chart-1)" },
   { key: "title", label: m.analytics_kind_title, color: "var(--chart-3)" },
   { key: "compaction", label: m.analytics_kind_summarizing, color: "var(--chart-4)" },
+  { key: "review", label: m.analytics_kind_review, color: "var(--chart-5)" },
   { key: "image", label: m.analytics_kind_image, color: "var(--chart-2)" },
 ] as const;
 
@@ -462,6 +463,7 @@ export function UsageOverview({
             chat: summary.messages,
             title: summary.titleGenerations,
             compaction: summary.compactionGenerations,
+            review: summary.reviewGenerations,
             image: summary.imageGenerations,
           }}
         />

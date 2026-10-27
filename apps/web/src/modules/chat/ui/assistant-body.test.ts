@@ -96,7 +96,7 @@ describe("projectAssistantBody", () => {
       tools: [
         desktop("open", "browser_open", 0),
         desktop("click", "browser_click", 1),
-        desktop("read", "read_local_file", 2),
+        desktop("read", "read_file", 2),
         desktop("shot", "browser_snapshot", 3),
       ],
       compactions: [],

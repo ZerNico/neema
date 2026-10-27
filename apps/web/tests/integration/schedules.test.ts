@@ -412,7 +412,7 @@ describe("durable scheduled attempts", () => {
           const create = () =>
             chatRepo.createTurn({
               userId: owner,
-              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+              conversation: { kind: "new", id: uuidv7() },
               modelId,
               content: schedule.prompt,
               attachmentIds: [],
@@ -431,7 +431,7 @@ describe("durable scheduled attempts", () => {
           const stale = yield* chatRepo
             .createTurn({
               userId: owner,
-              conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+              conversation: { kind: "new", id: uuidv7() },
               modelId,
               content: schedule.prompt,
               attachmentIds: [],
@@ -1088,15 +1088,15 @@ describe("schedule removal", () => {
     expect(result.afterEdit).toBe(result.edited);
   });
 
-  it("only accepts the owner's plain chat as a schedule's chat", async () => {
+  it("accepts any of the owner's kept chats as a schedule's chat, one with a computer too", async () => {
     const result = await run(
       Effect.gen(function* () {
         const db = yield* Db;
         const userId = yield* makeUser();
         const mine = yield* chat(userId);
         const theirs = yield* chat(yield* makeUser());
-        const work = uuidv7();
-        yield* db.insert(conversations).values({ id: work, userId, mode: "work" });
+        const computer = uuidv7();
+        yield* db.insert(conversations).values({ id: computer, userId, machineId: "machine-1" });
         const temporary = uuidv7();
         yield* db.insert(conversations).values({ id: temporary, userId, temporary: true });
         const deleted = yield* chat(userId);
@@ -1119,7 +1119,7 @@ describe("schedule removal", () => {
         return {
           mine: yield* check(mine),
           theirs: yield* check(theirs),
-          work: yield* check(work),
+          computer: yield* check(computer),
           temporary: yield* check(temporary),
           deleted: yield* check(deleted),
         };
@@ -1128,7 +1128,7 @@ describe("schedule removal", () => {
     expect(result).toEqual({
       mine: "ok",
       theirs: "the selected chat is unavailable",
-      work: "a work chat cannot run a schedule",
+      computer: "ok",
       temporary: "a temporary chat cannot run a schedule",
       deleted: "the selected chat is unavailable",
     });

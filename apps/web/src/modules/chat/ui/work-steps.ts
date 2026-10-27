@@ -114,10 +114,9 @@ export function stepLabel(step: WorkStep): string {
           if (isBrowserTool(call.name)) return m.chat_work_using_browser();
           if (call.name === "run_command") return m.chat_work_running_command();
           if (
-            call.name === "write_local_file" ||
-            call.name === "edit_local_file" ||
-            call.name === "move_local_file" ||
-            call.name === "delete_local_file"
+            call.name === "write_file" ||
+            call.name === "edit_file" ||
+            call.name === "delete_files"
           )
             return m.chat_work_editing_files();
           if (call.name.startsWith("request_")) return m.chat_work_asking_access();
@@ -192,10 +191,9 @@ const pastClauses = (step: WorkStep): Clause[] => {
           if (isBrowserTool(call.name)) return [clause(m.chat_work_past_used_browser())];
           if (call.name === "run_command") return [clause(m.chat_work_past_ran_command())];
           if (
-            call.name === "write_local_file" ||
-            call.name === "edit_local_file" ||
-            call.name === "move_local_file" ||
-            call.name === "delete_local_file"
+            call.name === "write_file" ||
+            call.name === "edit_file" ||
+            call.name === "delete_files"
           )
             return [clause(m.chat_work_past_edited_files())];
           if (call.name.startsWith("request_")) return [clause(m.chat_work_past_asked_access())];

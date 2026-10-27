@@ -75,14 +75,3 @@ export class NoActiveGeneration extends Schema.TaggedError<NoActiveGeneration>()
 export class ConversationBusy extends Schema.TaggedError<ConversationBusy>()("ConversationBusy", {
   conversationId: Schema.String,
 }) {}
-
-/**
- * A work chat acts on the user's machine, which only the desktop app can
- * reach. A send from a browser tab is refused rather than run as a plain chat
- * the model cannot explain. A folder is not required: the chat can start
- * without one and attach it later.
- */
-export class WorkDesktopRequired extends Schema.TaggedError<WorkDesktopRequired>()(
-  "WorkDesktopRequired",
-  {},
-) {}

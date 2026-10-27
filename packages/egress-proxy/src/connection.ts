@@ -3,6 +3,7 @@ import type { Denial, GrantDecision, ProxyOptions } from "./index.ts";
 import { interfaceIdentities, preparedRefusal, PRIVATE_NETWORK } from "./address-guard.ts";
 import { type Identity, Tokens } from "./auth.ts";
 import { canonicalHost, parseTarget, plainHttpAuthority } from "./host.ts";
+import { isPlaceholder } from "./names.ts";
 import { RequestParser, type RequestHead } from "./parser.ts";
 import { Deadline, type Timers } from "./timers.ts";
 
@@ -65,7 +66,6 @@ const unliftable = (host: string, own: ReadonlySet<string>) => {
 export class Connection {
   identity: Identity | undefined;
   reserved = false;
-  private proven = false;
   /**
    * headers: parse or abandon; establishing: buffer, resolve, dial, regrant or abandon.
    * responding: flush or backstop; tunnel: relay, half-close or revoke; closed: ignore.
@@ -89,8 +89,6 @@ export class Connection {
   constructor(
     private readonly client: Socket,
     private readonly services: Services,
-    /** Set on a command's own listener, where the port is the credential. */
-    private readonly preset?: Identity,
   ) {
     this.deadline = new Deadline(services.timers);
     this.idle = new Deadline(services.timers);
@@ -219,14 +217,7 @@ export class Connection {
   }
 
   private accept(request: RequestHead) {
-    this.identity = this.preset
-      ? this.preset.active
-        ? this.preset
-        : undefined
-      : this.services.tokens.authenticate(request.headers);
-    // On a shared port authentication is the proof; on a command's own it is optional.
-    this.proven =
-      !this.preset || this.services.tokens.authenticate(request.headers) === this.preset;
+    this.identity = this.services.tokens.authenticate(request.headers);
     if (!this.identity) {
       this.respond(407, "Proxy authentication required");
       return;
@@ -251,11 +242,20 @@ export class Connection {
       this.deny(canonical.reason, "", target.port);
       return;
     }
-    this.target = { host: canonical.host, port: target.port, kind: canonical.kind };
+    if (canonical.kind === "ipv4" && isPlaceholder(canonical.host)) {
+      // The client's DNS handed out this placeholder for a name: the connection is to that name.
+      const name = this.identity.names.name(canonical.host);
+      if (name === undefined) {
+        this.deny("Unknown placeholder address", canonical.host, target.port);
+        return;
+      }
+      this.target = { host: name, port: target.port, kind: "name" };
+    } else this.target = { host: canonical.host, port: target.port, kind: canonical.kind };
+    const destination = this.target;
     let decision: GrantDecision;
     try {
       decision = checkedDecision(
-        this.services.options.decide(this.identity.context, canonical.host, target.port),
+        this.services.options.decide(this.identity.context, destination.host, destination.port),
       );
     } catch {
       this.fault();
@@ -297,20 +297,11 @@ export class Connection {
     const target = this.target;
     const identity = this.identity;
     if (!target || !identity) return;
-    let local: (() => Socket) | null | undefined;
+    let local: (() => Socket) | undefined;
     try {
-      local = this.services.options.local?.(
-        identity.context,
-        target.host,
-        target.port,
-        this.proven,
-      );
+      local = this.services.options.local?.(identity.context, target.host, target.port);
     } catch {
       this.fault();
-      return;
-    }
-    if (local === null) {
-      this.deny("This destination needs the command's credentials");
       return;
     }
     if (local) {
@@ -544,9 +535,6 @@ export class Connection {
   ) {
     if (!this.identity || this.phase === "closed" || this.phase === "responding") return;
     this.respond(403, reason, headOnly);
-    // A destination the host serves itself, asked for by a caller that never proved it is the
-    // command (anyone can reach a command's own port), is refused, not counted against it.
-    if (!this.proven && this.servedLocally(host, port)) return;
     try {
       this.services.options.onDenial({
         context: this.identity.context,
@@ -557,15 +545,6 @@ export class Connection {
       });
     } catch {
       this.services.log("error", "Egress proxy: denial reporting failed");
-    }
-  }
-
-  private servedLocally(host: string, port: number) {
-    if (!this.identity) return false;
-    try {
-      return this.services.options.local?.(this.identity.context, host, port, false) !== undefined;
-    } catch {
-      return false;
     }
   }
 

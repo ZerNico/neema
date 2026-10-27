@@ -126,8 +126,8 @@ message text, offsets, tool payloads or provider replay. Aliases confer no acces
 target must still exist in the branch's attachment projection. Retrying an answer may
 remove its target, making old links unavailable rather than opening the source file.
 
-Local Work references have a separate absolute-path address space and read current
-bytes on click; see [desktop paths](desktop.md#several-folders-one-absolute-address-space).
+References to files on a chat's computer use the VM's own paths and read current
+bytes on click, on that machine only. See [addresses](desktop.md#addresses).
 The reference renderer shares existing previews, never a new active-content viewer.
 
 ## Files into tools

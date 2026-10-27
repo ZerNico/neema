@@ -3,8 +3,8 @@ import {
   Archive02Icon,
   Brain02Icon,
   HardDriveIcon,
-  ComputerIcon,
   Key01Icon,
+  LaptopIcon,
   LaptopPhoneSyncIcon,
   McpServerIcon,
   Notification03Icon,
@@ -90,7 +90,7 @@ const settingsSectionList = (): SectionNavItem[] => [
 const computerSection = (): SectionNavItem => ({
   to: "/settings/computer",
   label: m.settings_section_computer(),
-  icon: ComputerIcon,
+  icon: LaptopIcon,
   matchPrefix: "/settings/computer",
 });
 

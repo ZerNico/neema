@@ -126,7 +126,7 @@ test("the default 65th tunnel is a limit denial and does not disturb the first 6
 
 test("a shrunk per-token cap is isolated by token and released on closure", async () => {
   const f = await fixture({ limits: { tunnelsPerToken: 1, tunnelsTotal: 4 } });
-  const b = f.proxy.issue({ ...CONTEXT, command: "second-command" });
+  const b = await f.proxy.issue({ ...CONTEXT, chat: "chat-c" });
   const first = await established(f);
   await response(await f.open(), 403, true);
   await established(f, "example.com:443", b.token);
@@ -140,7 +140,7 @@ test("a shrunk per-token cap is isolated by token and released on closure", asyn
 
 test("the global cap denies a different token then reclaims revoked capacity", async () => {
   const f = await fixture({ limits: { tunnelsPerToken: 2, tunnelsTotal: 1 } });
-  const b = f.proxy.issue({ ...CONTEXT, chat: "chat-b", command: "command-b" });
+  const b = await f.proxy.issue({ ...CONTEXT, chat: "chat-b" });
   const first = await established(f);
   const denied = await response(await f.open("example.com:443", b.token), 403, true);
   expect(denied.body).toMatch(/limit|maximum|too many/i);
@@ -152,7 +152,7 @@ test("the global cap denies a different token then reclaims revoked capacity", a
 
 test("concurrent establishments cannot oversubscribe the global cap", async () => {
   const f = await fixture({ limits: { tunnelsTotal: 1, tunnelsPerToken: 1 } });
-  const b = f.proxy.issue({ ...CONTEXT, command: "command-b" });
+  const b = await f.proxy.issue({ ...CONTEXT, chat: "chat-b" });
   const clients = await Promise.all([f.open(), f.open("example.com:443", b.token)]);
   const heads = await Promise.all(clients.map((client) => client.head()));
   expect(heads.map((head) => head.status).toSorted()).toEqual([200, 403]);
@@ -236,7 +236,7 @@ for (const scope of ["per token", "global"] as const) {
     abandoned.socket.end();
     await abandoned.closed;
     const token =
-      scope === "global" ? f.proxy.issue({ ...CONTEXT, command: "other" }).token : f.token;
+      scope === "global" ? (await f.proxy.issue({ ...CONTEXT, chat: "other" })).token : f.token;
     for (let i = 0; i < 3; i++) {
       const client = await f.open("example.com:443", token);
       // This response proves the request was processed before the resolver count is checked.

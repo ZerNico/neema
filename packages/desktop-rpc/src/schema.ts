@@ -15,18 +15,9 @@ export const WorkspaceId = Schema.String.check(
 );
 export type WorkspaceId = typeof WorkspaceId.Type;
 
-/** Local transaction identities never become filesystem names without this check. */
-export const LocalTransactionId = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/, {
-    message: "Expected a canonical UUID.",
-  }),
-);
-export type LocalTransactionId = typeof LocalTransactionId.Type;
-
 /**
- * The name every work chat's own workspace answers to. It is the workspace
- * chip's label and the name the picker refuses for a user folder, so no
- * attached folder's basename collides with it.
+ * The name every chat's own workspace answers to, at `/workspace` in its computer. The picker
+ * refuses it for a user folder, so no attached folder's name collides with it.
  */
 export const WORKSPACE_FOLDER_NAME = "workspace";
 
@@ -60,18 +51,11 @@ export const LIMITS = {
    */
   binaryBytes: 20 * 1024 * 1024,
   /**
-   * Decoded bytes of one composer import that travels as base64 over IPC:
-   * pastes and picker files. At this cap a single import transiently costs
-   * ~67 MB of text plus structured-clone copies in both processes.
+   * Decoded bytes of one file that travels as base64 over IPC: a browser download or a file saved
+   * to the workspace. At this cap one transiently costs ~67 MB of text plus structured-clone
+   * copies in both processes.
    */
   importBytes: 50 * 1024 * 1024,
-  /**
-   * An import the shell copies from a local path instead of receiving over
-   * IPC (drops inside the desktop, where the File still knows where it came
-   * from). No bytes cross the bridge, so the bound is only against dropping
-   * something huge by accident, and `cp` streams either way.
-   */
-  importPathBytes: 512 * 1024 * 1024,
   /**
    * Workspace size above which a branch refuses to copy it: the copy is
    * awaited before navigation, so a multi-minute clone cannot pin the UI.
@@ -83,23 +67,6 @@ export const LIMITS = {
   /** Nesting inspected independently of the entry cap. */
   cloneDepth: 256,
 } as const;
-
-export const DirectoryEntry = Schema.Struct({
-  name: Schema.String,
-  kind: Schema.Literals(["file", "directory", "symlink", "other"]),
-  /** Absent for anything that is not a plain file. */
-  size: Schema.optionalKey(Schema.Int),
-});
-export type DirectoryEntry = typeof DirectoryEntry.Type;
-
-export const DirectoryListing = Schema.Struct({
-  /** Relative to the folder root, `.` for the root itself. */
-  path: Schema.String,
-  entries: Schema.Array(DirectoryEntry),
-  /** True when the directory held more than `LIMITS.entries`. */
-  truncated: Schema.Boolean,
-});
-export type DirectoryListing = typeof DirectoryListing.Type;
 
 export const FileContents = Schema.Struct({
   path: Schema.String,
@@ -129,40 +96,6 @@ export const WriteReceipt = Schema.Struct({
 });
 export type WriteReceipt = typeof WriteReceipt.Type;
 
-/** A composer file safely held outside every model-visible workspace. */
-export const StagedFileReceipt = Schema.Struct({
-  name: Schema.String,
-  bytes: Schema.Int,
-});
-export type StagedFileReceipt = typeof StagedFileReceipt.Type;
-
-export const PromotionReceipt = Schema.Struct({
-  reservationId: LocalTransactionId,
-  files: Schema.Array(
-    Schema.Struct({
-      stagedName: Schema.String,
-      finalName: Schema.String,
-      bytes: Schema.Int,
-    }),
-  ),
-});
-export type PromotionReceipt = typeof PromotionReceipt.Type;
-
-export const PendingPromotion = Schema.Struct({
-  conversationId: WorkspaceId,
-  reservationId: LocalTransactionId,
-  submissionId: LocalTransactionId,
-});
-export type PendingPromotion = typeof PendingPromotion.Type;
-
-/** Public metadata for the preload-only dropped-file staging channel. */
-export const DroppedFileStageInput = Schema.Struct({
-  conversationId: WorkspaceId,
-  submissionId: LocalTransactionId,
-  fileName: Schema.String,
-});
-export type DroppedFileStageInput = typeof DroppedFileStageInput.Type;
-
 /**
  * A file the model reads as bytes rather than text: an image for a vision
  * model, a PDF for one that accepts documents or for the server's parser.
@@ -177,116 +110,28 @@ export const BinaryContents = Schema.Struct({
 export type BinaryContents = typeof BinaryContents.Type;
 
 /**
- * What an edit did. The diff is the model's proof that the change landed
- * where it meant it to; without it a wrong-but-unique match goes unnoticed
- * until something breaks.
- */
-export const EditReceipt = Schema.Struct({
-  path: Schema.String,
-  replacements: Schema.Int,
-  /** Unified diff of the change, capped like a read. */
-  diff: Schema.String,
-  truncated: Schema.Boolean,
-});
-export type EditReceipt = typeof EditReceipt.Type;
-
-export const MoveReceipt = Schema.Struct({
-  from: Schema.String,
-  to: Schema.String,
-});
-export type MoveReceipt = typeof MoveReceipt.Type;
-
-export const DeleteItem = Schema.Struct({
-  path: Schema.String,
-  kind: Schema.Literals(["file", "directory"]),
-});
-export type DeleteItem = typeof DeleteItem.Type;
-
-export const DeleteFailure = Schema.Struct({
-  path: Schema.String,
-  reason: Schema.Literals(["no-folder", "outside-folder", "not-found", "failed"]),
-  message: Schema.String,
-});
-export type DeleteFailure = typeof DeleteFailure.Type;
-
-export const DeleteReceipt = Schema.Struct({
-  deleted: Schema.Array(DeleteItem),
-  failed: Schema.Array(DeleteFailure),
-});
-export type DeleteReceipt = typeof DeleteReceipt.Type;
-
-export const FoundPaths = Schema.Struct({
-  pattern: Schema.String,
-  /** Relative to the folder root, newest first. */
-  paths: Schema.Array(Schema.String),
-  /** True when more than `LIMITS.foundPaths` matched. */
-  truncated: Schema.Boolean,
-});
-export type FoundPaths = typeof FoundPaths.Type;
-
-export const SearchMatch = Schema.Struct({
-  path: Schema.String,
-  line: Schema.Int,
-  /** The matching line, capped at `LIMITS.matchChars`. */
-  text: Schema.String,
-});
-export type SearchMatch = typeof SearchMatch.Type;
-
-export const SearchMatches = Schema.Struct({
-  pattern: Schema.String,
-  matches: Schema.Array(SearchMatch),
-  /** Files searched, so an empty result reads as "nothing found" not "nothing looked at". */
-  filesSearched: Schema.Int,
-  /** True when more than `LIMITS.matches` lines matched. */
-  truncated: Schema.Boolean,
-});
-export type SearchMatches = typeof SearchMatches.Type;
-
-export const CommandOutput = Schema.Struct({
-  exitCode: Schema.Int,
-  output: Schema.String,
-  truncated: Schema.Boolean,
-  /**
-   * Sandbox denials, already turned into sentences. Empty on Linux, which has
-   * no violation reporting, so an empty list never means "nothing was blocked".
-   */
-  violations: Schema.Array(Schema.String),
-});
-export type CommandOutput = typeof CommandOutput.Type;
-
-/**
- * Why the desktop refused. Every case is something the model or the reader can
- * act on, so none of them leak a host path the caller did not already name.
+ * Why the desktop refused. Every case is something the reader can act on, so
+ * none of them leak a host path the caller did not already name.
  */
 export class DesktopError extends Schema.TaggedError<DesktopError>()("DesktopError", {
   reason: Schema.Literals([
-    /** No folder is attached to this conversation on this machine. */
+    /** No folder by that name is attached to this conversation on this machine. */
     "no-folder",
-    /** The path resolved outside the attached folder, or through a symlink that did. */
+    /** The path lies outside the workspace and the attached folders, or a link led out of them. */
     "outside-folder",
+    /** The folder was attached read-only. */
+    "read-only",
     "not-found",
     "not-a-file",
-    "not-a-directory",
     /** The file is not text, so reading it as text would only produce noise. */
     "not-text",
-    /** The file is neither an image nor a document the model could take. */
+    /** The file is neither an image nor a PDF. */
     "not-binary",
     /** Handing the file to its default application would run it. */
     "not-openable",
-    /** An edit's old text was not found, or was found more than once. */
-    "no-match",
-    "ambiguous-match",
-    /** A move's destination already exists, or a folder with that name is already attached. */
+    /** A folder with that name is already attached. */
     "already-exists",
-    /** The pattern could not be compiled. */
-    "bad-pattern",
     "too-large",
-    /** The server would not hand over the attachment: not in this chat, or not readable. */
-    "not-available",
-    /** Commands are unavailable because the sandbox is not ready. */
-    "sandbox-unavailable",
-    "timed-out",
-    "denied-by-user",
     "failed",
   ]),
   message: Schema.String,
@@ -358,91 +203,53 @@ export const OPENABLE_EXTENSIONS = new Set([
 export const RevealMode = Schema.Literals(["reveal", "open"]);
 export type RevealMode = typeof RevealMode.Type;
 
-/** How long an approved network permission lasts: the asking answer, the chat, or every chat. */
-export const GrantScope = Schema.Literals(["answer", "chat", "always"]);
-export type GrantScope = typeof GrantScope.Type;
-
-export const NetworkPort = Schema.Int.check(
-  Schema.isGreaterThanOrEqualTo(1),
-  Schema.isLessThanOrEqualTo(65_535),
-);
-
-/** One approved destination: the canonical host the desktop stored, and how long it lasts. */
-export const NetworkPermission = Schema.Struct({
-  host: Schema.String,
-  port: NetworkPort,
-  privateNetwork: Schema.Boolean,
-  scope: GrantScope,
-});
-export type NetworkPermission = typeof NetworkPermission.Type;
-
-/** One thing a chat may reach: a destination, a readable path, local services or the SSH agent. */
-export const ChatPermission = Schema.Union([
-  Schema.Struct({
-    kind: Schema.Literals(["network"]),
-    host: Schema.String,
-    port: NetworkPort,
-    privateNetwork: Schema.Boolean,
-  }),
-  Schema.Struct({ kind: Schema.Literals(["path"]), path: Schema.String }),
-  Schema.Struct({ kind: Schema.Literals(["local"]) }),
-  Schema.Struct({ kind: Schema.Literals(["ssh-agent"]) }),
-]);
-export type ChatPermission = typeof ChatPermission.Type;
-
-/** What a chat may reach: its own grants, and those every chat has, which it cannot remove. */
-export const ChatPermissions = Schema.Struct({
-  chat: Schema.Array(ChatPermission),
-  always: Schema.Array(ChatPermission),
-});
-export type ChatPermissions = typeof ChatPermissions.Type;
-
-/** Switches a person grants commands: local network services, and their SSH agent (chat only). */
-export const Capability = Schema.Literals(["local-services", "ssh-agent"]);
-export type Capability = typeof Capability.Type;
-
-/** Whether commands can run, and if not, whether the app itself can fix it. */
-export const SandboxAvailability = Schema.Union([
-  Schema.Struct({ kind: Schema.Literals(["ready"]) }),
-  Schema.Struct({
-    kind: Schema.Literals(["setup-needed"]),
-    /** Windows only today: an elevated one-time install the app can trigger. */
-    platform: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literals(["missing-deps"]),
-    missing: Schema.Array(Schema.String),
-    hint: Schema.String,
-  }),
-  Schema.Struct({ kind: Schema.Literals(["unsupported"]), reason: Schema.String }),
-]);
-export type SandboxAvailability = typeof SandboxAvailability.Type;
-
 /**
- * One attached folder as the site sees it, by its real absolute path. The path
- * is the model's address for every file inside: the tools take absolute paths
- * and the sandbox decides what is reachable, the way Cursor and Claude Code
- * work. Paths live in attempt-scoped prompt text and tool traffic, same as
- * file contents; the server persists only the names.
+ * One attached folder as the site sees it: by name and guest path, never where it lives on this
+ * machine, since host paths reach neither the server nor the model.
  */
 export const AttachedFolder = Schema.Struct({
-  /** The folder's basename, for the strip and grouping in the transcript. */
+  /** The folder's basename, unique in the chat. */
   name: Schema.String,
-  /** The real absolute path. */
+  /** Where the chat's computer sees it: `/folders/<name>`. */
   path: Schema.String,
   /** False when the remembered folder has been moved, renamed or deleted since. */
   alive: Schema.Boolean,
+  /** The computer may read it but not change it. */
+  readOnly: Schema.Boolean,
 });
 export type AttachedFolder = typeof AttachedFolder.Type;
 
 /** What the composer strip renders. An empty list is an invitation, not a fault. */
 export const FolderStatus = Schema.Struct({
   folders: Schema.Array(AttachedFolder),
-  sandbox: SandboxAvailability,
   /** The app-managed workspace, separate from user-picked folders. */
   workspace: Schema.Struct({
-    /** The workspace directory's real absolute path. */
+    /** Its guest path, `/workspace`. */
     path: Schema.String,
   }),
 });
 export type FolderStatus = typeof FolderStatus.Type;
+
+const computerSettings = {
+  /** Whether calls started on the person's other devices may run here. */
+  remote: Schema.Boolean,
+  /** The SSH agent socket chosen in Settings; null uses `SSH_AUTH_SOCK` or Windows' own. */
+  agentSocket: Schema.NullOr(Schema.String),
+};
+
+/** Whether this machine can run chats' computers, with its own settings for them. */
+export const ComputerStatus = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), ...computerSettings }),
+  Schema.Struct({
+    status: Schema.Literal("preparing"),
+    /** From 0 to 1: the image download. */
+    progress: Schema.Number,
+    ...computerSettings,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.String,
+    ...computerSettings,
+  }),
+]);
+export type ComputerStatus = typeof ComputerStatus.Type;

@@ -19,18 +19,12 @@ import {
   desktopWorkSnapshot,
   submitDesktopToolResult,
 } from "../server/functions.ts";
-import {
-  abortWorkTurn,
-  dispatchQueuedMessage,
-  getWorkTurnReservation,
-} from "~/modules/chat/server/functions.ts";
 import { readDesktopBrowser } from "@chat/desktop-rpc";
 import { browserTabs } from "~/modules/browser/client/browser-store.ts";
 import { cancelBrowserCall, executeBrowserTool } from "~/modules/browser/client/execute-browser.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
-import { DesktopToolName, desktopFailure } from "../tool-schema.ts";
-import { sendFieldsFor, useDesktop } from "./bridge.ts";
-import { executeDesktopTool } from "./execute-tool.ts";
+import { desktopFailure } from "../tool-schema.ts";
+import { useDesktop } from "./bridge.ts";
 import { WorkController } from "./work-controller.ts";
 import { WorkContext } from "./work-context.ts";
 
@@ -40,72 +34,6 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
   const queryClient = useQueryClient();
   const [revision, setRevision] = useState(0);
   const [failedAfter, setFailedAfter] = useState<number | null>(null);
-  const [reconciledClient, setReconciledClient] = useState<typeof client>(null);
-  const reconciled = client === null || reconciledClient === client;
-  useEffect(() => {
-    let live = true;
-    if (!client) return;
-    void Effect.runPromise(client.listPendingPromotions(undefined))
-      .then(async (pending) => {
-        for (const item of pending) {
-          let status;
-          try {
-            status = await getWorkTurnReservation({
-              data: { reservationId: item.reservationId },
-            });
-          } catch {
-            // The server may be offline or this origin may no longer own it.
-            continue;
-          }
-          if (status.status === "activated") {
-            await Effect.runPromise(
-              client.commitPromotion({
-                conversationId: item.conversationId,
-                reservationId: item.reservationId,
-              }),
-            ).catch(() => {});
-            continue;
-          }
-          if (status.status === "reserved") {
-            try {
-              status = await abortWorkTurn({ data: { reservationId: item.reservationId } });
-            } catch {
-              // The server may have accepted the abort. Keep the journal until
-              // its state can be observed instead of deleting live files.
-              continue;
-            }
-          }
-          // Activated between the read and the abort: the turn owns the files now.
-          if (status.status === "activated") {
-            await Effect.runPromise(
-              client.commitPromotion({
-                conversationId: item.conversationId,
-                reservationId: item.reservationId,
-              }),
-            ).catch(() => {});
-            continue;
-          }
-          await Effect.runPromise(
-            client.rollbackPromotion({
-              conversationId: item.conversationId,
-              reservationId: item.reservationId,
-            }),
-          ).catch(() => {});
-          await Effect.runPromise(
-            client.discardSubmission({
-              conversationId: item.conversationId,
-              submissionId: item.submissionId,
-            }),
-          ).catch(() => {});
-        }
-      })
-      .finally(() => {
-        if (live) setReconciledClient(client);
-      });
-    return () => {
-      live = false;
-    };
-  }, [client]);
   const session = useQuery({
     queryKey: ["desktop-session"],
     enabled: !!client,
@@ -113,8 +41,6 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     staleTime: Infinity,
   });
   const executorId = session.data?.id;
-  const machineId = session.data?.machineId;
-  const machineName = session.data?.machineName;
   const work = useQuery({
     queryKey: ["desktop-work", executorId],
     enabled: !!client && !!executorId,
@@ -122,7 +48,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
   });
 
   const controller = useMemo(() => {
-    if (!client || !executorId || !reconciled) return null;
+    if (!client || !executorId) return null;
     const report = (error: unknown) => {
       console.error("Background work connection failed", error);
       // Recording which snapshot was newest lets a later one disprove this.
@@ -143,20 +69,11 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     };
     return new WorkController({
       claim: async (call) => (await claimDesktopTool({ data: call })).token,
-      execute: (call, remainingMs, askSite, scope) => {
+      // Only browser calls reach a page; the chat's machine runs everything else.
+      execute: (call, remainingMs, askSite) => {
         const { name } = call;
-        if (!Schema.is(DesktopToolName)(name))
-          return Promise.resolve(desktopFailure("That did not run", "Unknown local tool."));
         if (!isBrowserTool(name))
-          return Effect.runPromise(
-            executeDesktopTool(client, call.conversationId, remainingMs, {
-              callId: call.callId,
-              generationId: call.generationId,
-              name,
-              args: call.args,
-              scope,
-            }),
-          );
+          return Promise.resolve(desktopFailure("That did not run", "Unknown browser tool."));
         const embedded = agentBrowser();
         return embedded
           ? executeBrowserTool({ ...call, name }, remainingMs, {
@@ -204,7 +121,7 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       changed: () => setRevision((current) => current + 1),
       error: report,
     });
-  }, [client, executorId, reconciled, queryClient, boundary]);
+  }, [client, executorId, queryClient, boundary]);
   // A snapshot that arrived after the failure disproves it, so any answered
   // request clears this, not only a delivered result.
   const stale = failedAfter !== null && failedAfter >= work.dataUpdatedAt;
@@ -253,9 +170,9 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
     return () => {
       window.removeEventListener("pagehide", pagehide);
       controller.dispose();
-      void Effect.runPromise(
-        client.setWorkState({ active: 0, needsApproval: 0, attempts: [] }),
-      ).catch((error) => console.error("Could not clear work status", error));
+      void Effect.runPromise(client.setWorkState({ active: 0, needsApproval: 0 })).catch((error) =>
+        console.error("Could not clear work status", error),
+      );
     };
   }, [controller, client]);
 
@@ -283,46 +200,11 @@ export function DesktopWorkProvider({ children, userId }: { children: ReactNode;
       });
   }, [host.controller, work.data, work.dataUpdatedAt, userId, boundary]);
 
-  // Queued Work waits for a machine, and this app is one. Each start reads the
-  // folders now and names this app's executor; the server's lock decides. Like
-  // tool work it waits for pending file promotions, so a reserved turn's
-  // activation never loses its chat to a queued message.
-  const starting = useRef(new Set<string>());
-  useEffect(() => {
-    if (!client || !executorId || !reconciled || !work.data) return;
-    for (const conversationId of work.data.queued) {
-      if (starting.current.has(conversationId)) continue;
-      starting.current.add(conversationId);
-      void Effect.runPromise(client.folderStatus({ conversationId }))
-        .then((status) =>
-          dispatchQueuedMessage({
-            data: {
-              conversationId,
-              desktop: {
-                ...sendFieldsFor(status),
-                executorId,
-                // Which machine runs the answer, as every other Work start says.
-                ...(machineId && machineName
-                  ? { machine: { id: machineId, name: machineName } }
-                  : {}),
-              },
-            },
-          }),
-        )
-        .catch((error: unknown) => console.error("Could not start queued work", error))
-        .finally(() => starting.current.delete(conversationId));
-    }
-  }, [client, executorId, machineId, machineName, reconciled, work.data]);
-
   useEffect(() => {
     if (!client) return;
     void Effect.runPromise(
       client.setWorkState({
         active: work.data?.attempts.length ?? 0,
-        attempts: (work.data?.attempts ?? []).map(({ conversationId, generationId }) => ({
-          conversationId,
-          generationId,
-        })),
         needsApproval: host.controller?.attention().reduce((n, item) => n + item.pending, 0) ?? 0,
       }),
     ).catch((error) => console.error("Could not update desktop work status", error));

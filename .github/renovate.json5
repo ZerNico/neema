@@ -6,7 +6,26 @@
   internalChecksFilter: "strict",
   postUpdateOptions: ["pnpmDedupe"],
   lockFileMaintenance: { enabled: true },
+  // The sandbox image's Python lock. Its refresh is the image's monthly update (below).
+  "pip-compile": {
+    managerFilePatterns: ["/^infra/sandbox-image/requirements\\.txt$/"],
+    lockFileMaintenance: { enabled: true, schedule: ["* * 1 * *"] },
+  },
   packageRules: [
+    {
+      // Every change to the sandbox image resets each chat's installs, so its updates
+      // (base images, Python lock) arrive together once a month instead of one by one.
+      // docs/internals/desktop.md#the-image
+      groupName: "sandbox image",
+      matchFileNames: ["infra/sandbox-image/**"],
+      schedule: ["* * 1 * *"],
+    },
+    {
+      // The lock is pip-compile's; the plain requirements manager would edit it by hand.
+      matchManagers: ["pip_requirements"],
+      matchFileNames: ["infra/sandbox-image/**"],
+      enabled: false,
+    },
     {
       // Every effect package shares one rc, and an rc can change the AI
       // interfaces the model client implements (AGENTS.md, Version pins), so

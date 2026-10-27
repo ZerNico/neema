@@ -56,13 +56,22 @@ jobs:
       contents: read
       packages: write
 
-  desktop:
+  # The guest image built from this commit's sources, reused when it already exists.
+  sandbox:
     needs: [draft, ci]
+    uses: ./.github/workflows/sandbox-image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  desktop:
+    needs: [draft, ci, sandbox]
     uses: ./.github/workflows/desktop.yml
     permissions:
       contents: read
     with:
       version: ${{ needs.draft.outputs.version }}
+      sandbox-image: ${{ needs.sandbox.outputs.ref }}
 
   assets:
     needs: [docker, desktop]

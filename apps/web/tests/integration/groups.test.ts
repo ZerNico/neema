@@ -1,4 +1,3 @@
-import { english, type Localized } from "~/i18n/localized.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { Effect, ManagedRuntime, Stream } from "effect";
@@ -548,76 +547,6 @@ describe("model visibility", () => {
 });
 
 describe("generation-time enforcement", () => {
-  it("rejects a queued Work message without leaving an entry", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const groups = yield* GroupRepo;
-        const repo = yield* ChatRepo;
-        const chat = yield* ChatService;
-        const userId = yield* makeUser();
-        const modelId = yield* makeModel();
-        const conversation = yield* repo.createConversation({ userId, modelId });
-        yield* db
-          .update(conversations)
-          .set({ mode: "work" })
-          .where(eq(conversations.id, conversation.id));
-        const group = yield* groups.createGroup(`No queued Work ${uuidv7()}`);
-        yield* groups.addMember(group.id, userId);
-        yield* groups.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, work: false });
-        const denied = yield* chat
-          .queueMessage({
-            userId,
-            conversationId: conversation.id,
-            content: "Continue the task",
-            attachmentIds: [],
-            input: { modelId, searchEnabled: false, researchEnabled: false },
-            desktop: {
-              executorId: "test-machine",
-              folders: [],
-              commands: false,
-              browser: false,
-            },
-          })
-          .pipe(Effect.flip);
-        return { denied, entries: yield* repo.listQueue(conversation.id) };
-      }),
-    );
-    expect(result.denied).toMatchObject({ _tag: "InvalidMessage" });
-    expect(english((result.denied as { reason: Localized }).reason)).toBe("Work is not permitted");
-    expect(result.entries).toEqual([]);
-  });
-
-  it("rejects a Work reservation before creating a conversation", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const groups = yield* GroupRepo;
-        const chat = yield* ChatService;
-        const userId = yield* makeUser();
-        const group = yield* groups.createGroup(`No Work ${uuidv7()}`);
-        yield* groups.addMember(group.id, userId);
-        yield* groups.updateGroupCapabilities(group.id, { ...ALL_CAPABILITIES, work: false });
-        const conversationId = uuidv7();
-        const denied = yield* chat
-          .reserveWorkTurn({
-            id: uuidv7(),
-            userId,
-            conversation: { kind: "new", id: conversationId, mode: "work" },
-          })
-          .pipe(Effect.flip);
-        const rows = yield* db
-          .select({ id: conversations.id })
-          .from(conversations)
-          .where(eq(conversations.id, conversationId));
-        return { denied, rows };
-      }),
-    );
-    expect(result.denied).toMatchObject({ _tag: "InvalidMessage" });
-    expect(english((result.denied as { reason: Localized }).reason)).toBe("Work is not permitted");
-    expect(result.rows).toEqual([]);
-  });
-
   it("rejects forbidden search before creating a turn", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -632,7 +561,7 @@ describe("generation-time enforcement", () => {
         const denied = yield* chat
           .sendMessage({
             userId,
-            conversation: { kind: "new", id: conversationId, mode: "chat" },
+            conversation: { kind: "new", id: conversationId },
             modelId: yield* makeModel(),
             content: "Look this up",
             searchEnabled: true,
@@ -670,7 +599,7 @@ describe("generation-time enforcement", () => {
 
         const sent = yield* chat.sendMessage({
           userId: member,
-          conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+          conversation: { kind: "new", id: uuidv7() },
           modelId: privateModel,
           content: "hello",
           searchEnabled: false,
@@ -680,7 +609,7 @@ describe("generation-time enforcement", () => {
         const denied = yield* chat
           .sendMessage({
             userId: outsider,
-            conversation: { kind: "new", id: uuidv7(), mode: "chat" },
+            conversation: { kind: "new", id: uuidv7() },
             modelId: privateModel,
             content: "hello",
             searchEnabled: false,

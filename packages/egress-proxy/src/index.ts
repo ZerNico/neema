@@ -1,8 +1,7 @@
-export interface CommandContext {
+/** Whose traffic this is: one chat's VM on one server. The proxy only passes it to callbacks. */
+export interface ClientContext {
   readonly server: string;
   readonly chat: string;
-  readonly attempt: string;
-  readonly command: string;
 }
 
 export type GrantDecision =
@@ -20,7 +19,7 @@ export type GrantDecision =
     };
 
 export interface Denial {
-  readonly context: CommandContext;
+  readonly context: ClientContext;
   readonly host: string;
   readonly port: number;
   readonly reason: string;
@@ -31,9 +30,19 @@ export interface Denial {
   readonly lift: "grant" | "private-network" | null;
 }
 
+/** What a client is given: CONNECT credentials, and the DNS server its names come from. */
+export interface Client {
+  readonly token: string;
+  readonly username: string;
+  /** `127.0.0.1:port` of the proxy. */
+  readonly proxy: string;
+  /** `127.0.0.1:port` of this client's own name listener. */
+  readonly dns: string;
+}
+
 export interface ProxyOptions {
   /** Synchronous: the proxy never prompts. Receives canonical host and port. */
-  readonly decide: (context: CommandContext, host: string, port: number) => GrantDecision;
+  readonly decide: (context: ClientContext, host: string, port: number) => GrantDecision;
   readonly onDenial: (denial: Denial) => void;
   /** The signal aborts when the connection no longer needs the answer. */
   readonly resolve?: (
@@ -42,18 +51,15 @@ export interface ProxyOptions {
   ) => Promise<ReadonlyArray<{ address: string; family: 4 | 6 }>>;
   readonly interfaceAddresses?: () => ReadonlyArray<string>;
   /**
-   * A destination the host serves itself, such as the SSH agent: returns a connector
-   * for a still-connecting socket, `null` to refuse it, or undefined to resolve and
-   * dial as usual. Asked only after `decide` allowed the destination; the address
-   * guard does not apply. `proven` is false on a command's own port when the client
-   * did not also present the command's token: anyone local can reach that port.
+   * A destination the host serves itself, such as a service on this computer: returns a
+   * connector for a still-connecting socket, or undefined to resolve and dial as usual. Asked
+   * only after `decide` allowed the destination; the address guard does not apply.
    */
   readonly local?: (
-    context: CommandContext,
+    context: ClientContext,
     host: string,
     port: number,
-    proven: boolean,
-  ) => (() => import("node:net").Socket) | null | undefined;
+  ) => (() => import("node:net").Socket) | undefined;
   /** Must return a socket that is still connecting; the proxy waits for its connect event. */
   readonly connect?: (address: string, port: number, family: 4 | 6) => import("node:net").Socket;
   /** Defaults to console. Receives only fixed diagnostics and validated numeric addresses. */
@@ -77,6 +83,8 @@ export interface ProxyOptions {
     earlyBytesTotal: number;
     tunnelsPerToken: number;
     tunnelsTotal: number;
+    /** Distinct names one client may look up, default 50,000. */
+    namesPerClient: number;
   }>;
   readonly timers?: {
     setTimeout: (fn: () => void, ms: number) => unknown;
@@ -86,17 +94,13 @@ export interface ProxyOptions {
 
 export interface EgressProxy {
   listen(): Promise<{ port: number }>;
-  issue(context: CommandContext): { token: string; proxyUrl: string };
-  /**
-   * A listener of the command's own, whose connections need no credentials: for
-   * a sandbox that reaches only that one port and refuses a URL carrying them.
-   * The token still revokes it, which also closes the listener.
-   */
-  issuePort(context: CommandContext): Promise<{ token: string; proxyUrl: string }>;
+  /** Credentials and a name listener for one client, until revoked. */
+  issue(context: ClientContext): Promise<Client>;
+  /** Ends the client's credentials, its name listener and every tunnel it opened. */
   revoke(token: string): void;
   regrant(grantId: string): void;
   tunnels(): ReadonlyArray<{
-    context: CommandContext;
+    context: ClientContext;
     host: string;
     port: number;
     grantId?: string;
@@ -107,4 +111,3 @@ export interface EgressProxy {
 export { createEgressProxy } from "./proxy.ts";
 export { canonicalHost } from "./host.ts";
 export { addressRefusal } from "./address-guard.ts";
-export { childEnvironment } from "./environment.ts";

@@ -1,7 +1,7 @@
 # The embedded browser
 
 The desktop app shows web pages as panel tabs. Phase one is a browser the person drives;
-the model's browser tools build on it later and stay Work-only.
+the model's browser tools build on it and are offered only to messages sent from the app.
 
 ## Guests are the page's, the gate is the shell's
 
@@ -126,8 +126,8 @@ bridge:
   address stays
 
 The chat on screen and a page playing sound are never frozen or discarded. A chat with
-an answer running on this desktop is held (`browserTabs.setHeld`, from the Work
-snapshot): its live pages run fully. Holds outrank the cap, but a hold alone never
+an answer running on this desktop is held (`browserTabs.setHeld`, from the work
+host's snapshot): its live pages run fully. Holds outrank the cap, but a hold alone never
 reloads a discarded page; the call that needs the page does.
 
 A renderer reload is one big discard: tabs come back from their addresses, and logins
@@ -135,18 +135,20 @@ survive in the partition.
 
 ## The model's browser tools
 
-In Work chats, the model gets `browser_tabs`, `browser_open`, `browser_navigate`,
-`browser_snapshot` and `browser_wait_for` to read and move, and `browser_click`, `browser_type`,
-`browser_press`, `browser_scroll`, `browser_select` and `browser_evaluate` to act. They are desktop tools: the same family, envelope,
-`ExternalCompletion` wait and result shape as the file tools. Only two things differ: they are
-offered when the sending app reports `desktop.browser`, meaning its shell has the bridge's
-`agent` surface, whatever folders the chat has, and the page runs them itself (`browser/client/execute-browser.ts`) rather than
-through the Work RPC. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
+When the message comes from the desktop app, the model gets `browser_tabs`, `browser_open`,
+`browser_navigate`, `browser_snapshot` and `browser_wait_for` to read and move, and
+`browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_select` and
+`browser_evaluate` to act. They are desktop tools in family, envelope and result shape, but
+unlike the computer's tools they are run by the page (`browser/client/execute-browser.ts`)
+through `ExternalCompletion`, and offered only when the sending app reports `desktop.browser`,
+meaning its shell has the bridge's `agent` surface. They are a lazy family (`browser`,
+[prompt caching](prompt-caching.md#lazy-tool-families)): most chats never open a page, so their
+schemas are paid only once one does. A screenshot travels as `result.file`. It becomes a `local` working file of the attempt
 ([files](files.md#files-into-tools)), shown to a vision model and offered by reference. The
 user sees one only when the snapshot is taken with `share`, which attaches it to the answer
 and stores it with the chat; the result's first line tells the model which happened, since a
 model that sees a picture assumes the reader does too. With `save` the page writes it into the
-chat's workspace on the computer instead, through the Work bridge, so it never reaches the
+chat's workspace on the computer instead, through the bridge's `saveToWorkspace`, so it never reaches the
 server. Like t3code, the tool set stays small: one snapshot tool with a few flags, no
 full-page mode, rather than a tool per way of looking.
 
@@ -198,9 +200,9 @@ Domains come from `browser/site-grants.ts` (`tldts` with private suffixes, so
   A remembered site re-checks the chat's other waiting site calls. `allow-rest` never covers a
   site.
 - **Storage:** grants live on the machine in `browser-sites.json`, per server origin. Like
-  folder and network grants, the server never learns which sites a person trusts. "Always"
+  folder grants, the server never learns which sites a person trusts. "Always"
   sites are listed and removable in Settings › This computer. A chat's sites go when the chat is
-  purged, with its folder, network and path grants. One purged while the app was closed is never
+  purged, with its folder grants. One purged while the app was closed is never
   named to it, so per-chat grants are also kept only for the 500 chats granted to most recently.
 
 While a call drives a tab, main gates its page: a `will-navigate` or main-frame `will-redirect`
@@ -287,7 +289,7 @@ name, including collision retries. A link already submitted may commit. This is 
 of not-yet-submitted publication, never rollback of a file already saved.
 
 A file a driven page downloads (a link the model clicks, or one `browser_evaluate` starts) lands
-in the chat's Work workspace, never in a dialog over the app, and the call reports where. Main
+in the chat's workspace on its computer, never in a dialog over the app, and the call reports where. Main
 claims a download for the chat while its call drives the tab and afterwards until the person
 next clicks or types in that tab (ten minutes at most), since a click starts one a moment later
 and a script may after it returned. Normal release waits at most thirty seconds for downloads

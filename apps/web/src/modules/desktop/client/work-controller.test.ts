@@ -10,7 +10,7 @@ const call = (id: string, conversationId = "a"): ExternalOperation => ({
   generationId: `g-${conversationId}`,
   executorId: "e",
   callId: id,
-  name: "write_local_file",
+  name: "write_file",
   args: { path: "site/a", text: "$&" },
   expiresAt: Date.now() + 1000,
   claimed: false,
@@ -21,7 +21,7 @@ const snapshot = (...calls: ExternalOperation[]): WorkSnapshot => ({
   settings: [...new Set(calls.map((c) => c.conversationId))].map((conversationId) => ({
     conversationId,
     title: conversationId,
-    approval: "auto",
+    approval: "ask",
   })),
 });
 const controllers: WorkController[] = [];
@@ -80,48 +80,47 @@ describe("app-owned Work execution", () => {
     },
   );
 
-  it.each(["manual", "auto", "skip"] as const)(
-    "honours %s approval policy and always asks about deletes and network access",
+  it.each(["ask", "allow"] as const)(
+    "honours %s approval policy, never asks about reads and always about deletes and network access",
     (approval) => {
       const { controller } = setup();
       const current = snapshot(
         call("edit"),
-        { ...call("read"), name: "read_local_file" },
+        { ...call("read"), name: "read_file" },
         { ...call("command"), name: "run_command" },
         {
           ...call("network"),
           name: "request_network_access",
           args: { host: "example.com" },
         },
-        { ...call("delete"), name: "delete_local_file" },
+        { ...call("delete"), name: "delete_files" },
       );
       current.settings[0]!.approval = approval;
       controller.reconcile(current);
       const pending = controller.pending("a");
-      expect(pending.has("read")).toBe(approval === "manual");
-      expect(pending.has("edit")).toBe(approval !== "skip");
-      expect(pending.has("command")).toBe(approval !== "skip");
+      expect(pending.has("read")).toBe(false);
+      expect(pending.has("edit")).toBe(approval === "ask");
+      expect(pending.has("command")).toBe(approval === "ask");
       expect(pending.get("delete")).toBe("delete");
       expect(pending.get("network")).toBe("network");
     },
   );
 
-  it("does not extend an edit grant to commands, deletes, or manual reads", async () => {
+  it("does not extend an edit grant to commands or deletes", async () => {
     const { controller, completed } = setup();
     const current = snapshot(
       call("edit"),
-      { ...call("read"), name: "read_local_file" },
+      { ...call("read"), name: "read_file" },
       { ...call("command"), name: "run_command" },
-      { ...call("delete"), name: "delete_local_file" },
+      { ...call("delete"), name: "delete_files" },
     );
-    current.settings[0]!.approval = "manual";
     controller.reconcile(current);
     controller.decide("edit", "allow-rest");
     await completed;
-    expect([...controller.pending("a").keys()]).toEqual(["read", "command", "delete"]);
+    expect([...controller.pending("a").keys()]).toEqual(["command", "delete"]);
   });
 
-  it.each(["manual", "auto", "skip"] as const)(
+  it.each(["ask", "allow"] as const)(
     "requires individual network consent under %s even after a blanket decision",
     async (approval) => {
       const { controller, deps, completed } = setup();
@@ -179,25 +178,6 @@ describe("app-owned Work execution", () => {
     );
   });
 
-  it("passes the scope chosen for a path request", async () => {
-    const { controller, deps, completed } = setup();
-    const request = {
-      ...call("path"),
-      name: "request_path_access",
-      args: { path: "/opt/specs" },
-    };
-    controller.reconcile(snapshot(request));
-    expect(controller.pending("a").get("path")).toBe("path");
-    controller.decide("path", "allow-always");
-    await completed;
-    expect(deps.execute).toHaveBeenCalledExactlyOnceWith(
-      request,
-      expect.any(Number),
-      expect.any(Function),
-      "always",
-    );
-  });
-
   it("declines network access without invoking the desktop grant", async () => {
     const { controller, deps, completed } = setup();
     controller.reconcile(snapshot({ ...call("network"), name: "request_network_access" }));
@@ -239,7 +219,7 @@ describe("app-owned Work execution", () => {
       expect.objectContaining({ ok: false }),
     );
     const next = snapshot(call("two"));
-    next.settings[0]!.approval = "skip";
+    next.settings[0]!.approval = "allow";
     controller.reconcile(next);
     expect(controller.pending("a").size).toBe(0);
   });
@@ -445,7 +425,7 @@ describe("browser sites", () => {
       const click = { ...call("click"), name: "browser_click", args: { tab: "t1", ref: "e1" } };
       controller.reconcile({
         ...snapshot(click),
-        settings: [{ conversationId: "a", title: "a", approval: "skip" }],
+        settings: [{ conversationId: "a", title: "a", approval: "allow" }],
       });
       await vi.waitFor(() => expect([...controller.pending("a")]).toEqual([["click", "site"]]));
       // The card asks about the address the click led to.

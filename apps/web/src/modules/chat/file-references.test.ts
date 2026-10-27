@@ -19,15 +19,7 @@ const file: Attachment = {
 };
 
 const local = (path: string, overrides = {}) =>
-  resolveLocalReference({
-    path,
-    conversationId: "branch",
-    workspaceRoot: "/profile/workspaces/branch",
-    workspaceAncestors: ["source", "original"],
-    machineId: "machine",
-    originMachineId: "machine",
-    ...overrides,
-  });
+  resolveLocalReference({ path, machineId: "machine", originMachineId: "machine", ...overrides });
 
 describe("file reference destinations", () => {
   it("keeps delivered file replies brief unless the reader wants detail", () => {
@@ -42,7 +34,7 @@ describe("file reference destinations", () => {
       [file.id, file],
       ["other", { ...file, id: "other" }],
     ]);
-    const aliases = { attachments: { old: "current", missing: "deleted" }, workspaceAncestors: [] };
+    const aliases = { attachments: { old: "current", missing: "deleted" } };
     expect(referenceAttachment("old", attachments, aliases)).toBe(file);
     expect(referenceAttachment("missing", attachments, aliases)).toBeUndefined();
     expect(referenceAttachment("same.txt", attachments, aliases)).toBeUndefined();
@@ -92,57 +84,27 @@ describe("file reference destinations", () => {
 });
 
 describe("local reference provenance", () => {
-  it("relocates only exact recorded workspace ancestors", () => {
-    expect(local("/profile/workspaces/source/downloaded_images/image_0.jpg")).toBe(
-      "/profile/workspaces/branch/downloaded_images/image_0.jpg",
-    );
-    expect(local("/profile/workspaces/original/image.jpg")).toBe(
-      "/profile/workspaces/branch/image.jpg",
-    );
-    expect(local("/profile/workspaces/branch/image.jpg")).toBe(
-      "/profile/workspaces/branch/image.jpg",
-    );
-    expect(local("/profile/workspaces/stranger/image.jpg")).toBe(
-      "/profile/workspaces/stranger/image.jpg",
-    );
-    expect(local("/profile/workspaces/source-other/image.jpg")).toBe(
-      "/profile/workspaces/source-other/image.jpg",
-    );
-    expect(local("/attached/source/image.jpg")).toBe("/attached/source/image.jpg");
+  it("opens guest paths of the chat's computer as they are, in every branch", () => {
+    expect(local("/workspace/plot.png")).toBe("/workspace/plot.png");
+    expect(local("/workspace")).toBe("/workspace");
+    expect(local("/folders/site/README.md")).toBe("/folders/site/README.md");
+  });
+
+  it("names a local file by its last segment", () => {
+    expect(localFileName("/workspace/charts/plot.png")).toBe("plot.png");
+    expect(localFileName("/folders/site/README.md")).toBe("README.md");
   });
 
   it("does not open files from another or unknown machine", () => {
-    expect(local("/work/a", { originMachineId: "other" })).toBeNull();
-    expect(local("/work/a", { machineId: null })).toBeNull();
-    expect(local("/work/a", { originMachineId: null })).toBeNull();
+    expect(local("/workspace/a", { originMachineId: "other" })).toBeNull();
+    expect(local("/workspace/a", { machineId: null })).toBeNull();
+    expect(local("/workspace/a", { originMachineId: null })).toBeNull();
   });
 
-  it("handles Windows drives and UNC paths independently of the server platform", () => {
-    expect(local("C:\\profile\\source\\image.jpg", { workspaceRoot: "C:\\profile\\branch" })).toBe(
-      "C:/profile/branch/image.jpg",
-    );
-    expect(local("c:/profile/source/image.jpg", { workspaceRoot: "C:\\profile\\branch" })).toBe(
-      "C:/profile/branch/image.jpg",
-    );
-    expect(
-      local("\\\\server\\share\\source\\image.jpg", { workspaceRoot: "\\\\server\\share\\branch" }),
-    ).toBe("//server/share/branch/image.jpg");
-    expect(localFileName("C:\\attached\\a.txt")).toBe("a.txt");
-    expect(localFileName("/attached/a\\b.txt")).toBe("a\\b.txt");
-  });
-
-  it("waits for a valid current workspace rather than falling back to the source", () => {
-    expect(local("/profile/workspaces/source/image.jpg", { workspaceRoot: null })).toBeNull();
-    expect(
-      local("/profile/workspaces/source/image.jpg", { workspaceRoot: "/wrong/layout" }),
-    ).toBeNull();
-    expect(local("//server/share/source/a.png", { workspaceRoot: "//server/share/branch" })).toBe(
-      "//server/share/branch/a.png",
-    );
-  });
-
-  it("does not normalize traversal past the desktop symlink check", () => {
-    expect(local("/profile/workspaces/source/link/../secret")).toBeNull();
-    expect(local("C:\\profile\\source\\..\\secret")).toBeNull();
+  it("opens nothing outside the computer's roots, host paths included", () => {
+    expect(local("/Users/alex/secret.txt")).toBeNull();
+    expect(local("C:\\Users\\alex\\secret.txt")).toBeNull();
+    expect(local("/folders")).toBeNull();
+    expect(local("/workspacex/a")).toBeNull();
   });
 });

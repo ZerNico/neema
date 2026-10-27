@@ -1,18 +1,16 @@
 import { lstat, realpath } from "node:fs/promises";
-import { basename, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import { Effect } from "effect";
 import { DesktopError } from "@chat/desktop-rpc";
-import { isOwnRealPath } from "./path-grants.ts";
 
 /**
- * Path containment: the one place that decides whether a path the site named is
- * allowed to be touched.
+ * Path containment on the host: the one place that decides whether a path the site
+ * named may be read here, for a preview or a save.
  *
- * The site is remote code. It may name any path it likes, and the model driving
- * it may have read that path out of a file. So a name is a request, never an
- * authorisation, and this module answers only against a root the *user* picked
- * from a native dialog (or the chat's own workspace, which is container
- * territory).
+ * The site is remote code, and the chat's computer writes inside the very folders
+ * it previews, links included. So a name is a request, never an authorisation, and
+ * this module answers only against a root the *user* picked from a native dialog
+ * (or the chat's own workspace, which is container territory).
  *
  * Resolving the string is not enough. `resolve()` collapses `..` but knows
  * nothing about symlinks, so `notes -> /etc` inside the folder would pass a
@@ -22,6 +20,28 @@ import { isOwnRealPath } from "./path-grants.ts";
  * Refusals name the path the caller supplied, never a resolved host path the
  * caller did not already know.
  */
+
+const trimmed = (path: string) =>
+  path.length > parse(path).root.length ? path.replace(/[\\/]+$/, "") : path;
+
+// Windows spells the drive letter either way; nothing else may differ.
+const exact = (path: string) =>
+  process.platform === "win32" ? path.replace(/^[a-z]:/, (drive) => drive.toUpperCase()) : path;
+
+/**
+ * macOS links /tmp, /var and /etc into /private, and its data volume holds the writable folders
+ * under a second spelling: the system's own aliases, not a planted link.
+ */
+const unaliased = (path: string) =>
+  process.platform === "darwin"
+    ? path
+        .replace(/^\/System\/Volumes\/Data(?=\/)/, "")
+        .replace(/^\/private(?=\/(?:tmp|var|etc)(?:\/|$))/, "")
+    : path;
+
+/** Whether `real` is `path` itself, not somewhere a link along it leads (system aliases aside). */
+export const isOwnRealPath = (path: string, real: string) =>
+  exact(unaliased(trimmed(normalize(path)))) === exact(unaliased(trimmed(real)));
 
 const outside = (named: string) =>
   new DesktopError({
@@ -78,7 +98,7 @@ const existingAncestor = (target: string, named: string) =>
 export interface ResolvedPath {
   /** Absolute, symlink-free, proven to sit inside the folder. */
   readonly absolute: string;
-  /** How it is named back to the model: relative to the folder, POSIX-ish. */
+  /** Relative to the folder, `.` for the folder itself. */
   readonly relative: string;
 }
 
@@ -92,12 +112,14 @@ export const resolveInFolder = (
   root: string,
   requested: string,
   pinned = false,
+  /** How refusals name the path: the caller's own address for it. */
+  named = requested,
 ): Effect.Effect<ResolvedPath, DesktopError> =>
   Effect.gen(function* () {
     // A missing root is not a missing file: the workspace dir is created on
     // demand and a moved folder reports through the status, so resolving
     // against a root that is not there yet must not read as "not found".
-    const realRoot = yield* realOrFail(root, requested).pipe(
+    const realRoot = yield* realOrFail(root, named).pipe(
       Effect.mapError(
         () =>
           new DesktopError({
@@ -115,14 +137,14 @@ export const resolveInFolder = (
         message: "The folder you chose is no longer available.",
       });
     const target = isAbsolute(requested) ? resolve(requested) : resolve(realRoot, requested);
-    const { base, trail } = yield* existingAncestor(target, requested);
-    const realBase = yield* realOrFail(base, requested);
-    if (!within(realRoot, realBase)) return yield* Effect.fail(outside(requested));
+    const { base, trail } = yield* existingAncestor(target, named);
+    const realBase = yield* realOrFail(base, named);
+    if (!within(realRoot, realBase)) return yield* Effect.fail(outside(named));
 
     const absolute = trail.length === 0 ? realBase : join(realBase, ...trail);
     // Rebuilding from a proven-inside ancestor cannot escape, but the join is
     // cheap to re-check and this is the boundary worth being paranoid at.
-    if (!within(realRoot, absolute)) return yield* Effect.fail(outside(requested));
+    if (!within(realRoot, absolute)) return yield* Effect.fail(outside(named));
 
     const relative = absolute === realRoot ? "." : absolute.slice(realRoot.length + 1);
     return { absolute, relative };
@@ -130,58 +152,3 @@ export const resolveInFolder = (
 
 /** What the strip shows for a folder. No longer the model's address. */
 export const folderName = (folder: string) => basename(folder) || folder;
-
-export interface LocatedPath extends ResolvedPath {
-  /** The root of the folder the path fell in, absolute and real. */
-  readonly root: string;
-}
-
-/**
- * An absolute path, resolved against a set of folder roots, each with a
- * display name. The containment proof is `resolveInFolder`'s; this only picks
- * which root the path belongs to and renders the receipt as
- * `rootName/relative`, so the transcript keeps the short form while the
- * model's address space is absolute. A path under no root is refused.
- *
- * `outside-folder` from one root means "not mine" only when the requested
- * string never textually sat inside that root: the path belongs to someone
- * else and the next root may own it. When the string *did* sit inside this
- * root and still resolved outside, a symlink or a `..` walked it out, and
- * letting the escape target match a neighbouring root would widen what a
- * symlink inside this folder can reach. That failure is the final answer.
- * `no-folder` (the root itself is gone) says nothing about the path, so it
- * is skipped too; every other failure is this root's to report.
- */
-export const resolveAmongRoots = (
-  roots: ReadonlyArray<{ name: string; root: string; pinned?: boolean }>,
-  requested: string,
-): Effect.Effect<LocatedPath, DesktopError> =>
-  Effect.gen(function* () {
-    if (!isAbsolute(requested)) return yield* Effect.fail(outside(requested));
-    const normalized = resolve(requested);
-    for (const { name, root, pinned } of roots) {
-      const resolved = yield* Effect.result(resolveInFolder(root, requested, pinned));
-      if (resolved._tag === "Failure") {
-        const { reason } = resolved.failure;
-        if (reason === "no-folder") continue;
-        if (reason === "outside-folder") {
-          const ownsTextually = yield* Effect.result(
-            Effect.map(realOrFail(root, requested), (realRoot) => within(realRoot, normalized)),
-          );
-          if (ownsTextually._tag === "Success" && !ownsTextually.success) continue;
-          return yield* Effect.fail(resolved.failure);
-        }
-        return yield* Effect.fail(resolved.failure);
-      }
-      const found = resolved.success;
-      return {
-        root:
-          found.relative === "."
-            ? found.absolute
-            : found.absolute.slice(0, -found.relative.length - 1),
-        absolute: found.absolute,
-        relative: found.relative === "." ? name : `${name}/${found.relative}`,
-      };
-    }
-    return yield* Effect.fail(outside(requested));
-  });

@@ -35,8 +35,8 @@ the rest of this page depends on.
   Its day starts when the branch is created.
 - A temporary chat never joins a [project](projects.md): a check constraint refuses the pair,
   since a project lists its chats and remembers what they settle.
-- A work chat cannot be temporary. Its grants and folders are keyed by its id on the user's
-  machine, and deleting it silently would strand them.
+- A temporary chat may have a computer. The sweep purges it like any chat, and the purge tells
+  its machine to discard the VM, workspace and grants.
 
 ## Lifetime
 

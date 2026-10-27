@@ -1,0 +1,2 @@
+ALTER TABLE "model_settings" ADD COLUMN "review_model_id" text;--> statement-breakpoint
+ALTER TABLE "model_settings" ADD CONSTRAINT "model_settings_review_model_id_models_id_fkey" FOREIGN KEY ("review_model_id") REFERENCES "models"("id") ON DELETE SET NULL;

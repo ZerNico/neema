@@ -15,7 +15,7 @@ import { reveal } from "./local-file-read.ts";
 import { m } from "~/paraglide/messages.js";
 
 /**
- * The file a Work row points at, shown in the preview dialog the rest of the
+ * The file a computer row points at, shown in the preview dialog the rest of the
  * app already uses for attachments.
  *
  * The bytes are read at click time through the bridge, never from the server:
@@ -26,17 +26,16 @@ import { m } from "~/paraglide/messages.js";
 
 export function LocalFileConversationProvider({
   conversationId,
-  workspaceRoot,
   children,
 }: {
-  conversationId: string;
-  workspaceRoot?: string | null;
+  /** Null where the chat's computer is not this machine: its files are not here to read. */
+  conversationId: string | null;
   children: ReactNode;
 }) {
   // One object per conversation, so consumers re-render only when it changes.
   const value = useMemo(
-    () => ({ conversationId, workspaceRoot: workspaceRoot ?? null }),
-    [conversationId, workspaceRoot],
+    () => (conversationId === null ? null : { conversationId }),
+    [conversationId],
   );
   return (
     <LocalFileConversationContext.Provider value={value}>

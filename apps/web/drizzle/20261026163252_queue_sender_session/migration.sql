@@ -1,0 +1,1 @@
+ALTER TABLE "conversation_queue_entries" ADD COLUMN "sender_session_id" text;

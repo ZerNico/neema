@@ -106,8 +106,8 @@ and package checks succeed. A failed edit leaves the last good revision intact.
 A draft opened from a chat attachment, project file or skill template retains its pinned
 source reference; publication checks that source is still authorized before delivery. A
 skill's master or logo is opened by the `skill:` reference `read_skill_file` returns, at the
-revision the answer was offered. In desktop
-Work a deck or picture on the computer arrives through `import_local_file` as a working file
+revision the answer was offered. In a chat with a
+computer, a deck or picture there arrives through `copy_from_computer` as a working file
 owned by `local`: accepted as `sourceRef` or an image, never as `workingRef`, which names only
 a presentation draft.
 

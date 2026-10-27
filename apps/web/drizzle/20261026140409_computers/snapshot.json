@@ -1,0 +1,798 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "036e76e9-dcf6-4104-b185-85bfbcb03123",
+  "prevIds": [
+    "e1c6886b-ada8-4701-a785-01b3e1ec0fab"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "machines"
+      ],
+      "writes": [
+        "s|tbl|public.machines",
+        "n|tbl|public.machines",
+        "e|tbl|public.machines",
+        "n|rel|public.machines",
+        "n|type|public.machines",
+        "n|rel|public.machines_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "network_grants"
+      ],
+      "writes": [
+        "s|tbl|public.network_grants",
+        "n|tbl|public.network_grants",
+        "e|tbl|public.network_grants",
+        "n|rel|public.network_grants",
+        "n|type|public.network_grants",
+        "n|rel|public.network_grants_pkey",
+        "n|rel|public.network_grants_destination_key"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "work_turn_reservations"
+      ],
+      "writes": [
+        "s|tbl|public.work_turn_reservations",
+        "n|tbl|public.work_turn_reservations",
+        "e|tbl|public.work_turn_reservations",
+        "n|rel|public.work_turn_reservations",
+        "n|type|public.work_turn_reservations"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversations",
+        "machine_id"
+      ],
+      "writes": [
+        "s|col|public.conversations.machine_id",
+        "n|col|public.conversations.machine_id",
+        "e|col|public.conversations.machine_id"
+      ],
+      "reads": [
+        "n|tbl|public.conversations",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversations",
+        "computer_folders"
+      ],
+      "writes": [
+        "s|col|public.conversations.computer_folders",
+        "n|col|public.conversations.computer_folders",
+        "e|col|public.conversations.computer_folders"
+      ],
+      "reads": [
+        "n|tbl|public.conversations",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversations",
+        "mode"
+      ],
+      "writes": [
+        "s|col|public.conversations.mode",
+        "n|col|public.conversations.mode",
+        "e|col|public.conversations.mode"
+      ],
+      "reads": [
+        "n|tbl|public.conversations",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "desktop_commands"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.desktop_commands",
+        "n|col|public.message_generation_config.desktop_commands",
+        "e|col|public.message_generation_config.desktop_commands"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "desktop_folders"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.desktop_folders",
+        "n|col|public.message_generation_config.desktop_folders",
+        "e|col|public.message_generation_config.desktop_folders"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "desktop_machine_id"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.desktop_machine_id",
+        "n|col|public.message_generation_config.desktop_machine_id",
+        "e|col|public.message_generation_config.desktop_machine_id"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "desktop_machine_name"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.desktop_machine_name",
+        "n|col|public.message_generation_config.desktop_machine_name",
+        "e|col|public.message_generation_config.desktop_machine_name"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "message_generation_config",
+        "workspace_files"
+      ],
+      "writes": [
+        "s|col|public.message_generation_config.workspace_files",
+        "n|col|public.message_generation_config.workspace_files",
+        "e|col|public.message_generation_config.workspace_files"
+      ],
+      "reads": [
+        "n|tbl|public.message_generation_config",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "conversations",
+        "permission_level"
+      ],
+      "writes": [
+        "s|colprop|public.conversations.permission_level.default"
+      ],
+      "reads": [
+        "n|tbl|public.conversations",
+        "n|sch|public",
+        "n|col|public.conversations.permission_level"
+      ],
+      "sqlHash": "2223d36a22d79d63"
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "network_grants",
+        "network_grants_conversation_idx"
+      ],
+      "writes": [
+        "s|idx|public.network_grants_conversation_idx",
+        "n|idx|public.network_grants_conversation_idx",
+        "e|idx|public.network_grants_conversation_idx",
+        "n|rel|public.network_grants_conversation_idx"
+      ],
+      "reads": [
+        "n|tbl|public.network_grants",
+        "n|sch|public",
+        "n|col|public.network_grants.conversation_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "machines"
+      ],
+      "writes": [
+        "s|fk|public.machines.machines_user_id_user_id_fkey",
+        "n|fk|public.machines.machines_user_id_user_id_fkey",
+        "e|fk|public.machines.machines_user_id_user_id_fkey",
+        "n|con|public.machines.machines_user_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.machines",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.machines.user_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "network_grants"
+      ],
+      "writes": [
+        "s|fk|public.network_grants.network_grants_user_id_user_id_fkey",
+        "n|fk|public.network_grants.network_grants_user_id_user_id_fkey",
+        "e|fk|public.network_grants.network_grants_user_id_user_id_fkey",
+        "n|con|public.network_grants.network_grants_user_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.network_grants",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.network_grants.user_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "network_grants"
+      ],
+      "writes": [
+        "s|fk|public.network_grants.network_grants_conversation_id_conversations_id_fkey",
+        "n|fk|public.network_grants.network_grants_conversation_id_conversations_id_fkey",
+        "e|fk|public.network_grants.network_grants_conversation_id_conversations_id_fkey",
+        "n|con|public.network_grants.network_grants_conversation_id_conversations_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.network_grants",
+        "n|sch|public",
+        "n|tbl|public.conversations",
+        "n|sch|public",
+        "n|col|public.network_grants.conversation_id",
+        "n|col|public.conversations.id",
+        "e|uniqueness|public.conversations.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "machines",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "network_grants",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversations",
+        "name": "machine_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversations",
+        "name": "computer_folders",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "'[]'",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "name",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "platform",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "last_seen_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "conversation_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "host",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "port",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "private_network",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "false",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "network_grants_conversation_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "conversation_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"conversation_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "machines_user_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "user_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "network_grants_user_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "user_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "network_grants_conversation_id_conversations_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "conversation_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "conversations",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "machines_pkey",
+        "columns": [
+          "user_id",
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "network_grants_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "network_grants",
+        "name": "network_grants_destination_key",
+        "nameExplicit": true,
+        "columns": [
+          "user_id",
+          "conversation_id",
+          "host",
+          "port"
+        ],
+        "nullsNotDistinct": true,
+        "entityType": "uniques"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "tables\u0000[\"public\",\"work_turn_reservations\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"message_generation_config\",\"desktop_commands\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"conversations\",\"mode\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"message_generation_config\",\"desktop_folders\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"message_generation_config\",\"desktop_machine_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"message_generation_config\",\"desktop_machine_name\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"message_generation_config\",\"workspace_files\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"user_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"conversation_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"intent\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"status\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"assistant_message_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"expires_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"created_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"work_turn_reservations\",\"updated_at\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"work_turn_reservations_user_id_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"work_turn_reservations_expiry_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"work_turn_reservations_live_conversation_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"work_turn_reservations\",\"work_turn_reservations_user_id_user_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "pks\u0000[\"public\",\"work_turn_reservations\",\"work_turn_reservations_pkey\"]"
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"conversations\",\"permission_level\"]",
+      "set": {
+        "default": "'ask'"
+      }
+    }
+  ]
+}

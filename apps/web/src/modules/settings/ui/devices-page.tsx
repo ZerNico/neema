@@ -1,4 +1,4 @@
-import { ComputerIcon, GlobeIcon } from "@hugeicons/core-free-icons";
+import { GlobeIcon, LaptopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -86,7 +86,7 @@ export function DevicesPage() {
             return (
               <ListRow key={session.id}>
                 <HugeiconsIcon
-                  icon={session.desktop ? ComputerIcon : GlobeIcon}
+                  icon={session.desktop ? LaptopIcon : GlobeIcon}
                   strokeWidth={2}
                   className="text-muted-foreground size-5 shrink-0"
                 />

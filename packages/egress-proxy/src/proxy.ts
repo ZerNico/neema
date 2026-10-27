@@ -1,8 +1,9 @@
-import { createConnection, createServer, type Server } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { createDefaultResolver } from "./resolver.ts";
 import { networkInterfaces } from "node:os";
 import type { EgressProxy, ProxyOptions } from "./index.ts";
-import { Tokens, type Identity } from "./auth.ts";
+import { Tokens, USERNAME } from "./auth.ts";
+import { serveNames } from "./dns.ts";
 import { Connection, type Services, type Limits } from "./connection.ts";
 import { defaultTimers } from "./timers.ts";
 
@@ -23,6 +24,7 @@ function limitsFor(options: ProxyOptions): Limits {
     earlyBytesTotal: supplied?.earlyBytesTotal ?? 4 * 1024 * 1024,
     tunnelsPerToken: supplied?.tunnelsPerToken ?? 64,
     tunnelsTotal: supplied?.tunnelsTotal ?? 256,
+    namesPerClient: supplied?.namesPerClient ?? 50_000,
   };
   for (const [name, value] of Object.entries(limits)) {
     if (
@@ -38,12 +40,6 @@ function limitsFor(options: ProxyOptions): Limits {
   }
   return limits;
 }
-
-const shut = (listener: Server) =>
-  new Promise<void>((resolve) => {
-    if (listener.listening) listener.close(() => resolve());
-    else resolve();
-  });
 
 export function createEgressProxy(options: ProxyOptions): EgressProxy {
   const tokens = new Tokens();
@@ -87,20 +83,18 @@ export function createEgressProxy(options: ProxyOptions): EgressProxy {
   let port: number | undefined;
   let listening: Promise<{ port: number }> | undefined;
   let closing: Promise<void> | undefined;
-  const accept = (preset?: Identity) =>
-    createServer({ allowHalfOpen: true }, (client) => {
-      if (closed || services.preTunnelConnections >= services.limits.connectionsTotal)
-        client.destroy();
-      else {
-        services.preTunnelConnections++;
-        connections.add(new Connection(client, services, preset));
-      }
-    });
-  const server = accept();
+  const server = createServer({ allowHalfOpen: true }, (client) => {
+    if (closed || services.preTunnelConnections >= services.limits.connectionsTotal)
+      client.destroy();
+    else {
+      services.preTunnelConnections++;
+      connections.add(new Connection(client, services));
+    }
+  });
   // Node counts tunnels too; the accept guard independently bounds pre-tunnel sockets.
   server.maxConnections = services.limits.connectionsTotal + services.limits.tunnelsTotal;
   server.on("error", () => services.log("error", "Egress proxy: listener failed"));
-  const dedicated = new Map<string, Server>();
+  const nameListeners = new Map<string, Promise<{ close: () => Promise<void> }>>();
   const proxy: EgressProxy = {
     listen() {
       if (closed) return Promise.reject(new Error("Proxy is closed"));
@@ -125,44 +119,32 @@ export function createEgressProxy(options: ProxyOptions): EgressProxy {
       });
       return listening;
     },
-    issue(context) {
+    async issue(context) {
       if (closed || port === undefined) throw new Error("Proxy is not listening");
-      const token = tokens.issue(context);
-      return { token, proxyUrl: `http://cmd:${token}@127.0.0.1:${port}` };
-    },
-    async issuePort(context) {
-      if (closed) throw new Error("Proxy is closed");
-      const token = tokens.issue(context);
-      const identity = tokens.lookup(token);
-      if (!identity) throw new Error("Token was not issued");
-      const listener = accept(identity);
-      listener.maxConnections = server.maxConnections;
-      listener.on("error", () => services.log("error", "Egress proxy: command listener failed"));
-      dedicated.set(token, listener);
-      const own = await new Promise<number>((resolve, reject) => {
-        listener.once("error", reject);
-        listener.listen(0, "127.0.0.1", () => {
-          listener.removeListener("error", reject);
-          const address = listener.address();
-          if (address && typeof address !== "string") resolve(address.port);
-          else reject(new Error("Proxy has no TCP listener"));
-        });
-      }).catch(async (error: unknown) => {
+      const { token, identity } = tokens.issue(context, limits.namesPerClient);
+      const starting = serveNames(identity.names, (message) => services.log("error", message));
+      nameListeners.set(token, starting);
+      const names = await starting.catch((error: unknown) => {
         proxy.revoke(token);
         throw error;
       });
       // Revoked or closed while the listener was starting.
       if (!identity.active) {
-        await shut(listener);
-        throw new Error("Proxy listener was revoked");
+        await names.close();
+        throw new Error("Client was revoked");
       }
-      return { token, proxyUrl: `http://127.0.0.1:${own}` };
+      return {
+        token,
+        username: USERNAME,
+        proxy: `127.0.0.1:${port}`,
+        dns: `127.0.0.1:${names.port}`,
+      };
     },
     revoke(token) {
-      const listener = dedicated.get(token);
-      if (listener) {
-        dedicated.delete(token);
-        void shut(listener);
+      const names = nameListeners.get(token);
+      if (names) {
+        nameListeners.delete(token);
+        void names.then((listener) => listener.close()).catch(() => {});
       }
       const identity = tokens.revoke(token);
       if (!identity) return;
@@ -182,10 +164,12 @@ export function createEgressProxy(options: ProxyOptions): EgressProxy {
       closed = true;
       tokens.clear();
       for (const connection of connections) connection.stop();
-      const listeners = [...dedicated.values()];
-      dedicated.clear();
+      const listeners = [...nameListeners.values()];
+      nameListeners.clear();
       closing = (async () => {
-        await Promise.all(listeners.map(shut));
+        await Promise.all(
+          listeners.map((names) => names.then((listener) => listener.close()).catch(() => {})),
+        );
         await listening?.catch(() => {});
         if (server.listening)
           await new Promise<void>((resolve, reject) => {
