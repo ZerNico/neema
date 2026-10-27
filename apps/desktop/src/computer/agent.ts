@@ -13,12 +13,47 @@ const chatId = (key: ChatKey) =>
 
 const keyOf = (origin: string, conversationId: string) => `${origin}\u0000${conversationId}`;
 
+/** OpenSSH's agent protocol: REQUEST_IDENTITIES, SIGN_REQUEST, EXTENSION, and FAILURE. */
+const LIST = 11;
+const SIGN = 13;
+const EXTENSION = 27;
+const FAILURE = Buffer.from([0, 0, 0, 1, 5]);
+/** What `ssh` sends before signing a host-bound login; refusing it is fine, passing it better. */
+const SESSION_BIND = "session-bind@openssh.com";
+/** OpenSSH's own ceiling for one agent message. */
+const MAX_MESSAGE = 256 * 1024;
+
+/** Whether a guest's request is one a login needs: list the keys, sign, bind the session. */
+export const passesToAgent = (message: Buffer) => {
+  const type = message[4];
+  if (type === LIST || type === SIGN) return true;
+  if (type !== EXTENSION || message.length < 9) return false;
+  const length = message.readUInt32BE(5);
+  return message.subarray(9, 9 + length).toString("latin1") === SESSION_BIND;
+};
+
+/** Splits a byte stream into whole agent messages, length prefix included. */
+const framer = (onMessage: (message: Buffer) => void, onTooLarge: () => void) => {
+  let pending = Buffer.alloc(0);
+  return (chunk: Buffer) => {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 4) {
+      const length = pending.readUInt32BE(0);
+      if (length > MAX_MESSAGE) return onTooLarge();
+      if (pending.length < 4 + length) return;
+      onMessage(pending.subarray(0, 4 + length));
+      pending = pending.subarray(4 + length);
+    }
+  };
+};
+
 /**
  * The person's SSH agent, relayed into chat VMs that may use it. Each chat gets its own host
  * socket (a named pipe on Windows), which microsandbox exposes to the guest over vsock; a
  * connection is relayed to the agent only while the server says the chat is allowed, and
- * revoking it cuts the connections already open. The agent's own socket is never mounted, so
- * a guest can ask it to sign but never reach it otherwise.
+ * revoking it cuts the connections already open. The agent's own socket is never mounted, and
+ * only what a login needs passes (`passesToAgent`): a guest can sign with the person's keys,
+ * but not add, remove or lock them in their agent.
  */
 export class AgentRelay {
   private readonly directory: string | null;
@@ -109,6 +144,32 @@ export class AgentRelay {
     };
     guest.on("error", done).on("close", done);
     agent.on("error", done).on("close", done);
-    guest.pipe(agent).pipe(guest);
+    // One request at a time, so a refused one answered here never overtakes a forwarded one.
+    const waiting: Buffer[] = [];
+    let forwarded = false;
+    const next = () => {
+      while (!forwarded && waiting.length > 0) {
+        const message = waiting.shift()!;
+        if (passesToAgent(message)) {
+          forwarded = true;
+          agent.write(message);
+        } else guest.write(FAILURE);
+      }
+    };
+    guest.on(
+      "data",
+      framer((message) => {
+        waiting.push(message);
+        next();
+      }, done),
+    );
+    agent.on(
+      "data",
+      framer((message) => {
+        guest.write(message);
+        forwarded = false;
+        next();
+      }, done),
+    );
   }
 }
