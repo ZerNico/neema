@@ -357,6 +357,8 @@ export async function deletePaths(
 export async function findFiles(guest: Guest, mounts: readonly Mount[], pattern: string) {
   // Models write roots into patterns (`/folders/site/**/*.ts`, `/folders/**/*.md`): an absolute
   // one is matched against whole paths, in each root its fixed start can reach.
+  // A folder named as the pattern (`/folders/site/`) means everything in it.
+  if (pattern.length > 1 && pattern.endsWith("/")) pattern = `${pattern}**`;
   const absolute = pattern.startsWith("/");
   const fixed = absolute ? pattern.slice(0, pattern.search(/[*?{]|$/)) : "";
   const all = roots(mounts).filter(
