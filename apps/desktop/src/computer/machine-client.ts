@@ -76,8 +76,18 @@ export class MachineClient {
     await this.post(MACHINE_ROUTES.folders, folders).catch(() => {});
   }
 
-  async postStatus() {
-    await this.post(MACHINE_ROUTES.status, {}).catch(() => {});
+  private statusPosts: Promise<unknown> = Promise.resolve();
+
+  /**
+   * One after another: posted at once, a last progress report could land after "ready" and
+   * leave the machine looking busy until it reconnects.
+   */
+  postStatus() {
+    const posted = this.statusPosts.then(() =>
+      this.post(MACHINE_ROUTES.status, {}).catch(() => {}),
+    );
+    this.statusPosts = posted;
+    return posted.then(() => {});
   }
 
   /** Which of these chats the server no longer has; none when it cannot be asked now. */

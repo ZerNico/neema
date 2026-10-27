@@ -49,6 +49,7 @@ export interface DispatchDeps {
   readonly attachment: (
     key: ChatKey,
     id: string,
+    signal: AbortSignal,
   ) => Promise<{ name: string; bytes: Buffer } | null>;
   /** Whether the chat may use the person's SSH agent; read when a command starts. */
   readonly agentAllowed: (key: ChatKey) => boolean;
@@ -60,9 +61,13 @@ export interface DispatchDeps {
   readonly requestFolder: (
     key: ChatKey,
     input: { path?: string; reason?: string },
+    signal: AbortSignal,
   ) => Promise<{ name: string } | { refused: string }>;
   /** Asks the person at this machine whether the chat may use their SSH agent. */
-  readonly requestAgent: (key: ChatKey) => Promise<"allowed" | "allowed-empty" | "declined">;
+  readonly requestAgent: (
+    key: ChatKey,
+    signal: AbortSignal,
+  ) => Promise<"allowed" | "allowed-empty" | "declined">;
 }
 
 /** Where `ssh-agent-bridge` in the image presents the person's agent inside the guest. */
@@ -133,7 +138,7 @@ const copyAttachments = async (
     if (!placed.ok || placed.readOnly) continue;
     if (!(await guest.stat(placed.path))) {
       // Not recorded when it could not be fetched: the next call tries again.
-      const file = await deps.attachment(call.key, attachment.id).catch(() => null);
+      const file = await deps.attachment(call.key, attachment.id, call.signal).catch(() => null);
       if (!file) continue;
       await guest.run({ argv: ["/bin/mkdir", "-p", posix.dirname(placed.path)] });
       if (!(await guest.write(placed.path, file.bytes).then(() => true, () => false))) continue;
@@ -161,12 +166,22 @@ export async function dispatch(deps: DispatchDeps, call: ComputerCall): Promise<
 }
 
 async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<ToolResult> {
+  // The server's wait is over: whatever ran now would happen after the model was told it did not.
+  if (Date.now() >= call.deadline)
+    return failure(
+      "Not started",
+      "The call's time ran out before this computer could start it. Ask again if it is still needed.",
+    );
   // Asking the person needs no VM.
   if (call.name === "request_folder") {
-    const answer = await deps.requestFolder(call.key, {
-      ...(str(call.args.path) ? { path: str(call.args.path) } : {}),
-      ...(str(call.args.reason) ? { reason: str(call.args.reason) } : {}),
-    });
+    const answer = await deps.requestFolder(
+      call.key,
+      {
+        ...(str(call.args.path) ? { path: str(call.args.path) } : {}),
+        ...(str(call.args.reason) ? { reason: str(call.args.reason) } : {}),
+      },
+      call.signal,
+    );
     return "refused" in answer
       ? failure("No folder was given", answer.refused)
       : ok(
@@ -175,7 +190,7 @@ async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<Too
         );
   }
   if (call.name === "request_ssh_agent") {
-    const answer = await deps.requestAgent(call.key);
+    const answer = await deps.requestAgent(call.key, call.signal);
     if (answer === "declined")
       return failure("You declined that", "The user declined. Do not retry it or work around it.");
     return answer === "allowed"
@@ -197,6 +212,12 @@ async function dispatchCall(deps: DispatchDeps, call: ComputerCall): Promise<Too
       call.key,
       () => deps.setup(call.key),
       async (guest, info) => {
+        // Again in its turn: earlier calls of the chat may have used up the rest of its time.
+        if (Date.now() >= call.deadline)
+          return failure(
+            "Not started",
+            "The call's time ran out while earlier calls of this chat ran. Ask again if it is still needed.",
+          );
         reset = info.reset;
         const { mounts } = info.setup;
         await copyAttachments(deps, call, guest, mounts);
@@ -386,7 +407,7 @@ async function run(
       };
     }
     case "copy_to_computer": {
-      const file = await deps.attachment(call.key, str(args.attachmentId));
+      const file = await deps.attachment(call.key, str(args.attachmentId), call.signal);
       if (!file)
         return failure(
           "That file is not in this chat",

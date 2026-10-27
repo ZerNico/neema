@@ -174,8 +174,10 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
 - **Presence is in memory** (`MachineHub`): there is one server process, and a machine whose
   stream drops is offline until it reconnects. A second stream from the same machine replaces
   the first.
-- **On connect** the server sends the person's network grants, then resumes calls held for the
-  machine. A new status arrives as `POST /api/machine/status`.
+- **On connect** the server sends the person's network grants, then, on a fiber of its own so
+  the stream flows meanwhile, resumes calls held for the machine. A new status arrives as
+  `POST /api/machine/status`, posted one at a time so a late progress report never lands after
+  "ready". Each connect, not only each start, also asks which of the machine's chats are gone.
 - **A call** (`call` event) carries the tool, its arguments, the server's deadline and the
   time it was sent, so the machine measures the deadline on its own clock. It also carries the
   chat's sent files and the guest path the server named for each.
@@ -184,12 +186,16 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   caps and classifies it like any untrusted result (`acceptDesktopToolResult`). A finished
   call's result is kept on the machine for ten minutes, so a call sent again after a reconnect
   gets the same answer, not a second run.
-- **Stop, a lost lease and the deadline** end the call's scope on the server, which sends the
-  machine a `cancel` for a call still running there.
+- **Stop and a lost lease** end the call's scope on the server, which sends the machine a
+  `cancel` for a call still running there. A question nobody answers ends just before the call's
+  own wait, so a later click runs nothing the model was told did not happen. The machine starts
+  no call past its deadline, checked on arrival and again in its turn. A native dialog closes on
+  Stop where it can, and an answer after Stop grants nothing.
 - **A reconnect loses what the old stream had not delivered,** calls and cancels alike. So each
   new stream starts with `running`, the calls the server still waits on from this machine, and
   each of them again. The machine stops any other call it is running and answers a repeated one
-  from what it has.
+  from what it has. Each hello carries the app's `launch`: a call sent to an earlier launch died
+  with it, maybe halfway, so it is answered as interrupted and never sent again.
 - **The page is not in the execution path.** Closing, reloading or never opening the window
   changes nothing for computer calls.
 
@@ -277,7 +283,7 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   message carries the names the composer shows, so its answer knows them; asking the machine
   would land after the answer had read the chat. Creating the chat from that machine's session
   still asks the machine, whose report has the last word. A draft never sent leaves a grant whose chat does not exist, which the machine's
-  check for gone chats removes on its next start.
+  check for gone chats removes on its next connect.
 
 ## A VM per chat
 

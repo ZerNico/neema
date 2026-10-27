@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { SeenFiles } from "./seen-files.ts";
 import type { AgentAnswer } from "./dialogs.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -44,12 +45,12 @@ export interface ComputerHostOptions {
   readonly remote: () => boolean;
   /** Native questions to the person at this machine; see `DispatchDeps`. */
   readonly ask: {
-    folder(input: {
-      path?: string;
-      reason?: string;
-    }): Promise<{ hostPath: string } | { refused: string }>;
+    folder(
+      input: { path?: string; reason?: string },
+      signal: AbortSignal,
+    ): Promise<{ hostPath: string } | { refused: string }>;
     /** Says whether the agent holds a key too, which the model is told. */
-    agent(input: { allowed: boolean }): Promise<AgentAnswer>;
+    agent(input: { allowed: boolean }, signal: AbortSignal): Promise<AgentAnswer>;
   };
   /** Attaches a folder to a chat here, refusing the ones no chat may have. */
   readonly attach: (
@@ -90,6 +91,8 @@ export class ComputerHost {
   private readonly client: MachineClient;
   private readonly sentFiles: SentFiles;
   private readonly seen = new SeenFiles();
+  /** This app's start, told the server in every hello; see `MachineHello.launch`. */
+  private readonly launch = randomUUID();
   private readonly calls = new Map<
     string,
     { abort: AbortController; result: Promise<ToolResult>; settled: boolean }
@@ -124,6 +127,13 @@ export class ComputerHost {
       hello: () => this.hello(),
       fetch: options.fetch,
       onEvent: (event) => this.handle(event),
+      // Each time, not only at start: a chat purged while this machine was away is told of here.
+      onConnected: (connected) => {
+        if (connected)
+          void this.forgetGone().catch((error: unknown) => {
+            this.options.log(`computer: removing purged chats failed: ${String(error)}`);
+          });
+      },
       log: options.log,
     });
   }
@@ -141,6 +151,7 @@ export class ComputerHost {
         process.platform === "win32" || process.platform === "linux" ? process.platform : "darwin",
       computer: this.current,
       remote: this.options.remote(),
+      launch: this.launch,
     };
   }
 
@@ -166,9 +177,6 @@ export class ComputerHost {
       );
     await this.proxy.listen();
     this.client.start();
-    void this.forgetGone().catch((error: unknown) => {
-      this.options.log(`computer: removing purged chats failed: ${String(error)}`);
-    });
     let reported = 0;
     try {
       await this.options.hypervisor.prepare(this.options.image, (fraction) => {
@@ -247,18 +255,21 @@ export class ComputerHost {
               workspace: await this.options.workspace(key.conversationId),
               mounts: await this.mountable(key.conversationId),
             }),
-            attachment: (key, id) => this.attachment(key, id),
+            attachment: (key, id, signal) => this.attachment(key, id, signal),
             agentAllowed: (key) => this.agent.isAllowed(key),
-            requestFolder: async (key, input) => {
-              const chosen = await this.options.ask.folder(input);
+            // An answer after Stop, or past the deadline, grants nothing: the call is over.
+            requestFolder: async (key, input, signal) => {
+              const chosen = await this.options.ask.folder(input, signal);
+              if (signal.aborted) return { refused: "The call was stopped before the answer." };
               if ("refused" in chosen) return chosen;
               const attached = await this.options.attach(key.conversationId, chosen.hostPath);
               if ("name" in attached) await this.foldersChanged(key.conversationId);
               return attached;
             },
-            requestAgent: async (key) => {
+            requestAgent: async (key, signal) => {
               const allowed = this.agent.isAllowed(key);
-              const answer = await this.options.ask.agent({ allowed });
+              const answer = await this.options.ask.agent({ allowed }, signal);
+              if (signal.aborted) return "declined";
               if (answer !== "declined" && !allowed) {
                 this.agent.allow(key);
                 await this.saveAgentChats();
@@ -345,8 +356,11 @@ export class ComputerHost {
       await this.discardChat(conversationId, true);
   }
 
-  private async attachment(key: ChatKey, id: string) {
-    const response = await this.options.fetch(`${key.origin}/api/files/${encodeURIComponent(id)}`);
+  private async attachment(key: ChatKey, id: string, signal: AbortSignal) {
+    const response = await this.options.fetch(
+      `${key.origin}/api/files/${encodeURIComponent(id)}`,
+      { signal },
+    );
     if (!response.ok) return null;
     return {
       name: fileName(response, id),
