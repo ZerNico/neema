@@ -89,8 +89,9 @@ export class MachineHub extends Context.Service<
             connections.set(id, connection);
             yield* Effect.addFinalizer(() =>
               Effect.gen(function* () {
-                // A replacement may already hold the slot; only this connection's own goes.
-                if (connections.get(id) === connection) {
+                // A replacement may already hold the slot; only this connection's own goes. By its
+                // queue: a status update or a rename stores a new object for the same connection.
+                if (connections.get(id)?.queue === queue) {
                   connections.delete(id);
                   yield* changed(userId);
                 }
