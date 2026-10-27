@@ -40,8 +40,12 @@ export class SharedAppDriver {
     return next;
   }
 
+  /** A driver that exited, crashed or was replaced is started again here, not failed on. */
   call: AppDriver["call"] = (method, params) => {
-    this.driver ??= startAppDriver(this.executable!);
+    if (!this.driver?.alive) {
+      this.driver = startAppDriver(this.executable!);
+      this.holder = null;
+    }
     return this.driver.call(method, params);
   };
 

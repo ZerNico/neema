@@ -16,6 +16,8 @@ export class AppDriverError extends Error {
 
 /** A running app driver. Calls are answered in order; the driver serializes them. */
 export interface AppDriver {
+  /** False once the process has exited, crashed or was never started. */
+  readonly alive: boolean;
   call<M extends Method>(method: M, params: Params<M>): Promise<Result<M>>;
   close(): void;
 }
@@ -69,6 +71,9 @@ export const startAppDriver = (executable: string): AppDriver => {
         pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject });
         child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
       }),
+    get alive() {
+      return exited === null;
+    },
     close: () => {
       child.stdin.end();
     },
