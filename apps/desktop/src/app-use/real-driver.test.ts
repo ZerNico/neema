@@ -23,14 +23,14 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")("the macOS app dri
   const frontApp = async () => (await driver.call("apps", {})).apps.find((app) => app.front)?.appId;
 
   const lookAt = async (): Promise<Look> => {
-    // Opening is asynchronous; the window appears a moment after `open` returns.
-    for (;;) {
+    // Opening is asynchronous; the window appears a moment after `open` returns. Bounded, so a
+    // Calculator that never shows fails the test instead of spinning past its timeout.
+    for (let attempt = 0; ; attempt++) {
       try {
         return await driver.call("look", { appId: CALCULATOR });
       } catch (error) {
-        if (!(error instanceof AppDriverError && /no_window|not_running/.test(error.code))) {
-          throw error;
-        }
+        const waiting = error instanceof AppDriverError && /no_window|not_running/.test(error.code);
+        if (!waiting || attempt >= 200) throw error;
         await new Promise((resolve) => setImmediate(resolve));
       }
     }
@@ -160,7 +160,7 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
         electron,
         [fileURLToPath(new URL("fixtures/chromium-target.cjs", import.meta.url))],
         {
-          stdio: ["ignore", "pipe", "ignore"],
+          stdio: ["pipe", "pipe", "ignore"],
           env,
         },
       );

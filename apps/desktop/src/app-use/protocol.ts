@@ -146,9 +146,15 @@ export const Methods = {
     params: Schema.Struct({ appId: Schema.String, pid: Schema.optionalKey(Schema.Number) }),
     result: Look,
   },
+  /** Which app a bundle id or name means, running or installed, without starting it. */
+  resolve: {
+    params: Schema.Struct({ app: Schema.String }),
+    result: Schema.Struct({ appId: Schema.String, name: Schema.String, running: Schema.Boolean }),
+  },
+  /** By bundle id, or by the name a person calls the app. */
   open: {
     params: Schema.Struct({ appId: Schema.String }),
-    result: Schema.Struct({ name: Schema.String, pid: Schema.Number }),
+    result: Schema.Struct({ name: Schema.String, pid: Schema.Number, appId: Schema.String }),
   },
   /** Part of the latest look's window, in window points, at full resolution. */
   zoom: {

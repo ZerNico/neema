@@ -24,6 +24,11 @@ const page = `<!doctype html>
   document.addEventListener("wheel", (e) => report({ type: "wheel", target: e.target.id, deltaY: Math.sign(e.deltaY) }));
 </script>`;
 
+// Quits with whatever started it: its stdin closes then, even when that process was killed
+// before it could clean up.
+process.stdin.on("end", () => app.quit());
+process.stdin.resume();
+
 app.whenReady().then(() => {
   const window = new BrowserWindow({
     width: 420,

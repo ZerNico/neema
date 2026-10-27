@@ -42,6 +42,26 @@ enum SkyLight {
   private static let windowOwner = symbol("SLSGetWindowOwner", as: WindowOwner.self)
   private static let connectionPSN = symbol("SLSGetConnectionPSN", as: ConnectionPSN.self)
   private static let processForPID = symbol("GetProcessForPID", as: ProcessForPID.self)
+  private typealias CaptureWindowList = @convention(c) (
+    Int32, UnsafeMutablePointer<UInt32>, Int32, UInt32
+  ) -> Unmanaged<CFArray>?
+  private static let captureWindowList =
+    symbol("SLSHWCaptureWindowList", as: CaptureWindowList.self)
+    ?? symbol("CGSHWCaptureWindowList", as: CaptureWindowList.self)
+
+  /// The window server's own copy of a window at full resolution, with no capture daemon in
+  /// between. Ignoring the global clip shape (1 << 11) at the best resolution (1 << 8), after
+  /// cua-driver; nil when the symbol is gone or the copy is empty.
+  static func captureWindow(_ window: CGWindowID) -> CGImage? {
+    guard let captureWindowList, let mainConnection else { return nil }
+    var id = UInt32(window)
+    guard
+      let images = captureWindowList(Int32(bitPattern: mainConnection()), &id, 1, 1 << 11 | 1 << 8)?
+        .takeRetainedValue() as? [CGImage],
+      let image = images.first, image.width > 1
+    else { return nil }
+    return image
+  }
 
   /// Whether a background click can be made at all.
   static var available: Bool {
@@ -88,8 +108,8 @@ enum SkyLight {
   }
 
   /// Posts a wheel event to one process. Unlike a click it carries only the routing fields, and
-  /// goes both ways: SkyLight reaches Chromium, the public route AppKit's scroll views (after
-  /// cua-driver, whose scrolls stopped arriving with a click's stamps).
+  /// a window-local location: the screen point never arrived. Posted once, measured: sent both
+  /// ways, as cua-driver does, Chromium dropped or doubled four scrolls in ten.
   static func postScroll(_ event: CGEvent, pid: pid_t, window: CGWindowID, local: CGPoint) {
     setWindowLocation?(event, local)
     if let set = setIntegerField {
@@ -98,8 +118,7 @@ enum SkyLight {
       set(event, 92, Int64(window))
       set(event, 40, Int64(pid))
     }
-    postToPid?(pid, event)
-    event.postToPid(pid)
+    if let postToPid { postToPid(pid, event) } else { event.postToPid(pid) }
   }
 
   // An 8-byte ProcessSerialNumber, as two 32-bit halves.

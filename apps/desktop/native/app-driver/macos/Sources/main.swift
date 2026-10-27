@@ -7,7 +7,7 @@ import ScreenCaptureKit
 private struct Looked {
   let app: NSRunningApplication
   let window: AXUIElement
-  let shareable: SCWindow
+  let windowNumber: CGWindowID
 }
 
 // One request at a time, in arrival order, so an action never races the look it refers to.
@@ -43,6 +43,8 @@ actor Driver {
       ]
     case "apps":
       return ["apps": listApps()]
+    case "resolve":
+      return try resolve(try param(params, "app", as: String.self))
     case "open":
       return try await open(try param(params, "appId", as: String.self))
     case "look":
@@ -87,17 +89,60 @@ actor Driver {
   }
 
   private func open(_ appId: String) async throws -> [String: Any] {
-    if isOffLimits(appId) {
+    guard
+      let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appId)
+        ?? installedApp(named: appId)
+    else { throw DriverError(code: "not_installed", message: "\(appId) is not installed") }
+    if isOffLimits(Bundle(url: url)?.bundleIdentifier) {
       throw DriverError(code: "off_limits", message: "\(appId) is never used")
-    }
-    guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appId) else {
-      throw DriverError(code: "not_installed", message: "\(appId) is not installed")
     }
     let configuration = NSWorkspace.OpenConfiguration()
     // Opened behind the person's work, like everything else app use does.
     configuration.activates = false
     let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-    return ["name": app.localizedName ?? appId, "pid": Int(app.processIdentifier)]
+    return [
+      "name": app.localizedName ?? appId, "pid": Int(app.processIdentifier),
+      "appId": app.bundleIdentifier ?? appId,
+    ]
+  }
+
+  /// Which app a bundle id or name means, without starting it: what consent is asked about.
+  private func resolve(_ app: String) throws -> [String: Any] {
+    let running = NSWorkspace.shared.runningApplications.filter {
+      $0.activationPolicy == .regular && !$0.isTerminated && !isOffLimits($0)
+    }
+    if let found = running.first(where: {
+      $0.bundleIdentifier == app || $0.localizedName?.caseInsensitiveCompare(app) == .orderedSame
+    }), let id = found.bundleIdentifier {
+      return ["appId": id, "name": found.localizedName ?? id, "running": true]
+    }
+    guard
+      let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app)
+        ?? installedApp(named: app),
+      let bundle = Bundle(url: url), let id = bundle.bundleIdentifier
+    else { throw DriverError(code: "not_installed", message: "\(app) is not installed") }
+    if isOffLimits(id) { throw DriverError(code: "off_limits", message: "\(app) is never used") }
+    let name =
+      bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+      ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+      ?? url.deletingPathExtension().lastPathComponent
+    return ["appId": id, "name": name, "running": false]
+  }
+
+  /// An app by the name a person calls it, where macOS keeps apps.
+  private func installedApp(named name: String) -> URL? {
+    let wanted = name.lowercased().replacingOccurrences(of: ".app", with: "") + ".app"
+    let folders = [
+      "/Applications", "/System/Applications", "/System/Applications/Utilities",
+      "/Applications/Utilities", NSHomeDirectory() + "/Applications",
+    ]
+    for folder in folders {
+      let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+      if let found = names.first(where: { $0.lowercased() == wanted }) {
+        return URL(fileURLWithPath: folder).appendingPathComponent(found)
+      }
+    }
+    return nil
   }
 
   private func look(_ appId: String, pid: pid_t?) async throws -> [String: Any] {
@@ -106,9 +151,9 @@ actor Driver {
     await MainActor.run { enableWebContent(app, window: window) }
     let box = frame(window)
     let tree = snapshot.take(window: window, pid: app.processIdentifier)
-    let shareable = try await shareableWindow(pid: app.processIdentifier, frame: box)
-    let picture = try await capture(shareable)
-    looked = Looked(app: app, window: window, shareable: shareable)
+    let number = try windowNumber(pid: app.processIdentifier, frame: box)
+    let picture = try await capture(window: number, size: box?.size ?? .zero)
+    looked = Looked(app: app, window: window, windowNumber: number)
     return [
       "app": app.localizedName ?? appId,
       "title": attribute(window, kAXTitleAttribute, as: String.self) ?? NSNull(),
@@ -124,7 +169,8 @@ actor Driver {
 
   private func zoom(_ region: CGRect) async throws -> [String: Any] {
     guard let looked else { throw DriverError(code: "no_look", message: "Look at the app first") }
-    let picture = try await capture(looked.shareable, region: region)
+    let picture = try await capture(
+      window: looked.windowNumber, size: frame(looked.window)?.size ?? .zero, region: region)
     return [
       "data": picture.png.base64EncodedString(), "width": picture.width,
       "height": picture.height,
@@ -167,7 +213,7 @@ actor Driver {
       throw DriverError(code: "no_window", message: "The window is gone")
     }
     return Target(
-      pid: looked.app.processIdentifier, window: looked.shareable.windowID, frame: box,
+      pid: looked.app.processIdentifier, window: looked.windowNumber, frame: box,
       chromium: isChromium(looked.app))
   }
 
@@ -218,15 +264,26 @@ NSApplication.shared.setActivationPolicy(.prohibited)
 let driver = Driver()
 // Requests are read off the main thread: AppKit keeps the running-app list current through the
 // main run loop, which therefore has to keep running.
+// Each request runs after the one before, without the reader waiting for it: a call that never
+// returns must not keep the driver from seeing its input close. That is how it learns the app
+// that started it is gone, and an orphan once kept a wedged capture spinning for minutes.
 Thread.detachNewThread {
+  var previous: Task<Void, Never>?
   while let line = readLine() {
-    let done = DispatchSemaphore(value: 0)
-    Task {
+    let before = previous
+    previous = Task {
+      await before?.value
       await driver.handle(line)
-      done.signal()
     }
-    done.wait()
   }
-  exit(0)
+  // What was asked before the input closed is answered, unless it is stuck. `_exit`, not `exit`:
+  // exit's cleanup waited on a lock a stuck capture held, and the orphan lived on.
+  let last = previous
+  Task {
+    await last?.value
+    _exit(0)
+  }
+  Thread.sleep(forTimeInterval: 2)
+  _exit(0)
 }
 RunLoop.main.run()
