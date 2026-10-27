@@ -170,7 +170,7 @@ export const Methods = {
     }),
     result: Picture,
   },
-  /** A small JPEG of the window last looked at, for the person's live view. */
+  /** A small PNG of the window last looked at, for the person's live view. */
   peek: {
     params: Schema.Struct({}),
     result: Schema.Struct({

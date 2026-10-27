@@ -60,7 +60,8 @@ func capture(window: CGWindowID, size: CGSize, region: CGRect? = nil) async thro
   return Capture(png: png, width: image.width, height: image.height)
 }
 
-/// A picture scaled within `maxEdge` pixels, as JPEG: a view to watch, not one to read.
+/// A picture scaled within `maxEdge` pixels, as PNG: a window's rounded corners stay clear, so
+/// they take whatever the view shows the picture on. A JPEG turned them black.
 func preview(_ image: CGImage, maxEdge: CGFloat) throws -> (data: Data, width: Int, height: Int) {
   let fit = max(CGFloat(max(image.width, image.height)) / maxEdge, 1)
   let width = max(1, Int((CGFloat(image.width) / fit).rounded()))
@@ -68,13 +69,13 @@ func preview(_ image: CGImage, maxEdge: CGFloat) throws -> (data: Data, width: I
   guard
     let context = CGContext(
       data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue)
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)
   else { throw DriverError(code: "capture_failed", message: "Could not scale the picture") }
   context.interpolationQuality = .medium
   context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
   guard let scaled = context.makeImage(),
-    let data = NSBitmapImageRep(cgImage: scaled).representation(
-      using: .jpeg, properties: [.compressionFactor: 0.7])
+    let data = NSBitmapImageRep(cgImage: scaled).representation(using: .png, properties: [:])
   else { throw DriverError(code: "capture_failed", message: "Could not encode the picture") }
   return (data, width, height)
 }
