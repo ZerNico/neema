@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toastError } from "~/ui/error-toast.ts";
 import type { IntegrationDecision } from "../schema.ts";
 import { decideIntegrationCall } from "../server/functions.ts";
-import { toolText } from "../tool-text.ts";
+import { approvalAction } from "../tool-text.ts";
 import { useIntegrationDirectory } from "./directory.ts";
 import { pendingIntegrationCallsQuery } from "./queries.ts";
 
@@ -19,7 +19,7 @@ export function useDecideIntegrationCall() {
   });
 }
 
-/** What a waiting call is to the person: the service's name and the tool as they know it. */
+/** What a waiting call is to the person: the service's name and what it asks to do. */
 export function useIntegrationCallNames(call: {
   integrationId: string;
   tool: string;
@@ -28,9 +28,6 @@ export function useIntegrationCallNames(call: {
   const directory = useIntegrationDirectory();
   return {
     name: directory.name(call.integrationId),
-    label: toolText(directory.find(call.integrationId)?.kind, {
-      name: call.tool,
-      label: call.label,
-    }).label,
+    action: approvalAction(directory.find(call.integrationId)?.kind, call),
   };
 }

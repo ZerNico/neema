@@ -3063,7 +3063,7 @@
   "integrations_approval_empty": "empty",
   "integrations_approval_everything": "Everything this sends",
   "integrations_approval_everything_lead": "Everything this sends:",
-  "integrations_approval_question": "{label} in {name}?",
+  "integrations_approval_question": "{action} in {name}?",
   "integrations_approval_read": "This will read with your {service} account.",
   "integrations_approval_read_account": "This will read with your {service} account “{account}”.",
   "integrations_approval_recipients": "Recipients",

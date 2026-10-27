@@ -3076,7 +3076,7 @@
   "integrations_approval_empty": "leer",
   "integrations_approval_everything": "Alles, was dabei gesendet wird",
   "integrations_approval_everything_lead": "Alles, was dabei gesendet wird:",
-  "integrations_approval_question": "{label} in {name}?",
+  "integrations_approval_question": "{action} in {name}?",
   "integrations_approval_read": "Dabei wird mit deinem Konto bei {service} gelesen.",
   "integrations_approval_read_account": "Dabei wird mit deinem Konto „{account}“ bei {service} gelesen.",
   "integrations_approval_recipients": "Empfänger",

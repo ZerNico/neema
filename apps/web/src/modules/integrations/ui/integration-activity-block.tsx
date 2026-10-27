@@ -146,7 +146,7 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
  * Nothing has happened in the service yet when this shows.
  */
 export function IntegrationApproval({ call }: { call: PendingIntegrationCall }) {
-  const { name, label } = useIntegrationCallNames(call);
+  const { name, action } = useIntegrationCallNames(call);
   const decide = useDecideIntegrationCall();
   const choose = (decision: IntegrationDecision) =>
     decide.mutate({ callId: call.callId, decision });
@@ -156,7 +156,7 @@ export function IntegrationApproval({ call }: { call: PendingIntegrationCall }) 
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <IntegrationLogo integrationId={call.integrationId} />
         <span className="min-w-0 truncate">
-          {m.integrations_approval_question({ label, name })}
+          {m.integrations_approval_question({ action, name })}
         </span>
       </div>
       {call.inFull ? (

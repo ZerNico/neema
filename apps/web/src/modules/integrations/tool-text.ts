@@ -20,3 +20,14 @@ export const toolText = (
     label: display?.label({}, { locale }) ?? tool.label ?? tool.name,
   };
 };
+
+/**
+ * What an approval asks to do. A shipped tool's title says it as an action; its
+ * label says what happened, for the transcript, and would ask "Sent … in Outlook?".
+ * A server's tool has no title on the call, so its own label stands in.
+ */
+export const approvalAction = (
+  kind: string | undefined,
+  call: { tool: string; label: string },
+  locale: Locale = getLocale(),
+) => toolText(kind, { name: call.tool, title: call.label, label: call.label }, locale).title;
