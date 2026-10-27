@@ -8,6 +8,7 @@ import { COMPUTER_QUERY_KEY, useComputerSnapshot } from "~/modules/computer/clie
 import {
   listNetworkGrants,
   removeNetworkGrant,
+  moveChatsHere,
   renameComputer,
 } from "~/modules/computer/server/functions.ts";
 import { useDesktop, useLocalMachineId } from "~/modules/desktop/client/bridge.ts";
@@ -276,11 +277,17 @@ function Machines() {
   const here = useLocalMachineId();
   const machines = snapshot.data?.machines ?? [];
   if (machines.length === 0) return null;
+  // Chats move to the computer this page runs on, so only a desktop app offers it.
   return (
     <Section title={m.settings_computer_machines_title()}>
       <ListCard>
         {machines.map((machine) => (
-          <MachineRow key={machine.id} machine={machine} here={machine.id === here} />
+          <MachineRow
+            key={machine.id}
+            machine={machine}
+            here={machine.id === here}
+            canMoveHere={here !== null && machine.id !== here}
+          />
         ))}
       </ListCard>
     </Section>
@@ -294,11 +301,32 @@ function Machines() {
 function MachineRow({
   machine,
   here,
+  canMoveHere,
 }: {
   machine: { id: string; name: string; online: boolean; lastSeenAt: string };
   here: boolean;
+  canMoveHere: boolean;
 }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const move = useMutation({
+    mutationFn: () => moveChatsHere({ data: { fromMachineId: machine.id } }),
+    onError: (error) => toastError(m.settings_computer_move_chats_failed(), error),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["conversation"] }),
+      ]),
+  });
+  const moveChats = async () => {
+    const confirmed = await confirm({
+      title: m.settings_computer_move_chats_title({ machine: machine.name }),
+      description: m.settings_computer_move_chats_note({ machine: machine.name }),
+      confirmLabel: m.settings_computer_move_chats(),
+      destructive: false,
+    });
+    if (confirmed) move.mutate();
+  };
   const [draft, setDraft] = useState<string | null>(null);
   const rename = useMutation({
     mutationFn: (name: string) => renameComputer({ data: { machineId: machine.id, name } }),
@@ -351,14 +379,26 @@ function MachineRow({
         <span className="text-muted-foreground text-xs">{status}</span>
       </div>
       {draft === null ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={m.settings_computer_rename({ name: machine.name })}
-          onClick={() => setDraft(machine.name)}
-        >
-          {m.settings_computer_rename_button()}
-        </Button>
+        <div className="flex shrink-0 gap-1">
+          {canMoveHere ? (
+            <PendingButton
+              variant="ghost"
+              size="sm"
+              pending={move.isPending}
+              onClick={() => void moveChats()}
+            >
+              {m.settings_computer_move_chats()}
+            </PendingButton>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={m.settings_computer_rename({ name: machine.name })}
+            onClick={() => setDraft(machine.name)}
+          >
+            {m.settings_computer_rename_button()}
+          </Button>
+        </div>
       ) : null}
     </ListRow>
   );

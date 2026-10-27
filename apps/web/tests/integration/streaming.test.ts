@@ -9124,6 +9124,31 @@ describe("desktop calls run by the sending app", () => {
     });
   });
 
+  it("moves every chat of one machine to another, and only the person's own", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    const other = await runtime.runPromise(desktopChat);
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* ComputerRepo;
+        yield* repo.rebind(seed.userId, seed.conversation.id, "old");
+        yield* repo.setFolders(seed.userId, "old", seed.conversation.id, [
+          { name: "site", readOnly: false },
+        ]);
+        yield* repo.rebind(other.userId, other.conversation.id, "old");
+        const moved = yield* repo.moveChats(seed.userId, "old", "new");
+        return {
+          moved,
+          mine: yield* repo.chat(seed.userId, seed.conversation.id),
+          theirs: yield* repo.chat(other.userId, other.conversation.id),
+        };
+      }),
+    );
+    expect(result.moved).toEqual([seed.conversation.id]);
+    // Its folders were the old machine's, so they go with the move.
+    expect(result.mine).toMatchObject({ machineId: "new", folders: [] });
+    expect(result.theirs).toMatchObject({ machineId: "old" });
+  });
+
   it("tells a new chat's first answer the folders its page named", async () => {
     const seed = await runtime.runPromise(desktopChat);
     const prompts: GatewayInput[] = [];

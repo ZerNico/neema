@@ -6,7 +6,7 @@ import {
   listNetworkGrants,
   removeNetworkGrant,
   resetChatEnvironment,
-  switchChatComputer,
+  moveChatHere,
 } from "../server/functions.ts";
 
 export const COMPUTER_QUERY_KEY = ["computer"] as const;
@@ -70,9 +70,8 @@ export function useComputerActions(conversationId: string) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: COMPUTER_QUERY_KEY });
   return {
-    switchTo: useMutation({
-      mutationFn: (machineId: string | null) =>
-        switchChatComputer({ data: { conversationId, machineId } }),
+    moveHere: useMutation({
+      mutationFn: () => moveChatHere({ data: { conversationId } }),
       onSettled: () =>
         Promise.all([
           refresh(),

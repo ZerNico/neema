@@ -96,23 +96,57 @@ export const renameComputer = createServerFn({ method: "POST" })
     ),
   );
 
-/** Points a chat at another of the person's machines, or at none. Its folders stay behind. */
-export const switchChatComputer = createServerFn({ method: "POST" })
+/**
+ * The machine the request comes from: a desktop app's page shares its session with the machine's
+ * own connection. Null from a browser, which has no computer to move a chat to.
+ */
+const thisMachine = (userId: string, sessionId: string) =>
+  Effect.flatMap(MachineHub, (hub) => hub.machineOfSession(userId, sessionId));
+
+/** After a move: the chats' old folders and "allow in this chat" answers no longer hold. */
+const moved = (userId: string, conversationIds: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const calls = yield* ComputerCalls;
+    const bus = yield* SyncBus;
+    yield* Effect.forEach(conversationIds, (id) => calls.forgetAllowances(id), { discard: true });
+    yield* bus.publish(userId, { type: "computer.changed" });
+    yield* Effect.forEach(
+      conversationIds,
+      (conversationId) => bus.publish(userId, { type: "conversation.updated", conversationId }),
+      { discard: true },
+    );
+  });
+
+/** Moves one chat to the computer it is open on. Nothing is copied from the old one. */
+export const moveChatHere = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(standard(Schema.Struct({ conversationId: Id, machineId: Schema.NullOr(Id) })))
+  .validator(standard(Schema.Struct({ conversationId: Id })))
   .handler(({ data, context }) =>
     runServerFn(
       Effect.gen(function* () {
         const userId = context.session.user.id;
-        const repo = yield* ComputerRepo;
-        if (data.machineId && !(yield* repo.machine(userId, data.machineId)))
-          return { switched: false };
-        const switched = yield* repo.rebind(userId, data.conversationId, data.machineId);
-        if (switched) {
-          yield* (yield* ComputerCalls).forgetAllowances(data.conversationId);
-          yield* (yield* SyncBus).publish(userId, { type: "computer.changed" });
-        }
-        return { switched };
+        const here = yield* thisMachine(userId, context.session.session.id);
+        if (!here) return { moved: false };
+        const rebound = yield* (yield* ComputerRepo).rebind(userId, data.conversationId, here);
+        if (rebound) yield* moved(userId, [data.conversationId]);
+        return { moved: rebound };
+      }),
+    ),
+  );
+
+/** Moves every chat on one of the person's computers to the one this page is open on. */
+export const moveChatsHere = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(standard(Schema.Struct({ fromMachineId: Id })))
+  .handler(({ data, context }) =>
+    runServerFn(
+      Effect.gen(function* () {
+        const userId = context.session.user.id;
+        const here = yield* thisMachine(userId, context.session.session.id);
+        if (!here || here === data.fromMachineId) return { moved: 0 };
+        const ids = yield* (yield* ComputerRepo).moveChats(userId, data.fromMachineId, here);
+        if (ids.length > 0) yield* moved(userId, ids);
+        return { moved: ids.length };
       }),
     ),
   );

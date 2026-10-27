@@ -10,7 +10,10 @@ import {
   messages,
   networkGrants,
 } from "~/db/schema/index.ts";
-import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
+import {
+  ownedConversation,
+  ownedConversationById,
+} from "~/modules/chat/server/owned-conversation.ts";
 import { Db } from "~/server/db.ts";
 
 /** What the server knows about a chat's computer. */
@@ -60,6 +63,12 @@ export class ComputerRepo extends Context.Service<
     gone(conversationIds: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string>>;
     /** Binds an unbound chat; false when it already has a machine or is not the person's. */
     bind(userId: string, conversationId: string, machineId: string): Effect.Effect<boolean>;
+    /** Every chat of the person on one machine moved to another; the ids moved. */
+    moveChats(
+      userId: string,
+      from: string,
+      to: string,
+    ): Effect.Effect<ReadonlyArray<string>>;
     /** Points the chat at another machine; its folders belong to the old one and go. */
     rebind(
       userId: string,
@@ -194,6 +203,16 @@ export class ComputerRepo extends Context.Service<
             )
             .returning({ id: conversations.id })
             .pipe(Effect.orDie, Effect.map(updated)),
+        moveChats: (userId, from, to) =>
+          db
+            .update(conversations)
+            .set({ machineId: to, computerFolders: [] })
+            .where(and(ownedConversation(userId), eq(conversations.machineId, from)))
+            .returning({ id: conversations.id })
+            .pipe(
+              Effect.orDie,
+              Effect.map((rows) => rows.map((row) => row.id)),
+            ),
         rebind: (userId, conversationId, machineId) =>
           db
             .update(conversations)

@@ -25,6 +25,7 @@ const server = vi.hoisted(() => ({
   removeNetworkGrant: vi.fn(),
   renameComputer: vi.fn(),
   listed: vi.fn(),
+  moveChatsHere: vi.fn(),
 }));
 vi.mock("~/modules/computer/server/functions.ts", () => ({
   listNetworkGrants: server.listed,
@@ -32,7 +33,8 @@ vi.mock("~/modules/computer/server/functions.ts", () => ({
   renameComputer: server.renameComputer,
   computerSnapshot: async () => ({ machines: server.machines, pending: [] }),
   decideComputerCall: vi.fn(),
-  switchChatComputer: vi.fn(),
+  moveChatHere: vi.fn(),
+  moveChatsHere: server.moveChatsHere,
   resetChatEnvironment: vi.fn(),
 }));
 
@@ -82,6 +84,7 @@ beforeEach(() => {
   server.machines = [];
   server.removeNetworkGrant.mockReset().mockResolvedValue({ removed: true });
   server.renameComputer.mockReset().mockResolvedValue({ renamed: true });
+  server.moveChatsHere.mockReset().mockResolvedValue({ moved: 2 });
   server.listed.mockReset().mockImplementation(async () => ({ grants: server.grants }));
   machine.client = null;
 });
@@ -200,6 +203,45 @@ describe("the list of computers", () => {
       expect(server.renameComputer).toHaveBeenCalledWith({
         data: { machineId: "laptop", name: "Work laptop" },
       }),
+    );
+  });
+});
+
+describe("moving chats", () => {
+  it("moves every chat of another computer here after confirming", async () => {
+    desktop({ status: "ready", remote: true, agentSocket: null });
+    server.machines = [
+      {
+        id: "laptop",
+        name: "New MacBook",
+        platform: "darwin",
+        lastSeenAt: new Date().toISOString(),
+        online: true,
+        computer: null,
+        remote: true,
+      },
+      {
+        id: "old",
+        name: "Old MacBook",
+        platform: "darwin",
+        lastSeenAt: new Date().toISOString(),
+        online: false,
+        computer: null,
+        remote: true,
+      },
+    ];
+    renderPage();
+    // One button, on the other computer's row only.
+    const buttons = await screen.findAllByRole("button", { name: "Move chats here" });
+    expect(buttons).toHaveLength(1);
+    await userEvent.click(buttons[0]!);
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Move chats here",
+      }),
+    );
+    await waitFor(() =>
+      expect(server.moveChatsHere).toHaveBeenCalledWith({ data: { fromMachineId: "old" } }),
     );
   });
 });

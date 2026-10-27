@@ -146,8 +146,11 @@ and of `process.argv` on a cold start; both are read.
   nothing of the person's.
 - **Folder names** are reported by the machine (`computer_folders`): names and read-only only,
   never paths. They feed the model's hint and the computer tag in the header.
-- **Switching computers** (`switchChatComputer`) points the chat at another machine and clears
-  its folder names, which belonged to the old one. Nothing is copied between machines.
+- **Moving a chat** goes to the computer it is open on, in that desktop app: one chat from its
+  computer chip (`moveChatHere`), or every chat of another machine from Settings › This computer
+  (`moveChatsHere`), as after Migration Assistant. The target is the machine of the request's
+  session, never named by the page, and a browser has none. The folder names go, being the old
+  machine's, and so do "allow in this chat" answers. Nothing is copied between machines.
 - **A branch keeps the source's computer.** The server sends that machine a `clone` event and
   it copies the workspace's files into the branch's, within the copy limits, and gives the branch
   the source's folders. Installs stay on the source's disk. The branch starts with no folder

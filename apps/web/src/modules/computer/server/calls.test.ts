@@ -67,6 +67,7 @@ const fakeRepo = (
           return true;
         }),
       rebind: () => Effect.succeed(true),
+      moveChats: () => Effect.succeed([]),
       setFolders: () => Effect.succeed(true),
       holdsAttachment: (_userId, _conversationId, id) => Effect.succeed(id === "a1"),
       setPermissionLevel: () => Effect.succeed(true),

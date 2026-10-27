@@ -104,7 +104,6 @@ export function ComputerTag({
           computer={computer}
           name={name}
           machine={current}
-          others={machines.filter((machine) => machine.id !== computer.machineId)}
         />
       </PopoverContent>
     </Popover>
@@ -116,13 +115,11 @@ function ComputerPanel({
   computer,
   name,
   machine,
-  others,
 }: {
   conversationId: string;
   computer: ChatComputer;
   name: string;
   machine: MachineStatus | undefined;
-  others: ReadonlyArray<MachineStatus>;
 }) {
   const queryClient = useQueryClient();
   const desktop = useDesktop();
@@ -145,6 +142,15 @@ function ComputerPanel({
       setPermissionLevel({ data: { conversationId, permissionLevel } }),
     onSettled: refreshChat,
   });
+  const moveHere = async () => {
+    const confirmed = await confirm({
+      title: m.computer_move_here_title(),
+      description: m.computer_move_here_note({ machine: name }),
+      confirmLabel: m.computer_move_here(),
+      destructive: false,
+    });
+    if (confirmed) actions.moveHere.mutate();
+  };
   const reset = async () => {
     const confirmed = await confirm({
       title: m.computer_reset_title(),
@@ -237,23 +243,16 @@ function ComputerPanel({
       ) : null}
       <Separator />
       <div className="flex flex-col gap-1.5">
-        {others.length > 0 ? (
-          <Select
-            value=""
-            items={others.map((other) => ({ value: other.id, label: other.name }))}
-            onValueChange={(value) => actions.switchTo.mutate(value as string)}
+        {/* Only from another desktop app: a browser has no computer to move the chat to. */}
+        {desktop !== null && here !== null && here !== computer.machineId ? (
+          <PendingButton
+            size="sm"
+            variant="outline"
+            pending={actions.moveHere.isPending}
+            onClick={() => void moveHere()}
           >
-            <SelectTrigger aria-label={m.computer_switch()} className="w-full">
-              <SelectValue placeholder={m.computer_switch()} />
-            </SelectTrigger>
-            <SelectContent>
-              {others.map((other) => (
-                <SelectItem key={other.id} value={other.id}>
-                  {other.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            {m.computer_move_here()}
+          </PendingButton>
         ) : null}
         <PendingButton
           size="sm"
