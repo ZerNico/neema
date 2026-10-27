@@ -414,6 +414,12 @@ function ApprovalCard({
             {approvalTitle(activity, approval.kind, roots, approval.machine)}
           </span>
         </div>
+        {/* Which machine it runs on: a card asked again after the chat moved names the new one. */}
+        {approval.machine && approval.kind !== "bind" ? (
+          <p className="text-muted-foreground text-xs">
+            {m.chat_desktop_ask_on({ machine: approval.machine })}
+          </p>
+        ) : null}
         {approval.reason ? (
           <p className="text-muted-foreground text-xs">
             {m.chat_desktop_review_reason({ reason: approval.reason })}

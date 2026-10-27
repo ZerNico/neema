@@ -47,6 +47,16 @@ describe("DesktopActivityBlock", () => {
     expect(screen.getByText("Couldn’t read image.png")).toBeInTheDocument();
   });
 
+  it("names the machine a call would run on", () => {
+    show(
+      <DesktopActivityBlock
+        activity={running()}
+        approval={{ kind: "command", machine: "Desk", decide: vi.fn() }}
+      />,
+    );
+    expect(screen.getByText("On Desk")).toBeInTheDocument();
+  });
+
   it("shows why the reviewer asked", () => {
     show(
       <DesktopActivityBlock

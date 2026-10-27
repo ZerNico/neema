@@ -1300,6 +1300,7 @@
   "chat_desktop_always_note": "“Always allow” applies to every chat on this computer. You can remove it in Settings › This computer.",
   "chat_desktop_ask_change": "Change this file",
   "chat_desktop_ask_command": "Run a program on this computer",
+  "chat_desktop_ask_on": "On {machine}",
   "chat_desktop_ask_delete": "Delete from this computer",
   "chat_desktop_ask_delete_count": [
     {
@@ -2657,7 +2658,7 @@
   "desktop_file_too_large": "This file is too large to show here.",
   "desktop_file_unreadable": "This file couldn’t be read.",
   "desktop_permission_allow": "Don’t ask",
-  "desktop_permission_allow_description": "Edits and commands run without asking, and a command can change or delete files. New network access still asks.",
+  "desktop_permission_allow_description": "Edits and commands run without asking, and a command can change or delete files. The delete tool and new network access still ask.",
   "desktop_permission_ask": "Ask before changes and commands",
   "desktop_permission_ask_description": "Reads run without asking. Edits and commands wait for your approval.",
   "desktop_permission_review": "Ask when risky",

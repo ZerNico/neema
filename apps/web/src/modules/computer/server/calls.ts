@@ -221,6 +221,17 @@ export class ComputerCalls extends Context.Service<
       ) =>
         Effect.gen(function* () {
           if (ended(entry)) return;
+          // Too late to ask: an answer now could land after the model's wait ends.
+          if ((yield* Clock.currentTimeMillis) >= entry.deadlineAt - DEADLINE_MARGIN_MS) {
+            yield* finish(
+              entry,
+              desktopFailure(
+                "Nobody answered in time",
+                "The user did not answer the question in time, so nothing ran. Ask again if it is still needed.",
+              ),
+            );
+            return;
+          }
           entry.state = {
             kind: "waiting",
             approval,
@@ -369,7 +380,9 @@ export class ComputerCalls extends Context.Service<
             (approval === "delete" && !answered) ||
             (changes && chat.permissionLevel === "ask" && !allowedHere)
           ) {
-            yield* wait(entry, approval, { machine: { id: chat.machineId, name: presence.hello.name } });
+            yield* wait(entry, approval, {
+              machine: { id: chat.machineId, name: presence.hello.name },
+            });
             return;
           }
           if (changes && chat.permissionLevel === "review" && !allowedHere) {
