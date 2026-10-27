@@ -3,9 +3,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { AppGrants } from "./grants.ts";
-import { type AppCall, AppUse, SharedAppDriver } from "./host.ts";
+import { type AppCall, AppUse, AWAKE_AFTER_MS, SharedAppDriver } from "./host.ts";
 
 const running = (name: string) => {
   try {
@@ -40,6 +40,29 @@ test("a machine without a driver says app use is not available", async () => {
   });
   const result = await apps.run(call("app_look", { app: "Calculator" }));
   expect(result).toMatchObject({ ok: false, summary: "Apps can't be used here" });
+});
+
+test("the display stays on through app calls and a while after the last", async () => {
+  vi.useFakeTimers();
+  try {
+    const held: string[] = [];
+    const driver = new SharedAppDriver(null, () => {
+      held.push("on");
+      return () => held.push("off");
+    });
+    await driver.exclusive(async () => {});
+    await driver.exclusive(async () => {});
+    expect(held).toEqual(["on"]);
+    await vi.advanceTimersByTimeAsync(AWAKE_AFTER_MS - 1);
+    // A call in the wait keeps it on and starts the wait again.
+    await driver.exclusive(async () => {});
+    await vi.advanceTimersByTimeAsync(AWAKE_AFTER_MS - 1);
+    expect(held).toEqual(["on"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(held).toEqual(["on", "off"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 /**

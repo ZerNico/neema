@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   session,
   shell,
   Tray,
@@ -227,6 +228,10 @@ const hypervisor = microsandbox(
  */
 const appDriver = new SharedAppDriver(
   existsSync(join(here, "app-driver")) ? join(here, "app-driver") : null,
+  () => {
+    const blocker = powerSaveBlocker.start("prevent-display-sleep");
+    return () => powerSaveBlocker.stop(blocker);
+  },
 );
 const stopComputer = async () => {
   const current = computer;

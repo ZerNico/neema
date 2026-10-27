@@ -22,6 +22,9 @@ export interface AppCall {
 export class SharedAppDriver {
   private driver: AppDriver | null = null;
   private tail: Promise<unknown> = Promise.resolve();
+  private running = 0;
+  private wake: (() => void) | null = null;
+  private idle: ReturnType<typeof setTimeout> | undefined;
   /** Accessibility and Screen Recording were seen granted; they hold until the app restarts. */
   permitted = false;
   /**
@@ -30,14 +33,37 @@ export class SharedAppDriver {
    */
   holder: string | null = null;
 
-  /** `executable` is null where there is no driver for the platform. */
-  constructor(readonly executable: string | null) {}
+  /**
+   * `executable` is null where there is no driver for the platform. `keepAwake` holds the
+   * display on and returns its release: a locked or sleeping Mac hides every window.
+   */
+  constructor(
+    readonly executable: string | null,
+    private readonly keepAwake: () => () => void = () => () => {},
+  ) {}
 
-  /** Runs work one at a time, so an action never lands between another chat's look and act. */
+  /**
+   * Runs work one at a time, so an action never lands between another chat's look and act. The
+   * display stays on meanwhile and for a while after, as the model thinks between calls.
+   */
   exclusive<T>(work: () => Promise<T>): Promise<T> {
+    clearTimeout(this.idle);
+    this.wake ??= this.keepAwake();
+    this.running++;
     const next = this.tail.then(work);
-    this.tail = next.catch(() => {});
+    this.tail = next
+      .catch(() => {})
+      .finally(() => {
+        if (--this.running > 0) return;
+        this.idle = setTimeout(() => this.sleep(), AWAKE_AFTER_MS);
+        this.idle.unref?.();
+      });
     return next;
+  }
+
+  private sleep() {
+    this.wake?.();
+    this.wake = null;
   }
 
   /** A driver that exited, crashed or was replaced is started again here, not failed on. */
@@ -56,10 +82,15 @@ export class SharedAppDriver {
   }
 
   close() {
+    clearTimeout(this.idle);
+    this.sleep();
     this.driver?.close();
     this.driver = null;
   }
 }
+
+/** How long the display stays on after the last app call. */
+export const AWAKE_AFTER_MS = 3 * 60_000;
 
 export interface AppUseOptions {
   readonly driver: SharedAppDriver;
@@ -138,6 +169,8 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
   window_not_key: (app) =>
     `${app} kept its keys in another of its windows, so nothing was typed. Click into the window first, then try again.`,
   capture_failed: (app) => `${app}'s window could not be captured. Try again.`,
+  screen_locked: () =>
+    "The user's Mac is locked, so no app can be used. Ask them to unlock it, then try again.",
 };
 
 /**

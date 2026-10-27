@@ -169,6 +169,11 @@ func windowID(_ window: AXUIElement) -> CGWindowID? {
   return id
 }
 
+func screenLocked() -> Bool {
+  let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+  return session?["CGSSessionScreenIsLocked"] as? Bool == true
+}
+
 /// The window the app sends keys to.
 func keyWindow(_ app: NSRunningApplication) -> CGWindowID? {
   attribute(appElement(app), kAXFocusedWindowAttribute, as: AXUIElement.self).flatMap(windowID)

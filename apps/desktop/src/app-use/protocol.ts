@@ -134,6 +134,7 @@ export const DriverErrorCode = Schema.Literals([
   "stale_node",
   "action_failed",
   "window_not_key",
+  "screen_locked",
   "capture_failed",
   "failed",
 ]);

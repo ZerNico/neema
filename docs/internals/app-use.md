@@ -221,11 +221,15 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
 
 ## Not now
 
-- **Working while the machine is locked.** On macOS it needs an authorization plug-in in the
-  unlock flow, installed with admin rights. Apple's engineers note such plug-ins move the Mac
-  to the legacy unlock path, without Touch ID, and Sonoma, Sequoia and Tahoe each broke
-  something there. It would also have to obtain the person's login to unlock. Windows has no
-  supported equivalent. Revisit once app use has proven itself.
+- **Working while the machine is locked.** A locked Mac hides every window from
+  accessibility, so the driver refuses with `screen_locked` and the model asks the person to
+  unlock. To make that rarer, the display stays on through app calls and three minutes after
+  the last, as Codex's helper holds it. Codex also unlocks by itself: an authorization plug-in
+  in the login window, installed with admin rights, lets its service through without the
+  password, behind an overlay that hands back to the real lock screen on any touch. Apple's
+  engineers note such plug-ins move the Mac to the legacy unlock path, without Touch ID, and
+  Sonoma, Sequoia and Tahoe each broke something there. Windows has no supported equivalent.
+  Revisit once app use has proven itself.
 - **Linux desktops.** AT-SPI exists, but Wayland's capture and input rules differ by
   compositor.
 - **Several chats in one app at once.** One chat drives an app at a time. A second waits.

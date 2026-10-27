@@ -34,6 +34,10 @@ actor Driver {
   }
 
   private func run(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
+    // A locked Mac hides every window from accessibility, which read as "no window".
+    if !["permissions", "apps", "guide", "cancelGuide", "resolve"].contains(method), screenLocked() {
+      throw DriverError(code: "screen_locked", message: "The Mac is locked")
+    }
     switch method {
     case "permissions":
       return [
