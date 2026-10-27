@@ -34,7 +34,7 @@ const LAZY_FAMILY_SUMMARIES: Record<LazyToolFamily, string> = {
   "schedule-draft": "Draft a scheduled task that runs a prompt on a recurring schedule.",
   browser:
     "Use a web browser on the user's computer, logged in wherever they are, for pages that need their session or interaction.",
-  app: "Operate apps on the user's own computer (Excel, Mail, Finder, any desktop app): look at a window, click, type, press keys.",
+  app: "Computer use: operate the apps on the user's own computer (Excel, Mail, Finder, any desktop app) by looking at their windows, clicking and typing.",
 };
 
 /** The family a tool belongs to: a fixed one, or its integration's, whether or not that is lazy here. */

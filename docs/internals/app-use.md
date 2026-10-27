@@ -8,7 +8,9 @@ browser's ([browser](browser.md)), and commands and files the chat's computer's
 tool, a company's desktop client.
 
 "Computer" stays the chat's VM. This is **app use**, its tools are the `app` family, and
-"the machine" is the desktop install, as in [desktop](desktop.md).
+"the machine" is the desktop install, as in [desktop](desktop.md). People call it computer use,
+and the model is told so in its catalogue line and hint: asked for "computer use" without that,
+it reached for the browser.
 
 ## Our own tools, not a provider's
 
