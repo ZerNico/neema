@@ -144,7 +144,7 @@ References keep working either way, since a press is accessibility, not a click.
 
 ### Chromium and Electron
 
-Chrome and every Electron app need three things more, each measured against an Electron page
+Chrome and every Electron app need more, each measured against an Electron page
 that reports what it receives (`fixtures/chromium-target.cjs`):
 
 - **Their page is not in the tree until asked for.** Reading the application's role turns it
@@ -153,11 +153,15 @@ that reports what it receives (`fixtures/chromium-target.cjs`):
   takes `AXEnhancedUserInterface` only after two quiet seconds, restarted whenever anything
   flips it, as window managers do. The driver asks once per process and waits for the page,
   turning its run loop: a page asked for from a sleeping thread never came.
-- **Their first click into an inactive window is swallowed.** A press and release at (-1, -1),
-  which nothing hit-tests, passes Chromium's user-activation check first; the events carry
-  screen points and a gesture phase (after cua-driver).
-- **A press by reference does nothing.** In the mode the driver turns on, the page answers an
-  accessibility press with success and ignores it, so a reference is clicked at its centre.
+- **A click by reference is a press, after the switch has settled.** For those same two
+  seconds the page answers a press with success and ignores it, so the driver waits them out
+  once. A pointer click is the fallback, not the default: Chromium takes one into a background
+  window only when it is stamped from before the window was shown (the raw field 58, which
+  cua-driver also fills with an early time). A page that then changes in place, as a router's
+  link does, crashes on a click older than itself (measured; it took neema down).
+- **Their first pointer click into an inactive window is swallowed.** A press and release at
+  (-1, -1), which nothing hit-tests, passes Chromium's user-activation check first; the events
+  carry screen points and a gesture phase (after cua-driver).
 
 Cua's `_AXObserverAddNotificationAndCheckRemote`, for keeping a covered Electron window's tree
 live, no longer exists in macOS 26; nothing here needed it.

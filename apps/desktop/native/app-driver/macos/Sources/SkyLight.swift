@@ -102,7 +102,7 @@ enum SkyLight {
       set(event, 3, button)  // button number
       set(event, 7, 3)  // subtype
       set(event, 51, Int64(window))  // window number
-      set(event, 58, group)  // one gesture
+      set(event, 58, group)  // the event's time; see `gesture()`
       set(event, 91, Int64(window))  // window under the pointer
       set(event, 92, Int64(window))  // that window can handle it
       set(event, 40, Int64(pid))  // target pid, which Chromium filters synthetic events by

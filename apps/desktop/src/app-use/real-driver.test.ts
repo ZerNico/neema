@@ -220,6 +220,12 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
       await received((event) => event.type === "click" && event.target === "go");
     });
 
+    test("follows a link that changes the page in place, without crashing it", async () => {
+      await driver.call("click", { node: node('link "Next page"') });
+      await received((event) => event.type === "navigated" || event.type === "gone");
+      expect(events.find((event) => event.type === "gone")).toBeUndefined();
+    });
+
     test("clicks a canvas, double clicks and right clicks", async () => {
       await driver.call("click", { at: centre("image") });
       await received((event) => event.type === "click" && event.target === "canvas");

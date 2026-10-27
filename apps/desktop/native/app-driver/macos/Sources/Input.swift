@@ -13,6 +13,9 @@ struct Target {
 
 private func pause(_ milliseconds: UInt32) { usleep(milliseconds * 1000) }
 
+/// The time a pointer gesture's events carry, in nanoseconds since boot: under a second, so
+/// always before the window was shown. Chromium drops a background click stamped later, and a
+/// page created after the stamp crashes if the click changes it in place; hence presses first.
 private func gesture() -> Int64 { Int64(DispatchTime.now().uptimeNanoseconds & 0x7FFF_FFFF) }
 
 /// A click at a point of the window, in window points, without raising it or moving the

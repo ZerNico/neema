@@ -64,7 +64,7 @@ actor Driver {
     case "zoom":
       return try await zoom(try rect(params, "region"))
     case "click":
-      try clickAction(params)
+      try await clickAction(params)
       return [:]
     case "setValue":
       let element = try node(params)
@@ -224,7 +224,7 @@ actor Driver {
     ]
   }
 
-  private func clickAction(_ params: [String: Any]) throws {
+  private func clickAction(_ params: [String: Any]) async throws {
     let button: CGMouseButton =
       switch params["button"] as? String {
       case "right": .right
@@ -236,12 +236,15 @@ actor Driver {
     for name in params["modifiers"] as? [String] ?? [] {
       flags.formUnion(try parseChord("\(name)+a").flags)
     }
-    // A plain click on an element that can be pressed is a press: no pointer at all. Not on a
-    // Chromium page, which answers a press with success and does nothing in the accessibility
-    // mode the driver turns on; its pointer route arrives as trusted input instead.
-    if let id = params["node"] as? String, button == .left, count == 1, flags.isEmpty,
-      !(try current().chromium && snapshot.webNodes.contains(id))
-    {
+    // A plain click on an element that can be pressed is a press: no pointer at all. On a
+    // Chromium page too: its pointer route needs a click stamped from before the window was shown,
+    // and a page that then navigates in place (a router's link) crashes on that time (measured).
+    if let id = params["node"] as? String, button == .left, count == 1, flags.isEmpty {
+      let target = try current()
+      if target.chromium, snapshot.webNodes.contains(id), let looked {
+        let ready = await MainActor.run { webPressesWork(looked.app) }.timeIntervalSinceNow
+        if ready > 0 { try await Task.sleep(for: .seconds(ready)) }
+      }
       let element = try node(params)
       if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }
     }

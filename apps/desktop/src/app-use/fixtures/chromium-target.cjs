@@ -13,6 +13,7 @@ const page = `<!doctype html>
 <textarea id="notes" aria-label="Notes"></textarea>
 <button id="go">Go</button>
 <canvas id="canvas" width="200" height="100"></canvas>
+<div id="view"><a id="next" href="/next">Next page</a></div>
 <script>
   const report = (event) => console.log("EVENT " + JSON.stringify(event));
   document.addEventListener("click", (e) =>
@@ -21,6 +22,13 @@ const page = `<!doctype html>
   document.addEventListener("keydown", (e) =>
     report({ type: "keydown", target: e.target.id, key: e.key, meta: e.metaKey, trusted: e.isTrusted }));
   document.addEventListener("input", (e) => report({ type: "input", target: e.target.id, value: e.target.value }));
+  // A router's link: the page changes in place, which Chromium times from the click.
+  document.getElementById("next").addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("view").textContent = "Second page";
+    history.pushState({}, "", "#next");
+    setTimeout(() => report({ type: "navigated" }), 300);
+  });
   document.addEventListener("wheel", (e) => report({ type: "wheel", target: e.target.id, deltaY: Math.sign(e.deltaY) }));
 </script>`;
 
@@ -40,6 +48,9 @@ app.whenReady().then(() => {
   window.webContents.on("console-message", (event) => {
     if (event.message.startsWith("EVENT ")) process.stdout.write(`${event.message}\n`);
   });
+  window.webContents.on("render-process-gone", (_event, details) =>
+    process.stdout.write(`EVENT ${JSON.stringify({ type: "gone", reason: details.reason })}\n`),
+  );
   window.once("ready-to-show", () => {
     // Behind whatever the person has in front, as app use finds most apps.
     window.showInactive();

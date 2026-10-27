@@ -68,8 +68,12 @@ func appElement(_ app: NSRunningApplication) -> AXUIElement {
   return element
 }
 
-/// Processes whose web content was asked for, by pid and launch, since pids are reused.
-private var enabled = Set<String>()
+/// When each process's web content was last asked for, by pid and launch, since pids are reused.
+@MainActor private var asked: [String: Date] = [:]
+
+private func launchKey(_ app: NSRunningApplication) -> String {
+  "\(app.processIdentifier):\(app.launchDate?.timeIntervalSince1970 ?? 0)"
+}
 
 /// Chromium apps (Chrome, Electron) leave their page out of the tree until an assistive client
 /// asks for it. Reading the application's role turns native accessibility on at once, as Apple
@@ -80,11 +84,11 @@ private var enabled = Set<String>()
 /// thread's run loop turns (measured).
 @MainActor
 func enableWebContent(_ app: NSRunningApplication, window: AXUIElement) {
-  let key = "\(app.processIdentifier):\(app.launchDate?.timeIntervalSince1970 ?? 0)"
-  guard !enabled.contains(key), isChromium(app) else { return }
-  enabled.insert(key)
+  let key = launchKey(app)
+  guard asked[key] == nil, isChromium(app) else { return }
   let element = appElement(app)
   let ask = {
+    asked[key] = Date()
     _ = attribute(element, kAXRoleAttribute, as: String.self)
     AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
@@ -99,6 +103,13 @@ func enableWebContent(_ app: NSRunningApplication, window: AXUIElement) {
     }
     CFRunLoopRunInMode(.defaultMode, 0.1, false)
   }
+}
+
+/// When a press on the page starts to work: Chromium answers one with success and does nothing
+/// until its two quiet seconds after the last request have passed (measured).
+@MainActor
+func webPressesWork(_ app: NSRunningApplication) -> Date {
+  asked[launchKey(app)].map { $0.addingTimeInterval(2.5) } ?? .distantPast
 }
 
 func isChromium(_ app: NSRunningApplication) -> Bool {
