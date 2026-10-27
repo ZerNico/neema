@@ -84,13 +84,54 @@ describe("the outline of a look", () => {
   });
 
   test("stops at its budget and says so", () => {
-    const rows = Array.from({ length: 2000 }, (_, index) =>
-      node(`n${index + 2}`, 1, { role: "cell", value: `row ${index} ${"x".repeat(20)}` }),
-    );
-    const outline = buildOutline(look([node("n1", 0, { role: "table" }), ...rows]));
+    // Many rows of a few cells each, so the budget and not the per-element cap stops it.
+    const nodes = [node("n0", 0, { role: "table" })];
+    for (let row = 0; row < 20; row++) {
+      nodes.push(node(`r${row}`, 1, { role: "row", name: `row ${row}` }));
+      for (let cell = 0; cell < 20; cell++)
+        nodes.push(
+          node(`c${row}-${cell}`, 2, { role: "cell", value: `${"x".repeat(30)} ${row}:${cell}` }),
+        );
+    }
+    const outline = buildOutline(look(nodes));
     expect(outline.truncated).toBe(true);
     expect(outline.text.length).toBeLessThanOrEqual(12_000);
     expect(outline.refs.size).toBe(outline.text.split("\n").length);
+  });
+
+  test("shows a long list's first items and counts the rest, so what follows still shows", () => {
+    const items = Array.from({ length: 60 }, (_, index) =>
+      node(`i${index}`, 2, { role: "link", name: `chat ${index}`, actions: ["press"] }),
+    );
+    const outline = buildOutline(
+      look([
+        node("n1", 0, { role: "window" }),
+        node("n2", 1, { role: "list" }),
+        ...items,
+        // In the same run of siblings, as Chromium lays a page out.
+        node("n4", 2, { role: "textArea", name: "Message", actions: ["setValue"] }),
+        node("n3", 1, { role: "button", name: "Send", actions: ["press"] }),
+      ]),
+    );
+    const lines = outline.text.split("\n");
+    expect(lines.filter((line) => line.includes(`link "`))).toHaveLength(25);
+    expect(outline.text).toContain("    … 35 more link (scroll or zoom to see them)");
+    expect(outline.text).toMatch(/textArea "Message"/);
+    expect(lines.at(-1)).toMatch(/button "Send"/);
+    expect(outline.truncated).toBe(false);
+  });
+
+  test("leaves out nameless groups and text that repeats its parent's name", () => {
+    const outline = buildOutline(
+      look([
+        node("n1", 0, { role: "window" }),
+        node("n2", 1, { role: "group", actions: ["press"] }),
+        node("n3", 2, { role: "link", name: "New chat", actions: ["press"] }),
+        node("n4", 3, { role: "text", value: "New chat" }),
+        node("n5", 3, { role: "text", value: "⌘N" }),
+      ]),
+    );
+    expect(outline.text).toBe('e1 window\n  e2 link "New chat"\n    e3 text = "⌘N"');
   });
 
   test("passes on the driver's own truncation", () => {

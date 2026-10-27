@@ -26,6 +26,31 @@ export interface Outline {
 }
 
 /**
+ * Shown children of one role per element. A long list (neema's own chat history, a mailbox)
+ * otherwise took the whole budget in document order. Counted per role, not in all: Chromium
+ * lays a page out as one flat run of siblings, and a plain cut hid what ends it, the composer.
+ */
+const MAX_OF_A_ROLE = 25;
+
+/** A shown element whose subtree is still being read. */
+interface Open {
+  readonly depth: number;
+  readonly indent: number;
+  /** Its name and value as shown, which a child's text would only repeat. */
+  readonly labels: ReadonlyArray<string>;
+  readonly children: Map<Role, number>;
+  readonly hidden: Map<Role, number>;
+}
+
+const opened = (depth: number, indent: number, labels: ReadonlyArray<string>): Open => ({
+  depth,
+  indent,
+  labels,
+  children: new Map(),
+  hidden: new Map(),
+});
+
+/**
  * The numbered outline the model reads beside a look's picture. Written once for every
  * platform: drivers send the raw tree, this decides what is worth the tokens. Positions are
  * in picture pixels, the same space a coordinate action uses.
@@ -36,42 +61,83 @@ export const buildOutline = (look: Look): Outline => {
   const lines: string[] = [];
   let length = 0;
   let truncated = look.truncated;
-  // Indents of the shown ancestors still open, by their tree depth.
-  const open: Array<{ depth: number; indent: number }> = [];
+  const root = opened(-1, -1, []);
+  const open: Open[] = [];
   let skipBelow: number | null = null;
 
-  for (const node of look.nodes) {
+  /** Adds a line within the budget; false once it is spent. */
+  const add = (line: string) => {
+    if (length + line.length + 1 > OUTLINE_BUDGET) {
+      truncated = true;
+      return false;
+    }
+    lines.push(line);
+    length += line.length + 1;
+    return true;
+  };
+  /** Leaves an element, saying how many of its children were left out, by role. */
+  const close = (done: Open) => {
+    for (const [role, count] of done.hidden)
+      if (
+        !add(`${"  ".repeat(done.indent + 1)}… ${count} more ${role} (scroll or zoom to see them)`)
+      )
+        return false;
+    return true;
+  };
+
+  walk: for (const node of look.nodes) {
     if (skipBelow !== null) {
       if (node.depth > skipBelow) continue;
       skipBelow = null;
     }
-    while (open.length > 0 && open[open.length - 1]!.depth >= node.depth) open.pop();
+    while (open.length > 0 && open[open.length - 1]!.depth >= node.depth)
+      if (!close(open.pop()!)) break walk;
     if (node.frame && outsideWindow(node.frame, look.window)) {
       // Scrolled out of view, with everything inside it.
       skipBelow = node.depth;
       continue;
     }
-    if (!shown(node)) continue;
-    const indent = open.length;
-    const ref = `e${refs.size + 1}`;
-    const line = "  ".repeat(indent) + describe(ref, node, scale);
-    if (length + line.length + 1 > OUTLINE_BUDGET) {
-      truncated = true;
-      break;
+    const parent = open[open.length - 1] ?? root;
+    if (!shown(node, parent.labels)) continue;
+    const ofRole = parent.children.get(node.role) ?? 0;
+    if (ofRole >= MAX_OF_A_ROLE) {
+      parent.hidden.set(node.role, (parent.hidden.get(node.role) ?? 0) + 1);
+      skipBelow = node.depth;
+      continue;
     }
+    parent.children.set(node.role, ofRole + 1);
+    const ref = `e${refs.size + 1}`;
+    if (!add("  ".repeat(open.length) + describe(ref, node, scale))) break;
     refs.set(ref, node.id);
-    lines.push(line);
-    length += line.length + 1;
-    open.push({ depth: node.depth, indent });
+    open.push(
+      opened(
+        node.depth,
+        open.length,
+        [node.name, node.value].flatMap((text) => (text ? [clean(text)] : [])),
+      ),
+    );
   }
+  if (!truncated) while (open.length > 0) if (!close(open.pop()!)) break;
+  if (!truncated) close(root);
   return { text: lines.join("\n"), refs, truncated };
 };
 
-const shown = (node: UiNode) =>
-  node.actions.length > 0 ||
-  node.name !== undefined ||
-  node.value !== undefined ||
-  structural.has(node.role);
+/**
+ * Worth a line: it can be acted on, says something, or gives the outline its shape. Not a
+ * nameless group, which web pages wrap around everything (its children still show), nor text
+ * that only repeats its parent's name, as a link's label does.
+ */
+const shown = (node: UiNode, parentLabels: ReadonlyArray<string>) => {
+  const label = clean(node.value ?? node.name ?? "");
+  if ((node.role === "text" || node.role === "image") && parentLabels.includes(label)) return false;
+  if ((node.role === "group" || node.role === "other") && !node.name && !node.value) return false;
+  return (
+    node.actions.length > 0 ||
+    node.name !== undefined ||
+    node.value !== undefined ||
+    structural.has(node.role)
+  );
+};
 
 const outsideWindow = (frame: NonNullable<UiNode["frame"]>, window: Look["window"]) =>
   frame.x + frame.width <= 0 ||
