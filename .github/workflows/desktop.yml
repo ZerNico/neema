@@ -98,6 +98,8 @@ jobs:
         shell: bash
         working-directory: apps/desktop
         run: |
+          # $PLUGINSDIR is NSIS's own folder name, quoted to stay literal, not a shell variable.
+          # shellcheck disable=SC2016
           for installer in release/*.exe; do
             # Relative, so Git Bash hands 7z.exe a path it can read.
             out="payload-$(basename "$installer" .exe)"
