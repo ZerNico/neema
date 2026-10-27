@@ -67,6 +67,8 @@ actor Driver {
         try param(params, "appId", as: String.self), pid: (params["pid"] as? Int).map(pid_t.init))
     case "zoom":
       return try await zoom(try rect(params, "region"))
+    case "peek":
+      return try peek()
     case "click":
       try await clickAction(params)
       return [:]
@@ -231,6 +233,22 @@ actor Driver {
     return [
       "data": picture.png.base64EncodedString(), "width": picture.width,
       "height": picture.height,
+    ]
+  }
+
+  /// A small picture of the window being driven, for the person's live view, many times a
+  /// minute: the window server's own copy, which no capture daemon stands between.
+  private func peek() throws -> [String: Any] {
+    guard let looked else { throw DriverError(code: "no_look", message: "Look at the app first") }
+    guard let whole = SkyLight.captureWindow(looked.windowNumber) else {
+      throw DriverError(code: "capture_failed", message: "The window could not be captured")
+    }
+    let picture = try preview(whole, maxEdge: 640)
+    let box = frame(looked.window)
+    return [
+      "data": picture.data.base64EncodedString(), "width": picture.width,
+      "height": picture.height,
+      "window": ["width": box?.width ?? 0, "height": box?.height ?? 0],
     ]
   }
 

@@ -170,6 +170,14 @@ export const Methods = {
     }),
     result: Picture,
   },
+  /** A small JPEG of the window last looked at, for the person's live view. */
+  peek: {
+    params: Schema.Struct({}),
+    result: Schema.Struct({
+      ...Picture.fields,
+      window: Schema.Struct({ width: Schema.Number, height: Schema.Number }),
+    }),
+  },
   /** A plain left click on a node that can be pressed is an accessibility press, no pointer. */
   click: {
     params: Schema.Struct({

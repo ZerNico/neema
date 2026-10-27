@@ -60,6 +60,25 @@ func capture(window: CGWindowID, size: CGSize, region: CGRect? = nil) async thro
   return Capture(png: png, width: image.width, height: image.height)
 }
 
+/// A picture scaled within `maxEdge` pixels, as JPEG: a view to watch, not one to read.
+func preview(_ image: CGImage, maxEdge: CGFloat) throws -> (data: Data, width: Int, height: Int) {
+  let fit = max(CGFloat(max(image.width, image.height)) / maxEdge, 1)
+  let width = max(1, Int((CGFloat(image.width) / fit).rounded()))
+  let height = max(1, Int((CGFloat(image.height) / fit).rounded()))
+  guard
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue)
+  else { throw DriverError(code: "capture_failed", message: "Could not scale the picture") }
+  context.interpolationQuality = .medium
+  context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+  guard let scaled = context.makeImage(),
+    let data = NSBitmapImageRep(cgImage: scaled).representation(
+      using: .jpeg, properties: [.compressionFactor: 0.7])
+  else { throw DriverError(code: "capture_failed", message: "Could not encode the picture") }
+  return (data, width, height)
+}
+
 /// The picture's size in pixels: a whole window at one pixel per point, a region at the
 /// display's density, either fitted within `maxLookEdge`.
 private func pictureSize(_ area: CGRect, density: CGFloat) -> CGSize {
