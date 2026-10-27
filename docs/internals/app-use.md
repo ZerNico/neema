@@ -94,15 +94,29 @@ vision model and not stored, like the browser's screenshots, unless the model sh
 
 ## macOS and Windows differ in one way
 
-|                | macOS                                                                    | Windows                                                      |
-| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| Structure      | AX                                                                       | UI Automation                                                |
-| Window picture | ScreenCaptureKit                                                         | Windows.Graphics.Capture                                     |
-| Acting         | AX actions in the background, events posted to the app where AX has none | UIA patterns without focus, real input with the app in front |
-| While working  | the person keeps their cursor and front app                              | the app comes to the front and input is real                 |
+|                | macOS                                                                       | Windows                                                      |
+| -------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Structure      | AX                                                                          | UI Automation                                                |
+| Window picture | ScreenCaptureKit                                                            | Windows.Graphics.Capture                                     |
+| Acting         | AX actions, and window server input to the covered window where AX has none | UIA patterns without focus, real input with the app in front |
+| While working  | the person keeps their cursor and front app                                 | the app comes to the front and input is real                 |
 
 On Windows the person is told that app use takes over the screen while it runs. What UIA
 can do without focus (Invoke, Value, Toggle, Selection) still runs without taking over.
+
+### Background input on macOS is private API, on purpose
+
+Keys and text reach a covered app through public per-process posting. A click does not: the
+window server delivers it to whatever lies under the real cursor. Codex's helper and Cua's
+driver both use SkyLight for this, and so does ours (`SkyLight.swift`, after cua-driver and
+yabai): a focus record makes the window take input without raising it, a stamped move primes
+where the app thinks the cursor is, and the press and release go to the process with the
+window's id. Only the target gets a focus record. Defocusing the person's front app left their
+window deaf to typing until they clicked it, which Cua shipped and had to undo.
+
+Every symbol is looked up by name. A macOS release that drops one turns `background` false in
+`permissions`, and coordinate input falls back to the public route, which most apps ignore.
+References keep working either way, since a press is accessibility, not a click.
 
 ## The drivers
 

@@ -82,6 +82,8 @@ export const Permissions = Schema.Struct({
   accessibility: Schema.Boolean,
   /** Capturing other apps' windows. */
   capture: Schema.Boolean,
+  /** Coordinate input reaches a covered window without raising it. Else it is not offered. */
+  background: Schema.Boolean,
 });
 
 export const RunningApp = Schema.Struct({
@@ -94,13 +96,25 @@ export const RunningApp = Schema.Struct({
 });
 export type RunningApp = typeof RunningApp.Type;
 
+/** A PNG, at most 1280 px on its long edge. */
+export const Picture = Schema.Struct({
+  data: Schema.String,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+
+/** A point in window points. */
+export const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+/** Where pointer input lands: a point, or the centre of a node of the latest look. */
+export const Place = Schema.Union([Point, Schema.Struct({ node: Schema.String })]);
+
 export const Look = Schema.Struct({
   app: Schema.String,
   title: Schema.NullOr(Schema.String),
   /** The window's size in points; node frames are relative to its top-left corner. */
   window: Schema.Struct({ width: Schema.Number, height: Schema.Number }),
-  /** A PNG of the window alone, at most 1280 px on its long edge. */
-  image: Schema.Struct({ data: Schema.String, width: Schema.Number, height: Schema.Number }),
+  /** The window alone. */
+  image: Picture,
   nodes: Schema.Array(UiNode),
   /** The driver stopped walking at its node cap. */
   truncated: Schema.Boolean,
@@ -112,8 +126,11 @@ export const DriverErrorCode = Schema.Literals([
   "unknown_method",
   "invalid_params",
   "off_limits",
+  "not_installed",
   "not_running",
   "no_window",
+  "no_look",
+  "no_frame",
   "stale_node",
   "action_failed",
   "capture_failed",
@@ -125,7 +142,54 @@ export const Methods = {
   permissions: { params: Schema.Struct({}), result: Permissions },
   apps: { params: Schema.Struct({}), result: Schema.Struct({ apps: Schema.Array(RunningApp) }) },
   look: { params: Schema.Struct({ appId: Schema.String }), result: Look },
-  press: { params: Schema.Struct({ node: Schema.String }), result: Schema.Struct({}) },
+  open: {
+    params: Schema.Struct({ appId: Schema.String }),
+    result: Schema.Struct({ name: Schema.String, pid: Schema.Number }),
+  },
+  /** Part of the latest look's window, in window points, at full resolution. */
+  zoom: {
+    params: Schema.Struct({
+      region: Schema.Struct({
+        x: Schema.Number,
+        y: Schema.Number,
+        width: Schema.Number,
+        height: Schema.Number,
+      }),
+    }),
+    result: Picture,
+  },
+  /** A plain left click on a node that can be pressed is an accessibility press, no pointer. */
+  click: {
+    params: Schema.Struct({
+      node: Schema.optionalKey(Schema.String),
+      at: Schema.optionalKey(Point),
+      button: Schema.optionalKey(Schema.Literals(["left", "right", "middle"])),
+      count: Schema.optionalKey(Schema.Number),
+      modifiers: Schema.optionalKey(Schema.Array(Schema.String)),
+    }),
+    result: Schema.Struct({}),
+  },
+  setValue: {
+    params: Schema.Struct({ node: Schema.String, value: Schema.String }),
+    result: Schema.Struct({}),
+  },
+  /** Into the node, focused first, or wherever the app's focus is. */
+  type: {
+    params: Schema.Struct({ node: Schema.optionalKey(Schema.String), text: Schema.String }),
+    result: Schema.Struct({}),
+  },
+  /** `cmd+s`, `Return`, `ctrl+Tab`; letters on the current keyboard layout. */
+  key: { params: Schema.Struct({ keys: Schema.String }), result: Schema.Struct({}) },
+  /** By lines; positive y reveals what is above, as a wheel does. */
+  scroll: {
+    params: Schema.Struct({
+      at: Place,
+      x: Schema.optionalKey(Schema.Number),
+      y: Schema.optionalKey(Schema.Number),
+    }),
+    result: Schema.Struct({}),
+  },
+  drag: { params: Schema.Struct({ from: Place, to: Place }), result: Schema.Struct({}) },
 } as const;
 export type Method = keyof typeof Methods;
 
