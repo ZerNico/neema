@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { compileDesktopMessages } from "../web/paraglide.ts";
 
 /**
@@ -5,4 +6,4 @@ import { compileDesktopMessages } from "../web/paraglide.ts";
  * page's, so the two never drift (docs/internals/i18n.md).
  */
 export const compileMessages = () =>
-  compileDesktopMessages(new URL("./src/paraglide", import.meta.url).pathname);
+  compileDesktopMessages(fileURLToPath(new URL("./src/paraglide", import.meta.url)));
