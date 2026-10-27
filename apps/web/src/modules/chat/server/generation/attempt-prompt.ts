@@ -182,6 +182,7 @@ export const prepareAttemptPrompt = (env: {
       skillTools,
       desktopTools,
       browserTools,
+      appTools,
       planTools,
       notifyTools,
       officeEditors,
@@ -771,6 +772,7 @@ export const prepareAttemptPrompt = (env: {
       research: !!researchTool,
       desktop: computer !== null,
       browser: !!browserTools,
+      apps: !!appTools,
       interactiveUi: skillManifest.some((entry) => entry.skillId === INTERACTIVE_UI_SKILL_ID)
         ? { photos: interactiveUi.images && !!webTools?.tools.search }
         : null,

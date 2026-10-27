@@ -12,6 +12,7 @@ export const LazyToolFamily = Schema.Literals([
   "agent-draft",
   "schedule-draft",
   "browser",
+  "app",
 ]);
 export type LazyToolFamily = typeof LazyToolFamily.Type;
 

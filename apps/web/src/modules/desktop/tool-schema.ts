@@ -1,6 +1,7 @@
 import { LIMITS } from "@chat/desktop-rpc";
 import { Schema } from "effect";
 import { AiError } from "effect/ai";
+import { APP_TOOL_NAMES } from "~/modules/app-use/tool-schema.ts";
 import {
   BROWSER_TOOL_NAMES,
   browserApprovalKind,
@@ -31,6 +32,7 @@ export const DESKTOP_TOOL_NAMES = [
   "request_folder",
   "request_ssh_agent",
   ...BROWSER_TOOL_NAMES,
+  ...APP_TOOL_NAMES,
 ] as const;
 
 export const DesktopToolName = Schema.Literals(DESKTOP_TOOL_NAMES);
@@ -258,6 +260,16 @@ const TOOL_TIMEOUTS: Record<DesktopToolName, "quick" | "command"> = {
   browser_evaluate: "command",
   // Can wait on the user allowing another site, then on the downloads.
   browser_save: "command",
+  app_list: "quick",
+  // Each may be an app's first use in the chat, which waits on the person allowing it.
+  app_open: "command",
+  app_look: "command",
+  app_click: "command",
+  app_type: "command",
+  app_key: "command",
+  app_scroll: "command",
+  app_drag: "command",
+  app_zoom: "command",
 };
 
 export const desktopToolTimeout = (name: DesktopToolName) => DESKTOP_TIMEOUTS[TOOL_TIMEOUTS[name]];

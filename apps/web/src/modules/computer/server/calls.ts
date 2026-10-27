@@ -1,6 +1,7 @@
 import { Clock, Context, Duration, Effect, Layer, Scope } from "effect";
 import type { ToolResult } from "@chat/desktop-rpc";
 import { canonicalHost } from "@chat/egress-proxy";
+import { isAppTool } from "~/modules/app-use/tool-schema.ts";
 import { desktopFailure, type DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -43,6 +44,8 @@ interface Entry {
   readonly scope: Scope.Scope;
   /** It already waited once for a machine to come back, so an absent one is now an answer. */
   waitedForMachine?: true;
+  /** Sent as coming from the machine's own person; a resend after a reconnect says the same. */
+  local?: boolean;
   /**
    * What the person allowed, for the machine the chat had when they were asked. A switch since
    * means asking again: the card never named the new one, nor its folders.
@@ -338,7 +341,10 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           const status = presence.hello.computer;
-          if (status.status === "unavailable") {
+          // App use never touches the VM, so a machine without one (still downloading, or none
+          // on this hardware) can still use its apps.
+          const usesVm = !isAppTool(entry.name);
+          if (usesVm && status.status === "unavailable") {
             yield* finish(
               entry,
               desktopFailure(
@@ -348,7 +354,7 @@ export class ComputerCalls extends Context.Service<
             );
             return;
           }
-          if (status.status === "preparing") {
+          if (usesVm && status.status === "preparing") {
             yield* hold(entry, chat.machineId, "preparing");
             return;
           }
@@ -409,7 +415,7 @@ export class ComputerCalls extends Context.Service<
               return;
             }
           }
-          yield* send(entry, chat.machineId);
+          yield* send(entry, chat.machineId, sender === chat.machineId);
         });
 
       /**
@@ -467,8 +473,9 @@ export class ComputerCalls extends Context.Service<
 
       // Every await before a state change may let Stop close the call's scope, whose finalizer
       // marks it done. A call that ended meanwhile is never sent, or is cancelled if it was.
-      const send = (entry: Entry, machineId: string) =>
+      const send = (entry: Entry, machineId: string, local: boolean) =>
         Effect.gen(function* () {
+          entry.local = local;
           const files = yield* repo.sentFiles(entry.userId, entry.conversationId);
           if (ended(entry)) return;
           const delivered = yield* hub.send(entry.userId, machineId, {
@@ -480,6 +487,7 @@ export class ComputerCalls extends Context.Service<
             deadlineAt: entry.deadlineAt,
             sentAt: yield* Clock.currentTimeMillis,
             attachments: sentFilePaths(files),
+            local,
           });
           if (!delivered) {
             yield* finish(
@@ -690,7 +698,9 @@ export class ComputerCalls extends Context.Service<
                 ),
               { discard: true },
             );
-            yield* Effect.forEach(sent, (entry) => send(entry, machineId), { discard: true });
+            yield* Effect.forEach(sent, (entry) => send(entry, machineId, entry.local ?? false), {
+              discard: true,
+            });
             yield* advanceHeld(userId, machineId);
           }),
         machineChanged: (userId, machineId) => advanceHeld(userId, machineId),

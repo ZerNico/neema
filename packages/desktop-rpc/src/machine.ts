@@ -80,6 +80,11 @@ export const MachineEvent = Schema.Union([
     attachments: Schema.optionalKey(
       Schema.Array(Schema.Struct({ id: Id, path: Schema.String.check(Schema.isMaxLength(1024)) })),
     ),
+    /**
+     * The message came from this machine, judged by the server from the sending session. Only
+     * then may the machine ask its person anything; absent is false.
+     */
+    local: Schema.optionalKey(Schema.Boolean),
   }),
   /** Stop a call: Stop, a lost lease or the deadline. */
   Schema.Struct({ type: Schema.Literal("cancel"), callId: Id }),

@@ -1,5 +1,6 @@
 import { m } from "~/paraglide/messages.js";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
+import { isAppTool } from "~/modules/app-use/tool-schema.ts";
 import type { ToolActivity } from "../client/use-message-stream.ts";
 import type { WorkStep } from "./assistant-body.ts";
 import {
@@ -112,6 +113,7 @@ export function stepLabel(step: WorkStep): string {
           return m.chat_work_route();
         case "desktop":
           if (isBrowserTool(call.name)) return m.chat_work_using_browser();
+          if (isAppTool(call.name)) return m.chat_work_using_apps();
           if (call.name === "run_command") return m.chat_work_running_command();
           if (
             call.name === "write_file" ||
@@ -189,6 +191,7 @@ const pastClauses = (step: WorkStep): Clause[] => {
           return [clause(m.chat_work_past_route())];
         case "desktop":
           if (isBrowserTool(call.name)) return [clause(m.chat_work_past_used_browser())];
+          if (isAppTool(call.name)) return [clause(m.chat_work_past_used_apps())];
           if (call.name === "run_command") return [clause(m.chat_work_past_ran_command())];
           if (
             call.name === "write_file" ||
