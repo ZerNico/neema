@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { type CompilerOptions, compile, paraglideVitePlugin } from "@inlang/paraglide-js";
 
 /**
@@ -34,7 +35,7 @@ export const compileMessages = () => compile(options);
  */
 export const compileDesktopMessages = (outdir: string) =>
   compile({
-    project: new URL("./project.inlang", import.meta.url).pathname,
+    project: fileURLToPath(new URL("./project.inlang", import.meta.url)),
     outdir,
     strategy: ["baseLocale"],
     emitTsDeclarations: true,
