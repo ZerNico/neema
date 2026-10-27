@@ -72,8 +72,12 @@ export class MachineClient {
     }
   }
 
+  /** Whether the server saved them, which it does only for a chat that exists. */
   async postFolders(folders: MachineFolders) {
-    await this.post(MACHINE_ROUTES.folders, folders).catch(() => {});
+    const response = await this.post(MACHINE_ROUTES.folders, folders).catch(() => null);
+    if (!response?.ok) return false;
+    const body = (await response.json().catch(() => null)) as { saved?: unknown } | null;
+    return body?.saved === true;
   }
 
   private statusPosts: Promise<unknown> = Promise.resolve();
@@ -83,8 +87,9 @@ export class MachineClient {
    * leave the machine looking busy until it reconnects.
    */
   postStatus() {
+    // Bounded, so one request stuck on a half-open connection cannot hold "ready" back.
     const posted = this.statusPosts.then(() =>
-      this.post(MACHINE_ROUTES.status, {}).catch(() => {}),
+      this.post(MACHINE_ROUTES.status, {}, AbortSignal.timeout(15_000)).catch(() => {}),
     );
     this.statusPosts = posted;
     return posted.then(() => {});
@@ -107,11 +112,12 @@ export class MachineClient {
     return { [MACHINE_HELLO_HEADER]: JSON.stringify(this.options.hello()) };
   }
 
-  private post(route: string, body: unknown) {
+  private post(route: string, body: unknown, signal?: AbortSignal) {
     return this.options.fetch(`${this.options.origin}${route}`, {
       method: "POST",
       headers: { ...this.headers(), "content-type": "application/json" },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
   }
 

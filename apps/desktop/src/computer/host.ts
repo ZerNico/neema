@@ -91,6 +91,12 @@ export class ComputerHost {
   private readonly client: MachineClient;
   private readonly sentFiles: SentFiles;
   private readonly seen = new SeenFiles();
+  /**
+   * Chats the server has shown exist while this app runs: it sent a call or event for them, or
+   * saved their folders. A reconnect forgets only those it then calls gone, never a new chat's
+   * draft, which has no row until its first message.
+   */
+  private readonly known = new Set<string>();
   /** This app's start, told the server in every hello; see `MachineHello.launch`. */
   private readonly launch = randomUUID();
   private readonly calls = new Map<
@@ -130,7 +136,7 @@ export class ComputerHost {
       // Each time, not only at start: a chat purged while this machine was away is told of here.
       onConnected: (connected) => {
         if (connected)
-          void this.forgetGone().catch((error: unknown) => {
+          void this.forgetGone(this.known).catch((error: unknown) => {
             this.options.log(`computer: removing purged chats failed: ${String(error)}`);
           });
       },
@@ -177,6 +183,10 @@ export class ComputerHost {
       );
     await this.proxy.listen();
     this.client.start();
+    // At start, every chat with something here: a draft left from an earlier run goes too.
+    void this.forgetGone().catch((error: unknown) => {
+      this.options.log(`computer: removing purged chats failed: ${String(error)}`);
+    });
     let reported = 0;
     try {
       await this.options.hypervisor.prepare(this.options.image, (fraction) => {
@@ -214,11 +224,13 @@ export class ComputerHost {
 
   /** Tells the server the chat's folder names after an attach or detach here. */
   async foldersChanged(conversationId: string) {
-    const mounts = await this.options.folders(conversationId);
-    await this.client.postFolders({
+    // Only what a VM would mount: a folder left out there is no folder for the model either.
+    const mounts = await this.mountable(conversationId);
+    const saved = await this.client.postFolders({
       conversationId,
       folders: mounts.map(({ name, readOnly }) => ({ name, readOnly })),
     });
+    if (saved) this.known.add(conversationId);
   }
 
   /** Remote control was switched; the server hears it with the next hello. */
@@ -231,6 +243,8 @@ export class ComputerHost {
   }
 
   private handle(event: MachineEvent) {
+    if ("conversationId" in event) this.known.add(event.conversationId);
+    if (event.type === "clone") this.known.add(event.to);
     switch (event.type) {
       case "call": {
         const existing = this.calls.get(event.callId);
@@ -347,20 +361,20 @@ export class ComputerHost {
   }
 
   /** Chats purged while this machine was offline missed their discard; it is done now. */
-  private async forgetGone() {
-    const local = new Set([
-      ...(await this.options.localChats()),
-      ...this.agent.allowed(this.options.origin),
-    ]);
+  private async forgetGone(only?: ReadonlySet<string>) {
+    const local = new Set(
+      [...(await this.options.localChats()), ...this.agent.allowed(this.options.origin)].filter(
+        (id) => !only || only.has(id),
+      ),
+    );
     for (const conversationId of await this.client.gone([...local]))
       await this.discardChat(conversationId, true);
   }
 
   private async attachment(key: ChatKey, id: string, signal: AbortSignal) {
-    const response = await this.options.fetch(
-      `${key.origin}/api/files/${encodeURIComponent(id)}`,
-      { signal },
-    );
+    const response = await this.options.fetch(`${key.origin}/api/files/${encodeURIComponent(id)}`, {
+      signal,
+    });
     if (!response.ok) return null;
     return {
       name: fileName(response, id),

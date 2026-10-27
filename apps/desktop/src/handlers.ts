@@ -1,3 +1,4 @@
+import { stillMountable } from "./computer/folder-access.ts";
 import { open, stat, type FileHandle } from "node:fs/promises";
 import { extname, isAbsolute } from "node:path";
 import { Effect } from "effect";
@@ -179,13 +180,17 @@ export const makeHandlers = (shell: Shell) =>
     const status = (conversationId: string): Effect.Effect<FolderStatus, DesktopError> =>
       Effect.gen(function* () {
         const folders = yield* store.lookup(key(conversationId));
+        // The same test a VM's mounts pass, so a folder the VM leaves out shows as lost here.
         const listed = yield* Effect.forEach(mountsOf(folders), (mount) =>
-          Effect.map(resolveInFolder(mount.hostPath, ".", true).pipe(Effect.result), (alive) => ({
-            name: mount.name,
-            path: guestRoot(mount),
-            alive: alive._tag === "Success",
-            readOnly: mount.readOnly,
-          })),
+          Effect.map(
+            Effect.promise(() => stillMountable(mount.hostPath, shell.appData)),
+            (alive) => ({
+              name: mount.name,
+              path: guestRoot(mount),
+              alive,
+              readOnly: mount.readOnly,
+            }),
+          ),
         );
         return { folders: listed, workspace: { path: WORKSPACE } };
       });

@@ -177,7 +177,9 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
 - **On connect** the server sends the person's network grants, then, on a fiber of its own so
   the stream flows meanwhile, resumes calls held for the machine. A new status arrives as
   `POST /api/machine/status`, posted one at a time so a late progress report never lands after
-  "ready". Each connect, not only each start, also asks which of the machine's chats are gone.
+  "ready". Each start asks which of the machine's chats are gone; each reconnect asks again, but
+  only about chats the server has shown exist since the start (a call, an event, saved
+  folders), since a new chat's draft has no row until its first message and would look gone.
 - **A call** (`call` event) carries the tool, its arguments, the server's deadline and the
   time it was sent, so the machine measures the deadline on its own clock. It also carries the
   chat's sent files and the guest path the server named for each.
@@ -247,7 +249,8 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   It runs on the admin's review model, else the answer's own. Anything that keeps it from
   answering (no model, an unavailable chosen one, a timeout, an error, an unreadable reply)
   asks, the level below, and never runs the call: a chosen model that is down does not
-  quietly hand the decision to the chat's. Each review is a `review` row in the usage ledger.
+  quietly hand the decision to the chat's. An argument longer than 20,000 characters asks
+  without a review, since what the reviewer cannot see whole it cannot clear. Each review is a `review` row in the usage ledger.
 - **Network grants** are `network_grants` rows: a `host:port`, for one chat or every chat of
   the person, with a flag when the approval card showed a private address. Approving
   `request_network_access` writes one and pushes the whole list to the person's machines,
@@ -276,14 +279,15 @@ holds `GET /api/machine/events` open for as long as the app runs, reconnecting w
   a disk root, the home folder itself, the app's own data, or holds or lies inside credentials
   (`folder-access.ts`), judged by where links lead. A folder may be attached read-only. The
   checks run again each time a VM is made (`stillMountable`): a folder since replaced by a link,
-  to credentials say, is left out, as the strip shows it moved.
+  to credentials say, is left out of the VM and of the names the model hears, and the strip,
+  which runs the same test, shows it moved.
 - **A folder is a use of the machine.** Folders are offered only where the chat's computer is
   this machine or none yet, and the first one binds a chat without a computer to it. A new chat
   has its id before its first message, so the machine holds a folder picked for it. The first
   message carries the names the composer shows, so its answer knows them; asking the machine
   would land after the answer had read the chat. Creating the chat from that machine's session
   still asks the machine, whose report has the last word. A draft never sent leaves a grant whose chat does not exist, which the machine's
-  check for gone chats removes on its next connect.
+  check for gone chats removes on its next start.
 
 ## A VM per chat
 

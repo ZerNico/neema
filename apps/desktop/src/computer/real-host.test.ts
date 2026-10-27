@@ -23,6 +23,8 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
   const hellos: unknown[] = [];
   const results = new Map<string, ToolResult>();
   const discarded: string[] = [];
+  const goneAsked: string[][] = [];
+  let goneAnswered: () => void = () => {};
   const reportedFolders: unknown[] = [];
   let folderReport: () => void = () => {};
   let discardedOne: () => void = () => {};
@@ -85,6 +87,8 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
       }
       if (request.url === "/api/machine/gone") {
         const { conversationIds } = (await body(request)) as { conversationIds: string[] };
+        goneAsked.push(conversationIds);
+        goneAnswered();
         response.end(
           JSON.stringify({ conversationIds: conversationIds.filter((id) => id === "purged") }),
         );
@@ -288,6 +292,16 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
     expect(answer.ok).toBe(false);
     expect(answer.detail).toMatch(/stopped/);
   }, 120_000);
+
+  test("a reconnect asks only about chats the server has shown exist, never a draft", async () => {
+    const asked = new Promise<void>((resolve) => (goneAnswered = resolve));
+    const before = goneAsked.length;
+    stream?.end();
+    await asked;
+    expect(goneAsked.length).toBe(before + 1);
+    // The chat that had calls, not one this machine only holds local data for.
+    expect(goneAsked.at(-1)).toEqual([CHAT]);
+  }, 60_000);
 
   test("time spent waiting behind the chat's earlier call counts against a command", async () => {
     const first = call("c-slow", "run_command", { command: "sleep 3" });
