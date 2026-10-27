@@ -2,7 +2,7 @@ import { getLocale } from "~/paraglide/runtime.js";
 import { m } from "~/paraglide/messages.js";
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { IntegrationToolActivity } from "~/modules/chat/client/use-message-stream.ts";
 import { ActivityChevron, ActivityFace, ActivityNote } from "~/modules/chat/ui/activity-face.tsx";
@@ -12,10 +12,8 @@ import {
   disclosureBodyRailClassName,
   disclosureTriggerClassName,
 } from "~/ui/disclosure-classes.ts";
-import { toastError } from "~/ui/error-toast.ts";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
-import { Card, CardContent } from "~/ui/primitives/card";
 import { cn } from "~/ui/utils";
 import { pendingIntegrationCallsQuery } from "../client/queries.ts";
 import {
@@ -23,16 +21,18 @@ import {
   type IntegrationDecision,
   type PendingIntegrationCall,
 } from "../schema.ts";
-import { decideIntegrationCall } from "../server/functions.ts";
 import { IntegrationLogo } from "./integration-logo.tsx";
 import { useIntegrationDirectory } from "../client/directory.ts";
 import { toolText } from "../tool-text.ts";
-import { ElicitationCard } from "./elicitation-card.tsx";
+import {
+  useDecideIntegrationCall,
+  useIntegrationCallNames,
+} from "../client/use-integration-call.ts";
 
 /**
  * One call into a connected service. While it runs it may be parked on the
- * person's decision; the card for that comes from the server's list of
- * waiting calls, so a reload or another tab shows the same question.
+ * person's decision, which is asked above the composer from the server's list
+ * of waiting calls, so a reload or another tab shows the same question.
  */
 export function IntegrationActivityBlock({ activity }: { activity: IntegrationToolActivity }) {
   const running = activity.status === "running";
@@ -93,12 +93,6 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
 
   return (
     <>
-      {asking ? (
-        // A new question starts a fresh form, never one filled in for the last.
-        <ElicitationCard key={asking.promptId} call={asking} name={name} />
-      ) : waiting ? (
-        <ApprovalCard call={waiting} name={name} label={toolLabel} />
-      ) : null}
       {!activity.error && !activity.link && !hiddenSummary ? (
         <div className={cn(activityRowClassName, "mb-2")} aria-label={`${name}: ${label}`}>
           {row}
@@ -151,90 +145,76 @@ export function IntegrationActivityBlock({ activity }: { activity: IntegrationTo
  * Pressable while the answer streams, because the generation is parked on it.
  * Nothing has happened in the service yet when this shows.
  */
-function ApprovalCard({
-  call,
-  name,
-  label,
-}: {
-  call: PendingIntegrationCall;
-  name: string;
-  label: string;
-}) {
-  const queryClient = useQueryClient();
-  const decide = useMutation({
-    mutationFn: (decision: IntegrationDecision) =>
-      decideIntegrationCall({ data: { callId: call.callId, decision } }),
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: pendingIntegrationCallsQuery.queryKey }),
-    onError: (error) => toastError(m.integrations_answer_send_error(), error),
-  });
+export function IntegrationApproval({ call }: { call: PendingIntegrationCall }) {
+  const { name, label } = useIntegrationCallNames(call);
+  const decide = useDecideIntegrationCall();
+  const choose = (decision: IntegrationDecision) =>
+    decide.mutate({ callId: call.callId, decision });
   const consequence = approvalConsequence(call, name, getLocale());
   return (
-    <Card className="mb-3 gap-0 py-4">
-      <CardContent className="flex min-w-0 flex-col gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <IntegrationLogo integrationId={call.integrationId} />
-          <span className="min-w-0 truncate">
-            {m.integrations_approval_question({ label, name })}
-          </span>
-        </div>
-        {call.inFull ? (
-          // The short list would have hidden something: everything, as it is sent.
-          <pre
-            aria-label={m.integrations_approval_everything()}
-            className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
-          >
-            {call.inFull}
-          </pre>
-        ) : call.details?.length ? (
-          // Every argument as sent, since a server's tool has no summary of its own.
-          <dl className="bg-muted grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl p-2 text-xs">
-            {call.details.map((entry) => (
-              <div key={entry.key} className="contents">
-                <dt className="text-muted-foreground font-mono">{entry.key}</dt>
-                <dd className="min-w-0 [overflow-wrap:anywhere]">
-                  {entry.value || m.integrations_approval_empty()}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        ) : call.summary ? (
-          <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">{call.summary}</p>
-        ) : null}
-        {call.targets.length > 0 ? (
-          <ul className="flex flex-wrap gap-1" aria-label={m.integrations_approval_recipients()}>
-            {call.targets.map((target) => (
-              <li key={target}>
-                <Badge variant="secondary">{target}</Badge>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <p className="text-muted-foreground text-xs">{consequence}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate("once")}>
-            {m.integrations_approval_allow()}
-          </Button>
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+        <IntegrationLogo integrationId={call.integrationId} />
+        <span className="min-w-0 truncate">
+          {m.integrations_approval_question({ label, name })}
+        </span>
+      </div>
+      {call.inFull ? (
+        // The short list would have hidden something: everything, as it is sent.
+        <pre
+          aria-label={m.integrations_approval_everything()}
+          className="bg-muted max-h-64 overflow-auto rounded-xl p-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
+        >
+          {call.inFull}
+        </pre>
+      ) : call.details?.length ? (
+        // Every argument as sent, since a server's tool has no summary of its own.
+        <dl className="bg-muted grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl p-2 text-xs">
+          {call.details.map((entry) => (
+            <div key={entry.key} className="contents">
+              <dt className="text-muted-foreground font-mono">{entry.key}</dt>
+              <dd className="min-w-0 [overflow-wrap:anywhere]">
+                {entry.value || m.integrations_approval_empty()}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : call.summary ? (
+        <p className="bg-muted rounded-xl p-2 text-xs [overflow-wrap:anywhere]">{call.summary}</p>
+      ) : null}
+      {call.targets.length > 0 ? (
+        <ul className="flex flex-wrap gap-1" aria-label={m.integrations_approval_recipients()}>
+          {call.targets.map((target) => (
+            <li key={target}>
+              <Badge variant="secondary">{target}</Badge>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="text-muted-foreground text-xs">{consequence}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={decide.isPending} onClick={() => choose("once")}>
+          {m.integrations_approval_allow()}
+        </Button>
+        {call.access !== "destructive" ? (
           <Button
             size="sm"
             variant="outline"
             disabled={decide.isPending}
-            onClick={() => decide.mutate("deny")}
+            onClick={() => choose("conversation")}
           >
-            {m.integrations_approval_deny()}
+            {m.integrations_approval_always()}
           </Button>
-          {call.access !== "destructive" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={decide.isPending}
-              onClick={() => decide.mutate("conversation")}
-            >
-              {m.integrations_approval_always()}
-            </Button>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+        ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={decide.isPending}
+          onClick={() => choose("deny")}
+        >
+          {m.integrations_approval_deny()}
+        </Button>
+      </div>
+    </div>
   );
 }

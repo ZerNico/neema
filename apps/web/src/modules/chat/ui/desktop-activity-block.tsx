@@ -29,7 +29,6 @@ import {
 import { deletePathsOf, stringArg as text } from "~/modules/desktop/tool-schema.ts";
 import { useLocalFilePreview } from "~/modules/desktop/ui/use-local-file-preview.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Card, CardContent } from "~/ui/card.tsx";
 import { Disclosure, DisclosureContent, DisclosureTrigger } from "~/ui/disclosure.tsx";
 import {
   disclosureBodyRailClassName,
@@ -377,22 +376,24 @@ export interface DesktopApprovalRequest {
 }
 
 /**
- * Asks before the machine is changed.
+ * Asks before the machine is changed, in the composer's dock.
  *
- * Unlike the clarification card this one is pressable while the message is
- * still streaming, because the generation is parked on the answer rather than
+ * Unlike a clarification this one is pressable while the message is still
+ * streaming, because the generation is parked on the answer rather than
  * finished by it. Nothing has happened yet when this renders: the page holds
  * the call, so declining means the work is simply never done.
  */
-function ApprovalCard({
-  activity,
+export function DesktopApproval({
+  activity: given,
   approval,
-  roots,
+  roots = EMPTY_ROOTS,
 }: {
   activity: DesktopToolActivity;
   approval: DesktopApprovalRequest;
-  roots: ReadonlyArray<{ name: string; path: string }>;
+  roots?: ReadonlyArray<{ name: string; path: string }> | undefined;
 }) {
+  // The live call's arguments may hold what the transcript never stores.
+  const activity = approval.args ? { ...given, args: { ...approval.args } } : given;
   const here = useLocalMachineId();
   const listed = activity.name === "delete_files" ? deletePathsOf(activity.args) : [];
   // A site question may come from a click: the address is what is asked about.
@@ -403,68 +404,65 @@ function ApprovalCard({
         ? ""
         : argText(activity);
   return (
-    // Same rhythm as the clarification card: py-4 on the shell, px-4 inside.
-    <Card className="mb-3 gap-0 py-4">
-      <CardContent className="flex min-w-0 flex-col gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <HugeiconsIcon
-            icon={iconOf(activity.name)}
-            strokeWidth={2}
-            className="size-4 shrink-0"
-            aria-hidden
-          />
-          <span className="min-w-0 truncate">
-            {approvalTitle(activity, approval.kind, roots, approval.machine)}
-          </span>
-        </div>
-        {/* Which machine it runs on, when not the one the reader is at: "this computer" in the
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+        <HugeiconsIcon
+          icon={iconOf(activity.name)}
+          strokeWidth={2}
+          className="size-4 shrink-0"
+          aria-hidden
+        />
+        <span className="min-w-0 truncate">
+          {approvalTitle(activity, approval.kind, roots, approval.machine)}
+        </span>
+      </div>
+      {/* Which machine it runs on, when not the one the reader is at: "this computer" in the
             title would be wrong there, as on a card asked again after the chat moved. */}
-        {approval.machine && approval.kind !== "bind" && approval.machineId !== here ? (
-          <p className="text-muted-foreground text-xs">
-            {m.chat_desktop_ask_on({ machine: approval.machine })}
-          </p>
-        ) : null}
-        {approval.reason ? (
-          <p className="text-muted-foreground text-xs">
-            {m.chat_desktop_review_reason({ reason: approval.reason })}
-          </p>
-        ) : null}
-        {approval.kind === "bind" ? (
-          <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
-        ) : listed.length > 1 ? (
-          <DeletePathList paths={listed} roots={roots} />
-        ) : what ? (
-          <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
-            {what}
-          </pre>
-        ) : null}
-        {approval.kind === "site" ? (
-          <ScopeChoices
-            decide={approval.decide}
-            once={m.chat_desktop_allow_once()}
-            note={m.chat_desktop_always_note()}
-          />
-        ) : approval.kind === "network" ? (
-          <ScopeChoices decide={approval.decide} note={m.chat_computer_network_note()} />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => approval.decide("allow")}>
-              {m.chat_desktop_allow()}
-            </Button>
-            {/* Deletes are always asked about one by one. The title says which kind the chat
+      {approval.machine && approval.kind !== "bind" && approval.machineId !== here ? (
+        <p className="text-muted-foreground text-xs">
+          {m.chat_desktop_ask_on({ machine: approval.machine })}
+        </p>
+      ) : null}
+      {approval.reason ? (
+        <p className="text-muted-foreground text-xs">
+          {m.chat_desktop_review_reason({ reason: approval.reason })}
+        </p>
+      ) : null}
+      {approval.kind === "bind" ? (
+        <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
+      ) : listed.length > 1 ? (
+        <DeletePathList paths={listed} roots={roots} />
+      ) : what ? (
+        <pre className="bg-muted max-h-48 min-w-0 max-w-full overflow-auto rounded-xl p-2 text-xs break-all whitespace-pre-wrap">
+          {what}
+        </pre>
+      ) : null}
+      {approval.kind === "site" ? (
+        <ScopeChoices
+          decide={approval.decide}
+          once={m.chat_desktop_allow_once()}
+          note={m.chat_desktop_always_note()}
+        />
+      ) : approval.kind === "network" ? (
+        <ScopeChoices decide={approval.decide} note={m.chat_computer_network_note()} />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => approval.decide("allow")}>
+            {m.chat_desktop_allow()}
+          </Button>
+          {/* Deletes are always asked about one by one. The title says which kind the chat
                 is allowed, so the button needn't. */}
-            {allowsBlanket(approval.kind) ? (
-              <Button size="sm" variant="outline" onClick={() => approval.decide("allow-rest")}>
-                {m.chat_desktop_allow_chat()}
-              </Button>
-            ) : null}
-            <Button size="sm" variant="ghost" onClick={() => approval.decide("deny")}>
-              {m.chat_desktop_deny()}
+          {allowsBlanket(approval.kind) ? (
+            <Button size="sm" variant="outline" onClick={() => approval.decide("allow-rest")}>
+              {m.chat_desktop_allow_chat()}
             </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => approval.decide("deny")}>
+            {m.chat_desktop_deny()}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -489,13 +487,16 @@ export function DesktopActivityBlock({
   // Null in a browser or on another machine, which keeps the chat readable there
   // without offering files it cannot reach. Nothing is read until this is called.
   const preview = useLocalFilePreview(previewablePath(activity));
+  // The question itself is asked above the composer; the row only says what waits.
   if (running && approval)
     return (
-      <ApprovalCard
-        activity={approval.args ? { ...activity, args: { ...approval.args } } : activity}
-        approval={approval}
-        roots={roots}
-      />
+      <div className={cn(activityRowClassName, "mb-2")}>
+        <ActivityFace
+          icon={iconOf(activity.name)}
+          label={approvalTitle(activity, approval.kind, roots, approval.machine)}
+          status="waiting"
+        />
+      </div>
     );
   // A browser result's detail is written for the model (tab handles, outlines,
   // what to call next); its line already says what happened to the page.

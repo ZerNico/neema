@@ -411,3 +411,18 @@ not catch:
   says "Waiting for you", whatever it was collapsed to: a decision is never folded away. A
   document delivered while the answer streams opens in the panel by itself; reloading opens
   nothing.
+- Whatever waits on the person is what the composer turns into, not a card in the transcript:
+  approvals and a service's questions (`approval-dock.tsx`) while the answer is parked on them,
+  then an open `ask_user` (`question-dock.tsx`), one question at a time with Back. The shell and
+  its bar stay: the field and the tools that only reach the next message give way, the model and
+  effort remain (an answer is sent with them), Stop stays the composer's own button, and the
+  cover's buttons go beside it. The draft stays mounted and hidden (`cover`), so it, its files and
+  toggles come back unchanged; a structured answer never reads them.
+  The field's height morphs only when the cover changes (`HeightMorph`), never while typing.
+  `useComposerDock` reads both from the rows the transcript draws and the server's waiting calls,
+  so the stream, a reload and another tab ask the same; the transcript keeps a waiting row, the
+  answered questions and their editing. Approvals cannot be put aside, since the run can do
+  nothing else; a question can, and a plain message then answers past it. The dock takes focus
+  only when covering the composer took it, and never on a button, so an Enter meant for the draft
+  allows nothing. "Allow all" is offered only for the same tool, never for deletes, sites,
+  network, binding or calls that contact people.

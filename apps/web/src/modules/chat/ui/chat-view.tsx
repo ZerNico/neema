@@ -19,6 +19,11 @@ import { projectCan } from "~/modules/projects/schema.ts";
 import { WritableChatProjectProvider } from "~/modules/projects/ui/save-to-project.tsx";
 import { ScheduleDraftOwner } from "~/modules/schedules/ui/schedule-draft-owner.tsx";
 import { PendingButton } from "~/ui/pending-button.tsx";
+import { Button } from "~/ui/primitives/button";
+import { AnimatePresence } from "motion/react";
+import * as motion from "motion/react-m";
+import { collapseMotion } from "~/ui/motion-presets.ts";
+import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { useDocumentTitle } from "~/ui/use-document-title.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
 import { conversationHistoryQuery, conversationQuery } from "../client/queries.ts";
@@ -35,6 +40,10 @@ import { SourcesPanelOwner } from "./sources-panel-owner.tsx";
 import { useAttemptMutations } from "./use-attempt-mutations.ts";
 import { useChatArtifacts } from "./use-chat-artifacts.ts";
 import { useChatDisplay } from "./use-chat-display.ts";
+import { ApprovalDock } from "./approval-dock.tsx";
+import { focusIsLost } from "./focus-lost.ts";
+import { QuestionDock } from "./question-dock.tsx";
+import { useComposerDock } from "./use-composer-dock.ts";
 import { useContextSelection } from "./use-context-selection.ts";
 import { useConversationQueue } from "./use-conversation-queue.ts";
 import { useLiveAnswer } from "./use-live-answer.ts";
@@ -276,7 +285,7 @@ export function ChatView({
     },
   });
 
-  const { display, withPlacedCards, fileReferences } = useChatDisplay({
+  const { display, withPlacedCards, fileReferences, approvalRequests } = useChatDisplay({
     conversationId,
     data,
     rows,
@@ -295,6 +304,50 @@ export function ChatView({
     scheduleDraftIds,
     documentIds,
   });
+
+  const stop = stoppableId
+    ? () =>
+        stopMutation.mutate({
+          messageId: stoppableId,
+          ...(streamingMessage?.generationId
+            ? { generationId: streamingMessage.generationId }
+            : {}),
+        })
+    : undefined;
+  // Approvals block a running answer, so they come first and cannot be put aside.
+  // A question can: the composer comes back and a plain message answers past it.
+  const dock = useComposerDock({ conversationId, display, approvalRequests });
+  const question = dock.question;
+  const [dismissedQuestion, setDismissedQuestion] = useState<string | null>(null);
+  const respond = attempts.respondToQuestion;
+  const cover =
+    dock.approvals.length > 0
+      ? { shown: true, id: "approvals", render: () => <ApprovalDock items={dock.approvals} /> }
+      : question
+        ? {
+            shown: dismissedQuestion !== question.callId,
+            id: question.callId,
+            render: (actions: HTMLElement | null) => (
+              <QuestionDock
+                key={question.callId}
+                activity={question}
+                onRespond={respond}
+                onDismiss={() => setDismissedQuestion(question.callId)}
+                open={dismissedQuestion !== question.callId}
+                disabled={generationDisabled || !effectiveModelId}
+                actions={actions}
+              />
+            ),
+          }
+        : undefined;
+  // Once the dock goes, the caret goes back to the draft it covered.
+  const covered = cover?.shown === true;
+  const waitingCollapse = collapseMotion(useAppReducedMotion());
+  const wasCovered = useRef(covered);
+  useEffect(() => {
+    if (wasCovered.current && !covered && !isMobile && focusIsLost()) composer.current?.focus();
+    wasCovered.current = covered;
+  }, [covered, isMobile]);
 
   return (
     <DocumentOwner
@@ -385,8 +438,25 @@ export function ChatView({
                     </PendingButton>
                   </div>
                 ) : null}
+                <AnimatePresence initial={false}>
+                  {question && !covered && dock.approvals.length === 0 ? (
+                    <motion.div key="question-waiting" {...waitingCollapse}>
+                      <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span>{m.chat_ask_waiting_strip()}</span>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setDismissedQuestion(null)}
+                        >
+                          {m.chat_ask_answer()}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
                 <Composer
                   ref={composer}
+                  cover={cover}
                   integrations={integrations}
                   folders={folders}
                   onSend={(content, attachmentIds, researchEnabled, skillIds) =>
@@ -399,17 +469,7 @@ export function ChatView({
                   }
                   {...(generating ? { onQueue: conversationQueue.submit } : {})}
                   queue={conversationQueue.queue}
-                  {...(stoppableId
-                    ? {
-                        onStop: () =>
-                          stopMutation.mutate({
-                            messageId: stoppableId,
-                            ...(streamingMessage?.generationId
-                              ? { generationId: streamingMessage.generationId }
-                              : {}),
-                          }),
-                      }
-                    : {})}
+                  {...(stop ? { onStop: stop } : {})}
                   // A live answer locks destructive transcript actions, not the
                   // next draft. The composer submits that draft to the queue.
                   disabled={

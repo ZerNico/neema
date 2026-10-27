@@ -1,6 +1,6 @@
 import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "~/ui/utils";
 import { useAppReducedMotion } from "./reduced-motion.ts";
@@ -109,5 +109,70 @@ export function MotionSwap({
         {children}
       </m.span>
     </span>
+  );
+}
+
+/**
+ * Grows or shrinks to its content when `swap` changes, and only then: typing a
+ * longer draft must not lag behind an animation. The last resting height is the
+ * start, read before the browser paints the new content at its own height.
+ */
+export function HeightMorph({
+  swap,
+  children,
+  className,
+}: {
+  swap: string | number | boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const resting = useRef(0);
+  const latest = useRef<Animation | null>(null);
+  const reduced = useAppReducedMotion();
+  const previous = useRef(swap);
+
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!element.getAnimations().length) resting.current = element.offsetHeight;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (previous.current === swap) return;
+    previous.current = swap;
+    if (!element || reduced || typeof element.animate !== "function") return;
+    // Mid-morph, a new swap starts from where the box is now, not where it last rested.
+    const running = element.getAnimations();
+    const from = running.length ? element.getBoundingClientRect().height : resting.current;
+    running.forEach((animation) => animation.cancel());
+    const to = element.offsetHeight;
+    if (!from || Math.abs(from - to) < 1) return;
+    const morph = element.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+      duration: 240,
+      easing: `cubic-bezier(${motionEase.join(",")})`,
+    });
+    // Clipped only while it moves: at rest a popover or focus ring may cross the edge.
+    element.style.overflow = "hidden";
+    latest.current = morph;
+    // Only the newest morph settles: a cancelled one rejects `finished` after its
+    // successor started, and must neither unclip it nor record a passing height.
+    const settle = () => {
+      if (latest.current !== morph) return;
+      element.style.overflow = "";
+      resting.current = element.offsetHeight;
+    };
+    morph.finished.then(settle, settle);
+  }, [swap, reduced]);
+
+  return (
+    <div ref={box} className={className}>
+      {children}
+    </div>
   );
 }

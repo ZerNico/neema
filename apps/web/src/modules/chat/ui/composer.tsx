@@ -8,7 +8,15 @@ import { skillsQuery } from "~/modules/skills/client/queries.ts";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
 import { AnimatePresence } from "motion/react";
 import * as motion from "motion/react-m";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { collapseMotion } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { ChatInput, type ImageModelChoice } from "./chat-input.tsx";
@@ -97,6 +105,16 @@ interface ComposerProps {
   integrations?: ComposerIntegrations | undefined;
   /** The chat's folders on this machine; see `useComposerFolders`. */
   folders?: ComposerFolders | undefined;
+  /**
+   * What the composer turns into, such as a question or an approval: it takes the
+   * field's place inside the same shell, whose bar keeps the model and Stop. The
+   * draft stays mounted and hidden, so it, its files and its toggles come back as
+   * they were. Mounted while present, shown while
+   * `shown`; `actions` is where its buttons go, beside Stop.
+   */
+  cover?:
+    | { shown: boolean; id: string; render: (actions: HTMLElement | null) => ReactNode }
+    | undefined;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
@@ -119,6 +137,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     initialSkillId,
     integrations,
     folders,
+    cover,
   },
   ref,
 ) {
@@ -317,10 +336,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     });
   };
 
+  const covered = cover?.shown === true;
   return (
     <div className="flex flex-col">
       <AnimatePresence initial={false}>
-        {queue && queue.entries.length > 0 ? (
+        {/* Its actions put text into the draft, which the cover holds aside. */}
+        {queue && queue.entries.length > 0 && !covered ? (
           <motion.div key="queue" {...queueCollapse}>
             <QueueStrip
               entries={queue.entries}
@@ -381,6 +402,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         {...(capabilities?.attachments ? { attachments } : {})}
         {...(context && (capabilities?.agentsUse || capabilities?.knowledgeUse) ? { context } : {})}
         {...(integrations ? { integrations } : {})}
+        cover={
+          cover && {
+            shown: covered,
+            id: cover.id,
+            render: cover.render,
+          }
+        }
       />
       {/* Under the composer and inset, so it reads as part of it. */}
       {folders ? <FolderStrip folders={folders} disabled={controlsDisabled ?? disabled} /> : null}
