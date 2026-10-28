@@ -118,6 +118,11 @@ vision model and not stored, like the browser's screenshots, unless the model sh
   already shows what it does in the app itself. A page is told of, and may steer, only the
   chats it asked about, which are its person's own: one that loads afresh, perhaps for another
   person, starts with none, and what its server's chats showed ends.
+- **The menu bar says it too.** neema's tray item names the apps in use beside its icon and
+  lists each chat's line with Pause or Resume at the top of its menu, as Codex keeps a status
+  item, so the person can stop it with neema's window out of sight. It lists the connected
+  server's chats in use or paused, not only those a page asked about: it is the Mac's own, and
+  whoever sits there sees the apps move anyway. A paused chat stays listed until resumed.
 - **The picture comes from the driver, for the chat whose look it holds.** `peek` copies the
   looked window from the window server, as PNG so rounded corners stay clear: about 15 ms, and
   nothing goes out while the window sits still. The driver pictures whatever was looked at
@@ -272,6 +277,6 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
    12,000-character budget).
 3. Done: the permission guide. Left: proving with a packaged build that a list accepts the
    dropped bundle, and asking for the direct-capture approval in the same step.
-4. Done: the live view in the chat's panel, Pause, neema's cursor and the
+4. Done: the live view in the chat's panel, Pause there and in the menu bar, neema's cursor and the
    person's input winning. Left: a global shortcut.
 5. The Windows driver on the same protocol.

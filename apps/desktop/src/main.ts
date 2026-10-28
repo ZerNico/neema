@@ -78,6 +78,7 @@ import { computerDialogs } from "./computer/dialogs.ts";
 import { SharedAppDriver } from "./app-use/host.ts";
 import { chatKey, parseChatKey } from "./app-use/chat-key.ts";
 import { LiveView } from "./app-use/live.ts";
+import { appUseStatus } from "./app-use/status.ts";
 import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
@@ -153,6 +154,17 @@ const onPage = <S extends Schema.Decoder<unknown>>(
 const isConnectSender = (event: IpcMainInvokeEvent) =>
   isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
 let tray: Tray | undefined;
+/** The tray's own items, below what app use adds at the top. */
+let trayActions: MenuItemConstructorOptions[] = [];
+let trayAppUse = "";
+/** Shows app use on the tray, rebuilding its menu only when what it shows changed. */
+const showAppUse = () => {
+  const status = appUseStatus(liveApps, serverOrigin);
+  if (!tray || status.signature === trayAppUse) return;
+  trayAppUse = status.signature;
+  if (process.platform === "darwin") tray.setTitle(status.title);
+  tray.setContextMenu(Menu.buildFromTemplate([...status.items, ...trayActions]));
+};
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
@@ -262,6 +274,7 @@ liveApps.subscribe((chat) => {
   )
     mainWindow.webContents.send(APP_USE_UPDATE, update);
 });
+liveApps.subscribe(showAppUse);
 const stopComputer = async () => {
   const current = computer;
   computer = null;
@@ -555,6 +568,8 @@ const connectFlow = makeConnectFlow({
     sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
     startComputer(origin);
+    // Another server: the tray shows its chats, not the last one's.
+    showAppUse();
   },
   closeMain: () => {
     const window = mainWindow;
@@ -797,6 +812,7 @@ void app.whenReady().then(async () => {
       : nativeImage.createFromPath(appIconFile).resize({ width: 32, height: 32 }),
   );
   tray.setToolTip("neema");
+  trayActions = actions;
   tray.setContextMenu(Menu.buildFromTemplate(actions));
   tray.on("click", restoreWindow);
 

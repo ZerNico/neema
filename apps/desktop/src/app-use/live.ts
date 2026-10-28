@@ -205,6 +205,16 @@ export class LiveView implements AppWatch {
     this.readLocale(origin);
   }
 
+  /**
+   * A server's chats using apps now or held by Pause, for the menu bar. Not only those its page
+   * asked about: the menu is the Mac's own, and whoever sits at it sees the apps move anyway.
+   */
+  using(origin: string): AppUseUpdate[] {
+    return [...this.chats.values()]
+      .filter((chat) => chat.scope === origin && (chat.live || chat.paused))
+      .map((chat) => this.update(chat.key)!);
+  }
+
   /** Paused, the chat's next calls are refused until it is resumed; see `begin`. */
   pause(key: string, paused: boolean) {
     const chat = this.chat(key);
@@ -213,15 +223,16 @@ export class LiveView implements AppWatch {
     this.notify(chat.key);
   }
 
+  /** A server's language as last read, for words written about its chats. */
+  locale(origin: string): Locale {
+    return this.locales.get(origin) ?? "en";
+  }
+
   close() {
     this.closed = true;
     clearTimeout(this.timer);
     for (const chat of this.chats.values()) clearTimeout(chat.linger);
     this.listeners.clear();
-  }
-
-  private locale(origin: string): Locale {
-    return this.locales.get(origin) ?? "en";
   }
 
   private chat(key: string): Chat | null {
