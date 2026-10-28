@@ -7,6 +7,7 @@ import { Schema } from "effect";
  */
 export const APP_USE_UPDATE = "chat-desktop:app-use-update" as const;
 export const APP_USE_OPEN_CHAT = "chat-desktop:app-use-open-chat" as const;
+export const APP_USE_TAKE_OPEN_CHAT = "chat-desktop:app-use-take-open-chat" as const;
 export const APP_USE_STATE = "chat-desktop:app-use-state" as const;
 export const APP_USE_PAUSE = "chat-desktop:app-use-pause" as const;
 export const APP_USE_PLACE = "chat-desktop:app-use-place" as const;
@@ -38,8 +39,10 @@ export interface AppUseUpdate {
   readonly spell: number;
   /** The app as macOS names it, or as the model asked for it until resolved. */
   readonly app: string;
-  /** The call running now, for its label; null between calls. */
-  readonly call: { readonly name: string; readonly args: Readonly<Record<string, unknown>> } | null;
+  /** What is happening, in the person's language: the one line both views show. */
+  readonly label: string;
+  /** A call is acting in the app right now. */
+  readonly busy: boolean;
   /** Calls are coming: one runs, or the last ended moments ago. */
   readonly live: boolean;
   readonly paused: boolean;
@@ -54,8 +57,13 @@ export interface DesktopAppUse {
   /** The chat's view as it is now; null when it has never used an app on this machine. */
   state(conversationId: string): Promise<AppUseUpdate | null>;
   onUpdate(listener: (update: AppUseUpdate) => void): () => void;
-  /** The floating window asks to show a chat in the main window, on its panel tab. */
-  onOpenChat(listener: (conversationId: string) => void): () => void;
+  /** The floating window asked for a chat; `takeOpenChat` says which. */
+  onOpenChat(listener: () => void): () => void;
+  /**
+   * The chat the floating window asked to show in the main window, once: a page that was still
+   * loading when it asked takes it when it is ready.
+   */
+  takeOpenChat(): Promise<string | null>;
   /** Paused, the chat's next app calls are refused until resumed. */
   pause(conversationId: string, paused: boolean): Promise<void>;
   place(conversationId: string, placement: AppUsePlacement): Promise<void>;
@@ -70,6 +78,7 @@ export function readDesktopAppUse(): DesktopAppUse | null {
     typeof appUse.state !== "function" ||
     typeof appUse.onUpdate !== "function" ||
     typeof appUse.onOpenChat !== "function" ||
+    typeof appUse.takeOpenChat !== "function" ||
     typeof appUse.pause !== "function" ||
     typeof appUse.place !== "function"
   )

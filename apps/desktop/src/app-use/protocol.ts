@@ -135,6 +135,7 @@ export const DriverErrorCode = Schema.Literals([
   "action_failed",
   "window_not_key",
   "screen_locked",
+  "person_active",
   "capture_failed",
   "failed",
 ]);
@@ -173,10 +174,7 @@ export const Methods = {
   /** A small PNG of the window last looked at, for the person's live view. */
   peek: {
     params: Schema.Struct({}),
-    result: Schema.Struct({
-      ...Picture.fields,
-      window: Schema.Struct({ width: Schema.Number, height: Schema.Number }),
-    }),
+    result: Picture,
   },
   /** A plain left click on a node that can be pressed is an accessibility press, no pointer. */
   click: {

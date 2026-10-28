@@ -45,6 +45,7 @@ test("a machine without a driver says app use is not available", async () => {
 test("a chat the person paused uses no app until they resume", async () => {
   const paused = new Set(["https://chat.example\u0000chat-1"]);
   const started: string[] = [];
+  const finished: string[] = [];
   const apps = new AppUse({
     driver: new SharedAppDriver("/nonexistent/driver"),
     scope: "https://chat.example",
@@ -53,17 +54,23 @@ test("a chat the person paused uses no app until they resume", async () => {
     explainPermissions: async () => {},
     log: () => {},
     watch: {
-      started: (chat) => started.push(chat),
+      begin: (chat) => {
+        if (paused.has(chat)) return false;
+        started.push(chat);
+        return true;
+      },
       named: () => {},
       clicked: () => {},
-      finished: () => {},
-      paused: (chat) => paused.has(chat),
+      yielded: () => {},
+      finished: (chat) => finished.push(chat),
       forget: (chat) => paused.delete(chat),
     },
   });
   const result = await apps.run(call("app_click", { app: "Calculator", ref: "e1" }));
   expect(result).toMatchObject({ ok: false, summary: "Paused by the user" });
+  // Refused before it began, so the view never counts it as running.
   expect(started).toEqual([]);
+  expect(finished).toEqual([]);
 });
 
 test("the display stays on through app calls and a while after the last", async () => {

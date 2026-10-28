@@ -5,6 +5,7 @@ import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
   APP_USE_OPEN_CHAT,
+  APP_USE_TAKE_OPEN_CHAT,
   BROWSER_ALLOW_SITE,
   BROWSER_ACT,
   BROWSER_BEGIN,
@@ -202,19 +203,20 @@ describe("restricted bundled preloads", () => {
   });
 
   it.runIf(process.platform === "darwin")(
-    "hands the page app use's chats to open as strings only, until unsubscribed",
-    () => {
+    "signals the page to take a chat to open, and asks main which, never the event",
+    async () => {
       const { exposed, ipc } = probe("preload.ts", "https:");
       const appUse = exposed.get("__chatDesktop")!.appUse as DesktopAppUse;
       const listener = vi.fn();
       const unsubscribe = appUse.onOpenChat(listener);
-      const electronEvent = { sender: { privileged: true } };
-      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, { conversationId: "object" });
-      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, "c1");
-      expect(listener).toHaveBeenCalledExactlyOnceWith("c1");
+      ipc.emit(APP_USE_OPEN_CHAT, { sender: { privileged: true } }, "forged");
+      expect(listener).toHaveBeenCalledExactlyOnceWith();
       unsubscribe();
-      ipc.emit(APP_USE_OPEN_CHAT, electronEvent, "c2");
+      ipc.emit(APP_USE_OPEN_CHAT, { sender: { privileged: true } });
       expect(listener).toHaveBeenCalledTimes(1);
+      ipc.invoke.mockResolvedValueOnce("c1");
+      await expect(appUse.takeOpenChat()).resolves.toBe("c1");
+      expect(ipc.invoke).toHaveBeenLastCalledWith(APP_USE_TAKE_OPEN_CHAT);
     },
   );
 

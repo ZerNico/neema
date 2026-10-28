@@ -891,6 +891,7 @@
   "app_running_drag": "Ziehe in {app}",
   "app_running_zoom": "Sehe mir {app} genauer an",
   "app_view_stop": "Stoppen",
+  "app_view_yielding": "Wartet, während du {app} verwendest",
   "app_view_tab": "Apps",
   "app_view_title": "neema verwendet {app}",
   "app_view_pause": "Pausieren",

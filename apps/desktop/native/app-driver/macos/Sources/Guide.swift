@@ -170,8 +170,7 @@ final class PermissionGuide {
     close("closed")
     return await withCheckedContinuation { continuation in
       finish = { continuation.resume(returning: $0) }
-      // Windows need an app that may show them; the driver goes back to none afterwards.
-      NSApplication.shared.setActivationPolicy(.accessory)
+      Shown.hold()
       NSWorkspace.shared.open(permission.pane)
       // A running Settings is not raised by its link alone.
       NSRunningApplication.runningApplications(withBundleIdentifier: settingsBundleId).first?
@@ -199,7 +198,7 @@ final class PermissionGuide {
     panel = nil
     if let finish {
       self.finish = nil
-      NSApplication.shared.setActivationPolicy(.prohibited)
+      Shown.release()
       finish(outcome)
     }
   }

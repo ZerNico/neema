@@ -4,6 +4,7 @@ import {
   APP_USE_PAUSE,
   APP_USE_PLACE,
   APP_USE_STATE,
+  APP_USE_TAKE_OPEN_CHAT,
   APP_USE_UPDATE,
   type AppUseUpdate,
   type DesktopAppUse,
@@ -21,15 +22,15 @@ export const makeAppUseBridge = (
       ipc.removeListener(APP_USE_UPDATE, receive);
     };
   },
+  // Only a signal: which chat is asked of main, so nothing the event carries is trusted.
   onOpenChat: (listener) => {
-    const receive = (_event: unknown, conversationId: unknown) => {
-      if (typeof conversationId === "string") listener(conversationId);
-    };
+    const receive = () => listener();
     ipc.on(APP_USE_OPEN_CHAT, receive);
     return () => {
       ipc.removeListener(APP_USE_OPEN_CHAT, receive);
     };
   },
+  takeOpenChat: () => ipc.invoke(APP_USE_TAKE_OPEN_CHAT),
   pause: (conversationId, paused) => ipc.invoke(APP_USE_PAUSE, { conversationId, paused }),
   place: (conversationId, placement) => ipc.invoke(APP_USE_PLACE, { conversationId, placement }),
 });

@@ -1,6 +1,6 @@
 # Using the person's apps
 
-Planned. A chat may operate apps on the person's own machine: look at one app's window, click,
+A chat may operate apps on the person's own machine: look at one app's window, click,
 type, scroll. It is the one feature that acts outside the chat's VM, so what it may touch is
 narrow and the person sees and can stop everything it does. Web pages are the embedded
 browser's ([browser](browser.md)), and commands and files the chat's computer's
@@ -28,9 +28,10 @@ included, and the tools can do better than pixels:
   look, which is reliable, cheap and works in the background, or a coordinate on that look's
   screenshot, for canvases, games and apps whose accessibility is thin. The model sees both
   in one look and picks per element. A reference stays with its element from look to look
-  within a chat's use of one app, known by role, name and place: the model sends several
-  actions on one look in a round, and each action looks again. An element that changed gets a
-  new reference, so an old one is refused rather than meaning another.
+  within a chat, known by app, role, name and place and, for elements alike, their order: the model
+  sends several actions on one look in a round, and each action looks again. An element that
+  changed or went, or one of another app, gets a new reference, so an old one is refused rather
+  than meaning another.
 - **Precision without a bigger picture.** `app_zoom` returns part of the last look at full
   resolution. Screenshots stay at most 1280 px on the long edge, and the desktop app maps
   coordinates back to the real window.
@@ -108,26 +109,46 @@ vision model and not stored, like the browser's screenshots, unless the model sh
 
 ## The person stays in control
 
-- **A live view in the chat.** While a chat uses an app, its panel gets a tab named after the
-  app (`AppViewOwner`): the app's window a few times a second, what is happening in the
-  rows' own words ("Clicking in Calculator"), a ring where it last clicked, Pause, and the
-  answer's Stop. It opens once per spell of app use, comes back unselected when the person
-  returns to the chat, and stays closed once they close it, as Codex keeps its view in the
-  chat's side panel.
-- **A floating window when the chat is out of sight.** The person can move the view to a
-  small window above every app, and it goes there by itself while neema's own window is
-  minimized or hidden, as Codex's picture in picture comes up on minimize. It never takes
-  focus; it takes the view back into the chat, or hides until the next spell.
-- **The picture comes from the driver.** `peek` copies the looked window from the window
-  server, as PNG so rounded corners stay clear: about 15 ms, and nothing goes out while the
-  window sits still. Capturing it a second time from neema's own process would risk the stall
-  two capturers of one identity cause (see the drivers). Codex's helper likewise captures and
-  hands frames to its app.
-- **Pause is per chat.** A paused chat's next app calls are refused with words telling the
-  model to stop and ask; Resume lifts it. The call already running finishes.
-- **Not yet: its own cursor over the app, and the person's input winning.** Codex draws an agent
-  cursor over the app and watches physical input only around its lock screen; a global
-  shortcut and pausing on the person's own keys and clicks are still to come.
+- **One live view, two places to show it.** `LiveView` in main keeps each chat's view: the
+  line both places show, in the chat's language and the rows' words ("Clicking in
+  Calculator"), the last picture and a ring where it last clicked. The chat's page draws it on
+  a panel tab named after the app (`AppViewOwner`), with Pause and the answer's Stop; it opens
+  once per spell of app use, comes back unselected when the person returns to the chat, and
+  stays closed once they close it, as Codex keeps its view in the chat's side panel.
+  `FloatingView` draws it in a small window above every app, where the person can move it and
+  where it goes by itself while neema's window is minimized or hidden, as Codex's picture in
+  picture comes up on minimize. It never takes focus, shows the connected server's chats only
+  and keeps the chat it shows while it may, and each press names the chat it was meant for.
+  Sending the person back into a chat is a pull: the page asks main which chat, so a page still
+  loading when the ask came takes it when ready. A page is told of, and may steer, only the chats
+  it asked about, which are its person's own: one that loads afresh, perhaps for another person,
+  starts with none, and what its server's chats showed ends. So a chat never opened in this page,
+  a schedule's say, does not float by itself.
+- **The picture comes from the driver, for the chat whose look it holds.** `peek` copies the
+  looked window from the window server, as PNG so rounded corners stay clear: about 15 ms, and
+  nothing goes out while the window sits still. The driver pictures whatever was looked at
+  last, whoever asked, so `LiveView` gives a picture only to the chat holding the look and
+  drops one that comes back after the look changed hands; it never starts a driver to take
+  one. Capturing a second time from neema's own process would risk the stall two capturers of
+  one identity cause (see the drivers). Codex's helper likewise captures and hands frames on.
+- **Pause is per chat.** A paused chat's next app calls are refused, telling the model the
+  person must press Resume in neema; only Resume lifts it, not words in the chat. Each refused
+  call starts a spell, so the view comes back with Resume on it even if the person closed it.
+  The call already running finishes.
+- **The person's input wins, per app.** Every action goes through one place in the driver
+  (`acting`), which refuses with `person_active` while the person is using that app: a key in
+  the last 2.5 seconds while it is in front, or a click or scroll while its window is uppermost
+  where the pointer is now, or on the menu bar while it is in front. Typing in neema with the pointer
+  resting on the app, or pressing Pause in the floating window above it, is not using it. An action
+  at a point asks again after the cursor's glide. The host drops the chat's look, so the next
+  action starts from a fresh one, and the view says it waits; nothing to resume, as Codex's
+  helper answers that the user is still interacting with the app. It reads the system's record
+  of hardware input, which the driver's own events, posted to one process, never enter
+  (measured); no input is watched.
+- **neema's own cursor.** Before acting, a cursor in neema's colour glides to the point, pulses
+  as a click lands and fades once neema rests, as Codex draws its agent cursor. It is a window
+  of the driver's ordered just above the app's window, so whatever covers the app covers it
+  too, and it never takes clicks or focus. The person's pointer never moves.
 
 ## macOS and Windows differ in one way
 
@@ -257,6 +278,6 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
    12,000-character budget).
 3. Done: the permission guide. Left: proving with a packaged build that a list accepts the
    dropped bundle, and asking for the direct-capture approval in the same step.
-4. Done: the live view in the chat's panel, the floating window and Pause. Left: a cursor drawn
-   over the app, pausing on the person's input, a global shortcut.
+4. Done: the live view in the chat's panel, the floating window, Pause, neema's cursor and the
+   person's input winning. Left: a global shortcut.
 5. The Windows driver on the same protocol.

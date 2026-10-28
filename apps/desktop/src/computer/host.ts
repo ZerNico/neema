@@ -59,7 +59,7 @@ export interface ComputerHostOptions {
   };
   /** This desktop app's one app driver, shared with any later host; see `SharedAppDriver`. */
   readonly appDriver: SharedAppDriver;
-  /** The person's floating view of app use, shared like the driver. */
+  /** The person's live view of app use, shared like the driver. */
   readonly appWatch?: AppWatch;
   /** Attaches a folder to a chat here, refusing the ones no chat may have. */
   readonly attach: (

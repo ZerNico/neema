@@ -30,6 +30,10 @@
           --accent: #8b7cff;
         }
       }
+      /* Before every rule that sets a display, which would otherwise show what is hidden. */
+      [hidden] {
+        display: none !important;
+      }
       html,
       body {
         margin: 0;
@@ -285,6 +289,7 @@
 
       window.__appView.onState((next) => {
         state = next;
+        document.documentElement.lang = next.lang;
         document.title = next.title;
         document.body.dataset.paused = String(next.paused);
         document.body.dataset.live = String(next.live);
@@ -299,18 +304,20 @@
         shadeLabel.textContent = next.words.paused;
         waiting.textContent = next.frame ? "" : next.words.waiting;
         waiting.hidden = !!next.frame;
+        // No picture is no picture: another chat's must never show under this one's words.
+        frame.hidden = !next.frame;
         if (next.frame) {
           const source = `data:image/png;base64,${next.frame.data}`;
           if (frame.src !== source) frame.src = source;
           frame.alt = next.title;
-        }
+        } else frame.removeAttribute("src");
         placeClick();
       });
-      toggle.addEventListener("click", () =>
-        window.__appView.act(state?.paused ? "resume" : "pause"),
-      );
-      dock.addEventListener("click", () => window.__appView.act("dock"));
-      close.addEventListener("click", () => window.__appView.act("close"));
+      // Each action names the chat it was meant for; main ignores it once another shows.
+      const act = (action) => window.__appView.act(action, state?.chat ?? "");
+      toggle.addEventListener("click", () => act(state?.paused ? "resume" : "pause"));
+      dock.addEventListener("click", () => act("dock"));
+      close.addEventListener("click", () => act("close"));
       frame.addEventListener("load", placeClick);
     </script>
   </body>

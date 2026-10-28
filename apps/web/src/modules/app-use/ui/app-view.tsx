@@ -14,7 +14,6 @@ import { Button } from "~/ui/primitives/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip";
 import { cn } from "~/ui/utils";
 import { useAppView, useDesktopAppUse } from "../client/use-app-view.ts";
-import { appViewLabel } from "./app-view-label.ts";
 
 function BarButton({
   label,
@@ -64,9 +63,9 @@ function LiveDot({ active }: { active: boolean }) {
 }
 
 /**
- * The row under the tab strip: what is happening, and the person's say over it. Pause holds the
- * chat's app use; Stop ends the answer, as the composer's does; the last moves the view to a
- * floating window above every app.
+ * The row under the tab strip: what is happening, and the person's say over it, as media
+ * controls so the line keeps its room in a narrow panel. Pause holds the chat's app use; Stop
+ * ends the answer, as the composer's does; the last moves the view to a floating window.
  */
 export function AppViewBar({
   conversationId,
@@ -80,28 +79,19 @@ export function AppViewBar({
   if (!appUse || !view) return null;
   const active = view.live && !view.paused;
   return (
-    <div className="flex h-8 items-center gap-2 px-2 text-sm" role="status">
+    <div className="flex h-8 items-center gap-1 pl-2 text-sm">
       <LiveDot active={active} />
-      <span className="min-w-0 flex-1 truncate" title={appViewLabel(view)}>
-        {appViewLabel(view)}
+      <span role="status" className="ml-1 min-w-0 flex-1 truncate" title={view.label}>
+        {view.label}
       </span>
       {view.live || view.paused ? (
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
+        <BarButton
+          label={view.paused ? m.app_view_resume() : m.app_view_pause()}
+          icon={view.paused ? PlayIcon : PauseIcon}
           onClick={() => void appUse.pause(conversationId, !view.paused)}
-        >
-          <HugeiconsIcon icon={view.paused ? PlayIcon : PauseIcon} strokeWidth={2} />
-          {view.paused ? m.app_view_resume() : m.app_view_pause()}
-        </Button>
+        />
       ) : null}
-      {stop ? (
-        <Button type="button" size="xs" variant="outline" onClick={stop}>
-          <HugeiconsIcon icon={StopIcon} strokeWidth={2} />
-          {m.app_view_stop()}
-        </Button>
-      ) : null}
+      {stop ? <BarButton label={m.app_view_stop()} icon={StopIcon} onClick={stop} /> : null}
       {view.placement === "panel" ? (
         <BarButton
           label={m.app_view_float()}
@@ -170,7 +160,6 @@ export function AppViewStage({ conversationId }: { conversationId: string }) {
             draggable={false}
           />
           {view.click ? <ClickMark click={view.click} /> : null}
-          {view.paused ? <PausedShade conversationId={conversationId} /> : null}
         </div>
       ) : (
         <div className="text-muted-foreground flex flex-col items-center gap-3 text-sm">
@@ -178,6 +167,7 @@ export function AppViewStage({ conversationId }: { conversationId: string }) {
           {m.app_view_waiting()}
         </div>
       )}
+      {view.paused ? <PausedShade conversationId={conversationId} /> : null}
     </div>
   );
 }

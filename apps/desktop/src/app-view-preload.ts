@@ -10,5 +10,5 @@ import {
 contextBridge.exposeInMainWorld("__appView", {
   onState: (listener: (state: AppViewState) => void) =>
     ipcRenderer.on(APP_VIEW_STATE, (_event, state: AppViewState) => listener(state)),
-  act: (action: AppViewAction) => ipcRenderer.send(APP_VIEW_ACTION, action),
+  act: (action: AppViewAction, chat: string) => ipcRenderer.send(APP_VIEW_ACTION, action, chat),
 });

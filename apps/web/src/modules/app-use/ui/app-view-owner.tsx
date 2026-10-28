@@ -2,22 +2,16 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef } from "react";
 import { useDetailPanel, useDetailPanelTabIds } from "~/ui/detail-panel-context.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
-import {
-  appViewOpenRequests,
-  useAppView,
-  useDesktopAppUse,
-  usePendingAppViewOpen,
-} from "../client/use-app-view.ts";
+import { appViewOpenRequests, usePendingAppViewOpen } from "../client/open-requests.ts";
+import { appViewSpells, useAppView, useDesktopAppUse } from "../client/use-app-view.ts";
 import { APP_VIEW_PREFIX, appViewRequest } from "./app-view-request.tsx";
 
+const { opened, closed } = appViewSpells;
+
 /**
- * Per chat, the last spell of app use whose tab was opened, and the last one whose tab the
- * person closed. Kept for the page's life, so coming back to a chat neither opens its tab
- * again nor brings back one the person closed.
+ * What each chat's tab stops now. The chat rebuilds its stop with every render; reading it from
+ * here keeps the tab's request, and so the panel, still while answers come and go.
  */
-const opened = new Map<string, number>();
-const closed = new Map<string, number>();
-/** What each chat's tab stops now: the tab keeps one function while answers come and go. */
 const stops = new Map<string, () => void>();
 
 /**
@@ -52,7 +46,7 @@ export function AppViewOwner({
   }, [conversationId, stop]);
   const stoppable = stop !== undefined;
   const app = view?.app ?? "";
-  const busy = !!view && view.live && !view.paused && view.call !== null;
+  const busy = view?.busy ?? false;
   const request = useMemo(
     () =>
       appViewRequest({
@@ -81,7 +75,13 @@ export function AppViewOwner({
       panel.open(request);
       return;
     }
-    if (!view.live || view.placement !== "panel" || present) return;
+    if (!view.live || present) return;
+    // A spell spent in the floating window has had its view: hiding the window later must not
+    // pop it open in the chat.
+    if (view.placement !== "panel") {
+      opened.set(conversationId, Math.max(opened.get(conversationId) ?? 0, view.spell));
+      return;
+    }
     if ((opened.get(conversationId) ?? 0) < view.spell) {
       opened.set(conversationId, view.spell);
       panel.open(request);
@@ -101,17 +101,25 @@ export function AppViewOwner({
 
 /**
  * Mounted once in the layout: the floating window's way back into a chat, which may be any
- * chat, so it navigates there and leaves the opening to that chat's owner.
+ * chat, so it navigates there and leaves the opening to that chat's owner. It asks main which
+ * chat when told to and once on mount, for a page that was still loading when the ask came.
  */
 export function AppViewReturns() {
   const appUse = useDesktopAppUse();
   const navigate = useNavigate();
   useEffect(() => {
     if (!appUse) return;
-    return appUse.onOpenChat((conversationId) => {
-      appViewOpenRequests.request(conversationId);
-      void navigate({ to: "/chat/$conversationId", params: { conversationId } });
-    });
+    const take = () =>
+      void appUse.takeOpenChat().then(
+        (conversationId) => {
+          if (!conversationId) return;
+          appViewOpenRequests.request(conversationId);
+          void navigate({ to: "/chat/$conversationId", params: { conversationId } });
+        },
+        () => {},
+      );
+    take();
+    return appUse.onOpenChat(take);
   }, [appUse, navigate]);
   return null;
 }

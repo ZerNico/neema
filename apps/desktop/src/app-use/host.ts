@@ -1,5 +1,6 @@
 import type { ToolResult } from "@chat/desktop-rpc";
 import { type AppDriver, AppDriverError, startAppDriver } from "./driver.ts";
+import { chatKey } from "./chat-key.ts";
 import type { AppGrants } from "./grants.ts";
 import { buildOutline, type Outline, RefBook } from "./outline.ts";
 
@@ -18,11 +19,13 @@ export interface AppCall {
  * capture path goes through, mixes up processes of one identity: two drivers capturing at once
  * stalled every capture until both were gone, while two differently named copies did not
  * (measured). So there is one process, its calls one at a time, as Codex has one service.
+ * The live view's pictures skip `exclusive`, so they never wait behind another chat's calls or a
+ * consent dialog; the driver still answers them in turn with the rest.
  */
 export class SharedAppDriver {
   private driver: AppDriver | null = null;
   private tail: Promise<unknown> = Promise.resolve();
-  private running = 0;
+  private inFlight = 0;
   private wake: (() => void) | null = null;
   private idle: ReturnType<typeof setTimeout> | undefined;
   /** Accessibility and Screen Recording were seen granted; they hold until the app restarts. */
@@ -49,12 +52,12 @@ export class SharedAppDriver {
   exclusive<T>(work: () => Promise<T>): Promise<T> {
     clearTimeout(this.idle);
     this.wake ??= this.keepAwake();
-    this.running++;
+    this.inFlight++;
     const next = this.tail.then(work);
     this.tail = next
       .catch(() => {})
       .finally(() => {
-        if (--this.running > 0) return;
+        if (--this.inFlight > 0) return;
         this.idle = setTimeout(() => this.sleep(), AWAKE_AFTER_MS);
         this.idle.unref?.();
       });
@@ -74,6 +77,11 @@ export class SharedAppDriver {
     }
     return this.driver.call(method, params);
   };
+
+  /** A driver is running now; looking at one never starts one. */
+  get running() {
+    return this.driver?.alive ?? false;
+  }
 
   /** A driver that exited is started again by the next call. */
   exited() {
@@ -109,17 +117,20 @@ export interface AppUseOptions {
 }
 
 /**
- * The person's floating view: what app use is doing, and their word to pause it. Chats are
- * named as `AppUse.key` names them, across servers.
+ * The person's live view of app use: what it does, and their word to hold it. Chats are named
+ * as `AppUse.key` names them, across servers.
  */
 export interface AppWatch {
-  started(chat: string, call: { name: string; args: AppCall["args"]; app: string }): void;
+  /** A call is about to run; false when the person paused the chat, which refuses the call. */
+  begin(chat: string, call: { name: string; args: AppCall["args"]; app: string }): boolean;
   /** The app as macOS names it, once the model's name for it is resolved. */
   named(chat: string, app: string): void;
-  /** Where a click landed, in window points. */
+  /** A click landed here, as a fraction of the window's width and height. */
   clicked(chat: string, at: { x: number; y: number }): void;
+  /** The call gave way to the person, who was using the app. */
+  yielded(chat: string): void;
+  /** The call that began is over, however it ended. */
   finished(chat: string): void;
-  paused(chat: string): boolean;
   /** The chat is gone: nothing kept for it outlives it. */
   forget(chat: string): void;
 }
@@ -188,6 +199,8 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
   window_not_key: (app) =>
     `${app} kept its keys in another of its windows, so nothing was typed. Click into the window first, then try again.`,
   capture_failed: (app) => `${app}'s window could not be captured. Try again.`,
+  person_active: (app) =>
+    `The user is using ${app} right now, so nothing was done: their own input comes first. Actions wait until they have left it alone for a few seconds; look at ${app} again before the next one, as they may have changed it.`,
   screen_locked: () =>
     "The user's Mac is locked, so no app can be used. Ask them to unlock it, then try again.",
 };
@@ -199,8 +212,11 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
  */
 export class AppUse {
   private readonly looks = new Map<string, ChatLook>();
-  /** Each chat's references into the app it looks at; a look at another app starts afresh. */
-  private readonly books = new Map<string, { readonly appId: string; readonly book: RefBook }>();
+  /**
+   * Each chat's references, one book whatever app it looks at: a look at another app forgets
+   * the last one's, so an old reference is refused rather than handed out again.
+   */
+  private readonly books = new Map<string, RefBook>();
 
   constructor(private readonly options: AppUseOptions) {}
 
@@ -217,7 +233,7 @@ export class AppUse {
   }
 
   private key(conversationId: string) {
-    return `${this.options.scope}\u0000${conversationId}`;
+    return chatKey(this.options.scope, conversationId);
   }
 
   private async runNow(call: AppCall): Promise<ToolResult> {
@@ -233,12 +249,11 @@ export class AppUse {
       named.name ? { ...result, app: { name: named.name } } : result;
     const chat = this.key(call.conversationId);
     const watch = this.options.watch;
-    if (watch?.paused(chat))
+    if (watch && !watch.begin(chat, { name: call.name, args: call.args, app: str(call.args.app) }))
       return failure(
         "Paused by the user",
-        "The user paused app use in this chat. Use no app until they say to go on; ask them what they want.",
+        "The user paused app use in this chat, so nothing was done. No app works here until they press Resume in neema's view of it; tell them that if you need one.",
       );
-    watch?.started(chat, { name: call.name, args: call.args, app: str(call.args.app) });
     try {
       await this.ensurePermitted(call);
       return withApp(await this.dispatch(call, named));
@@ -246,6 +261,11 @@ export class AppUse {
       if (error instanceof Refusal) return withApp(error.result);
       if (error instanceof AppDriverError) {
         if (error.code === "driver_exited") this.options.driver.exited();
+        if (error.code === "person_active") {
+          // They may have changed the window: the next action starts from a fresh look.
+          this.looks.delete(call.conversationId);
+          watch?.yielded(chat);
+        }
         const app = named.name ?? (str(call.args.app) || "The app");
         const words = DRIVER_WORDS[error.code];
         return withApp(failure(`Couldn't use ${app}`, words ? words(app) : error.message));
@@ -356,13 +376,13 @@ export class AppUse {
     summary: string,
     failed?: string,
   ): Promise<ToolResult> {
+    // The driver may hold another window once it looks, whatever comes back: until this look
+    // is known, its pictures are nobody's.
+    this.options.driver.holder = null;
     const look = await this.call("look", { appId });
-    let entry = this.books.get(conversationId);
-    if (entry?.appId !== appId) {
-      entry = { appId, book: new RefBook() };
-      this.books.set(conversationId, entry);
-    }
-    const outline = buildOutline(look, entry.book);
+    const book = this.books.get(conversationId) ?? new RefBook();
+    this.books.set(conversationId, book);
+    const outline = buildOutline(look, book);
     this.looks.set(conversationId, {
       appId,
       app: name,
@@ -456,14 +476,19 @@ export class AppUse {
         const modifiers = Array.isArray(args.modifiers)
           ? args.modifiers.filter((entry): entry is string => typeof entry === "string")
           : [];
-        const at = "node" in place ? look.centres.get(place.node) : place;
-        if (at) this.options.watch?.clicked(this.key(call.conversationId), at);
         await this.call("click", {
           ...("node" in place ? { node: place.node } : { at: place }),
           ...(button === "right" || button === "middle" ? { button } : {}),
           ...(num(args.count) ? { count: num(args.count)! } : {}),
           ...(modifiers.length ? { modifiers } : {}),
         });
+        const at = "node" in place ? look.centres.get(place.node) : place;
+        // As a fraction of the window, which is all the views need to place it.
+        if (at)
+          this.options.watch?.clicked(this.key(call.conversationId), {
+            x: at.x / look.window.width,
+            y: at.y / look.window.height,
+          });
         summary = `Clicked in ${name}`;
         break;
       }

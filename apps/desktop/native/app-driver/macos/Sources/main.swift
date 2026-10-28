@@ -74,47 +74,62 @@ actor Driver {
       return [:]
     case "setValue":
       let element = try node(params)
-      let result = AXUIElementSetAttributeValue(
-        element, kAXValueAttribute as CFString,
-        try param(params, "value", as: String.self) as CFString)
-      guard result == .success else {
-        throw DriverError(code: "action_failed", message: "That value cannot be set (\(result.rawValue))")
-      }
-      return [:]
-    case "type":
-      let target = try current()
-      let text = try param(params, "text", as: String.self)
-      return try await withKeys(target) {
-        var field: AXUIElement?
-        if params["node"] != nil {
-          field = try node(params)
-          AXUIElementSetAttributeValue(field!, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        } else if let looked {
-          field = attribute(appElement(looked.app), kAXFocusedUIElementAttribute)
+      let value = try param(params, "value", as: String.self)
+      return try await acting(at: centre(of: element)) { _ in
+        let result = AXUIElementSetAttributeValue(
+          element, kAXValueAttribute as CFString, value as CFString)
+        guard result == .success else {
+          throw DriverError(
+            code: "action_failed", message: "That value cannot be set (\(result.rawValue))")
         }
-        // A native text field takes the text at its cursor in one step, exactly as given: typed
-        // key by key, TextEdit's autocorrect and capitals rewrote it, and keys the person pressed
-        // meanwhile mixed in. A page ignores text set this way, so it is typed there.
-        if let field, !isWebField(field), insert(text, into: field) { return ["inserted": true] }
-        type(text, pid: target.pid)
-        return ["inserted": false]
+        return [:]
+      }
+    case "type":
+      let text = try param(params, "text", as: String.self)
+      let given = params["node"] != nil ? try node(params) : nil
+      let focused: AXUIElement? = looked.flatMap {
+        attribute(appElement($0.app), kAXFocusedUIElementAttribute)
+      }
+      return try await acting(at: (given ?? focused).flatMap(centre)) { target in
+        try await withKeys(target) {
+          var field = given
+          if let given {
+            AXUIElementSetAttributeValue(given, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+          } else if let looked {
+            field = attribute(appElement(looked.app), kAXFocusedUIElementAttribute)
+          }
+          // A native text field takes the text at its cursor in one step, exactly as given:
+          // typed key by key, TextEdit's autocorrect and capitals rewrote it, and keys the
+          // person pressed meanwhile mixed in. A page ignores text set this way, so it is typed.
+          if let field, !isWebField(field), insert(text, into: field) { return ["inserted": true] }
+          type(text, pid: target.pid)
+          return ["inserted": false]
+        }
       }
     case "key":
-      let target = try current()
       let chord = try parseChord(try param(params, "keys", as: String.self))
-      return try await withKeys(target) {
-        press(chord, pid: target.pid)
-        return [:]
+      return try await acting(at: nil) { target in
+        try await withKeys(target) {
+          press(chord, pid: target.pid)
+          return [:]
+        }
       }
     case "scroll":
       let lines = (
         x: Int32(params["x"] as? Int ?? 0), y: Int32(params["y"] as? Int ?? 0)
       )
-      try scroll(try current(), at: try point(params, "at"), lines: lines)
-      return [:]
+      let at = try point(params, "at")
+      return try await acting(at: at) { target in
+        try scroll(target, at: at, lines: lines)
+        return [:]
+      }
     case "drag":
-      try drag(try current(), from: try point(params, "from"), to: try point(params, "to"))
-      return [:]
+      let (from, to) = (try point(params, "from"), try point(params, "to"))
+      return try await acting(at: from) { target in
+        try drag(target, from: from, to: to)
+        await Cursor.shared.move(to: screen(to, in: target), above: target.window)
+        return [:]
+      }
     default:
       throw DriverError(code: "unknown_method", message: "No method \(method)")
     }
@@ -244,11 +259,9 @@ actor Driver {
       throw DriverError(code: "capture_failed", message: "The window could not be captured")
     }
     let picture = try preview(whole, maxEdge: 640)
-    let box = frame(looked.window)
     return [
       "data": picture.data.base64EncodedString(), "width": picture.width,
       "height": picture.height,
-      "window": ["width": box?.width ?? 0, "height": box?.height ?? 0],
     ]
   }
 
@@ -264,19 +277,62 @@ actor Driver {
     for name in params["modifiers"] as? [String] ?? [] {
       flags.formUnion(try parseChord("\(name)+a").flags)
     }
-    // A plain click on an element that can be pressed is a press: no pointer at all. On a
-    // Chromium page too: its pointer route needs a click stamped from before the window was shown,
-    // and a page that then navigates in place (a router's link) crashes on that time (measured).
-    if let id = params["node"] as? String, button == .left, count == 1, flags.isEmpty {
-      let target = try current()
-      if target.chromium, snapshot.webNodes.contains(id), let looked {
-        let ready = await MainActor.run { webPressesWork(looked.app) }.timeIntervalSinceNow
-        if ready > 0 { try await Task.sleep(for: .seconds(ready)) }
+    // A press needs no position, only a pointer click does; the cursor goes where there is one.
+    let at = try? point(params, "at")
+    try await acting(at: at, pressing: true) { target in
+      // A plain click on an element that can be pressed is a press: no pointer at all. On a
+      // Chromium page too: its pointer route needs a click stamped from before the window was
+      // shown, and a page that then navigates in place (a router's link) crashes on that time
+      // (measured).
+      if let id = params["node"] as? String, button == .left, count == 1, flags.isEmpty {
+        if target.chromium, snapshot.webNodes.contains(id), let looked {
+          let ready = await MainActor.run { webPressesWork(looked.app) }.timeIntervalSinceNow
+          if ready > 0 { try await Task.sleep(for: .seconds(ready)) }
+        }
+        let element = try node(params)
+        if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }
       }
-      let element = try node(params)
-      if AXUIElementPerformAction(element, kAXPressAction as CFString) == .success { return }
+      try click(target, at: at ?? point(params, "at"), button: button, count: count, flags: flags)
     }
-    try click(try current(), at: try point(params, "at"), button: button, count: count, flags: flags)
+  }
+
+  /// Every action in the person's apps comes through here. It waits for no one but the person:
+  /// while they are using the app it is refused, and they finish first. Otherwise neema's cursor
+  /// glides to where it acts, pulses as a click lands and fades once neema rests.
+  @discardableResult
+  private func acting<T>(
+    at point: CGPoint?, pressing: Bool = false, _ body: (Target) async throws -> T
+  ) async throws -> T {
+    let target = try current()
+    try yieldToPerson(in: target)
+    // However it ends, the cursor fades once neema rests, not over the person's own work.
+    defer { Task { @MainActor in Cursor.shared.settle() } }
+    if let point {
+      await Cursor.shared.move(to: screen(point, in: target), above: target.window)
+      // Input that began while the cursor glided wins too.
+      try yieldToPerson(in: target)
+      if pressing { await Cursor.shared.press() }
+    }
+    return try await body(target)
+  }
+
+  private func yieldToPerson(in target: Target) throws {
+    let wait = Person.busy(in: target)
+    guard wait > 0 else { return }
+    throw DriverError(
+      code: "person_active",
+      message: "The person is using the app; try again in \(Int(wait.rounded(.up))) s")
+  }
+
+  /// A window point on the screen, in global top-left points.
+  private func screen(_ point: CGPoint, in target: Target) -> CGPoint {
+    CGPoint(x: target.frame.minX + point.x, y: target.frame.minY + point.y)
+  }
+
+  /// An element's centre in the looked window's points, where neema's cursor shows it working.
+  private func centre(of element: AXUIElement) -> CGPoint? {
+    guard let box = frame(element), let window = try? current().frame else { return nil }
+    return CGPoint(x: box.midX - window.minX, y: box.midY - window.minY)
   }
 
   /// Runs `body` with the looked window as the one its app sends keys to, then hands them back

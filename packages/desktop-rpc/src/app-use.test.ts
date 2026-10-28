@@ -6,6 +6,7 @@ const appUse = {
   state: async () => null,
   onUpdate: () => () => {},
   onOpenChat: () => () => {},
+  takeOpenChat: async () => null,
   pause: async () => {},
   place: async () => {},
 } satisfies DesktopAppUse;
