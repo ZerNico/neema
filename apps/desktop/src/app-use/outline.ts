@@ -34,26 +34,41 @@ const MAX_OF_A_ROLE = 25;
 
 /**
  * The references one chat's looks at one app hand out. An element keeps its reference from look
- * to look, known by role, name and place: the model may send several actions on one look in a
+ * to look, known by app, role, name and place: the model may send several actions on one look in a
  * round, and each action looks again. Numbered per look, a pressed AC that became C shifted
  * every later number, and the round's last click hit the sidebar button (measured). An element
  * that changed gets a new reference, so an old one is refused instead of meaning another.
  */
 export class RefBook {
-  private readonly known = new Map<string, string>();
+  /** Per identity, the references the last look gave, in the order it met them. */
+  private last = new Map<string, ReadonlyArray<string>>();
   private next = 1;
 
-  /** `taken` holds the references this look already gave, for two elements alike. */
-  ref(node: UiNode, taken: { has(ref: string): boolean }) {
-    const frame = node.frame
-      ? [node.frame.x, node.frame.y, node.frame.width, node.frame.height].map(Math.round).join(",")
-      : `depth ${node.depth}`;
-    const identity = `${node.role}|${node.name ?? ""}|${frame}`;
-    const known = this.known.get(identity);
-    if (known && !taken.has(known)) return known;
-    const ref = `e${this.next++}`;
-    this.known.set(identity, ref);
-    return ref;
+  /**
+   * Numbers one look of an app. Elements alike take the last look's references for them in the same
+   * order, so the second of two equal rows keeps the second one's reference. What the look
+   * did not show is forgotten, so an old reference is never handed to something new.
+   */
+  start(app: string) {
+    const given = new Map<string, string[]>();
+    return {
+      ref: (node: UiNode) => {
+        const frame = node.frame
+          ? [node.frame.x, node.frame.y, node.frame.width, node.frame.height]
+              .map(Math.round)
+              .join(",")
+          : `depth ${node.depth}`;
+        const identity = `${app}|${node.role}|${node.name ?? ""}|${frame}`;
+        const refs = given.get(identity) ?? [];
+        const ref = this.last.get(identity)?.[refs.length] ?? `e${this.next++}`;
+        refs.push(ref);
+        given.set(identity, refs);
+        return ref;
+      },
+      finish: () => {
+        this.last = given;
+      },
+    };
   }
 }
 
@@ -86,6 +101,7 @@ export const buildOutline = (look: Look, book: RefBook = new RefBook()): Outline
   const lines: string[] = [];
   let length = 0;
   let truncated = look.truncated;
+  const numbering = book.start(look.app);
   const root = opened(-1, -1, []);
   const open: Open[] = [];
   let skipBelow: number | null = null;
@@ -131,7 +147,7 @@ export const buildOutline = (look: Look, book: RefBook = new RefBook()): Outline
       continue;
     }
     parent.children.set(node.role, ofRole + 1);
-    const ref = book.ref(node, refs);
+    const ref = numbering.ref(node);
     if (!add("  ".repeat(open.length) + describe(ref, node, scale))) break;
     refs.set(ref, node.id);
     open.push(
@@ -144,6 +160,7 @@ export const buildOutline = (look: Look, book: RefBook = new RefBook()): Outline
   }
   if (!truncated) while (open.length > 0) if (!close(open.pop()!)) break;
   if (!truncated) close(root);
+  numbering.finish();
   return { text: lines.join("\n"), refs, truncated };
 };
 

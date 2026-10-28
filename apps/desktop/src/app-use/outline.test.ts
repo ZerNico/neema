@@ -173,4 +173,32 @@ describe("the outline of a look", () => {
     expect(refOf(second, "m2")).not.toBe(refOf(first, "n2"));
     expect(second.refs.has(refOf(first, "n2")!)).toBe(false);
   });
+
+  test("gives two elements alike their own references, look after look", () => {
+    const row = (id: string) => node(id, 1, { role: "text", value: "Same" });
+    const book = new RefBook();
+    const refsOf = (outline: ReturnType<typeof buildOutline>) => [...outline.refs.keys()];
+    const first = refsOf(
+      buildOutline(look([node("n1", 0, { role: "window" }), row("n2"), row("n3")]), book),
+    );
+    const second = refsOf(
+      buildOutline(look([node("m1", 0, { role: "window" }), row("m2"), row("m3")]), book),
+    );
+    expect(second).toEqual(first);
+  });
+
+  test("gives the same button in another app its own reference", () => {
+    const close = node("n2", 1, {
+      role: "closeButton",
+      actions: ["press"],
+      frame: { x: 10, y: 10, width: 12, height: 12 },
+    });
+    const book = new RefBook();
+    const first = buildOutline(look([node("n1", 0, { role: "window" }), close]), book);
+    const other = buildOutline(
+      look([node("n1", 0, { role: "window" }), close], { app: "TextEdit" }),
+      book,
+    );
+    expect([...other.refs.keys()]).not.toContain([...first.refs.keys()][1]);
+  });
 });
