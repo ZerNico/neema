@@ -195,6 +195,8 @@ const lifecycle = makeLifecycle({
     await executions.dispose();
     await runtime.dispose();
     tray?.destroy();
+    // App use may still notify until quit; a destroyed tray must not be written to.
+    tray = undefined;
   },
   quit: () => app.quit(),
   reportError: (cause) => {

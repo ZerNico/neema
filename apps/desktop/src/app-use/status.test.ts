@@ -62,10 +62,23 @@ describe("app use in the menu bar", () => {
     expect(after.signature).not.toBe(during);
   });
 
-  test("keeps its signature while only the picture changes", () => {
-    live.begin(A, call("Calculator"));
-    const before = appUseStatus(live, SERVER).signature;
-    live.clicked(A, { x: 0.2, y: 0.3 });
-    expect(appUseStatus(live, SERVER).signature).toBe(before);
+  test("keeps its signature while only the picture and ring change", async () => {
+    const pictured = new LiveView({
+      driver: { holder: A, running: true, call: async () => ({ data: "p", width: 1, height: 1 }) },
+      locale: async () => "en",
+    });
+    pictured.begin(A, call("Calculator"));
+    const before = appUseStatus(pictured, SERVER).signature;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pictured.update(A)?.frame?.data).toBe("p");
+    pictured.clicked(A, { x: 0.2, y: 0.3 });
+    expect(appUseStatus(pictured, SERVER).signature).toBe(before);
+    pictured.close();
+  });
+
+  test("changes its signature with the server, whose chats its clicks name", () => {
+    expect(appUseStatus(live, SERVER).signature).not.toBe(
+      appUseStatus(live, "https://other.example").signature,
+    );
   });
 });

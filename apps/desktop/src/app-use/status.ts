@@ -28,6 +28,7 @@ export function appUseStatus(live: LiveView, origin: string | null) {
     { type: "separator" },
   ]);
   const signature = JSON.stringify([
+    origin,
     options.locale,
     chats.map((chat) => [chat.conversationId, chat.label, chat.app, chat.paused, chat.live]),
   ]);
