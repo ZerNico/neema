@@ -71,6 +71,9 @@ const wrapper = (group: string) =>
   ].join("\n");
 
 export async function runCommand(guest: Guest, run: CommandRun): Promise<CommandOutcome> {
+  // A Stop in the caller's tick must win, and two execs reach the guest in no promised order
+  // (on Windows the later kill lost): so yield once before dispatching anything.
+  await Promise.resolve();
   if (run.signal?.aborted)
     return { exitCode: 130, output: "", truncated: false, timedOut: false, stopped: true };
   const group = `/sys/fs/cgroup/cmd-${randomUUID()}`;

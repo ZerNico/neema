@@ -202,7 +202,7 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
           signal: controller.signal,
           outputLimit: 1_000,
         });
-        // In the same tick: the kill reaches the guest before the wrapper made its group.
+        // In the same tick: runCommand has not dispatched anything yet, so nothing runs.
         controller.abort();
         return running;
       });
