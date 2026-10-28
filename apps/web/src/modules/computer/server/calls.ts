@@ -290,17 +290,29 @@ export class ComputerCalls extends Context.Service<
           }
           if (!chat.machineId) {
             // A machine still getting ready can take the chat; the call then waits for it. App
-            // use takes a Mac, the one platform with a driver, and never needs its VM.
+            // use takes a Mac and never needs its VM; from another device, one allowing remote
+            // use, or the chat is bound where every call from there is refused.
             const app = isAppTool(entry.name);
-            const usable = (yield* hub.online(entry.userId)).filter((presence) =>
-              app
-                ? presence.hello.platform === "darwin"
-                : presence.hello.computer.status !== "unavailable",
-            );
+            const online = yield* hub.online(entry.userId);
+            const macs = online.filter((presence) => presence.hello.platform === "darwin");
+            const usable = app
+              ? macs.filter((presence) => presence.machineId === sender || presence.hello.remote)
+              : online.filter((presence) => presence.hello.computer.status !== "unavailable");
             const candidate =
               usable.find((presence) => presence.machineId === sender) ??
               usable.find((presence) => presence.hello.computer.status === "ready") ??
               usable[0];
+            const closed = macs[0];
+            if (!candidate && app && closed) {
+              yield* finish(
+                entry,
+                desktopFailure(
+                  `${closed.hello.name} does not allow remote use`,
+                  `This chat's apps can only be used from ${closed.hello.name} itself. Tell the user to continue there, or to allow remote control in its settings.`,
+                ),
+              );
+              return;
+            }
             if (!candidate) {
               const known = (yield* repo.machines(entry.userId)).filter(
                 (machine) => !app || machine.platform === "darwin",

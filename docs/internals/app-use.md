@@ -44,7 +44,8 @@ up for most of it, and the tool names and descriptions follow what those models 
 A lazy family, like the browser's: named in the catalogue, loaded on first need. Offered where
 the chat's computer is a Mac, the one platform with a driver, or, before the chat has one, once
 the person has a Mac; the first app call of such a chat binds it to a Mac online, never to
-another machine, even the one the message came from. A chat moved to another machine is offered
+another machine, even the one the message came from. From another device that Mac must allow
+remote use, or the chat would be bound where its calls are then refused. A chat moved to another machine is offered
 them or not from then on. They are desktop tools in family and envelope, run by the chat's
 machine like the computer's, but never touch its VM, so a machine whose VM is still downloading
 or impossible can still use its apps, and can take a chat for them.

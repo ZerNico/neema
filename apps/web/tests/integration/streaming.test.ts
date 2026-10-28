@@ -9090,9 +9090,19 @@ describe("desktop calls run by the sending app", () => {
         ),
       );
       await sendAndWait("And now?");
+      await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(conversations)
+            .set({ machineId: "mac" })
+            .where(eq(conversations.id, seed.conversation.id)),
+        ),
+      );
+      await sendAndWait("And on the Mac?");
       expect(offered[0]).toContain("app_click");
       expect(offered[1]).toContain("run_command");
       expect(offered[1]).not.toContain("app_click");
+      expect(offered[2]).toContain("app_click");
     } finally {
       authoringScript = null;
     }
