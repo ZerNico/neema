@@ -141,8 +141,22 @@ describe("DesktopActivityBlock", () => {
       />,
     );
     expect(screen.getByText("Use Nico's MacBook for this chat?")).toBeInTheDocument();
+    expect(screen.getByText(/in a VM of this chat/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(decide).toHaveBeenLastCalledWith("allow");
+  });
+
+  it("says an app call's machine is used for its apps, not a VM", () => {
+    show(
+      <DesktopApproval
+        activity={running({ name: "app_list", args: {} })}
+        approval={{ kind: "bind", machine: "Nico's MacBook", decide: vi.fn() }}
+      />,
+    );
+    expect(
+      screen.getByText("neema uses your apps there, each once you allow it."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/in a VM/)).not.toBeInTheDocument();
   });
 
   it("names a private network request as one", () => {

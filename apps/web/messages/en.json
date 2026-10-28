@@ -5646,6 +5646,7 @@
   "computer_agent_add_failed_title": "The key wasn’t added",
   "computer_agent_add_failed_detail": "Add it in Terminal with {command}, then try again in the chat.",
   "chat_computer_bind": "Use {machine} for this chat?",
+  "chat_computer_bind_apps_note": "neema uses your apps there, each once you allow it.",
   "chat_computer_bind_note": "Its commands and files run there, in a VM of this chat’s own.",
   "chat_computer_network_note": "“Always allow” applies to every chat. You can remove it in Settings › Permissions.",
   "computer_tag_label": "Computer",

@@ -447,7 +447,12 @@ export function DesktopApproval({
         </p>
       ) : null}
       {approval.kind === "bind" ? (
-        <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
+        // App use runs in the person's own apps there, never in the chat's VM.
+        <p className="text-muted-foreground text-xs">
+          {isAppTool(activity.name)
+            ? m.chat_computer_bind_apps_note()
+            : m.chat_computer_bind_note()}
+        </p>
       ) : listed.length > 1 ? (
         <DeletePathList paths={listed} roots={roots} />
       ) : what ? (
