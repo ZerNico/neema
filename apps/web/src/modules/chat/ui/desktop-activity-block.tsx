@@ -21,6 +21,8 @@ import { useState } from "react";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { BROWSER_ACTIVITY } from "~/modules/browser/ui/browser-activity.ts";
 import { isBrowserTool, type BrowserToolName } from "~/modules/browser/tool-schema.ts";
+import { isAppTool, type AppToolName } from "~/modules/app-use/tool-schema.ts";
+import { APP_ACTIVITY, appActivityLabel } from "~/modules/app-use/ui/app-activity.ts";
 import {
   allowsBlanket,
   type ApprovalChoice,
@@ -40,7 +42,10 @@ import { activityRowClassName } from "./activity-row.ts";
 
 const EMPTY_ROOTS: ReadonlyArray<{ name: string; path: string }> = [];
 
-const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconSvgElement> = {
+const ICONS: Record<
+  Exclude<DesktopToolActivity["name"], BrowserToolName | AppToolName>,
+  IconSvgElement
+> = {
   list_folder: Folder01Icon,
   find_files: FolderSearchIcon,
   search_files: SearchList01Icon,
@@ -60,14 +65,18 @@ const ICONS: Record<Exclude<DesktopToolActivity["name"], BrowserToolName>, IconS
 const iconOf = (name: DesktopToolActivity["name"]) =>
   isBrowserTool(name)
     ? BROWSER_ACTIVITY[name].icon
-    : Object.hasOwn(ICONS, name)
-      ? ICONS[name]
-      : File01Icon;
+    : isAppTool(name)
+      ? APP_ACTIVITY[name].icon
+      : Object.hasOwn(ICONS, name)
+        ? ICONS[name]
+        : File01Icon;
 
 /** The argument a reader would want to see: the path, the pattern, the command. */
 const argText = (activity: DesktopToolActivity) => {
   const args = activity.args ?? {};
   if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].arg(args);
+  // The row names the app; references and coordinates mean nothing to a reader.
+  if (isAppTool(activity.name)) return "";
   switch (activity.name) {
     case "run_command":
       return text(args.command);
@@ -153,6 +162,13 @@ const runningLabel = (
 ) => {
   if (isBrowserTool(activity.name))
     return BROWSER_ACTIVITY[activity.name].running(activity.args ?? {});
+  if (isAppTool(activity.name))
+    return appActivityLabel(
+      activity.name,
+      // The machine's name for the app once it has one, not the id the model used.
+      { ...activity.args, ...(activity.result?.app ? { app: activity.result.app.name } : {}) },
+      activity.status === "error",
+    );
   const raw = argText(activity);
   const what = PATH_TOOLS.has(activity.name) && raw ? shortPath(raw, roots) : raw;
   if (activity.status === "error") {
@@ -260,6 +276,8 @@ const approvalTitle = (
   if (kind === "site") return m.chat_desktop_ask_site();
   if (kind === "bind") return m.chat_computer_bind({ machine: machine ?? "" });
   if (isBrowserTool(activity.name)) return BROWSER_ACTIVITY[activity.name].ask();
+  // App calls ask nothing on the server: an app is allowed at the machine, natively.
+  if (isAppTool(activity.name)) return APP_ACTIVITY[activity.name].running(activity.args ?? {});
   switch (kind) {
     case "read":
       return activity.name === "list_folder"
@@ -429,7 +447,13 @@ export function DesktopApproval({
         </p>
       ) : null}
       {approval.kind === "bind" ? (
-        <p className="text-muted-foreground text-xs">{m.chat_computer_bind_note()}</p>
+        // The chat's commands and files run there from now on, whatever asked; an app call
+        // also says its apps are used there, which the VM never touches.
+        <p className="text-muted-foreground text-xs">
+          {isAppTool(activity.name)
+            ? `${m.chat_computer_bind_apps_note()} ${m.chat_computer_bind_note()}`
+            : m.chat_computer_bind_note()}
+        </p>
       ) : listed.length > 1 ? (
         <DeletePathList paths={listed} roots={roots} />
       ) : what ? (
@@ -498,11 +522,15 @@ export function DesktopActivityBlock({
         />
       </div>
     );
-  // A browser result's detail is written for the model (tab handles, outlines,
-  // what to call next); its line already says what happened to the page.
-  const detail = isBrowserTool(activity.name) ? "" : (activity.result?.detail ?? "");
+  // Browser and app details are written for the model (handles, outlines, what to call
+  // next); the row's line already says what happened.
+  const detail =
+    isBrowserTool(activity.name) || isAppTool(activity.name) ? "" : (activity.result?.detail ?? "");
   const violations = activity.result?.violations ?? [];
-  const label = activity.result?.summary ?? runningLabel(activity, roots);
+  // An app call's summary is the machine's English, so its row keeps the reader's own words.
+  const label = isAppTool(activity.name)
+    ? runningLabel(activity, roots)
+    : (activity.result?.summary ?? runningLabel(activity, roots));
   const fullPath = PATH_TOOLS.has(activity.name) ? argText(activity) : "";
 
   // A command or a long path must never widen the column: the row truncates

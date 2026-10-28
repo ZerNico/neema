@@ -1,6 +1,7 @@
 import { Clock, Context, Duration, Effect, Layer, Scope } from "effect";
 import type { ToolResult } from "@chat/desktop-rpc";
 import { canonicalHost } from "@chat/egress-proxy";
+import { isAppTool } from "~/modules/app-use/tool-schema.ts";
 import { desktopFailure, type DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -43,6 +44,8 @@ interface Entry {
   readonly scope: Scope.Scope;
   /** It already waited once for a machine to come back, so an absent one is now an answer. */
   waitedForMachine?: true;
+  /** Sent as coming from the machine's own person; a resend after a reconnect says the same. */
+  local?: boolean;
   /**
    * What the person allowed, for the machine the chat had when they were asked. A switch since
    * means asking again: the card never named the new one, nor its folders.
@@ -286,16 +289,34 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           if (!chat.machineId) {
-            // A machine still getting ready can take the chat; the call then waits for it.
-            const usable = (yield* hub.online(entry.userId)).filter(
-              (presence) => presence.hello.computer.status !== "unavailable",
-            );
+            // A machine still getting ready can take the chat; the call then waits for it. App
+            // use takes a Mac and never needs its VM; from another device, one allowing remote
+            // use, or the chat is bound where every call from there is refused.
+            const app = isAppTool(entry.name);
+            const online = yield* hub.online(entry.userId);
+            const macs = online.filter((presence) => presence.hello.platform === "darwin");
+            const usable = app
+              ? macs.filter((presence) => presence.machineId === sender || presence.hello.remote)
+              : online.filter((presence) => presence.hello.computer.status !== "unavailable");
             const candidate =
               usable.find((presence) => presence.machineId === sender) ??
               usable.find((presence) => presence.hello.computer.status === "ready") ??
               usable[0];
+            const closed = macs[0];
+            if (!candidate && app && closed) {
+              yield* finish(
+                entry,
+                desktopFailure(
+                  `${closed.hello.name} does not allow remote use`,
+                  `This chat's apps can only be used from ${closed.hello.name} itself. Tell the user to continue there, or to allow remote control in its settings.`,
+                ),
+              );
+              return;
+            }
             if (!candidate) {
-              const known = yield* repo.machines(entry.userId);
+              const known = (yield* repo.machines(entry.userId)).filter(
+                (machine) => !app || machine.platform === "darwin",
+              );
               if (
                 known.length > 0 &&
                 (yield* likelyBack(
@@ -308,10 +329,15 @@ export class ComputerCalls extends Context.Service<
               }
               yield* finish(
                 entry,
-                desktopFailure(
-                  "No computer is connected",
-                  "This chat has no computer yet and none of the user's desktop apps is online and ready. Tell the user to open the desktop app.",
-                ),
+                app
+                  ? desktopFailure(
+                      "No Mac is connected",
+                      "This chat has no computer yet and none of the user's Macs is online. Tell the user to open the desktop app on their Mac.",
+                    )
+                  : desktopFailure(
+                      "No computer is connected",
+                      "This chat has no computer yet and none of the user's desktop apps is online and ready. Tell the user to open the desktop app.",
+                    ),
               );
               return;
             }
@@ -338,7 +364,10 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           const status = presence.hello.computer;
-          if (status.status === "unavailable") {
+          // App use never touches the VM, so a machine without one (still downloading, or none
+          // on this hardware) can still use its apps.
+          const usesVm = !isAppTool(entry.name);
+          if (usesVm && status.status === "unavailable") {
             yield* finish(
               entry,
               desktopFailure(
@@ -348,7 +377,7 @@ export class ComputerCalls extends Context.Service<
             );
             return;
           }
-          if (status.status === "preparing") {
+          if (usesVm && status.status === "preparing") {
             yield* hold(entry, chat.machineId, "preparing");
             return;
           }
@@ -409,7 +438,7 @@ export class ComputerCalls extends Context.Service<
               return;
             }
           }
-          yield* send(entry, chat.machineId);
+          yield* send(entry, chat.machineId, sender === chat.machineId);
         });
 
       /**
@@ -467,8 +496,9 @@ export class ComputerCalls extends Context.Service<
 
       // Every await before a state change may let Stop close the call's scope, whose finalizer
       // marks it done. A call that ended meanwhile is never sent, or is cancelled if it was.
-      const send = (entry: Entry, machineId: string) =>
+      const send = (entry: Entry, machineId: string, local: boolean) =>
         Effect.gen(function* () {
+          entry.local = local;
           const files = yield* repo.sentFiles(entry.userId, entry.conversationId);
           if (ended(entry)) return;
           const delivered = yield* hub.send(entry.userId, machineId, {
@@ -480,6 +510,7 @@ export class ComputerCalls extends Context.Service<
             deadlineAt: entry.deadlineAt,
             sentAt: yield* Clock.currentTimeMillis,
             attachments: sentFilePaths(files),
+            local,
           });
           if (!delivered) {
             yield* finish(
@@ -690,7 +721,9 @@ export class ComputerCalls extends Context.Service<
                 ),
               { discard: true },
             );
-            yield* Effect.forEach(sent, (entry) => send(entry, machineId), { discard: true });
+            yield* Effect.forEach(sent, (entry) => send(entry, machineId, entry.local ?? false), {
+              discard: true,
+            });
             yield* advanceHeld(userId, machineId);
           }),
         machineChanged: (userId, machineId) => advanceHeld(userId, machineId),

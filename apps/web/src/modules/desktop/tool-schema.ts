@@ -1,6 +1,7 @@
 import { LIMITS } from "@chat/desktop-rpc";
 import { Schema } from "effect";
 import { AiError } from "effect/ai";
+import { APP_TOOL_NAMES } from "~/modules/app-use/tool-schema.ts";
 import {
   BROWSER_TOOL_NAMES,
   browserApprovalKind,
@@ -31,6 +32,7 @@ export const DESKTOP_TOOL_NAMES = [
   "request_folder",
   "request_ssh_agent",
   ...BROWSER_TOOL_NAMES,
+  ...APP_TOOL_NAMES,
 ] as const;
 
 export const DesktopToolName = Schema.Literals(DESKTOP_TOOL_NAMES);
@@ -111,8 +113,20 @@ export const DesktopToolResult = Schema.Struct({
   ),
   /** The web page a browser call left its tab on, for the transcript to link. */
   page: Schema.optionalKey(Schema.Struct({ url: Schema.String, title: Schema.String })),
+  /** The app an app call used, as macOS names it, for the transcript row. */
+  app: Schema.optionalKey(Schema.Struct({ name: Schema.String })),
 });
 export type DesktopToolResult = typeof DesktopToolResult.Type;
+
+const APP_NAME_CHARS = 200;
+
+/** An app's name as the transcript may keep it: capped and non-empty, else nothing. */
+export const storableApp = (
+  app: DesktopToolResult["app"],
+): NonNullable<DesktopToolResult["app"]> | undefined => {
+  const name = app ? storable(app.name).trim().slice(0, APP_NAME_CHARS) : "";
+  return name ? { name } : undefined;
+};
 
 const PAGE_URL_CHARS = 2_048;
 const PAGE_TITLE_CHARS = 300;
@@ -151,6 +165,7 @@ export const storable = (text: string) => text.replaceAll("\u0000", "");
 
 export const forTranscript = (result: DesktopToolResult): DesktopToolResult => {
   const page = storablePage(result.page);
+  const app = storableApp(result.app);
   return {
     v: 1,
     ok: result.ok,
@@ -167,6 +182,7 @@ export const forTranscript = (result: DesktopToolResult): DesktopToolResult => {
         }
       : {}),
     ...(page ? { page } : {}),
+    ...(app ? { app } : {}),
   };
 };
 
@@ -258,6 +274,16 @@ const TOOL_TIMEOUTS: Record<DesktopToolName, "quick" | "command"> = {
   browser_evaluate: "command",
   // Can wait on the user allowing another site, then on the downloads.
   browser_save: "command",
+  app_list: "quick",
+  // Each may be an app's first use in the chat, which waits on the person allowing it.
+  app_open: "command",
+  app_look: "command",
+  app_click: "command",
+  app_type: "command",
+  app_key: "command",
+  app_scroll: "command",
+  app_drag: "command",
+  app_zoom: "command",
 };
 
 export const desktopToolTimeout = (name: DesktopToolName) => DESKTOP_TIMEOUTS[TOOL_TIMEOUTS[name]];
