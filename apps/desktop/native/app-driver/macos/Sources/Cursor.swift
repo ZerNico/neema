@@ -14,7 +14,7 @@ final class Cursor {
   private static let size = CGSize(width: 72, height: 72)
   private static let tip = CGPoint(x: 36, y: 36)
   /// It stays this long after an action, through the model's thinking before the next.
-  private static let rest: TimeInterval = 8
+  static let rest: TimeInterval = 8
   /// Back within this long after fading, it reappears where it left off.
   private static let memory: TimeInterval = 60
 
@@ -95,11 +95,17 @@ final class Cursor {
     view?.pulse()
   }
 
-  /// neema is done for now: the cursor fades unless it moves again soon.
-  func settle() {
+  /// neema is done for now: the cursor fades unless it moves again soon, and at once when the
+  /// person takes over `target`'s app, so it never rests over their own work.
+  func settle(watching target: Target) {
     fade?.invalidate()
-    fade = Timer.scheduledTimer(withTimeInterval: Self.rest, repeats: false) { _ in
-      MainActor.assumeIsolated { Cursor.shared.hide() }
+    let since = Date()
+    fade = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+      MainActor.assumeIsolated {
+        if Date().timeIntervalSince(since) >= Cursor.rest || Person.busy(in: target) > 0 {
+          Cursor.shared.hide()
+        }
+      }
     }
   }
 

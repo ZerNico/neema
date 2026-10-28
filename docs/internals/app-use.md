@@ -152,7 +152,7 @@ vision model and not stored, like the browser's screenshots, unless the model sh
   slight arc, pulses as a click lands, and stays through the model's thinking between actions,
   fading 8 seconds after the last, as Codex draws its agent cursor. Back within a minute, it
   reappears where it left off; it comes in afresh only after that. It goes at once when the
-  person's input wins, rather than resting over their work. It is a window
+  person takes over the app, rather than resting over their work. It is a window
   of the driver's ordered just above the app's window, so whatever covers the app covers it
   too, and it never takes clicks or focus. The person's pointer never moves.
 

@@ -305,8 +305,8 @@ actor Driver {
   ) async throws -> T {
     let target = try current()
     try await yieldToPerson(in: target)
-    // However it ends, the cursor fades once neema rests.
-    defer { Task { @MainActor in Cursor.shared.settle() } }
+    // However it ends, the cursor fades once neema rests or the person takes over.
+    defer { Task { @MainActor in Cursor.shared.settle(watching: target) } }
     if let point {
       await Cursor.shared.move(to: screen(point, in: target), above: target.window)
       // Input that began while the cursor glided wins too.
