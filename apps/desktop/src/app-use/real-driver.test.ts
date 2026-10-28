@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { type AppDriver, AppDriverError, startAppDriver } from "./driver.ts";
 import { buildOutline } from "./outline.ts";
-import type { Look } from "./protocol.ts";
+import type { Look, UiNode } from "./protocol.ts";
 
 /**
  * The platform's real driver against a real app, opt-in because it opens Calculator and needs
@@ -252,66 +252,154 @@ describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
   },
 );
 
+const centre = ({ frame }: UiNode) => ({
+  x: frame!.x + frame!.width / 2,
+  y: frame!.y + frame!.height / 2,
+});
+
+/** A native fixture compiled into a throwaway bundle, since a look finds an app by bundle id. */
+const bundled = (fixture: string, bundleId: string) => {
+  const bundle = join(mkdtempSync(join(tmpdir(), `${fixture}-`)), `${fixture}.app`);
+  mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
+  writeFileSync(
+    join(bundle, "Contents/Info.plist"),
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${bundleId}</string><key>CFBundleExecutable</key><string>${fixture}</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`,
+  );
+  execFileSync("swiftc", [
+    "-O",
+    "-o",
+    join(bundle, "Contents/MacOS", fixture),
+    fileURLToPath(new URL(`fixtures/${fixture}.swift`, import.meta.url)),
+  ]);
+  return join(bundle, "Contents/MacOS", fixture);
+};
+
+/** A running fixture that reports its state as JSON lines, every one kept. */
+const launch = async (executable: string, args: string[] = []) => {
+  const app = spawn(executable, args, { stdio: ["pipe", "pipe", "ignore"] });
+  const states: Record<string, unknown>[] = [];
+  let changed = () => {};
+  const pid = await new Promise<number>((resolve) => {
+    createInterface({ input: app.stdout! }).on("line", (line) => {
+      if (line.startsWith("READY ")) resolve(Number(line.slice(6)));
+      if (line === "PONG") pongs.shift()?.();
+      if (line.startsWith("STATE ")) {
+        states.push(JSON.parse(line.slice(6)));
+        changed();
+      }
+    });
+  });
+  const pongs: (() => void)[] = [];
+  return {
+    app,
+    pid,
+    states,
+    get state() {
+      return states.at(-1) ?? {};
+    },
+    /** Resolves once the app has handled every event that reached it before this. */
+    settled() {
+      return new Promise<void>((resolve) => {
+        pongs.push(resolve);
+        app.stdin!.write("ping\n");
+      });
+    },
+    /** Resolves once the app reports a state like this; the test's timeout bounds it. */
+    async reaches(match: (state: Record<string, unknown>) => boolean) {
+      while (!match(states.at(-1) ?? {})) await new Promise<void>((resolve) => (changed = resolve));
+    },
+  };
+};
+
 /**
  * Keys go to an app's key window, which need not be the window looked at: a document behind
- * its own utility panel. The fixture is compiled into a throwaway bundle, since a look finds an
- * app by bundle id.
+ * its own utility panel.
  */
 describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
   "the macOS app driver with two windows",
   () => {
     let driver: AppDriver;
-    let app: ChildProcess;
-    let pid: number;
-    let state: Record<string, string> = {};
-    let changed = () => {};
+    let fixture: Awaited<ReturnType<typeof launch>>;
 
     beforeAll(async () => {
-      const bundle = join(mkdtempSync(join(tmpdir(), "two-windows-")), "TwoWindows.app");
-      mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
-      writeFileSync(
-        join(bundle, "Contents/Info.plist"),
-        `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>app.neema.test.two-windows</string><key>CFBundleExecutable</key><string>two-windows</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`,
-      );
-      execFileSync("swiftc", [
-        "-O",
-        "-o",
-        join(bundle, "Contents/MacOS/two-windows"),
-        fileURLToPath(new URL("fixtures/two-windows.swift", import.meta.url)),
-      ]);
-      app = spawn(join(bundle, "Contents/MacOS/two-windows"), [], {
-        stdio: ["pipe", "pipe", "ignore"],
-      });
-      pid = await new Promise<number>((resolve) => {
-        createInterface({ input: app.stdout! }).on("line", (line) => {
-          if (line.startsWith("READY ")) resolve(Number(line.slice(6)));
-          if (line.startsWith("STATE ")) {
-            state = JSON.parse(line.slice(6));
-            changed();
-          }
-        });
-      });
+      fixture = await launch(bundled("two-windows", "app.neema.test.two-windows"));
       driver = startAppDriver(EXECUTABLE!);
     }, 120_000);
     afterAll(() => {
       driver.close();
-      app.kill();
+      fixture.app.kill();
     });
 
-    /** Resolves once the app reports a state like this; the test's timeout bounds it. */
-    const reaches = async (match: (state: Record<string, string>) => boolean) => {
-      while (!match(state)) await new Promise<void>((resolve) => (changed = resolve));
-    };
-
     test("types and presses keys into the window looked at, then hands its keys back", async () => {
-      const look = await driver.call("look", { appId: "app.neema.test.two-windows", pid });
+      const look = await driver.call("look", {
+        appId: "app.neema.test.two-windows",
+        pid: fixture.pid,
+      });
       expect(look.title).toBe("Document");
       await driver.call("type", { text: "hi" });
       await driver.call("key", { keys: "x" });
-      await reaches((now) => now.document === "hix");
-      expect(state.panel).toBe("");
-      await reaches((now) => now.key === "Panel");
+      await fixture.reaches((now) => now.document === "hix");
+      expect(fixture.state.panel).toBe("");
+      await fixture.reaches((now) => now.key === "Panel");
     });
+  },
+);
+
+/**
+ * A menu opened in a background app takes key focus from the person's app, and their typing
+ * with it, though nothing is activated or raised. This brings a fixture forward for the person.
+ */
+describe.skipIf(!EXECUTABLE || process.platform !== "darwin")(
+  "the macOS app driver opening a menu behind the person's app",
+  () => {
+    let driver: AppDriver;
+    let person: Awaited<ReturnType<typeof launch>>;
+    let target: Awaited<ReturnType<typeof launch>>;
+
+    beforeAll(async () => {
+      const executable = bundled("menu-focus", "app.neema.test.menu-focus");
+      target = await launch(executable, ["target"]);
+      person = await launch(executable, ["front"]);
+      await person.reaches((now) => now.key === true && now.active === true);
+      driver = startAppDriver(EXECUTABLE!);
+    }, 120_000);
+    afterAll(() => {
+      driver.close();
+      person.app.kill();
+      target.app.kill();
+    });
+
+    const opens = {
+      "by reference": (choice: UiNode) => ({ node: choice.id }),
+      "by a click on the button": (choice: UiNode) => ({ at: centre(choice) }),
+      "as a context menu": (choice: UiNode) => ({
+        at: { x: centre(choice).x + 200, y: centre(choice).y },
+        button: "right" as const,
+      }),
+    };
+    test.each(Object.keys(opens))(
+      "keeps the person's window key while a menu opened %s is open",
+      async (way) => {
+        const look = await driver.call("look", {
+          appId: "app.neema.test.menu-focus",
+          pid: target.pid,
+        });
+        const choice = look.nodes.find((node) => node.role === "popUpButton");
+        expect(choice).toBeDefined();
+        const before = person.states.length;
+        await driver.call("click", opens[way as keyof typeof opens](choice!));
+        await target.reaches((now) => now.menu === true);
+        // AppKit takes key focus before it tracks the menu, so the person's app has the notice by now.
+        await person.settled();
+        expect(person.states.slice(before - 1)).not.toContainEqual(
+          expect.objectContaining({ key: false }),
+        );
+        expect(person.state).toMatchObject({ key: true, active: true });
+        expect(target.state).toMatchObject({ menu: true });
+        await driver.call("key", { keys: "Escape" });
+        await target.reaches((now) => now.menu === false);
+      },
+    );
   },
 );
 
