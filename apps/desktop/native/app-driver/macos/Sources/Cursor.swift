@@ -2,9 +2,10 @@ import AppKit
 import QuartzCore
 
 /// neema's own pointer, drawn where it acts so the person sees it work, as Codex's helper draws
-/// its agent cursor. The person's pointer never moves. It glides to each point before acting,
-/// pulses on a click and fades once neema rests. It sits just above the window it acts in, so
-/// whatever covers that window covers it too, and it never takes clicks or focus.
+/// its agent cursor. The person's pointer never moves. It glides along a slight arc to each point
+/// before acting, pulses on a click and fades once neema has rested a while. It sits just above
+/// the window it acts in, so whatever covers that window covers it too, and it never takes clicks
+/// or focus.
 @MainActor
 final class Cursor {
   static let shared = Cursor()
@@ -12,11 +13,18 @@ final class Cursor {
   /// The panel is larger than the arrow, for its shadow and the pulse around its tip.
   private static let size = CGSize(width: 72, height: 72)
   private static let tip = CGPoint(x: 36, y: 36)
-  private static let rest: TimeInterval = 1.6
+  /// It stays this long after an action, through the model's thinking before the next.
+  private static let rest: TimeInterval = 8
+  /// Back within this long after fading, it reappears where it left off.
+  private static let memory: TimeInterval = 60
 
   private var panel: NSPanel?
   private var view: CursorView?
   private var fade: Timer?
+  /// Where it faded, and when.
+  private var left: (origin: NSPoint, at: Date)?
+  /// The glide under way, ended early when another starts or the cursor hides.
+  private var gliding: (timer: Timer, done: CheckedContinuation<Void, Never>)?
 
   /// Brings the cursor to a screen point (global, top-left) above a window, gliding there from
   /// where it was; returns once it arrived. Nothing shows for a window off screen.
@@ -24,30 +32,62 @@ final class Cursor {
     fade?.invalidate()
     guard onScreen(window) else { return hide() }
     let panel = self.panel ?? make()
-    let origin = Self.origin(for: point)
+    let target = Self.origin(for: point)
     if !panel.isVisible {
-      // It comes in from a little up and left, as a hand enters a page.
-      panel.setFrameOrigin(NSPoint(x: origin.x - 24, y: origin.y + 18))
+      // Where it left off, if lately; else it comes in from a little up and left, as a hand
+      // enters a page.
+      let recent = left.flatMap { Date().timeIntervalSince($0.at) < Self.memory ? $0.origin : nil }
+      panel.setFrameOrigin(recent ?? NSPoint(x: target.x - 24, y: target.y + 18))
       panel.alphaValue = 0
-      panel.order(.above, relativeTo: Int(window))
-    } else {
-      panel.order(.above, relativeTo: Int(window))
     }
-    let distance = hypot(panel.frame.origin.x - origin.x, panel.frame.origin.y - origin.y)
-    let duration =
-      NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-      ? 0 : min(0.45, max(0.16, distance / 1800))
+    panel.order(.above, relativeTo: Int(window))
+    await glide(panel, to: target)
+  }
+
+  /// Steps the panel along a quadratic curve, easing in and out and fading in if it was hidden:
+  /// a window's animator only moves its frame in a straight line.
+  private func glide(_ panel: NSPanel, to end: NSPoint) async {
+    endGlide()
+    let start = panel.frame.origin
+    let (dx, dy) = (end.x - start.x, end.y - start.y)
+    let distance = hypot(dx, dy)
+    let alpha = panel.alphaValue
+    guard distance > 1, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+      panel.setFrameOrigin(end)
+      panel.alphaValue = 1
+      return
+    }
+    let duration = min(0.5, max(0.18, distance / 1600))
+    // Bowed to one side by an eighth of the way, at most 60 points, as a hand moves.
+    let bow = min(distance / 8, 60)
+    let control = NSPoint(
+      x: (start.x + end.x) / 2 - dy / distance * bow,
+      y: (start.y + end.y) / 2 + dx / distance * bow)
+    let began = CACurrentMediaTime()
     await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = duration
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        // A window animates its whole frame, not its origin alone.
-        panel.animator().setFrame(NSRect(origin: origin, size: Self.size), display: true)
-        panel.animator().alphaValue = 1
-      } completionHandler: {
-        done.resume()
+      let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { _ in
+        MainActor.assumeIsolated {
+          let t = min(1, (CACurrentMediaTime() - began) / duration)
+          let e = t < 0.5 ? 2 * t * t : 1 - pow(2 - 2 * t, 2) / 2
+          let u = 1 - e
+          panel.setFrameOrigin(
+            NSPoint(
+              x: u * u * start.x + 2 * u * e * control.x + e * e * end.x,
+              y: u * u * start.y + 2 * u * e * control.y + e * e * end.y))
+          panel.alphaValue = alpha + (1 - alpha) * min(1, t * 2.5)
+          if t >= 1 { Cursor.shared.endGlide() }
+        }
       }
+      gliding = (timer, done)
+      RunLoop.main.add(timer, forMode: .common)
     }
+  }
+
+  private func endGlide() {
+    guard let gliding else { return }
+    self.gliding = nil
+    gliding.timer.invalidate()
+    gliding.done.resume()
   }
 
   /// A ring out of the tip, as the click lands.
@@ -65,7 +105,9 @@ final class Cursor {
 
   func hide() {
     fade?.invalidate()
+    endGlide()
     guard let panel else { return }
+    left = (panel.frame.origin, Date())
     self.panel = nil
     view = nil
     NSAnimationContext.runAnimationGroup { context in

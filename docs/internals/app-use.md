@@ -144,8 +144,11 @@ vision model and not stored, like the browser's screenshots, unless the model sh
   helper answers that the user is still interacting with the app. It reads the system's record
   of hardware input, which the driver's own events, posted to one process, never enter
   (measured); no input is watched.
-- **neema's own cursor.** Before acting, a cursor in neema's colour glides to the point, pulses
-  as a click lands and fades once neema rests, as Codex draws its agent cursor. It is a window
+- **neema's own cursor.** Before acting, a cursor in neema's colour glides to the point along a
+  slight arc, pulses as a click lands, and stays through the model's thinking between actions,
+  fading 8 seconds after the last, as Codex draws its agent cursor. Back within a minute, it
+  reappears where it left off; it comes in afresh only after that. It goes at once when the
+  person's input wins, rather than resting over their work. It is a window
   of the driver's ordered just above the app's window, so whatever covers the app covers it
   too, and it never takes clicks or focus. The person's pointer never moves.
 

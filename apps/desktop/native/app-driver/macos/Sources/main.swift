@@ -304,21 +304,24 @@ actor Driver {
     at point: CGPoint?, pressing: Bool = false, _ body: (Target) async throws -> T
   ) async throws -> T {
     let target = try current()
-    try yieldToPerson(in: target)
-    // However it ends, the cursor fades once neema rests, not over the person's own work.
+    try await yieldToPerson(in: target)
+    // However it ends, the cursor fades once neema rests.
     defer { Task { @MainActor in Cursor.shared.settle() } }
     if let point {
       await Cursor.shared.move(to: screen(point, in: target), above: target.window)
       // Input that began while the cursor glided wins too.
-      try yieldToPerson(in: target)
+      try await yieldToPerson(in: target)
       if pressing { await Cursor.shared.press() }
     }
     return try await body(target)
   }
 
-  private func yieldToPerson(in target: Target) throws {
+  /// Refuses while the person is using the app, the cursor gone at once rather than resting
+  /// over their work.
+  private func yieldToPerson(in target: Target) async throws {
     let wait = Person.busy(in: target)
     guard wait > 0 else { return }
+    await Cursor.shared.hide()
     throw DriverError(
       code: "person_active",
       message: "The person is using the app; try again in \(Int(wait.rounded(.up))) s")
