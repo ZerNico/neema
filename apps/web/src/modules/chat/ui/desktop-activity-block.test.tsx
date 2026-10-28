@@ -146,7 +146,7 @@ describe("DesktopActivityBlock", () => {
     expect(decide).toHaveBeenLastCalledWith("allow");
   });
 
-  it("says an app call's machine is used for its apps, not a VM", () => {
+  it("says an app call's machine is used for its apps, and the chat's computer there", () => {
     show(
       <DesktopApproval
         activity={running({ name: "app_list", args: {} })}
@@ -154,9 +154,10 @@ describe("DesktopActivityBlock", () => {
       />,
     );
     expect(
-      screen.getByText("neema uses your apps there, each once you allow it."),
+      screen.getByText(
+        "neema uses your apps there, each once you allow it. Its commands and files run there, in a VM of this chat’s own.",
+      ),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/in a VM/)).not.toBeInTheDocument();
   });
 
   it("names a private network request as one", () => {

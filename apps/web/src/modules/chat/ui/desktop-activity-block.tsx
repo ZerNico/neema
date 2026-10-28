@@ -447,10 +447,11 @@ export function DesktopApproval({
         </p>
       ) : null}
       {approval.kind === "bind" ? (
-        // App use runs in the person's own apps there, never in the chat's VM.
+        // The chat's commands and files run there from now on, whatever asked; an app call
+        // also says its apps are used there, which the VM never touches.
         <p className="text-muted-foreground text-xs">
           {isAppTool(activity.name)
-            ? m.chat_computer_bind_apps_note()
+            ? `${m.chat_computer_bind_apps_note()} ${m.chat_computer_bind_note()}`
             : m.chat_computer_bind_note()}
         </p>
       ) : listed.length > 1 ? (
