@@ -9,7 +9,7 @@
   "main": "dist/main.cjs",
   "scripts": {
     "typecheck": "node scripts/compile-messages.ts && tsc --noEmit",
-    "test": "pnpm exec vitest run",
+    "test": "node scripts/compile-messages.ts && pnpm exec vitest run",
     "dev": "node dev.mjs",
     "build": "node build.mjs",
     "start": "pnpm build && node electron-app.mjs",
