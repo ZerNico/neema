@@ -144,7 +144,7 @@ interface ChatLook {
   readonly scale: number;
   /** The window's size in points. */
   readonly window: { readonly width: number; readonly height: number };
-  /** Each node's centre in window points, for the floating view to mark a click. */
+  /** Each node's centre in window points, for the live view to mark a click. */
   readonly centres: ReadonlyMap<string, { readonly x: number; readonly y: number }>;
 }
 

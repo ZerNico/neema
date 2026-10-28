@@ -4,8 +4,6 @@ import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
 import {
-  APP_USE_OPEN_CHAT,
-  APP_USE_TAKE_OPEN_CHAT,
   BROWSER_ALLOW_SITE,
   BROWSER_ACT,
   BROWSER_BEGIN,
@@ -19,7 +17,6 @@ import {
   BROWSER_OPEN_TAB,
   PROTOCOL_VERSION,
   type BrowserOpenTab,
-  type DesktopAppUse,
   type DesktopAuth,
   type DesktopBrowser,
   type DesktopChrome,
@@ -201,24 +198,6 @@ describe("restricted bundled preloads", () => {
       "systemLocale",
     ]);
   });
-
-  it.runIf(process.platform === "darwin")(
-    "signals the page to take a chat to open, and asks main which, never the event",
-    async () => {
-      const { exposed, ipc } = probe("preload.ts", "https:");
-      const appUse = exposed.get("__chatDesktop")!.appUse as DesktopAppUse;
-      const listener = vi.fn();
-      const unsubscribe = appUse.onOpenChat(listener);
-      ipc.emit(APP_USE_OPEN_CHAT, { sender: { privileged: true } }, "forged");
-      expect(listener).toHaveBeenCalledExactlyOnceWith();
-      unsubscribe();
-      ipc.emit(APP_USE_OPEN_CHAT, { sender: { privileged: true } });
-      expect(listener).toHaveBeenCalledTimes(1);
-      ipc.invoke.mockResolvedValueOnce("c1");
-      await expect(appUse.takeOpenChat()).resolves.toBe("c1");
-      expect(ipc.invoke).toHaveBeenLastCalledWith(APP_USE_TAKE_OPEN_CHAT);
-    },
-  );
 
   it("withholds the server switch from every document while the server is pinned", () => {
     const remote = probe("preload.ts", "https:", [FIXED_SERVER_ARGUMENT]);

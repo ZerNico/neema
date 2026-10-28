@@ -46,15 +46,11 @@ import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
 import {
-  APP_USE_OPEN_CHAT,
   APP_USE_PAUSE,
-  APP_USE_PLACE,
   APP_USE_STATE,
-  APP_USE_TAKE_OPEN_CHAT,
   APP_USE_UPDATE,
   AppUseChat,
   AppUsePause,
-  AppUsePlace,
   DesktopTheme,
   NoPayload,
   makeDesktopResponder,
@@ -81,7 +77,6 @@ import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
 import { computerDialogs } from "./computer/dialogs.ts";
 import { SharedAppDriver } from "./app-use/host.ts";
 import { chatKey, parseChatKey } from "./app-use/chat-key.ts";
-import { FloatingView, floatingFiles } from "./app-use/floating.ts";
 import { LiveView } from "./app-use/live.ts";
 import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
@@ -252,30 +247,20 @@ const appDriver = new SharedAppDriver(
 );
 /**
  * The live view of app use, one like the driver (docs/internals/app-use.md): each chat's view,
- * told to its page for the chat's panel tab, and the floating window it can move to.
+ * told to its page for the chat's panel tab.
  */
 const liveApps = new LiveView({ driver: appDriver, locale: (origin) => shellLocale(origin) });
-const appPage = () =>
-  mainWindow && !mainWindow.isDestroyed() && serverOrigin !== null
-    ? { origin: serverOrigin, window: mainWindow }
-    : null;
 // The page hears only of the chats it asked about, its person's own; see `LiveView.view`.
 liveApps.subscribe((chat) => {
-  const page = appPage();
   const update = liveApps.update(chat);
-  if (page && update && liveApps.told(chat) && parseChatKey(chat)?.scope === page.origin)
-    page.window.webContents.send(APP_USE_UPDATE, update);
-});
-/** The chat the floating window sent the person back to, by key, until its server's page takes it. */
-let openAppChat: string | null = null;
-const floatingApps = new FloatingView(liveApps, {
-  page: appPage,
-  showChat: (chat) => {
-    openAppChat = chat;
-    restoreWindow();
-    mainWindow?.webContents.send(APP_USE_OPEN_CHAT);
-  },
-  ...floatingFiles(here),
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    update &&
+    liveApps.told(chat) &&
+    parseChatKey(chat)?.scope === serverOrigin
+  )
+    mainWindow.webContents.send(APP_USE_UPDATE, update);
 });
 const stopComputer = async () => {
   const current = computer;
@@ -567,18 +552,14 @@ const connectFlow = makeConnectFlow({
   },
   openMain: (origin) => {
     serverOrigin = origin;
-    openAppChat = null;
     sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
     startComputer(origin);
-    // Another server: the floating window shows its chats, not the last one's.
-    floatingApps.place();
   },
   closeMain: () => {
     const window = mainWindow;
     mainWindow = null;
     window?.destroy();
-    floatingApps.place();
   },
 });
 
@@ -610,11 +591,6 @@ const openMainWindow = (origin: string) => {
 
   mainWindow = window;
   windowChrome.set(window, attachChrome(window, nativeTheme, platform));
-  // A chat using apps floats its view while this window is out of sight.
-  window.on("minimize", () => floatingApps.place());
-  window.on("restore", () => floatingApps.place());
-  window.on("hide", () => floatingApps.place());
-  window.on("show", () => floatingApps.place());
   const recovery = attachLoadRecovery(window, origin, recoveryFile, (cause) =>
     console.error("[desktop] recovery page failed", cause),
   );
@@ -654,7 +630,6 @@ const openMainWindow = (origin: string) => {
   window.on("close", (event) => lifecycle.close(event));
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
-    floatingApps.place();
   });
   window.webContents.on("did-finish-load", flushPendingTicket);
   window.webContents.on("did-navigate", flushPendingTicket);
@@ -852,17 +827,6 @@ void app.whenReady().then(async () => {
     const chat = serverOrigin && chatKey(serverOrigin, conversationId);
     if (chat && liveApps.told(chat)) liveApps.pause(chat, paused);
   });
-  onPage(APP_USE_PLACE, AppUsePlace, ({ conversationId, placement }) => {
-    const chat = serverOrigin && chatKey(serverOrigin, conversationId);
-    if (chat && liveApps.told(chat)) liveApps.place(chat, placement);
-  });
-  onPage(APP_USE_TAKE_OPEN_CHAT, NoPayload, () => {
-    const chat = openAppChat ? parseChatKey(openAppChat) : null;
-    const told = openAppChat !== null && liveApps.told(openAppChat);
-    openAppChat = null;
-    // This server's chat only, though another server's page may have asked about its own.
-    return chat && told && chat.scope === serverOrigin ? chat.conversationId : null;
-  });
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {
@@ -940,6 +904,5 @@ app.on("before-quit", (event) => {
   void lifecycle.beforeQuit(event);
 });
 app.on("will-quit", () => {
-  floatingApps.close();
   liveApps.close();
 });

@@ -16,7 +16,7 @@ enum Person {
   /// How long to wait for the person in the target's app; zero when they are not using it.
   /// Keys count while the app is in front, where keys go; clicks and scrolls while its window
   /// is uppermost under the pointer, where they go. Typing in neema with the pointer resting on
-  /// the app, or pressing Pause in neema's floating window above it, is not using the app.
+  /// the app is not using the app.
   static func busy(in target: Target) -> TimeInterval {
     let keys = since([.keyDown])
     let clicks = since(pointer)
@@ -39,8 +39,8 @@ enum Person {
 
   /// The app a click at a screen point goes to: the owner of the uppermost window there, or the
   /// app in front over the menu bar, which is its. Nil over the Dock, a banner or the desktop.
-  /// Floating windows count, as neema's floating view does; the driver's own cursor does not,
-  /// as clicks pass through it.
+  /// Floating windows count, as clicks go to them; the driver's own cursor does not, as clicks
+  /// pass through it.
   private static func owner(at point: CGPoint) -> pid_t? {
     let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
       as? [[String: Any]] ?? []

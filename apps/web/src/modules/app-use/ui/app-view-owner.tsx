@@ -1,8 +1,6 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef } from "react";
 import { useDetailPanel, useDetailPanelTabIds } from "~/ui/detail-panel-context.ts";
 import { useIsMobile } from "~/ui/use-mobile.ts";
-import { appViewOpenRequests, usePendingAppViewOpen } from "../client/open-requests.ts";
 import { appViewSpells, useAppView, useDesktopAppUse } from "../client/use-app-view.ts";
 import { APP_VIEW_PREFIX, appViewRequest } from "./app-view-request.tsx";
 
@@ -16,9 +14,9 @@ const stops = new Map<string, () => void>();
 
 /**
  * Keeps a chat's live view of app use on its panel tab. Opens it when a spell of app use
- * starts while the chat is on screen, adds it back unselected when the person returns during
- * one, and opens it when the floating window sends them back. Never on a phone, where the panel
- * covers the answer, and only in the desktop app on a Mac.
+ * starts while the chat is on screen, and adds it back unselected when the person returns
+ * during one. Never on a phone, where the panel covers the answer, and only in the desktop app
+ * on a Mac.
  */
 export function AppViewOwner({
   conversationId,
@@ -33,7 +31,6 @@ export function AppViewOwner({
   const tabIds = useDetailPanelTabIds();
   const isMobile = useIsMobile();
   const view = useAppView(conversationId);
-  const pendingOpen = usePendingAppViewOpen();
   const id = `${APP_VIEW_PREFIX}${conversationId}`;
   const present = tabIds.includes(id);
 
@@ -68,20 +65,7 @@ export function AppViewOwner({
   }, [id, present, view, conversationId]);
 
   useEffect(() => {
-    if (!appUse || !view || isMobile) return;
-    if (pendingOpen === conversationId && appViewOpenRequests.take(conversationId)) {
-      opened.set(conversationId, view.spell);
-      closed.delete(conversationId);
-      panel.open(request);
-      return;
-    }
-    if (!view.live || present) return;
-    // A spell spent in the floating window has had its view: hiding the window later must not
-    // pop it open in the chat.
-    if (view.placement !== "panel") {
-      opened.set(conversationId, Math.max(opened.get(conversationId) ?? 0, view.spell));
-      return;
-    }
+    if (!appUse || !view || isMobile || !view.live || present) return;
     if ((opened.get(conversationId) ?? 0) < view.spell) {
       opened.set(conversationId, view.spell);
       panel.open(request);
@@ -89,37 +73,12 @@ export function AppViewOwner({
       // Back during a spell whose tab went with the page: listed, not selected.
       panel.append(request);
     }
-  }, [appUse, view, isMobile, conversationId, panel, request, present, pendingOpen]);
+  }, [appUse, view, isMobile, conversationId, panel, request, present]);
 
   useEffect(() => {
     if (present) panel.refresh(request);
   }, [panel, request, present]);
 
   useEffect(() => () => panel.release(id), [panel, id]);
-  return null;
-}
-
-/**
- * Mounted once in the layout: the floating window's way back into a chat, which may be any
- * chat, so it navigates there and leaves the opening to that chat's owner. It asks main which
- * chat when told to and once on mount, for a page that was still loading when the ask came.
- */
-export function AppViewReturns() {
-  const appUse = useDesktopAppUse();
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!appUse) return;
-    const take = () =>
-      void appUse.takeOpenChat().then(
-        (conversationId) => {
-          if (!conversationId) return;
-          appViewOpenRequests.request(conversationId);
-          void navigate({ to: "/chat/$conversationId", params: { conversationId } });
-        },
-        () => {},
-      );
-    take();
-    return appUse.onOpenChat(take);
-  }, [appUse, navigate]);
   return null;
 }

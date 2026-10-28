@@ -129,69 +129,30 @@ describe("a chat's live view", () => {
   });
 });
 
-describe("the floating window", () => {
-  test("stays in the chat while neema's window is in sight, and floats when it is not", () => {
-    live.view(A);
-    live.begin(A, call());
-    expect(live.floating(SERVER, true, null)).toBeNull();
-    expect(live.floating(SERVER, false, null)).toBe(A);
-  });
-
-  test("shows where the person put it until they close it, for the next spell", async () => {
-    live.view(A);
-    live.begin(A, call());
-    live.place(A, "floating");
-    expect(live.floating(SERVER, true, null)).toBe(A);
-    live.dismiss(A);
-    expect(live.floating(SERVER, false, null)).toBeNull();
-    live.finished(A);
-    await vi.advanceTimersByTimeAsync(20_000);
-    live.begin(A, call());
-    expect(live.floating(SERVER, false, null)).toBe(A);
-  });
-
-  test("never shows another server's chat", () => {
-    live.view(ELSEWHERE);
-    live.begin(ELSEWHERE, call());
-    live.place(ELSEWHERE, "floating");
-    expect(live.floating(SERVER, false, null)).toBeNull();
-  });
-
-  test("keeps showing its chat while it may, as two chats take turns at the driver", () => {
-    live.view(A);
-    live.view(B);
-    live.begin(A, call());
-    live.begin(B, call());
-    fake.holder = B;
-    expect(live.floating(SERVER, false, A)).toBe(A);
-    expect(live.floating(SERVER, false, null)).toBe(B);
-  });
-});
-
 describe("a page", () => {
   test("is told only of the chats it asked about, its person's own", () => {
     live.begin(A, call());
-    live.place(A, "floating");
     expect(live.told(A)).toBe(false);
-    expect(live.floating(SERVER, false, null)).toBeNull();
     expect(live.view(A)?.label).toBe("Clicking in Calculator");
     expect(live.told(A)).toBe(true);
-    expect(live.floating(SERVER, false, null)).toBe(A);
+    // Another server's page loading afresh forgets only what it asked about.
+    live.view(ELSEWHERE);
+    live.pageLoaded("https://other.example");
+    expect(live.told(ELSEWHERE)).toBe(false);
+    expect(live.told(A)).toBe(true);
   });
 
   test("that loads afresh, perhaps for another person, starts with nothing but Pause", async () => {
     fake.holder = A;
     live.view(A);
     live.begin(A, call());
-    live.place(A, "floating");
     live.pause(B, true);
     fake.resolve?.();
     await settle();
     live.finished(A);
     live.pageLoaded(SERVER);
     expect(live.told(A)).toBe(false);
-    expect(live.update(A)).toMatchObject({ live: false, placement: "panel", frame: null });
-    expect(live.floating(SERVER, false, null)).toBeNull();
+    expect(live.update(A)).toMatchObject({ live: false, frame: null });
     expect(live.update(B)?.paused).toBe(true);
   });
 
@@ -225,27 +186,14 @@ describe("a page", () => {
     expect(live.told(A)).toBe(false);
   });
 
-  test("lets a deleted chat's floating window go", () => {
-    live.view(A);
-    live.begin(A, call());
-    live.place(A, "floating");
-    const shown: (string | null)[] = [];
-    live.subscribe(() => shown.push(live.floating(SERVER, true, A)));
-    live.forget(A);
-    expect(shown).toEqual([null]);
-  });
-
   test("brings a paused chat's view back with each refused call, even within its spell", () => {
     live.view(A);
     live.begin(A, call());
     live.finished(A);
     live.pause(A, true);
-    live.place(A, "floating");
-    live.dismiss(A);
     const spell = live.update(A)!.spell;
     expect(live.begin(A, call())).toBe(false);
-    // A new spell reopens its tab; out of sight, it floats again.
+    // A new spell reopens its tab, even one the person closed.
     expect(live.update(A)?.spell).toBe(spell + 1);
-    expect(live.floating(SERVER, false, null)).toBe(A);
   });
 });

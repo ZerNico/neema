@@ -1,4 +1,4 @@
-import type { AppUsePlacement, AppUseUpdate } from "@chat/desktop-rpc";
+import type { AppUseUpdate } from "@chat/desktop-rpc";
 import { m } from "../paraglide/messages.js";
 import { parseChatKey } from "./chat-key.ts";
 import type { AppCall, AppWatch } from "./host.ts";
@@ -32,17 +32,14 @@ interface Chat {
   live: boolean;
   paused: boolean;
   yielding: boolean;
-  placement: AppUsePlacement;
-  /** The floating window was closed for this spell. */
-  dismissed: boolean;
   frame: AppUseUpdate["frame"];
   click: AppUseUpdate["click"];
   linger?: ReturnType<typeof setTimeout>;
 }
 
 /**
- * Each chat's live view of app use (docs/internals/app-use.md), told to whoever draws it: the
- * chat's page and the floating window. It pictures the driver's window a few times a second
+ * Each chat's live view of app use (docs/internals/app-use.md), told to the chat's page. It
+ * pictures the driver's window a few times a second
  * while chats use apps, and only for the chat whose look the driver holds, since the driver
  * pictures whatever was looked at last, whoever asked. It knows nothing of windows.
  */
@@ -87,7 +84,6 @@ export class LiveView implements AppWatch {
     // Resume on it even if the person just closed it.
     if (!chat.live || chat.paused) {
       chat.spell++;
-      chat.dismissed = false;
       chat.click = null;
     }
     chat.live = true;
@@ -153,18 +149,15 @@ export class LiveView implements AppWatch {
     const chat = this.chats.get(key);
     if (!chat) return;
     clearTimeout(chat.linger);
-    // Its page hears it is over before it is forgotten, so a tab still open stops showing it
-    // live, and the floating window lets it go.
+    // Its page hears it is over before it is forgotten, so a tab still open stops showing it live.
     chat.live = false;
     chat.call = null;
-    chat.placement = "panel";
-    chat.dismissed = true;
     this.notify(key);
     this.chats.delete(key);
     this.asked.delete(key);
   }
 
-  /** A chat's view as its page and the floating window draw it; null before it used an app. */
+  /** A chat's view as its page draws it; null before it used an app. */
   update(key: string): AppUseUpdate | null {
     const chat = this.chats.get(key);
     if (!chat) return null;
@@ -176,7 +169,6 @@ export class LiveView implements AppWatch {
       busy: chat.call !== null && !chat.yielding,
       live: chat.live,
       paused: chat.paused,
-      placement: chat.placement,
       frame: chat.frame,
       click: chat.click,
     };
@@ -195,8 +187,8 @@ export class LiveView implements AppWatch {
 
   /**
    * A server's page loaded afresh, perhaps for another person. It is told of no chat until it
-   * asks, and what its chats showed ends: their spells, pictures and where they were shown.
-   * Pause stays, as the person's word does; the language is read again.
+   * asks, and what its chats showed ends: their spells and pictures. Pause stays, as the
+   * person's word does; the language is read again.
    */
   pageLoaded(origin: string) {
     for (const key of this.asked) if (parseChatKey(key)?.scope === origin) this.asked.delete(key);
@@ -206,33 +198,11 @@ export class LiveView implements AppWatch {
       // A call still running keeps its spell, with its pictures and Pause button.
       chat.live = chat.call !== null;
       chat.yielding = false;
-      chat.placement = "panel";
-      chat.dismissed = false;
       chat.frame = null;
       chat.click = null;
       this.notify(chat.key);
     }
     this.readLocale(origin);
-  }
-
-  /**
-   * The chat the floating window shows for a server's page, if any; see `floats`. Only chats the
-   * page asked about. The one it shows stays while it may, so two chats taking turns at the
-   * driver do not swap places under the person's pointer; else the chat acting now, else one
-   * the person put there.
-   */
-  floating(origin: string, mainVisible: boolean, current: string | null): string | null {
-    const holder = this.options.driver.holder;
-    const eligible = [...this.chats.values()].filter(
-      (chat) => chat.scope === origin && this.asked.has(chat.key) && floats(chat, mainVisible),
-    );
-    return (
-      (
-        eligible.find((chat) => chat.key === current) ??
-        eligible.find((chat) => chat.key === holder) ??
-        eligible[0]
-      )?.key ?? null
-    );
   }
 
   /** Paused, the chat's next calls are refused until it is resumed; see `begin`. */
@@ -243,32 +213,15 @@ export class LiveView implements AppWatch {
     this.notify(chat.key);
   }
 
-  place(key: string, placement: AppUsePlacement) {
-    const chat = this.chats.get(key);
-    if (!chat) return;
-    chat.placement = placement;
-    if (placement === "floating") chat.dismissed = false;
-    this.notify(chat.key);
-  }
-
-  /** The person closed the floating window: it stays away until the chat's next spell. */
-  dismiss(key: string) {
-    const chat = this.chats.get(key);
-    if (!chat) return;
-    chat.placement = "panel";
-    chat.dismissed = true;
-    this.notify(chat.key);
-  }
-
-  locale(origin: string): Locale {
-    return this.locales.get(origin) ?? "en";
-  }
-
   close() {
     this.closed = true;
     clearTimeout(this.timer);
     for (const chat of this.chats.values()) clearTimeout(chat.linger);
     this.listeners.clear();
+  }
+
+  private locale(origin: string): Locale {
+    return this.locales.get(origin) ?? "en";
   }
 
   private chat(key: string): Chat | null {
@@ -285,8 +238,6 @@ export class LiveView implements AppWatch {
       live: false,
       paused: false,
       yielding: false,
-      placement: "panel",
-      dismissed: false,
       frame: null,
       click: null,
     };
@@ -350,14 +301,6 @@ export class LiveView implements AppWatch {
     return chat.live ? m.app_view_title({ app }, options) : m.app_view_done({}, options);
   }
 }
-
-/**
- * Whether the floating window shows a chat. Where the person put it; and by itself while the
- * chat uses apps and neema's window is minimized or hidden, as Codex's picture in picture
- * comes up on minimize. Closing it keeps it away until the chat's next spell.
- */
-const floats = (chat: Chat, mainVisible: boolean) =>
-  !chat.dismissed && (chat.placement === "floating" || (chat.live && !mainVisible));
 
 /** The model may name an app by bundle id; its last part is the app ("com.apple.calculator"). */
 const shortName = (app: string) =>

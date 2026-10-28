@@ -1,11 +1,5 @@
 import type { AppUseUpdate } from "@chat/desktop-rpc";
-import {
-  PauseIcon,
-  PictureInPictureOnIcon,
-  PlayIcon,
-  PictureInPictureExitIcon,
-  StopIcon,
-} from "@hugeicons/core-free-icons";
+import { PauseIcon, PlayIcon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import * as motion from "motion/react-m";
 import type { CSSProperties } from "react";
@@ -65,7 +59,7 @@ function LiveDot({ active }: { active: boolean }) {
 /**
  * The row under the tab strip: what is happening, and the person's say over it, as media
  * controls so the line keeps its room in a narrow panel. Pause holds the chat's app use; Stop
- * ends the answer, as the composer's does; the last moves the view to a floating window.
+ * ends the answer, as the composer's does.
  */
 export function AppViewBar({
   conversationId,
@@ -92,19 +86,6 @@ export function AppViewBar({
         />
       ) : null}
       {stop ? <BarButton label={m.app_view_stop()} icon={StopIcon} onClick={stop} /> : null}
-      {view.placement === "panel" ? (
-        <BarButton
-          label={m.app_view_float()}
-          icon={PictureInPictureOnIcon}
-          onClick={() => void appUse.place(conversationId, "floating")}
-        />
-      ) : (
-        <BarButton
-          label={m.app_view_dock()}
-          icon={PictureInPictureExitIcon}
-          onClick={() => void appUse.place(conversationId, "panel")}
-        />
-      )}
     </div>
   );
 }
@@ -118,25 +99,6 @@ export function AppViewStage({ conversationId }: { conversationId: string }) {
   const appUse = useDesktopAppUse();
   const view = useAppView(conversationId);
   if (!appUse || !view) return null;
-  if (view.placement === "floating")
-    return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-        <HugeiconsIcon
-          icon={PictureInPictureOnIcon}
-          strokeWidth={2}
-          className="text-muted-foreground size-6"
-        />
-        <p className="text-muted-foreground text-sm">{m.app_view_floating()}</p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => void appUse.place(conversationId, "panel")}
-        >
-          {m.app_view_dock()}
-        </Button>
-      </div>
-    );
   const frame = view.frame;
   const ratio = frame ? frame.width / frame.height : 1;
   return (

@@ -355,7 +355,7 @@ skipped one on purpose.
   and remote use.
 - `docs/internals/app-use.md`: the model operating the person's own apps through our own
   tools: looks as a window picture plus an accessibility outline, consent per app, apps never
-  offered, the live view in the chat and its floating window, the native drivers.
+  offered, the live view in the chat, the native drivers.
 
 ## Version pins
 
