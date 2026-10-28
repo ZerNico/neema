@@ -72,7 +72,7 @@ describe("browser activity block", () => {
     expect(screen.queryByText(/written for the model/)).not.toBeInTheDocument();
   });
 
-  it("says what is happening while running, and waits on the user with the card below", () => {
+  it("says it waits on the user, and leaves the question to the dock", () => {
     const { result: _none, ...click } = step("browser_click", "", undefined, {
       status: "running",
       args: { ref: "e1" },
@@ -91,8 +91,7 @@ describe("browser activity block", () => {
       ]),
     );
     expect(screen.getByText("Waiting for you")).toBeInTheDocument();
-    expect(screen.getByText("Click on this page")).toBeInTheDocument();
-    expect(screen.getByText("the “Learn more” link")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
   });
 
   it("stays folded while running, since the work line around it is what opens", () => {

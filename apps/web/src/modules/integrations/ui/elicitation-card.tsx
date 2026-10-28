@@ -6,7 +6,6 @@ import { useId, useState } from "react";
 import { toastError } from "~/ui/error-toast.ts";
 import { OptionalMark } from "~/ui/form/form-fields.tsx";
 import { Button } from "~/ui/primitives/button";
-import { Card, CardContent } from "~/ui/primitives/card";
 import { Checkbox } from "~/ui/primitives/checkbox";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "~/ui/primitives/field";
 import { Input } from "~/ui/primitives/input";
@@ -109,81 +108,73 @@ export function ElicitationCard({ call, name }: { call: PendingIntegrationCall; 
   });
 
   return (
-    <Card className="mb-3 gap-0 py-4">
-      <CardContent className="flex min-w-0 flex-col gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <IntegrationLogo integrationId={call.integrationId} />
-          <span className="min-w-0 truncate">{m.integrations_elicit_asking({ name })}</span>
-        </div>
-        {prompt.message ? (
-          <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap">{prompt.message}</p>
-        ) : null}
-        {prompt.mode === "url" ? (
-          <UrlPrompt
-            url={prompt.url}
-            pending={answer.isPending}
-            onAnswer={(action) => answer.mutate(action)}
-          />
-        ) : (
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!missing(prompt, values)) answer.mutate("accept");
-            }}
-          >
-            <FieldGroup>
-              {prompt.fields.map((field) => (
-                <ElicitationInput
-                  key={field.key}
-                  field={field}
-                  value={values[field.key]}
-                  disabled={answer.isPending}
-                  onChange={(value) =>
-                    setValues((current) => {
-                      const next = { ...current };
-                      if (value === undefined) delete next[field.key];
-                      else next[field.key] = value;
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </FieldGroup>
-            <p className="text-muted-foreground text-xs">
-              {m.integrations_elicit_goes_to({ name })}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                type="submit"
-                disabled={answer.isPending || missing(prompt, values)}
-              >
-                {m.integrations_elicit_send()}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                type="button"
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+        <IntegrationLogo integrationId={call.integrationId} />
+        <span className="min-w-0 truncate">{m.integrations_elicit_asking({ name })}</span>
+      </div>
+      {prompt.message ? (
+        <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap">{prompt.message}</p>
+      ) : null}
+      {prompt.mode === "url" ? (
+        <UrlPrompt
+          url={prompt.url}
+          pending={answer.isPending}
+          onAnswer={(action) => answer.mutate(action)}
+        />
+      ) : (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!missing(prompt, values)) answer.mutate("accept");
+          }}
+        >
+          <FieldGroup>
+            {prompt.fields.map((field) => (
+              <ElicitationInput
+                key={field.key}
+                field={field}
+                value={values[field.key]}
                 disabled={answer.isPending}
-                onClick={() => answer.mutate("decline")}
-              >
-                {m.integrations_elicit_decline()}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                type="button"
-                disabled={answer.isPending}
-                onClick={() => answer.mutate("cancel")}
-              >
-                {m.common_cancel()}
-              </Button>
-            </div>
-          </form>
-        )}
-      </CardContent>
-    </Card>
+                onChange={(value) =>
+                  setValues((current) => {
+                    const next = { ...current };
+                    if (value === undefined) delete next[field.key];
+                    else next[field.key] = value;
+                    return next;
+                  })
+                }
+              />
+            ))}
+          </FieldGroup>
+          <p className="text-muted-foreground text-xs">{m.integrations_elicit_goes_to({ name })}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" type="submit" disabled={answer.isPending || missing(prompt, values)}>
+              {m.integrations_elicit_send()}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              type="button"
+              disabled={answer.isPending}
+              onClick={() => answer.mutate("decline")}
+            >
+              {m.integrations_elicit_decline()}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              disabled={answer.isPending}
+              onClick={() => answer.mutate("cancel")}
+            >
+              {m.common_cancel()}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }
 

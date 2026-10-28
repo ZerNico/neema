@@ -1,5 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AskUserBlock } from "./ask-user-block.tsx";
 import type { AskToolActivity } from "../client/use-message-stream.ts";
@@ -18,11 +17,6 @@ const activity: AskToolActivity = {
     },
   ],
 };
-
-const renderCard = (onRespond = vi.fn().mockResolvedValue(undefined)) => ({
-  onRespond,
-  ...render(<AskUserBlock activity={activity} messageStatus="complete" onRespond={onRespond} />),
-});
 
 describe("AskUserBlock resolved answers", () => {
   const resolved = {
@@ -131,166 +125,30 @@ describe("AskUserBlock resolved answers", () => {
 });
 
 describe("AskUserBlock", () => {
-  it("starts empty, requires explicit submission, and sends positional selections only", async () => {
-    const { onRespond } = renderCard();
-    expect(screen.queryByText("A little more context")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Answer each question, or skip and continue without answers."),
-    ).not.toBeInTheDocument();
+  it("reads as asked while the dock answers it, with nothing to press here", () => {
+    render(<AskUserBlock activity={activity} messageStatus="complete" awaiting />);
+    expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
     expect(screen.getByText("Where should we start?")).toBeInTheDocument();
-    expect(screen.getByText("Plan the interface")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Design" })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    expect(onRespond).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
-    await waitFor(() =>
-      expect(onRespond).toHaveBeenCalledWith("ask-1", {
-        kind: "answers",
-        answers: [{ selected: [1], custom: "" }],
-      }),
-    );
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Send answers" })).not.toBeInTheDocument(),
-    );
+    expect(screen.getByText("Design: Plan the interface")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
-  it("makes custom text and options mutually exclusive for single selection", () => {
-    renderCard();
-    const custom = screen.getByRole("textbox", { name: "Or write your own answer" });
-    fireEvent.click(screen.getByRole("button", { name: "Design" }));
-    fireEvent.change(custom, { target: { value: "Documentation" } });
-    expect(screen.getByRole("button", { name: "Design" })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    expect(custom).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("accepts multiple options plus custom text and requires every question", async () => {
-    const onRespond = vi.fn().mockResolvedValue(undefined);
-    render(
-      <AskUserBlock
-        activity={{
-          ...activity,
-          questions: [
-            { ...activity.questions![0]!, multiSelect: true },
-            { question: "What is the deadline?", options: [], multiSelect: false },
-          ],
-        }}
-        messageStatus="complete"
-        onRespond={onRespond}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Design" }));
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Add your own answer (optional)" }), {
-      target: { value: "Tests" },
-    });
-    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
-    fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), {
-      target: { value: "Tomorrow" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send answers" }));
-    await waitFor(() =>
-      expect(onRespond).toHaveBeenCalledWith("ask-1", {
-        kind: "answers",
-        answers: [
-          { selected: [0, 1], custom: "Tests" },
-          { selected: [], custom: "Tomorrow" },
-        ],
-      }),
-    );
-  });
-
-  it("skips the whole batch without turning draft values into answers", async () => {
-    const { onRespond } = renderCard();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Unsent idea" } });
-    fireEvent.click(screen.getByRole("button", { name: "Skip and continue" }));
-    await waitFor(() => expect(onRespond).toHaveBeenCalledWith("ask-1", { kind: "skip" }));
-  });
-
-  it("guards repeated submissions synchronously, retains draft after rejection, and restores controls", async () => {
-    let reject!: (error: Error) => void;
-    const onRespond = vi.fn(
-      () =>
-        new Promise<void>((_resolve, fail) => {
-          reject = fail;
-        }),
-    );
-    renderCard(onRespond);
-    const custom = screen.getByRole("textbox");
-    fireEvent.change(custom, { target: { value: "My draft" } });
-    const button = screen.getByRole("button", { name: "Send answers" });
-    const form = button.closest("form")!;
-    act(() => {
-      fireEvent.submit(form);
-      fireEvent.submit(form);
-    });
-    expect(onRespond).toHaveBeenCalledTimes(1);
-    expect(button).toHaveAttribute("aria-busy", "true");
-    expect(button).toHaveTextContent("Send answers");
-    expect(within(button).queryByRole("status")).toBeNull();
-    expect(screen.getByRole("button", { name: "Skip and continue" })).toBeDisabled();
-    expect(custom).toBeDisabled();
-    await act(async () => reject(new Error("Network interrupted")));
-    expect(custom).toHaveValue("My draft");
-    expect(button).toBeEnabled();
-  });
-
-  it.each(["streaming", "error", "aborted"])(
-    "never enables a successful card in a %s assistant",
-    (messageStatus) => {
-      render(
-        <AskUserBlock activity={activity} messageStatus={messageStatus} onRespond={vi.fn()} />,
-      );
-      expect(screen.getByText("Where should we start?")).toBeInTheDocument();
-      for (const button of screen.queryAllByRole("button")) expect(button).toBeDisabled();
-    },
-  );
-
-  it("shows old cards read-only with no duplicate copy of user draft answers", () => {
-    const { rerender } = renderCard();
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Private draft" } });
-    rerender(<AskUserBlock activity={activity} messageStatus="complete" />);
+  it("shows an older question read-only", () => {
+    render(<AskUserBlock activity={activity} messageStatus="complete" />);
     expect(screen.getByText("Previous questions · read-only")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByText("Private draft")).not.toBeInTheDocument();
-    expect(screen.getByText("Code")).toBeInTheDocument();
   });
 
-  it("hydrates a running card without selecting defaults and preserves draft across durable refetch", () => {
-    const onRespond = vi.fn();
-    const { rerender } = render(
+  it("says the questions are on their way while the answer streams", () => {
+    render(
       <AskUserBlock
         activity={{ ...activity, status: "running", questions: [] }}
         messageStatus="streaming"
-        onRespond={onRespond}
       />,
     );
     expect(screen.getByText("Preparing questions…")).toBeInTheDocument();
-    rerender(<AskUserBlock activity={activity} messageStatus="complete" onRespond={onRespond} />);
-    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    rerender(
-      <AskUserBlock
-        activity={structuredClone(activity)}
-        messageStatus="complete"
-        onRespond={onRespond}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("supports keyboard selection and allows choices to wrap on narrow layouts", async () => {
-    const user = userEvent.setup();
-    renderCard();
-    const design = screen.getByRole("button", { name: "Design" });
-    design.focus();
-    await user.keyboard("{ArrowRight} ");
-    expect(screen.getByRole("button", { name: "Code" })).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
-    expect(design.closest('[data-slot="toggle-group"]')).toHaveClass("flex-wrap", "w-full");
-    expect(design).toHaveClass("whitespace-normal", "max-w-full");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("never offers controls for rejected or undecodable presentation results", () => {
@@ -298,7 +156,6 @@ describe("AskUserBlock", () => {
       <AskUserBlock
         activity={{ ...activity, status: "error", questions: [] }}
         messageStatus="complete"
-        onRespond={vi.fn()}
       />,
     );
     expect(screen.getByText("These questions are unavailable.")).toBeInTheDocument();

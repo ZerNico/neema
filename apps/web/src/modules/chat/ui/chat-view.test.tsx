@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Suspense, use, useState } from "react";
+import { Suspense, use, useState, type ReactNode } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { AskUserBlock } from "./ask-user-block.tsx";
@@ -343,7 +343,9 @@ vi.mock("./composer.tsx", () => ({
     disabled,
     controlsDisabled,
     textareaDisabled,
+    cover,
   }: {
+    cover?: { shown: boolean; render: (kept: null) => ReactNode };
     disabled: boolean;
     controlsDisabled?: boolean;
     textareaDisabled?: boolean;
@@ -355,6 +357,7 @@ vi.mock("./composer.tsx", () => ({
     onSearchEnabledChange: (enabled: boolean) => void;
   }) => (
     <div>
+      {cover ? <div hidden={!cover.shown}>{cover.render(null)}</div> : null}
       <textarea aria-label="Unrelated composer draft" defaultValue="" disabled={textareaDisabled} />
       <output data-testid="composer-model">{modelId}</output>
       <button type="button" disabled={controlsDisabled} onClick={() => onModelChange("m2")}>

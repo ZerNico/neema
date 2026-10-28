@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -29,7 +30,11 @@ vi.mock("@tanstack/react-router", () => ({
     select({ location: { pathname: "/chat/c1" }, matches: [] }),
   useBlocker: vi.fn(),
 }));
-vi.mock("./composer.tsx", () => ({ Composer: () => null }));
+// The composer itself is not under test; what covers it (the question) is.
+vi.mock("./composer.tsx", () => ({
+  Composer: ({ cover }: { cover?: { shown: boolean; render: (kept: null) => ReactNode } }) =>
+    cover?.shown ? cover.render(null) : null,
+}));
 // Keep the real stream hook, chronology, research disclosure and question controls;
 // only replace viewport measurement and unrelated composer/upload UI.
 vi.mock("./virtual-message-list.tsx", () => ({
@@ -200,10 +205,10 @@ it.each(["stream first", "detail first"])(
         delta: JSON.stringify({ ...ask, phase: "result", result }),
       });
     });
-    expect(screen.getByText(questions[0]!.question)).toBeInTheDocument();
-    const draft = screen.getByRole("textbox", { name: "Your answer" });
-    fireEvent.change(draft, { target: { value: "Focus on access and cost" } });
-    expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
+    expect(screen.getAllByText(questions[0]!.question).length).toBeGreaterThan(0);
+    // Asked once the answer is done, which a detail refresh may have seen first.
+    if (order === "stream first")
+      expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
     act(() => {
       source.emit("chunk", {
         seq: 4,
@@ -217,7 +222,13 @@ it.each(["stream first", "detail first"])(
       });
       source.emit("done", { status: "complete", generationId: "gen-1" });
     });
+    const draft = await screen.findByRole("textbox", { name: "Your answer" });
+    fireEvent.change(draft, { target: { value: "Focus on access and cost" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send answers" })).toBeEnabled());
+    // A refetch of the settled answer keeps the dock, and the answer typed into it.
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["conversation", "c1"] });
+    });
     expect(screen.getByRole("textbox", { name: "Your answer" })).toBe(draft);
     expect(draft).toHaveValue("Focus on access and cost");
     // The call returned before the host asked, so its settled row stands above

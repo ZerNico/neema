@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { DesktopActivityBlock } from "./desktop-activity-block.tsx";
+import { DesktopActivityBlock, DesktopApproval } from "./desktop-activity-block.tsx";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -49,7 +49,7 @@ describe("DesktopActivityBlock", () => {
 
   it("names the machine a call would run on", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running()}
         approval={{ kind: "command", machine: "Desk", decide: vi.fn() }}
       />,
@@ -59,7 +59,7 @@ describe("DesktopActivityBlock", () => {
 
   it("shows why the reviewer asked", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({ args: { command: "git push --force" } })}
         approval={{ kind: "command", reason: "It rewrites the remote history.", decide: vi.fn() }}
       />,
@@ -83,9 +83,17 @@ describe("DesktopActivityBlock", () => {
     expect(row.querySelector("svg")).not.toBeNull();
   });
 
+  it("leaves only a waiting row in the transcript, the dock being where it is asked", () => {
+    show(
+      <DesktopActivityBlock activity={running()} approval={{ kind: "command", decide: vi.fn() }} />,
+    );
+    expect(screen.getByText("Run a program on this computer")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("is pressable while the message is still streaming", async () => {
     const decide = vi.fn();
-    show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
+    show(<DesktopApproval activity={running()} approval={{ kind: "command", decide }} />);
     // The clarification card is disabled mid-stream because answering it ends
     // the turn. This one is the inverse: the generation is parked on it.
     await userEvent.click(screen.getByRole("button", { name: "Allow" }));
@@ -94,7 +102,7 @@ describe("DesktopActivityBlock", () => {
 
   it("offers to allow the rest of the call's kind in this chat", async () => {
     const decide = vi.fn();
-    show(<DesktopActivityBlock activity={running()} approval={{ kind: "command", decide }} />);
+    show(<DesktopApproval activity={running()} approval={{ kind: "command", decide }} />);
     expect(screen.getByText("pnpm test")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Allow in this chat" }));
     expect(decide).toHaveBeenCalledWith("allow-rest");
@@ -103,7 +111,7 @@ describe("DesktopActivityBlock", () => {
   it("asks for network access for this chat or every chat", async () => {
     const decide = vi.fn();
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           name: "request_network_access",
           args: { host: "github.com", port: 22 },
@@ -127,7 +135,7 @@ describe("DesktopActivityBlock", () => {
   it("asks which machine an unbound chat's computer runs on", async () => {
     const decide = vi.fn();
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({ name: "list_folder", args: { path: "." } })}
         approval={{ kind: "bind", machine: "Nico's MacBook", decide }}
       />,
@@ -139,7 +147,7 @@ describe("DesktopActivityBlock", () => {
 
   it("names a private network request as one", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           name: "request_network_access",
           args: { host: "git.internal", privateNetwork: true },
@@ -156,9 +164,7 @@ describe("DesktopActivityBlock", () => {
       name: "request_network_access",
       args: { host: "picsum.photos" },
     });
-    show(
-      <DesktopActivityBlock activity={activity} approval={{ kind: "network", decide: vi.fn() }} />,
-    );
+    show(<DesktopApproval activity={activity} approval={{ kind: "network", decide: vi.fn() }} />);
     expect(screen.getByText("picsum.photos:443")).toBeInTheDocument();
     show(<DesktopActivityBlock activity={activity} />);
     expect(screen.getByText("Requesting network access to picsum.photos:443")).toBeInTheDocument();
@@ -167,7 +173,7 @@ describe("DesktopActivityBlock", () => {
   it("offers no blanket grant for a delete and lists every path", () => {
     const decide = vi.fn();
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           callId: "call-3",
           name: "delete_files",
@@ -187,7 +193,7 @@ describe("DesktopActivityBlock", () => {
 
   it("groups a mixed-folder delete under each folder name", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           callId: "call-3b",
           name: "delete_files",
@@ -207,7 +213,7 @@ describe("DesktopActivityBlock", () => {
 
   it("still names a single-file delete with its full path", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           callId: "call-3c",
           name: "delete_files",
@@ -223,7 +229,7 @@ describe("DesktopActivityBlock", () => {
 
   it("groups absolute paths under the attempt's roots, longest match first", () => {
     show(
-      <DesktopActivityBlock
+      <DesktopApproval
         activity={running({
           callId: "call-3d",
           name: "delete_files",

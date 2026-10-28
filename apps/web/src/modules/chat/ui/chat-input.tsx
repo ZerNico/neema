@@ -16,7 +16,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { capabilitiesQuery } from "~/modules/groups/client/queries.ts";
-import { forwardRef, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { chatModelsQuery, composerAvailabilityQuery } from "../client/queries.ts";
 import { ChatTextarea, type ComposerFieldHandle } from "./chat-textarea.tsx";
 import { CHAT_INPUT_SHELL_CLASS } from "./chat-input-shell.ts";
@@ -63,8 +71,8 @@ import { cn } from "~/ui/utils";
 import { useFileDrop } from "~/ui/use-file-drop.ts";
 import { AnimatePresence } from "motion/react";
 import * as motion from "motion/react-m";
-import { CollapseItem, MotionSwap } from "~/ui/motion.tsx";
-import { collapseMotion } from "~/ui/motion-presets.ts";
+import { CollapseItem, HeightMorph, MotionSwap } from "~/ui/motion.tsx";
+import { collapseMotion, motionEase } from "~/ui/motion-presets.ts";
 import { useAppReducedMotion } from "~/ui/reduced-motion.ts";
 import { Disclosure, DisclosureContent } from "~/ui/disclosure.tsx";
 import type {
@@ -139,6 +147,19 @@ export const ChatInput = forwardRef<
     /** Replaces the send button while a response is generating. */
     onStop?: (() => void) | undefined;
     /**
+     * What the field turns into while the person must decide something: it
+     * replaces the draft (kept mounted, hidden) and the tools that only reach the
+     * next message, and puts its own buttons beside Stop through `actions`.
+     */
+    cover?:
+      | {
+          shown: boolean;
+          /** Which decision is shown: a new one morphs the field's height like covering does. */
+          id: string;
+          render: (actions: HTMLElement | null) => ReactNode;
+        }
+      | undefined;
+    /**
      * A live response does not block the composer: submitting adds the draft to
      * the conversation's queue instead. Stop moves beside the primary button so
      * both remain reachable while typing.
@@ -194,6 +215,7 @@ export const ChatInput = forwardRef<
     onSubmit,
     onCancel,
     onStop,
+    cover,
     disabled,
     queueing = false,
     queueLabel = m.chat_composer_add_to_queue(),
@@ -257,7 +279,12 @@ export const ChatInput = forwardRef<
   // Queueing owns the primary button only while there is something to queue,
   // so an empty composer still offers Stop where people expect it.
   const queueDraft = queueing && (value.trim() !== "" || (attachments?.items.length ?? 0) > 0);
-  const stopping = !!onStop && !queueDraft;
+  const covered = cover?.shown === true;
+  // Covered, the draft is out of reach: Stop is the one thing the button does.
+  const stopping = !!onStop && (!queueDraft || covered);
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
+  // The folding tools clip only while they move, so a focus ring is never cut at rest.
+  const [clipTools, setClipTools] = useState(covered);
   const action = stopping ? "stop" : target?.queued ? "upload" : "send";
   const actionLabel = stopping
     ? m.chat_composer_stop()
@@ -436,7 +463,8 @@ export const ChatInput = forwardRef<
   const pickFiles = () => fileInputRef.current?.click();
 
   const { dragging, handlers: dropHandlers } = useFileDrop({
-    enabled: target !== undefined && !controlsDisabled,
+    // Covered, a dropped file would go into the hidden draft, not to what is asked.
+    enabled: target !== undefined && !controlsDisabled && !covered,
     onDrop: (files) => target?.addFiles(files),
   });
 
@@ -445,315 +473,379 @@ export const ChatInput = forwardRef<
       className={cn("relative", CHAT_INPUT_SHELL_CLASS, dragging && "border-ring/60", className)}
       {...dropHandlers}
     >
-      {/* Present on the first render when an edit opens with files or skills, so
-          the row is already full height for the edit swap's measurement. */}
-      <AnimatePresence initial={false}>
-        {(references && references.items.length > 0) ||
-        (attachments && items.length > 0) ||
-        (context?.selection.agent && !context.agentLocked) ? (
-          <motion.div key="chips" {...rowMotion}>
-            <AttachmentChipRow className="px-3 pt-3">
-              <AnimatePresence initial={false}>
-                {/* What the message is about comes first. */}
-                {references?.items.map((reference) => (
-                  <CollapseItem key={`${reference.kind}:${reference.id}`}>
-                    <ReferenceChip
-                      reference={reference}
-                      onRemove={controlsDisabled ? undefined : () => references.onRemove(reference)}
-                    />
-                  </CollapseItem>
-                ))}
-              </AnimatePresence>
-              {/* Context first: it frames the files that follow. */}
-              {context ? (
-                <AgentChip
-                  agent={context.selection.agent}
-                  agentLocked={context.agentLocked}
-                  onAgentChange={context.onAgentChange}
-                  disabled={controlsDisabled}
-                />
-              ) : null}
-              <AnimatePresence initial={false}>
-                {attachments
-                  ? items.map((item) => (
-                      <CollapseItem key={item.localId}>
-                        <AttachmentChip
-                          item={item}
-                          warning={warningFor(item)}
-                          onRemove={
-                            controlsDisabled ? undefined : () => attachments.remove(item.localId)
-                          }
-                          preview={previewFor(item)}
-                        />
-                      </CollapseItem>
-                    ))
-                  : null}
-              </AnimatePresence>
-            </AttachmentChipRow>
+      <HeightMorph swap={covered ? cover.id : ""}>
+        {cover ? (
+          // Keyed by what it asks: another decision taking its place fades in as one,
+          // instead of its content changing under the reader in a single frame.
+          <motion.div
+            key={cover.id}
+            hidden={!covered}
+            // Never from nothing, so a swap has no empty frame between the two.
+            initial={{ opacity: 0.35, y: 4 }}
+            animate={covered ? { opacity: 1, y: 0 } : { opacity: 0, y: 4 }}
+            transition={{ duration: 0.18, ease: motionEase }}
+          >
+            {/* Put aside, its buttons leave the bar too: the composer's own Send is back. */}
+            {actionsSlot ? cover.render(covered ? actionsSlot : null) : null}
           </motion.div>
         ) : null}
-      </AnimatePresence>
-      {target?.notice ? (
-        <p className="text-muted-foreground px-4 pt-2 text-xs">{target.notice}</p>
-      ) : null}
+        <motion.div
+          hidden={covered}
+          initial={false}
+          animate={covered ? { opacity: 0 } : { opacity: 1 }}
+          transition={{ duration: 0.18, ease: motionEase }}
+        >
+          {/* Present on the first render when an edit opens with files or skills, so
+          the row is already full height for the edit swap's measurement. */}
+          <AnimatePresence initial={false}>
+            {(references && references.items.length > 0) ||
+            (attachments && items.length > 0) ||
+            (context?.selection.agent && !context.agentLocked) ? (
+              <motion.div key="chips" {...rowMotion}>
+                <AttachmentChipRow className="px-3 pt-3">
+                  <AnimatePresence initial={false}>
+                    {/* What the message is about comes first. */}
+                    {references?.items.map((reference) => (
+                      <CollapseItem key={`${reference.kind}:${reference.id}`}>
+                        <ReferenceChip
+                          reference={reference}
+                          onRemove={
+                            controlsDisabled ? undefined : () => references.onRemove(reference)
+                          }
+                        />
+                      </CollapseItem>
+                    ))}
+                  </AnimatePresence>
+                  {/* Context first: it frames the files that follow. */}
+                  {context ? (
+                    <AgentChip
+                      agent={context.selection.agent}
+                      agentLocked={context.agentLocked}
+                      onAgentChange={context.onAgentChange}
+                      disabled={controlsDisabled}
+                    />
+                  ) : null}
+                  <AnimatePresence initial={false}>
+                    {attachments
+                      ? items.map((item) => (
+                          <CollapseItem key={item.localId}>
+                            <AttachmentChip
+                              item={item}
+                              warning={warningFor(item)}
+                              onRemove={
+                                controlsDisabled
+                                  ? undefined
+                                  : () => attachments.remove(item.localId)
+                              }
+                              preview={previewFor(item)}
+                            />
+                          </CollapseItem>
+                        ))
+                      : null}
+                  </AnimatePresence>
+                </AttachmentChipRow>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+          {target?.notice ? (
+            <p className="text-muted-foreground px-4 pt-2 text-xs">{target.notice}</p>
+          ) : null}
 
-      <ChatTextarea
-        ref={textareaRef}
-        skills={
-          skills && canChooseSkills && !controlsDisabled
-            ? {
-                // Added ones stay listed; at five only they are.
-                items: skills.items
-                  .filter(
-                    (item) => skills.selectedIds.length < 5 || skills.selectedIds.includes(item.id),
-                  )
-                  .map((item) => ({
-                    id: item.id,
-                    label: item.name,
-                    ...(item.ownerName ? { meta: item.ownerName } : {}),
-                    description: item.description,
-                  })),
-                onSelect: (id) => skills.onChange([...new Set([...skills.selectedIds, id])]),
+          <ChatTextarea
+            ref={textareaRef}
+            skills={
+              skills && canChooseSkills && !controlsDisabled
+                ? {
+                    // Added ones stay listed; at five only they are.
+                    items: skills.items
+                      .filter(
+                        (item) =>
+                          skills.selectedIds.length < 5 || skills.selectedIds.includes(item.id),
+                      )
+                      .map((item) => ({
+                        id: item.id,
+                        label: item.name,
+                        ...(item.ownerName ? { meta: item.ownerName } : {}),
+                        description: item.description,
+                      })),
+                    onSelect: (id) => skills.onChange([...new Set([...skills.selectedIds, id])]),
+                  }
+                : undefined
+            }
+            collections={mentionableCollections}
+            integrations={
+              integrations && !controlsDisabled
+                ? {
+                    // One row per integration, already-on ones too: the mention in the
+                    // text names it, not an account. Picking one with nothing on turns
+                    // on all its accounts; the model asks which when there are several.
+                    items: mentionableIntegrations(integrations.items),
+                    onSelect: (id) => {
+                      const accounts = integrations.items.filter(
+                        (item) => item.integrationId === id,
+                      );
+                      if (accounts.some((item) => item.enabled)) return;
+                      for (const item of accounts) integrations.setEnabled(item.connectionId, true);
+                    },
+                  }
+                : undefined
+            }
+            // The field sees a paste before anything around it, so it asks first.
+            onPasteData={(data) => {
+              if (!target || controlsDisabled) return false;
+              const files = Array.from(data.files);
+              if (files.length > 0) {
+                target.addFiles(files);
+                return true;
               }
-            : undefined
-        }
-        collections={mentionableCollections}
-        integrations={
-          integrations && !controlsDisabled
-            ? {
-                // One row per integration, already-on ones too: the mention in the
-                // text names it, not an account. Picking one with nothing on turns
-                // on all its accounts; the model asks which when there are several.
-                items: mentionableIntegrations(integrations.items),
-                onSelect: (id) => {
-                  const accounts = integrations.items.filter((item) => item.integrationId === id);
-                  if (accounts.some((item) => item.enabled)) return;
-                  for (const item of accounts) integrations.setEnabled(item.connectionId, true);
-                },
-              }
-            : undefined
-        }
-        // The field sees a paste before anything around it, so it asks first.
-        onPasteData={(data) => {
-          if (!target || controlsDisabled) return false;
-          const files = Array.from(data.files);
-          if (files.length > 0) {
-            target.addFiles(files);
-            return true;
-          }
-          // A pasted wall of text reads far better as an attachment than as a
-          // draft nobody can scroll past.
-          const text = data.getData("text/plain");
-          if (!text || !shouldPasteAsFile(text)) return false;
-          target.addFiles([createPastedTextFile(text)]);
-          return true;
-        }}
-        value={value}
-        onValueChange={onValueChange}
-        onSubmit={submit}
-        onCancel={onCancel}
-        placeholder={noModels ? m.chat_composer_no_models() : placeholder}
-        {...(textareaLabel ? { ariaLabel: textareaLabel } : {})}
-        autoFocus={autoFocus}
-        disabled={noModels || textareaDisabled}
-      />
+              // A pasted wall of text reads far better as an attachment than as a
+              // draft nobody can scroll past.
+              const text = data.getData("text/plain");
+              if (!text || !shouldPasteAsFile(text)) return false;
+              target.addFiles([createPastedTextFile(text)]);
+              return true;
+            }}
+            value={value}
+            onValueChange={onValueChange}
+            onSubmit={submit}
+            onCancel={onCancel}
+            placeholder={noModels ? m.chat_composer_no_models() : placeholder}
+            {...(textareaLabel ? { ariaLabel: textareaLabel } : {})}
+            autoFocus={autoFocus}
+            disabled={noModels || textareaDisabled}
+          />
+        </motion.div>
+      </HeightMorph>
       {/* The textarea's own bottom padding is inside its scroll box, so the gap
           above the controls lives here: it stays constant once the text scrolls. */}
       <div className="@container flex flex-wrap items-center gap-1 p-2 pt-2">
-        {target ? (
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            // Any type lands in a workspace; the server upload path keeps its
-            // allowlist, since the model only reads what the server accepts.
-            className="sr-only"
-            aria-label={m.chat_composer_attach_files()}
-            // Selecting the same file twice in a row must re-fire `change`.
-            onChange={(event) => {
-              target.addFiles(event.target.files ?? []);
-              event.target.value = "";
-            }}
-          />
-        ) : null}
-        <DropdownMenu
-          onOpenChangeComplete={(open) => {
-            if (open || pendingPicker === null) return;
-            setPicker(pendingPicker);
-            setPendingPicker(null);
-          }}
+        {/* Everything here reaches only the next message, which is not what is being asked:
+            it folds away, and the model slides into its place. */}
+        <motion.div
+          className={cn("flex shrink-0 items-center gap-1", clipTools && "overflow-hidden")}
+          initial={false}
+          animate={
+            covered
+              ? { width: 0, opacity: 0, marginRight: -4 }
+              : { width: "auto", opacity: 1, marginRight: 0 }
+          }
+          // Out: gone before the width folds. In: shown once there is room for it.
+          transition={
+            reduced
+              ? { duration: 0 }
+              : covered
+                ? { duration: 0.22, ease: motionEase, opacity: { duration: 0.08 } }
+                : { duration: 0.22, ease: motionEase, opacity: { duration: 0.12, delay: 0.12 } }
+          }
+          onAnimationStart={() => setClipTools(true)}
+          onAnimationComplete={() => setClipTools(covered)}
+          inert={covered}
+          aria-hidden={covered || undefined}
         >
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={menuLabel}
-                      ref={setMenuAnchor}
-                      disabled={
-                        controlsDisabled || (!hasTools && !folders && (!target || target.isFull))
-                      }
-                      className="text-muted-foreground"
-                    />
-                  }
-                />
-              }
-            >
-              <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-            </DropdownMenuTrigger>
-            <TooltipContent>{menuLabel}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent ref={menuPopup} align="start" className={cn(hasTools && "w-64")}>
-            {target ? (
-              <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
-                <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
-                {m.chat_composer_attach_files()}
-              </DropdownMenuItem>
-            ) : null}
-            {folders ? (
-              <DropdownMenuItem onClick={folders.onAdd} disabled={controlsDisabled || folders.busy}>
-                <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
-                {m.chat_composer_attach_folder()}
-              </DropdownMenuItem>
-            ) : null}
-            {context && (canChooseAgent || canChooseKnowledge) ? (
-              <ContextMenuItems
-                selection={context.selection}
-                agentLocked={context.agentLocked || !canChooseAgent}
-                knowledgeEnabled={canChooseKnowledge}
-                onPick={choosePicker}
-                disabled={controlsDisabled}
-              />
-            ) : null}
-            {skills && canChooseSkills ? (
-              <DropdownMenuItem disabled={controlsDisabled} onClick={() => choosePicker("skills")}>
-                <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
-                {m.chat_composer_skills()}
-                {skills.selectedIds.length > 0 ? (
-                  <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">
-                    {skills.selectedIds.length}
-                  </span>
-                ) : null}
-              </DropdownMenuItem>
-            ) : null}
-            {imageModel && canChooseImageModel ? (
-              <ImageModelMenu
-                value={imageModel.value}
-                lock={imageModel.lock}
-                agentPreference={imageModel.agentPreference}
-                onChange={imageModel.onChange}
-                disabled={controlsDisabled}
-              />
-            ) : null}
-            {integrations && (integrations.items.length || integrations.canAdd) ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger disabled={controlsDisabled}>
-                    <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={2} />
-                    {m.chat_composer_integrations()}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-64">
-                    {integrations.items.map((item) => (
-                      <DropdownMenuSwitchItem
-                        key={item.connectionId}
-                        checked={item.enabled}
-                        onCheckedChange={(checked) =>
-                          integrations.setEnabled(item.connectionId, checked)
-                        }
-                      >
-                        <IntegrationLogo integrationId={item.integrationId} />
-                        {/* Only told apart once there is more than one of it. */}
-                        {item.account && sharesIntegration(integrations.items, item)
-                          ? `${item.name} · ${item.account}`
-                          : item.name}
-                      </DropdownMenuSwitchItem>
-                    ))}
-                    {integrations.items.length ? <DropdownMenuSeparator /> : null}
-                    <DropdownMenuItem onClick={() => setAddingIntegration(true)}>
-                      <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
-                      {m.chat_composer_add_integration()}
-                    </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </>
-            ) : null}
-            {canResearch && (onResearchEnabledChange || researchEnabled) ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuSwitchItem
-                  checked={researchEnabled}
-                  onCheckedChange={(checked) => onResearchEnabledChange?.(checked)}
-                  disabled={
-                    modeDisabled || (!researchEnabled && researchUnavailableReason !== null)
-                  }
-                  {...(researchUnavailableReason ? { "aria-describedby": researchHintId } : {})}
-                >
-                  <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
-                  {m.chat_composer_deep_research()}
-                </DropdownMenuSwitchItem>
-                {researchUnavailableReason ? (
-                  <p id={researchHintId} className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs">
-                    {researchUnavailableReason}
-                  </p>
-                ) : null}
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {integrations && addingIntegration ? (
-          <AddIntegrationDialog open onOpenChange={setAddingIntegration} chat={integrations} />
-        ) : null}
-        {skills && canChooseSkills ? (
-          <SkillPicker
-            items={skills.items}
-            selectedIds={skills.selectedIds}
-            onChange={skills.onChange}
-            open={picker === "skills"}
-            onOpenChange={(open) => setPicker(open ? "skills" : null)}
-            anchor={menuAnchor}
-            side={pickerSide}
-          />
-        ) : null}
-        {context && canChooseAgent && !context.agentLocked ? (
-          <AgentPicker
-            selection={context.selection}
-            onAgentChange={context.onAgentChange}
-            open={picker === "agent"}
-            onOpenChange={(open) => setPicker(open ? "agent" : null)}
-            anchor={menuAnchor}
-            side={pickerSide}
-          />
-        ) : null}
-        {context && canChooseKnowledge ? (
-          <CollectionPicker
-            selection={context.selection}
-            agentCollectionIds={context.agentCollectionIds}
-            maxCollections={context.maxCollections}
-            onCollectionsChange={context.onCollectionsChange}
-            open={picker === "collections"}
-            onOpenChange={(open) => setPicker(open ? "collections" : null)}
-            anchor={menuAnchor}
-            side={pickerSide}
-          />
-        ) : null}
-        {searchAvailable ? (
-          <Button
-            size="sm-collapsible"
-            variant={searchEnabled ? "default" : "ghost"}
-            aria-label={m.chat_composer_search_label()}
-            aria-pressed={searchEnabled}
-            onClick={() => onSearchEnabledChange(!searchEnabled)}
-            disabled={controlsDisabled}
-            className={cn("shrink-0", !searchEnabled && "text-muted-foreground")}
+          {target ? (
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              // Any type lands in a workspace; the server upload path keeps its
+              // allowlist, since the model only reads what the server accepts.
+              className="sr-only"
+              aria-label={m.chat_composer_attach_files()}
+              // Selecting the same file twice in a row must re-fire `change`.
+              onChange={(event) => {
+                target.addFiles(event.target.files ?? []);
+                event.target.value = "";
+              }}
+            />
+          ) : null}
+          <DropdownMenu
+            onOpenChangeComplete={(open) => {
+              if (open || pendingPicker === null) return;
+              setPicker(pendingPicker);
+              setPendingPicker(null);
+            }}
           >
-            <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
-            <span>{m.chat_composer_search()}</span>
-          </Button>
-        ) : null}
+            <Tooltip>
+              <DropdownMenuTrigger
+                render={
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={menuLabel}
+                        ref={setMenuAnchor}
+                        disabled={
+                          controlsDisabled || (!hasTools && !folders && (!target || target.isFull))
+                        }
+                        className="text-muted-foreground"
+                      />
+                    }
+                  />
+                }
+              >
+                <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+              </DropdownMenuTrigger>
+              <TooltipContent>{menuLabel}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent ref={menuPopup} align="start" className={cn(hasTools && "w-64")}>
+              {target ? (
+                <DropdownMenuItem onClick={pickFiles} disabled={target.isFull}>
+                  <HugeiconsIcon icon={Attachment01Icon} strokeWidth={2} />
+                  {m.chat_composer_attach_files()}
+                </DropdownMenuItem>
+              ) : null}
+              {folders ? (
+                <DropdownMenuItem
+                  onClick={folders.onAdd}
+                  disabled={controlsDisabled || folders.busy}
+                >
+                  <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
+                  {m.chat_composer_attach_folder()}
+                </DropdownMenuItem>
+              ) : null}
+              {context && (canChooseAgent || canChooseKnowledge) ? (
+                <ContextMenuItems
+                  selection={context.selection}
+                  agentLocked={context.agentLocked || !canChooseAgent}
+                  knowledgeEnabled={canChooseKnowledge}
+                  onPick={choosePicker}
+                  disabled={controlsDisabled}
+                />
+              ) : null}
+              {skills && canChooseSkills ? (
+                <DropdownMenuItem
+                  disabled={controlsDisabled}
+                  onClick={() => choosePicker("skills")}
+                >
+                  <HugeiconsIcon icon={Book02Icon} strokeWidth={2} />
+                  {m.chat_composer_skills()}
+                  {skills.selectedIds.length > 0 ? (
+                    <span className="text-muted-foreground ml-auto pl-2 text-xs tabular-nums">
+                      {skills.selectedIds.length}
+                    </span>
+                  ) : null}
+                </DropdownMenuItem>
+              ) : null}
+              {imageModel && canChooseImageModel ? (
+                <ImageModelMenu
+                  value={imageModel.value}
+                  lock={imageModel.lock}
+                  agentPreference={imageModel.agentPreference}
+                  onChange={imageModel.onChange}
+                  disabled={controlsDisabled}
+                />
+              ) : null}
+              {integrations && (integrations.items.length || integrations.canAdd) ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger disabled={controlsDisabled}>
+                      <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={2} />
+                      {m.chat_composer_integrations()}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="w-64">
+                      {integrations.items.map((item) => (
+                        <DropdownMenuSwitchItem
+                          key={item.connectionId}
+                          checked={item.enabled}
+                          onCheckedChange={(checked) =>
+                            integrations.setEnabled(item.connectionId, checked)
+                          }
+                        >
+                          <IntegrationLogo integrationId={item.integrationId} />
+                          {/* Only told apart once there is more than one of it. */}
+                          {item.account && sharesIntegration(integrations.items, item)
+                            ? `${item.name} · ${item.account}`
+                            : item.name}
+                        </DropdownMenuSwitchItem>
+                      ))}
+                      {integrations.items.length ? <DropdownMenuSeparator /> : null}
+                      <DropdownMenuItem onClick={() => setAddingIntegration(true)}>
+                        <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} />
+                        {m.chat_composer_add_integration()}
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
+              ) : null}
+              {canResearch && (onResearchEnabledChange || researchEnabled) ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSwitchItem
+                    checked={researchEnabled}
+                    onCheckedChange={(checked) => onResearchEnabledChange?.(checked)}
+                    disabled={
+                      modeDisabled || (!researchEnabled && researchUnavailableReason !== null)
+                    }
+                    {...(researchUnavailableReason ? { "aria-describedby": researchHintId } : {})}
+                  >
+                    <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} />
+                    {m.chat_composer_deep_research()}
+                  </DropdownMenuSwitchItem>
+                  {researchUnavailableReason ? (
+                    <p
+                      id={researchHintId}
+                      className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs"
+                    >
+                      {researchUnavailableReason}
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {integrations && addingIntegration ? (
+            <AddIntegrationDialog open onOpenChange={setAddingIntegration} chat={integrations} />
+          ) : null}
+          {skills && canChooseSkills ? (
+            <SkillPicker
+              items={skills.items}
+              selectedIds={skills.selectedIds}
+              onChange={skills.onChange}
+              open={picker === "skills"}
+              onOpenChange={(open) => setPicker(open ? "skills" : null)}
+              anchor={menuAnchor}
+              side={pickerSide}
+            />
+          ) : null}
+          {context && canChooseAgent && !context.agentLocked ? (
+            <AgentPicker
+              selection={context.selection}
+              onAgentChange={context.onAgentChange}
+              open={picker === "agent"}
+              onOpenChange={(open) => setPicker(open ? "agent" : null)}
+              anchor={menuAnchor}
+              side={pickerSide}
+            />
+          ) : null}
+          {context && canChooseKnowledge ? (
+            <CollectionPicker
+              selection={context.selection}
+              agentCollectionIds={context.agentCollectionIds}
+              maxCollections={context.maxCollections}
+              onCollectionsChange={context.onCollectionsChange}
+              open={picker === "collections"}
+              onOpenChange={(open) => setPicker(open ? "collections" : null)}
+              anchor={menuAnchor}
+              side={pickerSide}
+            />
+          ) : null}
+          {searchAvailable ? (
+            <Button
+              size="sm-collapsible"
+              variant={searchEnabled ? "default" : "ghost"}
+              aria-label={m.chat_composer_search_label()}
+              aria-pressed={searchEnabled}
+              onClick={() => onSearchEnabledChange(!searchEnabled)}
+              disabled={controlsDisabled}
+              className={cn("shrink-0", !searchEnabled && "text-muted-foreground")}
+            >
+              <HugeiconsIcon icon={GlobalSearchIcon} strokeWidth={2} data-icon="inline-start" />
+              <span>{m.chat_composer_search()}</span>
+            </Button>
+          ) : null}
+        </motion.div>
         {/* One unit, so a narrow composer wraps model, reasoning and send onto
             their own row together instead of wherever the tools run out. */}
         <div className="flex min-w-0 grow items-center gap-1">
@@ -820,7 +912,10 @@ export const ChatInput = forwardRef<
             </DropdownMenu>
           ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            {onStop && queueDraft ? (
+            {/* Always there, so a cover's first render already has its buttons' place: measured
+                without them, the field would grow past its height and then jump back. */}
+            <div ref={setActionsSlot} className="flex items-center gap-1 empty:hidden" />
+            {onStop && queueDraft && !covered ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -837,44 +932,51 @@ export const ChatInput = forwardRef<
                 <TooltipContent>{m.chat_composer_stop()}</TooltipContent>
               </Tooltip>
             ) : null}
-            {onCancel ? (
+            {onCancel && !covered ? (
               <Button size="sm" variant="ghost" onClick={onCancel} disabled={disabled}>
                 {m.common_cancel()}
               </Button>
             ) : null}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    onClick={stopping ? onStop : submit}
-                    // Stop is available precisely while sending is disabled.
-                    disabled={!stopping && !canSubmit}
-                    aria-label={actionLabel}
-                    aria-busy={(!onStop && target?.queued) || undefined}
-                  />
-                }
-              >
-                <MotionSwap value={action} kind="icon" className="size-4">
-                  {stopping ? (
-                    <HugeiconsIcon icon={StopIcon} strokeWidth={2} className="size-4" aria-hidden />
-                  ) : target?.queued ? (
-                    <Spinner aria-hidden className="size-4" />
-                  ) : (
-                    <HugeiconsIcon
-                      icon={ArrowUp02Icon}
-                      strokeWidth={2}
-                      className="size-4"
-                      aria-hidden
+            {!covered || onStop ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      onClick={stopping ? onStop : submit}
+                      // Stop is available precisely while sending is disabled.
+                      disabled={!stopping && !canSubmit}
+                      aria-label={actionLabel}
+                      aria-busy={(!onStop && target?.queued) || undefined}
                     />
-                  )}
-                </MotionSwap>
-              </TooltipTrigger>
-              <TooltipContent>
-                {actionLabel}
-                {!stopping ? <Kbd>Enter</Kbd> : null}
-              </TooltipContent>
-            </Tooltip>
+                  }
+                >
+                  <MotionSwap value={action} kind="icon" className="size-4">
+                    {stopping ? (
+                      <HugeiconsIcon
+                        icon={StopIcon}
+                        strokeWidth={2}
+                        className="size-4"
+                        aria-hidden
+                      />
+                    ) : target?.queued ? (
+                      <Spinner aria-hidden className="size-4" />
+                    ) : (
+                      <HugeiconsIcon
+                        icon={ArrowUp02Icon}
+                        strokeWidth={2}
+                        className="size-4"
+                        aria-hidden
+                      />
+                    )}
+                  </MotionSwap>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {actionLabel}
+                  {!stopping ? <Kbd>Enter</Kbd> : null}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
       </div>

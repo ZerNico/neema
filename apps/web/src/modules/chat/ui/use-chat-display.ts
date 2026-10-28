@@ -94,7 +94,6 @@ export function useChatDisplay({
     generationDisabled,
     editPending,
     mutateResume,
-    respondToQuestion,
     tailMessageId,
     retry,
     branchAt,
@@ -209,7 +208,7 @@ export function useChatDisplay({
         ...(canRespond || resolution
           ? {
               questionActions: {
-                ...(canRespond ? { onRespond: respondToQuestion } : {}),
+                ...(canRespond && !resolution ? { awaiting: true } : {}),
                 disabled: generationDisabled || !effectiveModelId,
                 ...(resolution
                   ? {
@@ -285,7 +284,6 @@ export function useChatDisplay({
     desktopApprovalRequests,
     generationDisabled,
     effectiveModelId,
-    respondToQuestion,
     tailMessageId,
     modelByMessage,
     mutateResume,
@@ -487,7 +485,7 @@ export function useChatDisplay({
     localMachineId,
   ]);
 
-  return { display, withPlacedCards, fileReferences };
+  return { display, withPlacedCards, fileReferences, approvalRequests: desktopApprovalRequests };
 }
 
 /** The edit in progress, drawn on the row it edits. */

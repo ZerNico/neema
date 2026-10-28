@@ -85,7 +85,7 @@ describe("MessageBubble chronological body", () => {
     reasoningSeen: false,
     toolActivities: [ask],
     status: "complete",
-    questionActions: { onRespond: vi.fn() },
+    questionActions: { awaiting: true },
   };
 
   it("renders introductions before the question and same-round trailing prose after it", () => {
@@ -630,17 +630,16 @@ describe("MessageBubble chronological body", () => {
       />,
     );
     expect(screen.getByText("Where next?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Skip and continue" })).toBeDisabled();
+    expect(screen.getByText("Preparing questions…")).toBeInTheDocument();
   });
 
-  it("keeps the same card and draft when the first source arrives", () => {
+  it("keeps the same card when the first source arrives", () => {
     const { rerender } = render(
       <DetailPanelProvider>
         <MessageBubble message={base} />
       </DetailPanelProvider>,
     );
-    const draft = screen.getByRole("textbox", { name: "Your answer" });
-    fireEvent.change(draft, { target: { value: "Keep this draft" } });
+    const question = screen.getByText("Where next?");
     rerender(
       <DetailPanelProvider>
         <MessageBubble
@@ -673,8 +672,7 @@ describe("MessageBubble chronological body", () => {
         />
       </DetailPanelProvider>,
     );
-    expect(screen.getByRole("textbox", { name: "Your answer" })).toBe(draft);
-    expect(draft).toHaveValue("Keep this draft");
+    expect(screen.getByText("Where next?")).toBe(question);
     expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
   });
 
@@ -761,7 +759,7 @@ describe("MessageBubble ask activity", () => {
               outcome: "created",
             },
           ],
-          questionActions: { onRespond: vi.fn() },
+          questionActions: { awaiting: true },
         }}
       />,
     );
@@ -772,7 +770,7 @@ describe("MessageBubble ask activity", () => {
       before.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(question.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Skip and continue" })).toBeEnabled();
+    expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
   });
 });
 
