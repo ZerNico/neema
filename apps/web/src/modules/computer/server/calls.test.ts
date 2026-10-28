@@ -286,6 +286,19 @@ describe("ComputerCalls", () => {
     }),
   );
 
+  it.effect("an unbound chat's app call binds to a Mac, never its Windows sender", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(fakeRepo());
+      yield* connect("pc", { name: "PC", platform: "win32" });
+      // App use needs no VM, so a Mac without one may still take the chat.
+      yield* connect("mac", { name: "Mac", computer: { status: "unavailable", reason: "none" } });
+      yield* open("call-1", "app_list", {}, "pc");
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({ approval: "bind", machine: { id: "mac", name: "Mac" } }),
+      ]);
+    }),
+  );
+
   it.effect("ask asks before a command; allow-rest stops asking for the rest of the chat", () =>
     Effect.gen(function* () {
       const { calls, open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }));

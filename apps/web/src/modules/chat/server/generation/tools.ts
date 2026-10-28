@@ -357,8 +357,15 @@ export const prepareGenerationTools = (
     // not, so the list is stable per person. Without the app nobody pays for these schemas.
     const machines = permissions.work ? yield* deps.computerRepo.machines(input.userId) : [];
     const desktopTools = machines.length > 0 ? prepareDesktopTools({ rowIdFor }) : null;
-    // App use has a driver on macOS only, so it is offered once the person has a Mac connected.
-    const appTools = machines.some((machine) => machine.platform === "darwin")
+    // App use has a driver on macOS only: offered where the chat's computer is a Mac, or, before
+    // the chat has one, once the person has a Mac, which its first app call then binds.
+    const bound =
+      machines.length > 0
+        ? ((yield* deps.computerRepo.chat(input.userId, input.conversationId))?.machineId ?? null)
+        : null;
+    const appTools = machines.some(
+      (machine) => machine.platform === "darwin" && (bound === null || machine.id === bound),
+    )
       ? prepareAppTools({ rowIdFor })
       : null;
     // Attempts from an app that can embed pages; they run in the sending app's own tabs.

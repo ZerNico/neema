@@ -9032,6 +9032,72 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
+  it("offers app use where the chat's computer is a Mac, or before it has one", async () => {
+    const seed = await runtime.runPromise(desktopChat);
+    await runtime.runPromise(
+      Effect.flatMap(ComputerRepo, (repo) =>
+        Effect.all([
+          repo.saveMachine(seed.userId, {
+            machineId: "mac",
+            name: "Mac",
+            platform: "darwin",
+            computer: { status: "ready" },
+            remote: true,
+          }),
+          repo.saveMachine(seed.userId, {
+            machineId: "pc",
+            name: "PC",
+            platform: "win32",
+            computer: { status: "ready" },
+            remote: true,
+          }),
+        ]),
+      ),
+    );
+    const offered: string[][] = [];
+    authoringScript = (input) => {
+      offered.push(Object.keys(input.toolkit?.tools ?? {}));
+      return Stream.make(
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    const sendAndWait = (content: string) =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const service = yield* ChatService;
+          const sent = yield* service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          });
+          const engine = yield* StreamEngine;
+          yield* Stream.runDrain(engine.subscribe(sent.assistantMessageId, 0));
+        }),
+      );
+    try {
+      await sendAndWait("Hello");
+      await runtime.runPromise(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(conversations)
+            .set({ machineId: "pc" })
+            .where(eq(conversations.id, seed.conversation.id)),
+        ),
+      );
+      await sendAndWait("And now?");
+      expect(offered[0]).toContain("app_click");
+      expect(offered[1]).toContain("run_command");
+      expect(offered[1]).not.toContain("app_click");
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("asks the sending machine for a new chat's folders, and the first folders bind the chat", async () => {
     const seed = await runtime.runPromise(desktopChat);
     authoringScript = () =>

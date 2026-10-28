@@ -289,16 +289,22 @@ export class ComputerCalls extends Context.Service<
             return;
           }
           if (!chat.machineId) {
-            // A machine still getting ready can take the chat; the call then waits for it.
-            const usable = (yield* hub.online(entry.userId)).filter(
-              (presence) => presence.hello.computer.status !== "unavailable",
+            // A machine still getting ready can take the chat; the call then waits for it. App
+            // use takes a Mac, the one platform with a driver, and never needs its VM.
+            const app = isAppTool(entry.name);
+            const usable = (yield* hub.online(entry.userId)).filter((presence) =>
+              app
+                ? presence.hello.platform === "darwin"
+                : presence.hello.computer.status !== "unavailable",
             );
             const candidate =
               usable.find((presence) => presence.machineId === sender) ??
               usable.find((presence) => presence.hello.computer.status === "ready") ??
               usable[0];
             if (!candidate) {
-              const known = yield* repo.machines(entry.userId);
+              const known = (yield* repo.machines(entry.userId)).filter(
+                (machine) => !app || machine.platform === "darwin",
+              );
               if (
                 known.length > 0 &&
                 (yield* likelyBack(
@@ -311,10 +317,15 @@ export class ComputerCalls extends Context.Service<
               }
               yield* finish(
                 entry,
-                desktopFailure(
-                  "No computer is connected",
-                  "This chat has no computer yet and none of the user's desktop apps is online and ready. Tell the user to open the desktop app.",
-                ),
+                app
+                  ? desktopFailure(
+                      "No Mac is connected",
+                      "This chat has no computer yet and none of the user's Macs is online. Tell the user to open the desktop app on their Mac.",
+                    )
+                  : desktopFailure(
+                      "No computer is connected",
+                      "This chat has no computer yet and none of the user's desktop apps is online and ready. Tell the user to open the desktop app.",
+                    ),
               );
               return;
             }
