@@ -307,6 +307,9 @@ actor Driver {
     try await yieldToPerson(in: target)
     // However it ends, the cursor fades once neema rests or the person takes over.
     defer { Task { @MainActor in Cursor.shared.settle(watching: target) } }
+    // A menu the action opens must not take the person's typing with it.
+    let guarding = KeyFocus.protect(target.pid)
+    defer { guarding?.end() }
     if let point {
       await Cursor.shared.move(to: screen(point, in: target), above: target.window)
       // Input that began while the cursor glided wins too.

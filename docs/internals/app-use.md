@@ -184,6 +184,14 @@ to that app alone (a defocus, a focus, the make-key pair, after cua-driver), con
 reading the focused window back, and returns it afterwards. When it cannot confirm, nothing is
 typed: a key in a sibling window is worse than none.
 
+A menu opened in the app behind (a pop-up clicked, a context menu) takes the person's key
+focus: AppKit steals it for the menu, so their window resigns key and their typing goes to the
+menu, with nothing activated or raised. A press by reference does not, a pointer click does.
+While an action runs, `KeyFocus.swift` (after cua-driver) taps the person's app, swallows that
+notice and hands the theft back once the menu is on screen, putting their window back on top if
+the menu lifted the target's. Arming it never moves key focus, since a key typed in that
+instant would be lost.
+
 Every symbol is looked up by name. A macOS release that drops one turns `background` false in
 `permissions`, and coordinate input falls back to the public route, which most apps ignore.
 References keep working either way, since a press is accessibility, not a click.
