@@ -8,6 +8,8 @@ import { saveAuthSettings } from "~/modules/auth/server/signup-functions.ts";
 import { leaveIfSignedIn } from "~/modules/auth/signed-in-guard.ts";
 import { signupModeItems, SIGNUP_MODE_LABELS, type SignupMode } from "~/modules/auth/signup.ts";
 import { AuthScreen } from "~/modules/auth/ui/auth-screen.tsx";
+import { DesktopSignIn } from "~/modules/auth/ui/desktop-sign-in.tsx";
+import { useDesktopAuth } from "~/modules/desktop/client/bridge.ts";
 import { useAppForm } from "~/ui/form/app-form.ts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/ui/card.tsx";
 import { Field, FieldDescription, FieldError, FieldLabel } from "~/ui/primitives/field";
@@ -45,7 +47,17 @@ export const Route = createFileRoute("/setup")({
   component: SetupPage,
 });
 
+/**
+ * The shell shows no password form (docs/internals/desktop.md), so it gets its sign-in screen:
+ * the browser page it opens leads an anonymous visitor through setup and back with a ticket.
+ */
 function SetupPage() {
+  const desktopAuth = useDesktopAuth();
+  if (desktopAuth) return <DesktopSignIn auth={desktopAuth} />;
+  return <SetupForm />;
+}
+
+function SetupForm() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { redirect: destination = "/" } = Route.useSearch();

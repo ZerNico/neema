@@ -245,6 +245,20 @@ describe("an instance nobody has set up", () => {
     expect(saveAuthSettings).not.toHaveBeenCalled();
   });
 
+  it("gives the desktop shell its browser sign-in, which leads through setup, never a form", async () => {
+    vi.mocked(getNeedsSetup).mockResolvedValue(true);
+    vi.stubGlobal("__chatDesktop", {
+      auth: { onTicket: () => () => {}, canChangeServer: false, changeServer: vi.fn() },
+    });
+    const router = await renderAt("/login");
+
+    const link = await screen.findByRole("link", { name: "Sign in in your browser" });
+    expect(link.getAttribute("href")).toMatch(/\/desktop\/sign-in\?challenge=/);
+    expect(router.state.location.pathname).toBe("/setup");
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
   it("is gone once the instance has an owner", async () => {
     const router = await renderAt("/setup");
 

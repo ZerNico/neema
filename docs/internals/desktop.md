@@ -76,7 +76,8 @@ opens the chooser.
 The shell never shows a password form. Google refuses OAuth from an embedded
 user agent, and the person's provider session lives in their real browser, so
 the login route renders a browser-only screen whenever the shell exposes the
-`auth` capability: a link to `/desktop/sign-in?challenge=…` that the window-open
+`auth` capability, and so does `/setup` on an instance without an owner: the browser
+page sends an anonymous visitor through setup and back with a ticket. That screen has a link to `/desktop/sign-in?challenge=…` that the window-open
 handler pushes to the system browser, and a paste field for the code that page
 mints. The browser page mints a ticket only for a signed-in, approved, not
 impersonated account, and shows it twice: as a `chat-desktop://sign-in` link
