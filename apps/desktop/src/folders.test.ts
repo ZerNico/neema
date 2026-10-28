@@ -46,6 +46,8 @@ describe("resolving a path inside the chosen folder", () => {
 
   it("treats only ENOENT as missing, not an unreadable path", async () => {
     expect(await Effect.runPromise(exists(join(root, "missing")))).toBe(false);
+    // Windows answers ENOENT below a file, where POSIX says ENOTDIR.
+    if (process.platform === "win32") return;
     const outcome = await Effect.runPromise(
       Effect.result(exists(join(root, "src", "index.ts", "child"))),
     );
@@ -160,8 +162,9 @@ describe("a pinned root", () => {
 
 describe("a real path", () => {
   it("is the path's own apart from the system's aliases, never where a link leads", () => {
-    expect(isOwnRealPath("/Users/a/project/", "/Users/a/project")).toBe(true);
-    expect(isOwnRealPath("/Users/a/project", "/Users/a/elsewhere")).toBe(false);
+    const project = resolve("/Users/a/project");
+    expect(isOwnRealPath(`${project}/`, project)).toBe(true);
+    expect(isOwnRealPath(project, resolve("/Users/a/elsewhere"))).toBe(false);
     if (process.platform === "darwin")
       expect(isOwnRealPath("/tmp/project", "/private/tmp/project")).toBe(true);
   });

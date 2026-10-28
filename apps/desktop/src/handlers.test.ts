@@ -264,7 +264,10 @@ describe("revealing a file", () => {
     await writeFile(join(site, "install.command"), "rm -rf /\n");
     await writeFile(join(site, "notes.txt"), "#!/bin/sh\n", { mode: 0o755 });
     await writeFile(join(site, "photo.PNG"), "png");
-    for (const name of ["install.command", "notes.txt"])
+    // Windows has no execute bit, and opening a .txt there opens an editor.
+    const refused =
+      process.platform === "win32" ? ["install.command"] : ["install.command", "notes.txt"];
+    for (const name of refused)
       expect(
         await failureOf(
           handlers.revealPath({

@@ -130,7 +130,9 @@ describe.skipIf(!IMAGE)("a chat's computer on a real VM", () => {
       expect(removed.failed).toHaveLength(1);
     });
     expect(await readFile(join(site, "app.ts"), "utf8")).toBe("export const answer = 42;\n");
-    expect((await stat(join(site, "app.ts"))).mode & 0o777).toBe(0o644);
+    // NTFS keeps no POSIX mode to mirror.
+    if (process.platform !== "win32")
+      expect((await stat(join(site, "app.ts"))).mode & 0o777).toBe(0o644);
   }, 300_000);
 
   test("commands reach only granted destinations and leave nothing running", async () => {

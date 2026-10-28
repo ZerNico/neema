@@ -161,16 +161,19 @@ test("operations on one chat run one at a time", async () => {
   const { vms } = await setup();
   const order: string[] = [];
   let release!: () => void;
+  let started!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
+  const running = new Promise<void>((resolve) => (started = resolve));
   const first = vms.use(KEY, plain, async () => {
     order.push("first start");
+    started();
     await gate;
     order.push("first end");
   });
   const second = vms.use(KEY, plain, async () => {
     order.push("second");
   });
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  await running;
   expect(order).toEqual(["first start"]);
   release();
   await Promise.all([first, second]);

@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
@@ -42,8 +42,10 @@ describe("workspacesRoot", () => {
   it("keys the workspaces directory by an origin hash, not the origin", () => {
     const one = workspacesRoot("https://chat.one", "/data");
     const two = workspacesRoot("https://chat.two", "/data");
-    expect(one).toMatch(/^\/data\/workspaces\/[0-9a-f]{16}$/);
-    expect(two).toMatch(/^\/data\/workspaces\/[0-9a-f]{16}$/);
+    for (const root of [one, two]) {
+      expect(dirname(root)).toBe(join("/data", "workspaces"));
+      expect(basename(root)).toMatch(/^[0-9a-f]{16}$/);
+    }
     expect(one).not.toBe(two);
   });
 });
