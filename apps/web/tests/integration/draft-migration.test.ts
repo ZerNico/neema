@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { conversationDrafts } from "~/db/schema/index.ts";
 import { Db } from "~/server/db.ts";
@@ -11,7 +12,7 @@ import { createTestDatabase, type TestDatabase } from "./database.ts";
 
 /** The migration that renames the agent-draft table into the generic store. */
 const GENERIC_DRAFTS = "20260918203923_blue_magma";
-const root = new URL("../..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("../..", import.meta.url));
 
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Db, unknown>;

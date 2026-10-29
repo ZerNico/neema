@@ -1,5 +1,6 @@
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { TestProject } from "vitest/node";
 import { POSTGRES_IMAGE } from "./postgres-image.ts";
 import { TEMPLATE_DATABASE } from "./database.ts";
@@ -32,7 +33,7 @@ export default async function setup(project: TestProject) {
     ])
     .start();
   execSync("pnpm drizzle-kit migrate", {
-    cwd: new URL("../..", import.meta.url).pathname,
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
     env: { ...process.env, DATABASE_URL: container.getConnectionUri() },
     stdio: "pipe",
   });
