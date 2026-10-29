@@ -28,6 +28,8 @@ export interface MachineRecord {
   readonly id: string;
   readonly name: string;
   readonly platform: "darwin" | "win32" | "linux";
+  /** Null when its shell is older than saying so; see `drivesApps`. */
+  readonly apps: boolean | null;
   readonly lastSeenAt: Date;
 }
 
@@ -35,6 +37,7 @@ const toMachine = (row: typeof machines.$inferSelect): MachineRecord => ({
   id: row.id,
   name: row.label ?? row.name,
   platform: row.platform,
+  apps: row.apps,
   lastSeenAt: row.lastSeenAt,
 });
 const updated = (rows: readonly unknown[]) => rows.length > 0;
@@ -113,10 +116,21 @@ export class ComputerRepo extends Context.Service<
         saveMachine: (userId, hello) =>
           db
             .insert(machines)
-            .values({ id: hello.machineId, userId, name: hello.name, platform: hello.platform })
+            .values({
+              id: hello.machineId,
+              userId,
+              name: hello.name,
+              platform: hello.platform,
+              apps: hello.apps ?? null,
+            })
             .onConflictDoUpdate({
               target: [machines.userId, machines.id],
-              set: { name: hello.name, platform: hello.platform, lastSeenAt: sql`now()` },
+              set: {
+                name: hello.name,
+                platform: hello.platform,
+                apps: hello.apps ?? null,
+                lastSeenAt: sql`now()`,
+              },
             })
             .returning({ name: machines.name, label: machines.label })
             .pipe(

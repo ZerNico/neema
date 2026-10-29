@@ -45,6 +45,11 @@ export const MachineHello = Schema.Struct({
   /** Whether this machine lets calls started on other devices run. */
   remote: Schema.Boolean,
   /**
+   * Whether this machine can use the person's apps: it has an app driver. Absent from shells older
+   * than this field, of which only a Mac's had one.
+   */
+  apps: Schema.optionalKey(Schema.Boolean),
+  /**
    * New each time the app starts. A call sent to an earlier launch died with it, maybe halfway,
    * so it is answered as interrupted, never sent again to run a second time.
    */

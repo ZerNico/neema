@@ -3,7 +3,7 @@ import { useCallback, useSyncExternalStore } from "react";
 
 const subscribeToNothing = () => () => {};
 
-/** The shell's live view of app use, or null in a web browser, off a Mac and in older shells. */
+/** The shell's live view of app use, or null in a web browser, off macOS and Windows and in older shells. */
 export function useDesktopAppUse(): DesktopAppUse | null {
   return useSyncExternalStore(subscribeToNothing, readDesktopAppUse, () => null);
 }

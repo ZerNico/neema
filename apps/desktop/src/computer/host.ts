@@ -191,6 +191,7 @@ export class ComputerHost {
         process.platform === "win32" || process.platform === "linux" ? process.platform : "darwin",
       computer: this.current,
       remote: this.options.remote(),
+      apps: this.options.appDriver.executable !== null,
       launch: this.launch,
     };
   }

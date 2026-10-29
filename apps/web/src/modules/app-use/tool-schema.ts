@@ -19,6 +19,15 @@ export type AppToolName = (typeof APP_TOOL_NAMES)[number];
 export const isAppTool = (name: string): name is AppToolName =>
   (APP_TOOL_NAMES as ReadonlyArray<string>).includes(name);
 
+/**
+ * Whether a machine can use the person's apps: its shell says it has an app driver. A shell older
+ * than saying so has one only on a Mac; an old Windows shell has none, nor a build without Rust.
+ */
+export const drivesApps = (machine: {
+  readonly platform: "darwin" | "win32" | "linux";
+  readonly apps?: boolean | null | undefined;
+}) => machine.apps ?? machine.platform === "darwin";
+
 /** The app a call names, as stored: a bundle id or the name the model used. */
 export const appOfArgs = (args: Readonly<Record<string, unknown>> | undefined) =>
   typeof args?.app === "string" ? args.app : "";

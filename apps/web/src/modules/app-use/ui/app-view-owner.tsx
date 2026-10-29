@@ -16,7 +16,7 @@ const stops = new Map<string, () => void>();
  * Keeps a chat's live view of app use on its panel tab. Opens it when a spell of app use
  * starts while the chat is on screen, and adds it back unselected when the person returns
  * during one. Never on a phone, where the panel covers the answer, and only in the desktop app
- * on a Mac.
+ * on a Mac or a Windows PC.
  */
 export function AppViewOwner({
   conversationId,

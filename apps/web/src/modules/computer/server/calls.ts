@@ -1,7 +1,7 @@
 import { Clock, Context, Duration, Effect, Layer, Scope } from "effect";
 import type { ToolResult } from "@chat/desktop-rpc";
 import { canonicalHost } from "@chat/egress-proxy";
-import { isAppTool } from "~/modules/app-use/tool-schema.ts";
+import { drivesApps, isAppTool } from "~/modules/app-use/tool-schema.ts";
 import { desktopFailure, type DesktopToolResult } from "~/modules/desktop/tool-schema.ts";
 import { ExternalCompletion } from "~/modules/tools/server/external-completion.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
@@ -290,19 +290,19 @@ export class ComputerCalls extends Context.Service<
           }
           if (!chat.machineId) {
             // A machine still getting ready can take the chat; the call then waits for it. App
-            // use takes a Mac and never needs its VM; from another device, one allowing remote
-            // use, or the chat is bound where every call from there is refused.
+            // use takes a machine with an app driver and never needs its VM; from another device,
+            // one allowing remote use, or the chat is bound where every call from there is refused.
             const app = isAppTool(entry.name);
             const online = yield* hub.online(entry.userId);
-            const macs = online.filter((presence) => presence.hello.platform === "darwin");
+            const drivers = online.filter((presence) => drivesApps(presence.hello));
             const usable = app
-              ? macs.filter((presence) => presence.machineId === sender || presence.hello.remote)
+              ? drivers.filter((presence) => presence.machineId === sender || presence.hello.remote)
               : online.filter((presence) => presence.hello.computer.status !== "unavailable");
             const candidate =
               usable.find((presence) => presence.machineId === sender) ??
               usable.find((presence) => presence.hello.computer.status === "ready") ??
               usable[0];
-            const closed = macs[0];
+            const closed = drivers[0];
             if (!candidate && app && closed) {
               yield* finish(
                 entry,
@@ -315,7 +315,7 @@ export class ComputerCalls extends Context.Service<
             }
             if (!candidate) {
               const known = (yield* repo.machines(entry.userId)).filter(
-                (machine) => !app || machine.platform === "darwin",
+                (machine) => !app || drivesApps(machine),
               );
               if (
                 known.length > 0 &&
@@ -331,8 +331,8 @@ export class ComputerCalls extends Context.Service<
                 entry,
                 app
                   ? desktopFailure(
-                      "No Mac is connected",
-                      "This chat has no computer yet and none of the user's Macs is online. Tell the user to open the desktop app on their Mac.",
+                      "No computer that can use apps is connected",
+                      "This chat has no computer yet and none of the user's Macs or Windows PCs is online. Tell the user to open the desktop app on one.",
                     )
                   : desktopFailure(
                       "No computer is connected",

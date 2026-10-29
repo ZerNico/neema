@@ -74,7 +74,7 @@ export interface FixedPrefixInput {
   /** Whether the computer's tools are offered; its state goes after history, not here. */
   readonly desktop: boolean;
   readonly browser: boolean;
-  /** The app family is offered: the person has a Mac connected. */
+  /** The app family is offered: the person has a machine with an app driver connected. */
   readonly apps?: boolean;
   /** `read_history` is offered; `otherChats` when `search_chats` and `read_chat` are too. */
   readonly history?: { readonly otherChats: boolean } | null;

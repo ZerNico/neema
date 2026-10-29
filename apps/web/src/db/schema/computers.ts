@@ -30,6 +30,8 @@ export const machines = pgTable(
     /** The person's own name for it, shown in place of `name` when set. */
     label: text(),
     platform: text({ enum: ["darwin", "win32", "linux"] }).notNull(),
+    /** It has an app driver, as it last said; null when its shell is older than saying so. */
+    apps: boolean(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

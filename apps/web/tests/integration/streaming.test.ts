@@ -9032,7 +9032,7 @@ describe("desktop calls run by the sending app", () => {
     }
   });
 
-  it("offers app use where the chat's computer is a Mac, or before it has one", async () => {
+  it("offers app use where the chat's computer has an app driver, or before it has one", async () => {
     const seed = await runtime.runPromise(desktopChat);
     await runtime.runPromise(
       Effect.flatMap(ComputerRepo, (repo) =>
@@ -9048,6 +9048,14 @@ describe("desktop calls run by the sending app", () => {
             machineId: "pc",
             name: "PC",
             platform: "win32",
+            computer: { status: "ready" },
+            remote: true,
+            apps: true,
+          }),
+          repo.saveMachine(seed.userId, {
+            machineId: "box",
+            name: "Box",
+            platform: "linux",
             computer: { status: "ready" },
             remote: true,
           }),
@@ -9085,7 +9093,7 @@ describe("desktop calls run by the sending app", () => {
         Effect.flatMap(Db, (db) =>
           db
             .update(conversations)
-            .set({ machineId: "pc" })
+            .set({ machineId: "box" })
             .where(eq(conversations.id, seed.conversation.id)),
         ),
       );
@@ -9094,11 +9102,11 @@ describe("desktop calls run by the sending app", () => {
         Effect.flatMap(Db, (db) =>
           db
             .update(conversations)
-            .set({ machineId: "mac" })
+            .set({ machineId: "pc" })
             .where(eq(conversations.id, seed.conversation.id)),
         ),
       );
-      await sendAndWait("And on the Mac?");
+      await sendAndWait("And on the PC?");
       expect(offered[0]).toContain("app_click");
       expect(offered[1]).toContain("run_command");
       expect(offered[1]).not.toContain("app_click");

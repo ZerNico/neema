@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "c9d1ebe8-48d5-405c-b5d1-30948a0a20eb",
+  "prevIds": [
+    "cfc2d827-6f0c-4100-924c-8590a3eb9df2"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "machines",
+        "apps"
+      ],
+      "writes": [
+        "s|col|public.machines.apps",
+        "n|col|public.machines.apps",
+        "e|col|public.machines.apps"
+      ],
+      "reads": [
+        "n|tbl|public.machines",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "machines",
+        "name": "apps",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

@@ -125,8 +125,8 @@ export const appZoomTool = Tool.make("app_zoom", {
 });
 
 /**
- * Offered once the person has a Mac connected, the one platform with a driver. Like the
- * computer's tools, the handlers only wait: the chat's machine runs each call.
+ * Offered once the person has a Mac or a Windows PC connected, the platforms with a driver. Like
+ * the computer's tools, the handlers only wait: the chat's machine runs each call.
  */
 export const prepareAppTools = (deps: Pick<DesktopToolDeps, "rowIdFor">): ToolGroup => {
   const handle = (name: DesktopToolName) =>

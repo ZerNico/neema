@@ -54,6 +54,7 @@ const fakeRepo = (
           id,
           name: "Laptop",
           platform: "darwin" as const,
+          apps: true,
           lastSeenAt: new Date(0),
         }),
       machines: () => Effect.succeed([]),
@@ -286,12 +287,39 @@ describe("ComputerCalls", () => {
     }),
   );
 
-  it.effect("an unbound chat's app call binds to a Mac, never its Windows sender", () =>
+  it.effect(
+    "an unbound chat's app call binds to a machine with a driver, never its Linux sender",
+    () =>
+      Effect.gen(function* () {
+        const { calls, open, connect } = yield* setup(fakeRepo());
+        yield* connect("box", { name: "Box", platform: "linux" });
+        // App use needs no VM, so a Mac without one may still take the chat.
+        yield* connect("mac", { name: "Mac", computer: { status: "unavailable", reason: "none" } });
+        yield* open("call-1", "app_list", {}, "box");
+        expect(yield* calls.pending(USER)).toEqual([
+          expect.objectContaining({ approval: "bind", machine: { id: "mac", name: "Mac" } }),
+        ]);
+      }),
+  );
+
+  it.effect("an unbound chat's app call from a Windows PC binds to that PC", () =>
     Effect.gen(function* () {
       const { calls, open, connect } = yield* setup(fakeRepo());
+      yield* connect("mac", { name: "Mac" });
+      yield* connect("pc", { name: "PC", platform: "win32", apps: true });
+      yield* open("call-1", "app_list", {}, "pc");
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({ approval: "bind", machine: { id: "pc", name: "PC" } }),
+      ]);
+    }),
+  );
+
+  it.effect("a Windows shell that cannot say it drives apps is passed over for a Mac", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(fakeRepo());
+      yield* connect("mac", { name: "Mac" });
+      // Older than the `apps` field: a Windows shell of then had no driver.
       yield* connect("pc", { name: "PC", platform: "win32" });
-      // App use needs no VM, so a Mac without one may still take the chat.
-      yield* connect("mac", { name: "Mac", computer: { status: "unavailable", reason: "none" } });
       yield* open("call-1", "app_list", {}, "pc");
       expect(yield* calls.pending(USER)).toEqual([
         expect.objectContaining({ approval: "bind", machine: { id: "mac", name: "Mac" } }),
@@ -303,9 +331,9 @@ describe("ComputerCalls", () => {
     Effect.gen(function* () {
       const repo = fakeRepo();
       const { calls, open, connect } = yield* setup(repo);
-      yield* connect("pc", { name: "PC", platform: "win32" });
+      yield* connect("box", { name: "Box", platform: "linux" });
       yield* connect("mac", { name: "Mac", remote: false });
-      const { waiting } = yield* open("call-1", "app_list", {}, "pc");
+      const { waiting } = yield* open("call-1", "app_list", {}, "box");
       expect(yield* calls.pending(USER)).toEqual([]);
       expect(repo.chat.machineId).toBeNull();
       expect(yield* Fiber.join(waiting)).toMatchObject({
