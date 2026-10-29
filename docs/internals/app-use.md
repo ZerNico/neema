@@ -42,10 +42,13 @@ up for most of it, and the tool names and descriptions follow what those models 
 ## The tools
 
 A lazy family, like the browser's: named in the catalogue, loaded on first need. Offered where
-the chat's computer is a Mac, the one platform with a driver, or, before the chat has one, once
-the person has a Mac; the first app call of such a chat binds it to a Mac online, never to
-another machine, even the one the message came from. From another device that Mac must allow
-remote use, or the chat would be bound where its calls are then refused. A chat moved to another machine is offered
+the chat's computer has a driver, or, before the chat has one, once the person has such a
+machine; the first app call of such a chat binds it to one online, never to a machine without a
+driver, even the one the message came from. A machine says so in its hello (`apps`), since a
+Windows build without Rust has none; a shell older than saying so had one only on a Mac
+(`drivesApps`).
+From another device that machine must allow remote use, or the chat would be bound where its
+calls are then refused. A chat moved to another machine is offered
 them or not from then on. They are desktop tools in family and envelope, run by the chat's
 machine like the computer's, but never touch its VM, so a machine whose VM is still downloading
 or impossible can still use its apps, and can take a chat for them.
@@ -71,7 +74,10 @@ latest look.
 - **The person allows an app, not a click.** The first call that touches an app asks at the
   machine, in a native dialog like `request_folder`'s: "Let this chat use Microsoft Excel?"
   with **Allow in this chat** and **Always allow**. No "once": a grant for one call would ask
-  again before every click. The app is named as macOS knows it before anything starts it.
+  again before every click. The app is named as the system knows it before anything starts it.
+  On Windows a packaged app is its AppUserModelID and any other its executable's path, running
+  or only in Start, so a grant keeps naming one app. A Squirrel app (Discord, Slack) runs from a
+  folder named after its version, so it is named by its install folder, which outlives updates.
   Answers live on the machine, per server, like folder and site grants, so the server never
   learns which apps a person trusts; a chat's go with it. Always-allowed apps are to be listed
   in Settings › This computer, removable there.
@@ -94,7 +100,9 @@ latest look.
 
 ## Permissions are a guided step
 
-App use needs Accessibility and Screen Recording for neema. On macOS 26 the system's prompts
+Windows asks nothing: UI Automation and window capture are open to any app in the person's
+session, so its driver reports every permission granted. On macOS app use needs Accessibility
+and Screen Recording for neema. On macOS 26 the system's prompts
 no longer add a new app to either list (measured by agent-desktop), so the person must drag
 neema in. The driver shows a small panel for that, pinned under the list in System Settings,
 with neema's bundle as the thing to drag, as LobeHub does (`Guide.swift`). It never takes
@@ -122,8 +130,9 @@ vision model and not stored, like the browser's screenshots, unless the model sh
   already shows what it does in the app itself. A page is told of, and may steer, only the
   chats it asked about, which are its person's own: one that loads afresh, perhaps for another
   person, starts with none, and what its server's chats showed ends.
-- **The menu bar says it too.** neema's tray item names the apps in use beside its icon and
-  lists each chat's line with Pause or Resume at the top of its menu, as Codex keeps a status
+- **The menu bar says it too.** neema's tray item names the apps in use beside its icon (on
+  Windows, which shows no text there, when the icon is pointed at) and lists each chat's line
+  with Pause or Resume at the top of its menu, as Codex keeps a status
   item, so the person can stop it with neema's window out of sight. It lists the connected
   server's chats in use or paused, not only those a page asked about: it is the Mac's own, and
   whoever sits there sees the apps move anyway. A paused chat stays listed until resumed.
@@ -145,28 +154,43 @@ vision model and not stored, like the browser's screenshots, unless the model sh
   resting on the app is not using it. An action
   at a point asks again after the cursor's glide. The host drops the chat's look, so the next
   action starts from a fresh one, and the view says it waits; nothing to resume, as Codex's
-  helper answers that the user is still interacting with the app. It reads the system's record
-  of hardware input, which the driver's own events, posted to one process, never enter
-  (measured); no input is watched.
+  helper answers that the user is still interacting with the app. On macOS it reads the system's
+  record of hardware input, which the driver's own events, posted to one process, never enter
+  (measured); no input is watched. Windows keeps no such record by kind, so low-level hooks note
+  the time and the window of the person's key and button presses. The driver stamps its own
+  input to leave it out; Windows' injected flag would also leave out the person's input through
+  remote-control tools and the touch keyboard. The window is noted as the input happens, not judged by where input would
+  go now: the driver brings the app to the front, so typing the person did in their own window a
+  moment before would otherwise count against it (measured).
 - **neema's own cursor.** Before acting, a cursor in neema's colour glides to the point along a
   slight arc, pulses as a click lands, and stays through the model's thinking between actions,
   fading 8 seconds after the last, as Codex draws its agent cursor. Back within a minute, it
   reappears where it left off; it comes in afresh only after that. It goes at once when the
   person takes over the app, rather than resting over their work. It is a window
   of the driver's ordered just above the app's window, so whatever covers the app covers it
-  too, and it never takes clicks or focus. The person's pointer never moves.
+  too, and it never takes clicks or focus. The person's pointer never moves. Windows has no such
+  cursor yet: its pointer input is real, so the person's pointer goes there and comes back.
 
 ## macOS and Windows differ in one way
 
-|                | macOS                                                                       | Windows                                                      |
-| -------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Structure      | AX                                                                          | UI Automation                                                |
-| Window picture | ScreenCaptureKit                                                            | Windows.Graphics.Capture                                     |
-| Acting         | AX actions, and window server input to the covered window where AX has none | UIA patterns without focus, real input with the app in front |
-| While working  | the person keeps their cursor and front app                                 | the app comes to the front and input is real                 |
+|                | macOS                                                                       | Windows                                                        |
+| -------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Structure      | AX                                                                          | UI Automation, one cached request for the whole tree           |
+| Window picture | ScreenCaptureKit                                                            | Windows.Graphics.Capture, PrintWindow where it gets no picture |
+| Acting         | AX actions, and window server input to the covered window where AX has none | UIA patterns without focus, SendInput with the app in front    |
+| While working  | the person keeps their cursor and front app                                 | the app comes to the front and input is real                   |
 
 On Windows the person is told that app use takes over the screen while it runs. What UIA
-can do without focus (Invoke, Value, Toggle, Selection) still runs without taking over.
+can do without focus (Invoke, Toggle, Selection, ExpandCollapse, Value) still runs without
+taking over. XAML and Chromium bring themselves forward from inside a press's handler, so the
+driver disables their window for the press, which keeps it from rising, and gives the front
+back to the window the person had: a disabled Store app still takes the keyboard (measured on
+Calculator, 8 of 8 presses), which would send their typing to an app they cannot see. The rest is real input because posted window messages reach few apps: Chromium and
+WPF ignore them, as Cua measured for its Windows driver, which ours learns from. Before a
+pointer action the driver confirms that the window under the point is the app's, so a click
+never lands in whatever covers it, and it refuses an app running as administrator, which drops
+input from below without a word. Keys typed while the app is in front go to it, the person's
+included, which is why their input wins.
 
 ### Background input on macOS is private API, on purpose
 
@@ -246,8 +270,12 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
   and exits when its input closes, after answering what was already asked, within two
   seconds even if a call is stuck. An orphan once kept a stalled capture spinning for minutes.
 - **Captures are bounded.** ScreenCaptureKit gets two seconds, then the window server's own
-  copy through SkyLight three, as cua-driver reads windows on another Space. A capture that
-  never answers fails the look; it does not hold every later call.
+  copy through SkyLight three, as cua-driver reads windows on another Space. On Windows,
+  Graphics Capture gets two seconds, polled on a free-threaded pool since its frame event needs
+  a message loop the driver does not run, then PrintWindow. A capture that never answers fails
+  the look; it does not hold every later call. On Windows any request gets 20 seconds: a hung
+  app can stall UI Automation or PrintWindow past their own timeouts (Cua names LibreOffice), so
+  the call is answered as failed and a fresh worker, holding no look, takes the next one.
 - **The machine's permissions, granted once.** macOS asks for Screen Recording and
   Accessibility for neema, never for the driver: TCC charges a child process to the app that
   spawned it, so an unsigned driver runs on its parent's grants. That holds only while
@@ -264,6 +292,8 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
   policy.
 - **The off-limits list lives in each driver**, by bundle id or executable, so a confused
   caller cannot reach those apps either.
+- **One Windows driver per architecture.** CI packages x64 and arm64 from one build, so it builds
+  `app-driver-<arch>.exe` for each and the packaging hook keeps the installer's own.
 - **Calls take the machine route.** The server decides them like any computer call and sends
   them over the machine connection. The host hands them to the driver instead of the VM.
 
@@ -294,4 +324,6 @@ on Windows (`…/windows`). Both implement one protocol, JSON lines over stdio, 
    dropped bundle, and asking for the direct-capture approval in the same step.
 4. Done: the live view in the chat's panel, Pause there and in the menu bar, neema's cursor and the
    person's input winning. Left: a global shortcut.
-5. The Windows driver on the same protocol.
+5. Done: the Windows driver on the same protocol, on Calculator and Chromium
+   (`real-driver-windows.test.ts`). Left: neema's cursor, and a pass over classic Win32 dialogs,
+   which are windows of their own that a look follows while they block their owner.

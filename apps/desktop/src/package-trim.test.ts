@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { trimPackage } from "./package-trim.ts";
+import { trimAppDrivers, trimPackage } from "./package-trim.ts";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -55,4 +55,11 @@ it("fails the build when the target's package is missing or unknown", async () =
   await expect(trimPackage(await packaged(everything), "darwin", "x64")).rejects.toThrow(
     "no native package for darwin-x64",
   );
+});
+
+it("keeps only the target's app driver, and does without one", async () => {
+  const root = await packaged(["main.cjs", "app-driver-x64.exe", "app-driver-arm64.exe"]);
+  await trimAppDrivers(root, "arm64");
+  expect(await listing(root)).toEqual(["app-driver-arm64.exe", "main.cjs"]);
+  expect(await trimAppDrivers(await packaged(["main.cjs"]), "x64")).toEqual([]);
 });

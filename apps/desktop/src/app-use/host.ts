@@ -38,7 +38,7 @@ export class SharedAppDriver {
 
   /**
    * `executable` is null where there is no driver for the platform. `keepAwake` holds the
-   * display on and returns its release: a locked or sleeping Mac hides every window.
+   * display on and returns its release: a locked or sleeping computer hides every window.
    */
   constructor(
     readonly executable: string | null,
@@ -123,7 +123,7 @@ export interface AppUseOptions {
 export interface AppWatch {
   /** A call is about to run; false when the person paused the chat, which refuses the call. */
   begin(chat: string, call: { name: string; args: AppCall["args"]; app: string }): boolean;
-  /** The app as macOS names it, once the model's name for it is resolved. */
+  /** The app as the system names it, once the model's name for it is resolved. */
   named(chat: string, app: string): void;
   /** A click landed here, as a fraction of the window's width and height. */
   clicked(chat: string, at: { x: number; y: number }): void;
@@ -202,7 +202,7 @@ const DRIVER_WORDS: Partial<Record<AppDriverError["code"], (app: string) => stri
   person_active: (app) =>
     `The user is using ${app} right now, so nothing was done: their own input comes first. Actions wait until they have left it alone for a few seconds; look at ${app} again before the next one, as they may have changed it.`,
   screen_locked: () =>
-    "The user's Mac is locked, so no app can be used. Ask them to unlock it, then try again.",
+    "The user's computer is locked, so no app can be used. Ask them to unlock it, then try again.",
 };
 
 /**
@@ -241,9 +241,9 @@ export class AppUse {
     if (!this.options.driver.executable)
       return failure(
         "Apps can't be used here",
-        "This computer cannot use apps for the user: app use needs the desktop app on a Mac.",
+        "This computer cannot use apps for the user: app use needs the desktop app on a Mac or a Windows PC.",
       );
-    // The app's name as macOS gives it, once resolved: the row shows it, not the model's id.
+    // The app's name as the system gives it, once resolved: the row shows it, not the model's id.
     const named: { name?: string } = {};
     const withApp = (result: ToolResult): ToolResult =>
       named.name ? { ...result, app: { name: named.name } } : result;

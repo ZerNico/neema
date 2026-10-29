@@ -162,7 +162,9 @@ const showAppUse = () => {
   const status = appUseStatus(liveApps, serverOrigin);
   if (!tray || status.signature === trayAppUse) return;
   trayAppUse = status.signature;
+  // Only macOS shows text beside a tray icon; Windows names the apps when the icon is pointed at.
   if (process.platform === "darwin") tray.setTitle(status.title);
+  else tray.setToolTip(status.title ? `neema · ${status.title}` : "neema");
   tray.setContextMenu(Menu.buildFromTemplate([...status.items, ...trayActions]));
 };
 let workState = { active: 0, needsApproval: 0 };
@@ -249,11 +251,14 @@ const hypervisor = microsandbox(
 );
 /**
  * The app driver, one for the app's life whichever server it serves: replayd stalls two capturing
- * processes of one identity. Built beside the bundle on macOS (build.mjs); elsewhere there is
- * none. It exits by itself when the app does, its input closing.
+ * processes of one identity. Built beside the bundle on macOS and Windows (build.mjs), on Windows
+ * one per architecture; elsewhere there is none. It exits by itself when the app does, its input
+ * closing.
  */
+const appDriverFile =
+  process.platform === "win32" ? `app-driver-${process.arch}.exe` : "app-driver";
 const appDriver = new SharedAppDriver(
-  existsSync(join(here, "app-driver")) ? join(here, "app-driver") : null,
+  existsSync(join(here, appDriverFile)) ? join(here, appDriverFile) : null,
   () => {
     const blocker = powerSaveBlocker.start("prevent-display-sleep");
     return () => powerSaveBlocker.stop(blocker);

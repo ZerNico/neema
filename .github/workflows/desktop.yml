@@ -67,11 +67,17 @@ jobs:
       - name: Install both architectures' natives
         run: pnpm install --frozen-lockfile --cpu=x64 --cpu=arm64
 
+      # Windows' app driver is Rust, built for both architectures this job packages.
+      - name: Add Rust's arm64 target
+        if: matrix.os == 'windows'
+        run: rustup target add aarch64-pc-windows-msvc
+
       - name: Build shell
         shell: bash
         env:
           SANDBOX_IMAGE_REF: ${{ inputs.sandbox-image }}
           RELEASE: ${{ inputs.version }}
+          APP_DRIVER_ARCHES: x64 arm64
         run: |
           # A release must boot exactly the image built for it, never whatever edge is.
           if [[ -n "$RELEASE" && "$SANDBOX_IMAGE_REF" != *@sha256:* ]]; then
@@ -110,6 +116,19 @@ jobs:
               echo "::error::$installer compresses executables with 7-Zip's ARM64 filter"
               exit 1
             fi
+          done
+
+      # A build without its driver still succeeds, and the app would ship without app use.
+      - name: Check the app drivers
+        if: matrix.os == 'windows'
+        shell: bash
+        working-directory: apps/desktop
+        run: |
+          for arch in x64 arm64; do
+            other=$([[ $arch == x64 ]] && echo arm64 || echo x64)
+            dist=release/win-$([[ $arch == x64 ]] || echo "arm64-")unpacked/resources/app/dist
+            test -f "$dist/app-driver-$arch.exe" || { echo "::error::$dist lacks app-driver-$arch.exe"; exit 1; }
+            test ! -e "$dist/app-driver-$other.exe" || { echo "::error::$dist kept app-driver-$other.exe"; exit 1; }
           done
 
       # The runner's own architecture loads microsandbox from the packaged app.

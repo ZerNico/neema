@@ -26,8 +26,10 @@ if (location.protocol === "file:") {
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
     browser: makeBrowserBridge(ipcRenderer, process.argv),
-    // Only a Mac has a driver to show; elsewhere the page offers no view.
-    ...(process.platform === "darwin" ? { appUse: makeAppUseBridge(ipcRenderer) } : {}),
+    // Only macOS and Windows have a driver to show; elsewhere the page offers no view.
+    ...(process.platform === "darwin" || process.platform === "win32"
+      ? { appUse: makeAppUseBridge(ipcRenderer) }
+      : {}),
     request: (tag: unknown, payload: unknown) =>
       ipcRenderer.invoke("chat-desktop:request", { tag, payload }),
   });

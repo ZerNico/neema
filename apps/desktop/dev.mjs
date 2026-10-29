@@ -24,7 +24,7 @@ const reloader = makeDevReloader({
 });
 
 await compileMessages();
-// Once per start: the shell relaunches on TypeScript changes, not on the driver's Swift.
+// Once per start: the shell relaunches on TypeScript changes, not on the driver's Swift or Rust.
 buildAppDriver();
 const ctx = await context({
   ...buildOptions(),

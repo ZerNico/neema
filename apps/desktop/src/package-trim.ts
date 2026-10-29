@@ -42,3 +42,19 @@ export const trimPackage = async (
     throw new Error(`microsandbox's ${keep} is missing; install with --cpu ${arch}`);
   return removed;
 };
+
+/**
+ * Leaves in a packaged Windows app's dist/ only the app driver of its architecture: CI builds one
+ * per architecture into the one dist/ both installers pack. A missing one is not an error, since a
+ * build without Rust ships without app use, as build.mjs says.
+ */
+export const trimAppDrivers = async (dist: string, arch: string): Promise<string[]> => {
+  const keep = `app-driver-${arch}.exe`;
+  const removed: string[] = [];
+  for (const name of await entries(dist)) {
+    if (!/^app-driver-.+\.exe$/.test(name) || name === keep) continue;
+    await rm(join(dist, name), { force: true });
+    removed.push(join(dist, name));
+  }
+  return removed;
+};

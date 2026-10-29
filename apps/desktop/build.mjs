@@ -71,12 +71,13 @@ export const buildOptions = () => ({
 });
 
 /**
- * The macOS app driver (docs/internals/app-use.md), built with Swift and placed beside the bundle
- * in dist/, which ships as a plain folder. Elsewhere there is no driver. Without Swift the build
- * goes on and app use says it is unavailable, so a checkout without Xcode can still work on the
- * rest; a release has it, being built on a Mac runner.
+ * The app driver (docs/internals/app-use.md), placed beside the bundle in dist/, which ships as a
+ * plain folder: Swift on macOS, Rust on Windows. Elsewhere there is no driver. Without the
+ * toolchain the build goes on and app use says it is unavailable, so a checkout without Xcode or
+ * Rust can still work on the rest; a release has it, its runners having both.
  */
 export const buildAppDriver = () => {
+  if (process.platform === "win32") return buildWindowsDriver();
   if (process.platform !== "darwin") return;
   const packagePath = "native/app-driver/macos";
   try {
@@ -89,6 +90,39 @@ export const buildAppDriver = () => {
   }
   mkdirSync("dist", { recursive: true });
   copyFileSync(`${packagePath}/.build/release/app-driver`, "dist/app-driver");
+};
+
+const RUST_TARGETS = { x64: "x86_64-pc-windows-msvc", arm64: "aarch64-pc-windows-msvc" };
+
+/**
+ * One driver per architecture, `dist/app-driver-<arch>.exe`: CI packages x64 and arm64 from one
+ * build (APP_DRIVER_ARCHES), and the packaging hook keeps the installer's own. Elsewhere this
+ * machine's alone.
+ */
+const buildWindowsDriver = () => {
+  const manifest = "native/app-driver/windows/Cargo.toml";
+  const arches = (process.env.APP_DRIVER_ARCHES ?? process.arch).split(/[\s,]+/).filter(Boolean);
+  mkdirSync("dist", { recursive: true });
+  for (const arch of arches) {
+    const target = RUST_TARGETS[arch];
+    try {
+      if (!target) throw new Error(`no Rust target for ${arch}`);
+      execFileSync(
+        "cargo",
+        ["build", "--release", "--locked", "--manifest-path", manifest, "--target", target],
+        { stdio: ["ignore", "ignore", "inherit"] },
+      );
+      // Windows locks a running executable, as a dev shell's driver is; the build goes on.
+      copyFileSync(
+        `native/app-driver/windows/target/${target}/release/app-driver.exe`,
+        `dist/app-driver-${arch}.exe`,
+      );
+    } catch (error) {
+      console.warn(
+        `build: the ${arch} app driver was not updated, so app use is off or stale there: ${error}`,
+      );
+    }
+  }
 };
 
 // Run directly: one build. Imported by dev.mjs: the options only.

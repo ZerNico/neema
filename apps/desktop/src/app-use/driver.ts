@@ -30,7 +30,8 @@ const decodeResponse = Schema.decodeUnknownSync(Schema.fromJsonString(Response))
  * and only that way does the driver run on neema's grants.
  */
 export const startAppDriver = (executable: string): AppDriver => {
-  const child = spawn(executable, [], { stdio: ["pipe", "pipe", "inherit"] });
+  // A console program started by a windowed one opens a console window on Windows, unless hidden.
+  const child = spawn(executable, [], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
   const pending = new Map<
     number,
     { method: Method; resolve: (value: unknown) => void; reject: (error: Error) => void }

@@ -415,6 +415,10 @@ Several are release candidates or pre-1.0. Pin exactly; never float to `latest`.
   real-VM tests (`NEEMA_VM_IMAGE=… pnpm --filter @chat/desktop test src/computer`) on each OS,
   since the unit tests use a fake hypervisor. The guest image is not a pin: a release builds
   the desktop with the image of its own sources. See [desktop](docs/internals/desktop.md#the-image).
+- The Windows app driver's Rust crates (`native/app-driver/windows`) are pinned exact with a
+  committed `Cargo.lock`. `windows` is pre-1.0 and moves its module paths between minor versions.
+  On a bump, run `real-driver-windows.test.ts` with a built driver (`NEEMA_APP_DRIVER=…`), since
+  only that drives real apps. See [app use](docs/internals/app-use.md#the-drivers).
 - `rolldown` needs no override since 1.2.7 and follows the release cooldown like any other
   package. Re-pin only if the production module check fails again, and then add it to
   `minimumReleaseAgeExclude`.
