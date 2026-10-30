@@ -1,13 +1,16 @@
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
   conversationDocuments,
   conversations,
   documentComments,
+  documentGroupGrants,
   documents,
   documentSteps,
+  documentUserGrants,
+  groupMembers,
   messages,
   projects,
   user,
@@ -35,26 +38,48 @@ type DocumentWrite = Partial<
 >;
 type Reader = Pick<DbTx, "select">;
 
+/** Whether the document in scope is shared with the person, as an editor when `editor`. */
+const grantedSql = (userId: string, editor: boolean) => sql`(
+  exists (
+    select 1 from ${documentUserGrants}
+    where ${documentUserGrants.documentId} = ${documents.id}
+      and ${documentUserGrants.userId} = ${userId}
+      ${editor ? sql`and ${documentUserGrants.role} = 'editor'` : sql``}
+  )
+  or exists (
+    select 1 from ${documentGroupGrants}
+    join ${groupMembers} on ${groupMembers.groupId} = ${documentGroupGrants.groupId}
+    where ${documentGroupGrants.documentId} = ${documents.id}
+      and ${groupMembers.userId} = ${userId}
+      ${editor ? sql`and ${documentGroupGrants.role} = 'editor'` : sql``}
+  )
+)`;
 /**
  * The reader's standing on the document in scope: a person's document is its
- * owner's alone, a project's follows the project role. One still tied to its
- * answer is reachable only while that answer's chat is, so a deleted chat's
- * documents wait out its grace hidden with it. Null means no access, which is
- * also every document while the documents feature is off for them.
+ * owner's and whoever it is shared with, the highest grant winning; a
+ * project's follows the project role. One still tied to its answer is
+ * reachable only while that answer's chat is, so a deleted chat's documents
+ * wait out its grace hidden with it. Null means no access, which is also
+ * every document while the documents feature is off for them.
  */
-const accessSql = (userId: string) => sql<ProjectRole | null>`(case
+export const documentAccessSql = (userId: string) => sql<ProjectRole | null>`(case
   when not (${capabilityAllowedSql(userId, "documents")}) then null
   when ${documents.projectId} is not null then (
     select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId}
   )
-  when ${documents.userId} <> ${userId} then null
-  when ${documents.answerMessageId} is null then 'owner'
-  else (
-    select 'owner' from ${messages}
-    join ${conversations} on ${conversations.id} = ${messages.conversationId}
-    where ${messages.id} = ${documents.answerMessageId} and ${ownedConversation(userId)}
-  )
+  when ${documents.userId} = ${userId} then (case
+    when ${documents.answerMessageId} is null then 'owner'
+    else (
+      select 'owner' from ${messages}
+      join ${conversations} on ${conversations.id} = ${messages.conversationId}
+      where ${messages.id} = ${documents.answerMessageId} and ${ownedConversation(userId)}
+    )
+  end)
+  when ${documents.answerMessageId} is not null then null
+  when ${grantedSql(userId, true)} then 'editor'
+  when ${grantedSql(userId, false)} then 'viewer'
 end)`;
+const accessSql = documentAccessSql;
 /** The chat it was made in: its first link, which only a move into a project removes. */
 export const documentOriginSql = sql<string | null>`(
   select ${conversationDocuments.conversationId} from ${conversationDocuments}
@@ -64,7 +89,10 @@ export const documentOriginSql = sql<string | null>`(
 const documentColumns = (userId: string) => ({
   id: documents.id,
   userId: documents.userId,
-  conversationId: documentOriginSql,
+  // Another's chat is theirs alone, even by id.
+  conversationId: sql<
+    string | null
+  >`(case when ${documents.userId} = ${userId} then ${documentOriginSql} end)`,
   projectId: documents.projectId,
   answerMessageId: documents.answerMessageId,
   title: documents.title,
@@ -101,6 +129,8 @@ export interface StoredDocumentState {
   steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
+/** A document's place for its images: where it is created, or a person's own once it exists. */
+export type ImageOwner = DocumentOwner | { userId: string };
 
 export class DocumentRepo extends Context.Service<
   DocumentRepo,
@@ -118,10 +148,11 @@ export class DocumentRepo extends Context.Service<
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
     /**
-     * Whose files images in the owner's documents are: the project's owner, or
-     * the chat's. Null unless the caller may edit there.
+     * Whose files images in the owner's documents are: the project's owner,
+     * the chat's, or the person's. Null unless the caller may edit there; for
+     * a person's document the claim's lock checks that.
      */
-    imageOwner(userId: string, owner: DocumentOwner, tx?: Reader): Effect.Effect<string | null>;
+    imageOwner(userId: string, owner: ImageOwner, tx?: Reader): Effect.Effect<string | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
     /** The person's own documents they can reach now, last changed first. */
@@ -284,6 +315,7 @@ export class DocumentRepo extends Context.Service<
         }),
         get,
         imageOwner: Effect.fn("DocumentRepo.imageOwner")(function* (userId, owner, tx) {
+          if ("userId" in owner) return owner.userId || null;
           if ("conversationId" in owner) {
             const [chat] = yield* (tx ?? db)
               .select({ userId: conversations.userId })
@@ -326,18 +358,31 @@ export class DocumentRepo extends Context.Service<
           const rows = yield* db
             .select({
               ...documentColumns(userId),
+              sharedBy: sql<string | null>`(
+                select ${user.name} from ${user}
+                where ${user.id} = ${documents.userId} and ${user.id} <> ${userId}
+              )`,
               conversationTitle: sql<string | null>`(
                 select ${conversations.title} from ${conversations}
                 where ${conversations.id} = ${documentOriginSql} and ${conversations.deletedAt} is null
               )`,
             })
             .from(documents)
-            .where(and(eq(documents.userId, userId), isNotNull(accessSql(userId))))
+            .where(
+              and(
+                isNull(documents.projectId),
+                or(eq(documents.userId, userId), grantedSql(userId, false)),
+                isNotNull(accessSql(userId)),
+              ),
+            )
             .orderBy(desc(documents.updatedAt), desc(documents.id))
+            .limit(500)
             .pipe(Effect.orDie);
-          return rows.map(({ conversationTitle, ...row }) => ({
+          return rows.map(({ conversationTitle, sharedBy, ...row }) => ({
             ...toDocument(row),
-            conversationTitle,
+            // Another's chat is theirs to know about.
+            conversationTitle: sharedBy === null ? conversationTitle : null,
+            sharedBy,
           }));
         }),
         loadState: Effect.fn("DocumentRepo.loadState")(function* (userId, documentId) {
@@ -472,6 +517,15 @@ export class DocumentRepo extends Context.Service<
             yield* tx
               .delete(conversationDocuments)
               .where(eq(conversationDocuments.documentId, documentId))
+              .pipe(Effect.orDie);
+            // The project's members are who reads it now.
+            yield* tx
+              .delete(documentUserGrants)
+              .where(eq(documentUserGrants.documentId, documentId))
+              .pipe(Effect.orDie);
+            yield* tx
+              .delete(documentGroupGrants)
+              .where(eq(documentGroupGrants.documentId, documentId))
               .pipe(Effect.orDie);
           },
         ),

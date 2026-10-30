@@ -15,6 +15,7 @@ import {
   DocumentImageInput,
   DocumentVersionInput,
   MoveDocumentInput,
+  ShareDocumentInput,
   ProjectDocumentsInput,
   PushDocumentInput,
   RenameDocumentInput,
@@ -177,6 +178,27 @@ export const moveDocumentToProject = createServerFn({ method: "POST" })
           data.projectId,
           () => Effect.void,
         ),
+      ),
+    ),
+  );
+/** Who a person's document is shared with. */
+export const getDocumentSharing = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) =>
+        service.sharing(context.session.user.id, data.documentId),
+      ),
+    ),
+  );
+export const shareDocument = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(ShareDocumentInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) =>
+        service.share(context.session.user.id, data.documentId, data.change),
       ),
     ),
   );

@@ -60,11 +60,13 @@ import {
   type DocumentPresence,
   type EditableDocument,
   type LibraryDocument,
+  type DocumentShareChange,
+  type DocumentSharing,
   type PushDocumentResult,
 } from "../schema.ts";
 import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
-import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
+import { DocumentRepo, type DocumentOwner, type ImageOwner } from "./document-repo.ts";
 import { groupVersions, type DocumentVersion } from "./versions.ts";
 import { placeImported, type ImportedText } from "./word-import.ts";
 import type { TreeNode } from "~/modules/word/server/document-tree.ts";
@@ -76,6 +78,7 @@ import {
   personComment,
   threadResolution,
 } from "./live-shared.ts";
+import { changeDocumentSharing, documentAudience, documentSharing } from "./document-sharing.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 /** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
@@ -309,10 +312,9 @@ const withOutline = (parsed: Node, outline: ReadonlyArray<string>) => {
   return ensureIds(squareTables(new Transform(doc))).doc;
 };
 /** Who a document belongs to, as the image owner is read from it. */
-const ownerOf = (document: Pick<EditableDocument, "projectId" | "conversationId">) =>
-  document.projectId
-    ? { projectId: document.projectId }
-    : { conversationId: document.conversationId ?? "" };
+/** Whose files a document's images are: its project's owner, or the person who owns it. */
+const ownerOf = (document: Pick<EditableDocument, "projectId" | "userId">): ImageOwner =>
+  document.projectId ? { projectId: document.projectId } : { userId: document.userId ?? "" };
 
 /** A tree read from a file, as the schema builds it, every block given an ID; refused if it does not fit. */
 const importedDocument = (json: TreeNode) =>
@@ -338,6 +340,12 @@ const liveSpot = (doc: Node, live: LiveEdit) => {
   return { parent: range.parent, startIndex: index, endIndex: index, from: at, to: at };
 };
 
+/** Keeping, moving, deleting and sharing a person's document are its owner's alone. */
+const ownerOnly = (document: EditableDocument, userId: string) =>
+  document.projectId === null && document.userId !== userId
+    ? Effect.fail(new DocumentRejected({ reason: localized(m.documents_share_error_owner_only) }))
+    : Effect.void;
+
 export class DocumentService extends Context.Service<
   DocumentService,
   {
@@ -346,6 +354,14 @@ export class DocumentService extends Context.Service<
     library(userId: string): Effect.Effect<LibraryDocument[]>;
     /** By its owner, or a project's by anyone who may edit it. */
     remove(userId: string, documentId: string): Effect.Effect<void, DocumentError>;
+    /** Who a person's document is shared with, for anyone who may read it. */
+    sharing(userId: string, documentId: string): Effect.Effect<DocumentSharing, DocumentError>;
+    /** One change to who a person's document is shared with, by its owner; sharing keeps it. */
+    share(
+      userId: string,
+      documentId: string,
+      change: DocumentShareChange,
+    ): Effect.Effect<void, DocumentError>;
     /**
      * Unties a person's document from the answer that wrote it, so retrying
      * or deleting that answer, or its chat, leaves it be.
@@ -632,7 +648,7 @@ export class DocumentService extends Context.Service<
        */
       const planImages = (
         userId: string,
-        owner: DocumentOwner | null,
+        owner: ImageOwner | null,
         attachmentIds: ReadonlyArray<string>,
         /** A person's images take the owner's quota; the model's are kept like its files. */
         charged: boolean,
@@ -680,7 +696,7 @@ export class DocumentService extends Context.Service<
         tx: DbTx,
         userId: string,
         documentId: string,
-        owner: DocumentOwner,
+        owner: ImageOwner,
         plan: { ownerId: string | null; copies: ReadonlyMap<string, string> },
         attachmentIds: ReadonlyArray<string>,
       ) =>
@@ -1051,6 +1067,7 @@ export class DocumentService extends Context.Service<
                 return yield* new DocumentRejected({
                   reason: localized(m.documents_error_already_in_project),
                 });
+              yield* ownerOnly(before, userId);
               yield* lockProjectForEditing(tx, userId, projectId);
               yield* documents.moveToProject(tx, documentId, projectId);
               return { before, after: (yield* documents.get(userId, documentId, tx))! };
@@ -1600,6 +1617,7 @@ export class DocumentService extends Context.Service<
             transaction((tx) =>
               Effect.gen(function* () {
                 const locked = yield* documents.lock(tx, userId, documentId);
+                yield* ownerOnly(locked, userId);
                 if (!locked.answerMessageId) return { document: locked, changed: false };
                 yield* documents.keep(tx, documentId);
                 return { document: { ...locked, answerMessageId: null }, changed: true };
@@ -1613,14 +1631,42 @@ export class DocumentService extends Context.Service<
           const removed = yield* exclusive(documentId)(
             transaction((tx) =>
               Effect.gen(function* () {
-                // Editing a person's document is owning it, so this is its owner.
                 const document = yield* documents.lock(tx, userId, documentId);
+                yield* ownerOnly(document, userId);
+                // Its readers are named before the grants go with it.
+                const readers = document.projectId ? [] : yield* documentAudience(tx, documentId);
                 yield* documents.remove(tx, documentId);
-                return document;
+                return { document, readers };
               }),
             ).pipe(Effect.tap(() => drop(documentId))),
           );
-          yield* documentChanged(userId, removed);
+          yield* documentChanged(userId, removed.document, false, removed.readers);
+        }),
+        sharing: Effect.fn("DocumentService.sharing")(function* (userId, documentId) {
+          const document = yield* documents.get(userId, documentId);
+          if (!document || document.projectId)
+            return yield* new DocumentNotAvailable({ documentId });
+          return yield* documentSharing(db, documentId, document.userId === userId ? userId : null);
+        }),
+        share: Effect.fn("DocumentService.share")(function* (userId, documentId, change) {
+          const { document, affected } = yield* exclusive(documentId)(
+            transaction((tx) =>
+              Effect.gen(function* () {
+                const locked = yield* documents.lock(tx, userId, documentId);
+                if (locked.projectId)
+                  return yield* new DocumentRejected({
+                    reason: localized(m.documents_error_already_in_project),
+                  });
+                yield* ownerOnly(locked, userId);
+                yield* documents.keep(tx, documentId);
+                return {
+                  document: locked,
+                  affected: yield* changeDocumentSharing(tx, userId, documentId, change),
+                };
+              }),
+            ),
+          );
+          yield* documentChanged(userId, document, false, affected);
         }),
         rename: Effect.fn("DocumentService.rename")(function* (userId, documentId, title) {
           const renamed = yield* exclusive(documentId)(

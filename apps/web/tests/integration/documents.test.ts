@@ -25,6 +25,8 @@ import {
   conversations,
   documents,
   documentSteps,
+  groupMembers,
+  groups,
   messages,
   user,
 } from "~/db/schema/index.ts";
@@ -33,6 +35,7 @@ import {
   DOCUMENT_LIMITS,
   type EditableDocument,
   type DocumentFrame,
+  type DocumentShareChange,
 } from "~/modules/documents/schema.ts";
 import { blockIdOf } from "~/modules/documents/editor/block-ids.ts";
 import { commentAnchors } from "~/modules/documents/editor/comments.ts";
@@ -1029,6 +1032,112 @@ describe("ownership, limits and sync", () => {
     await service((s) => s.remove(owner, anchored.id));
     expect(await get(owner, anchored)).toBeNull();
     expect(await service((s) => s.library(owner))).toEqual([]);
+  });
+});
+
+describe("sharing", () => {
+  const share = (owner: string, documentId: string, change: DocumentShareChange) =>
+    service((s) => s.share(owner, documentId, change));
+
+  it("lets an editor write and a viewer read, keeps it, and ends both on revoke", async () => {
+    const owner = await createUser();
+    const editor = await createUser();
+    const viewer = await createUser();
+    const conversationId = await createConversation(owner);
+    const fence = await generation(owner, conversationId);
+    const shared = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        answerMessageId: fence.messageId,
+        title: "Shared",
+        content: CHECKLIST,
+      }),
+    ).then((r) => r.document);
+    expect(await get(editor, shared)).toBeNull();
+
+    await share(owner, shared.id, { action: "addUser", email: `${editor}@t.io`, role: "editor" });
+    await share(owner, shared.id, { action: "addUser", email: `${viewer}@t.io`, role: "viewer" });
+    // Sharing keeps it, and the recipients never learn the owner's chat.
+    expect(await get(owner, shared)).toMatchObject({ answerMessageId: null, conversationId });
+    expect(await get(editor, shared)).toMatchObject({ canEdit: true, conversationId: null });
+    expect(await get(viewer, shared)).toMatchObject({ canEdit: false });
+    expect(await service((s) => s.library(editor))).toEqual([
+      expect.objectContaining({
+        id: shared.id,
+        sharedBy: "Document owner",
+        conversationTitle: null,
+      }),
+    ]);
+    expect(changedEvents(viewer).length).toBeGreaterThan(0);
+
+    const edited = await edit(editor, (await get(editor, shared))!, {
+      old: "ship",
+      new: "ship it",
+    });
+    expect(edited).toMatchObject({ outcome: "updated" });
+    await expect(
+      edit(viewer, (await get(viewer, shared))!, { old: "announce", new: "x" }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    // Only the owner keeps, shares or deletes it.
+    for (const attempt of [
+      service((s) => s.remove(editor, shared.id)),
+      share(editor, shared.id, { action: "removeUser", userId: viewer }),
+    ])
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two refusals, each checked alone.
+      await expect(attempt).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    expect(await service((s) => s.sharing(viewer, shared.id))).toMatchObject({
+      ownerName: "Document owner",
+      eligibleGroups: [],
+      users: expect.arrayContaining([
+        expect.objectContaining({ userId: editor, role: "editor" }),
+        expect.objectContaining({ userId: viewer, role: "viewer" }),
+      ]),
+    });
+
+    await share(owner, shared.id, { action: "removeUser", userId: editor });
+    expect(await get(editor, shared)).toBeNull();
+    await share(owner, shared.id, { action: "setUserRole", userId: viewer, role: "editor" });
+    expect(await get(viewer, shared)).toMatchObject({ canEdit: true });
+  });
+
+  it("shares with a group only for an owner the group lets share", async () => {
+    const owner = await createUser();
+    const member = await createUser();
+    const groupId = uuidv7();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(groups)
+          .values({ id: groupId, name: "Team" })
+          .pipe(
+            Effect.andThen(
+              db.insert(groupMembers).values([
+                { groupId, userId: owner },
+                { groupId, userId: member },
+              ]),
+            ),
+          ),
+      ),
+    );
+    const document = await create(owner, await createConversation(owner));
+    await expect(
+      share(owner, document.id, { action: "addGroup", groupId, role: "viewer" }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(groupMembers).set({ shareProjects: true }).where(eq(groupMembers.userId, owner)),
+      ),
+    );
+    await share(owner, document.id, { action: "addGroup", groupId, role: "viewer" });
+    expect(await get(member, document)).toMatchObject({ canEdit: false });
+    expect((await service((s) => s.sharing(owner, document.id))).eligibleGroups).toEqual([
+      { id: groupId, name: "Team" },
+    ]);
+    // Deleted, it tells every reader, not only the owner.
+    const before = changedEvents(member).length;
+    await service((s) => s.remove(owner, document.id));
+    expect(changedEvents(member).length).toBe(before + 1);
+    expect(await get(member, document)).toBeNull();
   });
 });
 

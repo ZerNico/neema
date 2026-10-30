@@ -20,6 +20,8 @@ export const DOCUMENT_LIMITS = {
   quote: 500,
   /** Comments one document may hold, replies included. */
   comments: 1_000,
+  /** People, and groups, one document may be shared with each. */
+  shares: 200,
 } as const;
 
 export const DocumentTitle = Schema.String.check(
@@ -36,6 +38,34 @@ export const CreateProjectDocumentInput = Schema.Struct({
   projectId: EntityId,
   title: DocumentTitle,
 });
+export const DocumentShareRole = Schema.Literals(["viewer", "editor"]);
+export const DocumentShareChange = Schema.Union([
+  Schema.Struct({
+    action: Schema.Literal("addUser"),
+    email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
+    role: DocumentShareRole,
+  }),
+  Schema.Struct({
+    action: Schema.Literal("setUserRole"),
+    userId: EntityId,
+    role: DocumentShareRole,
+  }),
+  Schema.Struct({ action: Schema.Literal("removeUser"), userId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("addGroup"), groupId: EntityId, role: DocumentShareRole }),
+  Schema.Struct({ action: Schema.Literal("removeGroup"), groupId: EntityId }),
+]);
+export type DocumentShareChange = typeof DocumentShareChange.Type;
+export const ShareDocumentInput = Schema.Struct({
+  documentId: EntityId,
+  change: DocumentShareChange,
+});
+/** Who a person's document is shared with; the owner also gets the groups they may add. */
+export interface DocumentSharing {
+  ownerName: string;
+  users: ReadonlyArray<{ userId: string; name: string; email: string; role: "viewer" | "editor" }>;
+  groups: ReadonlyArray<{ groupId: string; name: string; role: "viewer" | "editor" }>;
+  eligibleGroups: ReadonlyArray<{ id: string; name: string }>;
+}
 export const MoveDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
 export const RenameDocumentInput = Schema.Struct({
   documentId: EntityId,
@@ -198,9 +228,11 @@ export interface EditableDocument {
   updatedAt: string;
 }
 
-/** A row of a person's library: their own document, with the chat it was made in. */
+/** A row of a person's library: their own, with the chat it was made in, or one shared with them. */
 export interface LibraryDocument extends EditableDocument {
   conversationTitle: string | null;
+  /** The owner's name, for one shared with the reader; null for their own. */
+  sharedBy: string | null;
 }
 
 /** What one model edit did: the blocks it wrote, or why it changed nothing. */

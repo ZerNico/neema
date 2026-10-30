@@ -14,7 +14,8 @@ import {
 import { attachments } from "./attachments.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
-import { projects } from "./projects.ts";
+import { groups } from "./groups.ts";
+import { PROJECT_MEMBER_ROLES, projects } from "./projects.ts";
 
 /** A ProseMirror document or step as its own `toJSON` writes it. */
 type ProseMirrorJson = Record<string, unknown>;
@@ -95,6 +96,48 @@ export const conversationDocuments = pgTable(
     index("conversation_documents_message_idx")
       .on(t.messageId)
       .where(sql`${t.messageId} is not null`),
+  ],
+);
+
+/**
+ * A person's document shared with another account, as viewer or editor.
+ * Project documents are shared by their project instead, and only a kept
+ * document is shared: sharing keeps it.
+ */
+export const documentUserGrants = pgTable(
+  "document_user_grants",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text({ enum: PROJECT_MEMBER_ROLES }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.documentId, t.userId] }),
+    index("document_user_grants_user_idx").on(t.userId),
+  ],
+);
+
+/** A person's document shared with every member of a group. */
+export const documentGroupGrants = pgTable(
+  "document_group_grants",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    role: text({ enum: PROJECT_MEMBER_ROLES }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.documentId, t.groupId] }),
+    index("document_group_grants_group_idx").on(t.groupId),
   ],
 );
 

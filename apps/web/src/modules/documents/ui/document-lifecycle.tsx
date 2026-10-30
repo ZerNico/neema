@@ -1,7 +1,13 @@
-import { Archive02Icon, Delete02Icon, FolderAddIcon } from "@hugeicons/core-free-icons";
+import {
+  Archive02Icon,
+  Delete02Icon,
+  FolderAddIcon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { useWritableChatProject } from "~/modules/projects/ui/writable-chat-project-context.ts";
 import { m } from "~/paraglide/messages.js";
 import { useConfirm } from "~/ui/confirm-context.ts";
@@ -16,7 +22,7 @@ import {
 
 type Lifecycle = Pick<
   EditableDocument,
-  "id" | "title" | "userId" | "projectId" | "answerMessageId"
+  "id" | "title" | "userId" | "projectId" | "answerMessageId" | "canEdit"
 >;
 
 /** Lists showing the document; the sync event follows, this is only sooner. */
@@ -29,10 +35,19 @@ const refresh = (queryClient: ReturnType<typeof useQueryClient>, documentId: str
   ]);
 
 /**
- * Keep, move into the chat's project and delete, for someone who may edit the
- * document: a person's own may be kept and moved, either kind deleted.
+ * Share, keep, move into the chat's project and delete. A person's document
+ * is its owner's to change, though anyone reading it sees who else does; a
+ * project's may be deleted by anyone who may edit it. `onShare` opens the
+ * dialog, which outlives the menu.
  */
-export function DocumentLifecycleItems({ document }: { document: Lifecycle }) {
+export function DocumentLifecycleItems({
+  document,
+  onShare,
+}: {
+  document: Lifecycle;
+  onShare: () => void;
+}) {
+  const me = useSessionUser();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const project = useWritableChatProject();
@@ -59,38 +74,47 @@ export function DocumentLifecycleItems({ document }: { document: Lifecycle }) {
     onError: (error) => toastError(m.documents_delete_failed(), error),
   });
   const personal = document.userId !== null;
+  const mine = personal && document.userId === me?.id;
   return (
     <>
-      {personal && document.answerMessageId ? (
+      {personal ? (
+        <DropdownMenuItem onClick={onShare}>
+          <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
+          {m.documents_share()}
+        </DropdownMenuItem>
+      ) : null}
+      {mine && document.answerMessageId ? (
         <DropdownMenuItem disabled={keep.isPending} onClick={() => keep.mutate()}>
           <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} />
           {m.documents_keep()}
         </DropdownMenuItem>
       ) : null}
-      {personal && project ? (
+      {mine && project ? (
         <DropdownMenuItem disabled={move.isPending} onClick={() => move.mutate(project.id)}>
           <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
           {m.documents_move_to_project({ project: project.name })}
         </DropdownMenuItem>
       ) : null}
-      <DropdownMenuItem
-        variant="destructive"
-        disabled={remove.isPending}
-        onClick={() => {
-          void confirm({
-            title: m.documents_delete_title({ title: document.title }),
-            description: personal
-              ? m.documents_delete_description()
-              : m.projects_documents_delete_description(),
-            confirmLabel: m.documents_delete(),
-          }).then((confirmed) => {
-            if (confirmed) remove.mutate();
-          });
-        }}
-      >
-        <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-        {m.documents_delete()}
-      </DropdownMenuItem>
+      {mine || (!personal && document.canEdit) ? (
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={remove.isPending}
+          onClick={() => {
+            void confirm({
+              title: m.documents_delete_title({ title: document.title }),
+              description: personal
+                ? m.documents_delete_description()
+                : m.projects_documents_delete_description(),
+              confirmLabel: m.documents_delete(),
+            }).then((confirmed) => {
+              if (confirmed) remove.mutate();
+            });
+          }}
+        >
+          <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
+          {m.documents_delete()}
+        </DropdownMenuItem>
+      ) : null}
     </>
   );
 }

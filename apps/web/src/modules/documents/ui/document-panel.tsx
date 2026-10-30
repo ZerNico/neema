@@ -27,7 +27,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
 import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
 import { DocumentLifecycleItems } from "./document-lifecycle.tsx";
+import { DocumentShareDialog } from "./document-share-dialog.tsx";
 import { RenameDocumentDialog } from "./rename-document-dialog.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
@@ -70,6 +72,8 @@ export function DocumentPanelActions({
 }) {
   const [copied, setCopied] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const me = useSessionUser();
   const document = controller.document;
   return (
     // Comments, the menu and Copy line up with the ribbon's tab row, not the middle of both lines.
@@ -137,16 +141,24 @@ export function DocumentPanelActions({
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               {m.documents_export_word()}
             </DropdownMenuItem>
-            {document?.canEdit ? (
+            {document && (document.userId !== null || document.canEdit) ? (
               <>
                 <DropdownMenuSeparator />
-                <DocumentLifecycleItems document={document} />
+                <DocumentLifecycleItems document={document} onShare={() => setSharing(true)} />
               </>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
         {document?.canEdit ? (
           <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
+        ) : null}
+        {document?.userId ? (
+          <DocumentShareDialog
+            document={document}
+            manage={document.userId === me?.id}
+            open={sharing}
+            onOpenChange={setSharing}
+          />
         ) : null}
         <Tooltip>
           <TooltipTrigger

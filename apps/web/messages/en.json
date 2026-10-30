@@ -5686,5 +5686,16 @@
   "chat_composer_add_document": "Add a document",
   "chat_document_picker_title": "Add a document",
   "chat_document_picker_search": "Search your documents",
-  "chat_document_picker_empty": "No documents found"
+  "chat_document_picker_empty": "No documents found",
+  "documents_share_error_add_failed": "could not share with that account",
+  "documents_share_error_full": "this document is shared with as many as it can be",
+  "documents_share_error_not_shared": "it isn’t shared with that person",
+  "documents_share_error_group_unavailable": "that group is not available",
+  "documents_share_error_owner_only": "only its owner can do that",
+  "documents_share": "Share",
+  "documents_share_title": "Share “{title}”",
+  "documents_share_description": "Editors write in it with you, viewers read it. It stays yours.",
+  "documents_library_shared": "Shared with you",
+  "documents_library_yours": "Yours",
+  "documents_library_shared_by": "{name} · Updated {age}"
 }
