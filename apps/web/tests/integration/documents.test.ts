@@ -20,7 +20,14 @@ import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { english, type Localized } from "~/i18n/localized.ts";
-import { conversations, documents, documentSteps, messages, user } from "~/db/schema/index.ts";
+import {
+  conversationDocuments,
+  conversations,
+  documents,
+  documentSteps,
+  messages,
+  user,
+} from "~/db/schema/index.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import {
   DOCUMENT_LIMITS,
@@ -896,13 +903,13 @@ describe("ownership, limits and sync", () => {
     const anchored = await service((s) =>
       s.create(owner, {
         conversationId,
-        createdByMessageId: fence.messageId,
+        answerMessageId: fence.messageId,
         title: "Anchored",
         content: CHECKLIST,
       }),
     ).then((r) => r.document);
     const loose = await create(owner, conversationId, "no anchor", "Loose");
-    expect(anchored.createdByMessageId).toBe(fence.messageId);
+    expect(anchored.answerMessageId).toBe(fence.messageId);
 
     // Rewinding past that answer deletes the message; the document goes with it
     // rather than surviving as an artifact of a conversation prefix that is gone.
@@ -914,23 +921,60 @@ describe("ownership, limits and sync", () => {
     expect(await get(owner, loose)).toEqual(loose);
   });
 
-  it("removes documents with their conversation", async () => {
+  it("removes a chat's answer-bound documents with it and keeps kept ones", async () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
-    const created = await create(owner, conversationId);
+    const fence = await generation(owner, conversationId);
+    const anchored = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        answerMessageId: fence.messageId,
+        title: "Anchored",
+        content: CHECKLIST,
+      }),
+    ).then((r) => r.document);
+    // No answer holds it, so it is the person's own and outlives the chat.
+    const kept = await create(owner, conversationId);
     await run(
       Effect.flatMap(Db, (db) =>
         db.delete(conversations).where(eq(conversations.id, conversationId)),
       ),
     );
-    expect(await get(owner, created)).toBeNull();
+    expect(await get(owner, anchored)).toBeNull();
+    expect(await get(owner, kept)).toMatchObject({ id: kept.id, conversationId: null });
     expect(
       await run(
         Effect.flatMap(Db, (db) =>
-          db.select().from(documents).where(eq(documents.conversationId, conversationId)),
+          db
+            .select()
+            .from(conversationDocuments)
+            .where(eq(conversationDocuments.conversationId, conversationId)),
         ),
       ),
     ).toEqual([]);
+  });
+
+  it("hides an answer's document while its chat waits out a delete", async () => {
+    const owner = await createUser();
+    const conversationId = await createConversation(owner);
+    const fence = await generation(owner, conversationId);
+    const anchored = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        answerMessageId: fence.messageId,
+        title: "Anchored",
+        content: CHECKLIST,
+      }),
+    ).then((r) => r.document);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(conversations)
+          .set({ deletedAt: new Date() })
+          .where(eq(conversations.id, conversationId)),
+      ),
+    );
+    expect(await get(owner, anchored)).toBeNull();
   });
 });
 

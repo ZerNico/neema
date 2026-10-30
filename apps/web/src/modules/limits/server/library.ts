@@ -21,6 +21,7 @@ import {
   skillRevisions,
   skills,
 } from "~/db/schema/index.ts";
+import { documentOriginSql } from "~/modules/documents/server/document-repo.ts";
 import { Db } from "~/server/db.ts";
 import { LIBRARY_LISTED } from "../rules.ts";
 
@@ -121,7 +122,7 @@ export class StorageLibrary extends Context.Service<
                 documentId: documents.id,
                 documentTitle: documents.title,
                 documentProject: documents.projectId,
-                documentConversation: documents.conversationId,
+                documentConversation: documentOriginSql,
               })
               .from(attachments)
               .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))

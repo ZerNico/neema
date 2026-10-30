@@ -61,6 +61,7 @@ const replica = async (markdown = "", documentId?: string) => {
   if (!documentId)
     server.seed({
       id,
+      userId: "user",
       conversationId: "conversation",
       projectId: null,
       title: "Plan",

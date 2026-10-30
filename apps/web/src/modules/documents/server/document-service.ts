@@ -934,8 +934,8 @@ export class DocumentService extends Context.Service<
                 id,
                 title: parsed.title,
                 // Only a chat's document dies with the answer that made it.
-                createdByMessageId:
-                  "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,
+                answerMessageId:
+                  "conversationId" in owner ? (parsed.answerMessageId ?? null) : null,
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: doc.toJSON() as Record<string, unknown>,
               });

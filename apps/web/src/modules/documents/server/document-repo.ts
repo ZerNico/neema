@@ -1,12 +1,14 @@
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
-import { and, asc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
+  conversationDocuments,
   conversations,
   documentComments,
   documents,
   documentSteps,
+  messages,
   projects,
   user,
 } from "~/db/schema/index.ts";
@@ -33,23 +35,37 @@ type DocumentWrite = Partial<
 type Reader = Pick<DbTx, "select">;
 
 /**
- * The reader's standing on the document in scope: a chat's document is its
- * owner's alone, a project's follows the project role. Null means no access,
- * which is also every document while the documents feature is off for them.
+ * The reader's standing on the document in scope: a person's document is its
+ * owner's alone, a project's follows the project role. One still tied to its
+ * answer is reachable only while that answer's chat is, so a deleted chat's
+ * documents wait out its grace hidden with it. Null means no access, which is
+ * also every document while the documents feature is off for them.
  */
 const accessSql = (userId: string) => sql<ProjectRole | null>`(case
   when not (${capabilityAllowedSql(userId, "documents")}) then null
-  when ${documents.conversationId} is not null then (
-    select 'owner' from ${conversations}
-    where ${conversations.id} = ${documents.conversationId} and ${ownedConversation(userId)}
+  when ${documents.projectId} is not null then (
+    select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId}
   )
-  else (select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId})
+  when ${documents.userId} <> ${userId} then null
+  when ${documents.answerMessageId} is null then 'owner'
+  else (
+    select 'owner' from ${messages}
+    join ${conversations} on ${conversations.id} = ${messages.conversationId}
+    where ${messages.id} = ${documents.answerMessageId} and ${ownedConversation(userId)}
+  )
 end)`;
+/** The chat it was made in: its first link, which only a move into a project removes. */
+export const documentOriginSql = sql<string | null>`(
+  select ${conversationDocuments.conversationId} from ${conversationDocuments}
+  where ${conversationDocuments.documentId} = ${documents.id}
+  order by ${conversationDocuments.createdAt} limit 1
+)`;
 const documentColumns = (userId: string) => ({
   id: documents.id,
-  conversationId: documents.conversationId,
+  userId: documents.userId,
+  conversationId: documentOriginSql,
   projectId: documents.projectId,
-  createdByMessageId: documents.createdByMessageId,
+  answerMessageId: documents.answerMessageId,
   title: documents.title,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
@@ -59,6 +75,7 @@ const documentColumns = (userId: string) => ({
   access: accessSql(userId),
 });
 type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
+  conversationId: string | null;
   access: ProjectRole | null;
 };
 const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
@@ -93,7 +110,7 @@ export class DocumentRepo extends Context.Service<
       userId: string,
       owner: DocumentOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
-        createdByMessageId?: string | null;
+        answerMessageId?: string | null;
         /** Given when the snapshot already names the document, as an imported image's address does. */
         id?: string;
       },
@@ -235,21 +252,30 @@ export class DocumentRepo extends Context.Service<
         lockConversation,
         create: Effect.fn("DocumentRepo.create")(function* (tx, userId, owner, values) {
           const id = values.id ?? uuidv7();
+          const answerMessageId = values.answerMessageId ?? null;
+          // The caller holds the chat's lock as its owner, so a chat's document is the caller's.
           yield* tx
             .insert(documents)
             .values({
               id,
-              ...("conversationId" in owner
-                ? { conversationId: owner.conversationId }
-                : { projectId: owner.projectId }),
+              ...("conversationId" in owner ? { userId } : { projectId: owner.projectId }),
               title: values.title,
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
-              createdByMessageId: values.createdByMessageId ?? null,
+              answerMessageId,
               snapshot: values.snapshot,
               snapshotRevision: 0,
             })
             .pipe(Effect.orDie);
+          if ("conversationId" in owner)
+            yield* tx
+              .insert(conversationDocuments)
+              .values({
+                conversationId: owner.conversationId,
+                documentId: id,
+                messageId: answerMessageId,
+              })
+              .pipe(Effect.orDie);
           return (yield* get(userId, id, tx))!;
         }),
         get,
@@ -277,7 +303,13 @@ export class DocumentRepo extends Context.Service<
             .where(
               and(
                 "conversationId" in owner
-                  ? eq(documents.conversationId, owner.conversationId)
+                  ? inArray(
+                      documents.id,
+                      db
+                        .select({ id: conversationDocuments.documentId })
+                        .from(conversationDocuments)
+                        .where(eq(conversationDocuments.conversationId, owner.conversationId)),
+                    )
                   : eq(documents.projectId, owner.projectId),
                 isNotNull(access),
               ),
@@ -401,11 +433,16 @@ export class DocumentRepo extends Context.Service<
               .update(documents)
               .set({
                 projectId,
-                conversationId: null,
-                createdByMessageId: null,
+                userId: null,
+                answerMessageId: null,
                 updatedAt: new Date(),
               })
               .where(eq(documents.id, documentId))
+              .pipe(Effect.orDie);
+            // A project chat lists the project's documents already; a link would list it twice.
+            yield* tx
+              .delete(conversationDocuments)
+              .where(eq(conversationDocuments.documentId, documentId))
               .pipe(Effect.orDie);
           },
         ),

@@ -34,8 +34,9 @@ let server: ReturnType<typeof fakeDocumentServer>;
 let panel: DetailPanelApi;
 const fresh = (): SeedDocument => ({
   id: "document-1",
+  userId: "user",
   conversationId: "conversation",
-  createdByMessageId: "m-answer",
+  answerMessageId: "m-answer",
   title: "Checklist",
   content: "- [ ] first\n  - [x] nested\n- [ ] third",
   revision: 1,
@@ -130,7 +131,7 @@ describe("document panel", () => {
     server.seed({
       ...fresh(),
       conversationId: null,
-      createdByMessageId: null,
+      answerMessageId: null,
       projectId: "project-1",
     });
     await fixture();

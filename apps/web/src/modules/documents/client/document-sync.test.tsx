@@ -21,6 +21,7 @@ beforeEach(async () => {
   server = fakeDocumentServer();
   server.seed({
     id: "plan",
+    userId: "user",
     conversationId: "conversation",
     projectId: null,
     title: "Plan",

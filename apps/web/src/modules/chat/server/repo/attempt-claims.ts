@@ -568,7 +568,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
             // keeps the row id, so those have to be removed explicitly.
             yield* tx
               .delete(documents)
-              .where(eq(documents.createdByMessageId, input.messageId))
+              .where(eq(documents.answerMessageId, input.messageId))
               .pipe(Effect.orDie);
             yield* tx
               .delete(conversationDrafts)

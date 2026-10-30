@@ -49,6 +49,7 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
     put(
       {
         id: row.id,
+        userId: "user",
         conversationId: CONVERSATION,
         projectId: null,
         title: row.title,
@@ -90,6 +91,7 @@ function fakeService(initial: { id: string; title: string; content: string }[] =
         const document = put(
           {
             id: `doc-${++nextDocument}`,
+            userId: input.projectId ? null : "user",
             conversationId: input.conversationId ?? null,
             projectId: input.projectId ?? null,
             canEdit: true,

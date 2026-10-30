@@ -16,8 +16,9 @@ import {
 } from "effect";
 import { uuidv7 } from "uuidv7";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/ai";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
+  conversationDocuments,
   conversationDrafts,
   conversations,
   conversationWorkingFiles,
@@ -2380,7 +2381,7 @@ describe("conversation documents", () => {
         const detail = await runtime.runPromise(
           loadConversationDetail(seed.userId, seed.conversation.id),
         );
-        expect(document!.createdByMessageId).toBe(detail.messages.at(-1)?.id);
+        expect(document!.answerMessageId).toBe(detail.messages.at(-1)?.id);
         expect(detail.messages.at(-1)?.status).toBe("complete");
         expect(detail.toolCalls.map((call) => call.arguments)).toEqual([{}, {}]);
         expect(detail.toolCalls.map((call) => call.result)).toEqual([
@@ -2758,7 +2759,13 @@ describe("conversation documents", () => {
               .from(documents)
               .where(
                 or(
-                  eq(documents.conversationId, seed.conversation.id),
+                  inArray(
+                    documents.id,
+                    db
+                      .select({ id: conversationDocuments.documentId })
+                      .from(conversationDocuments)
+                      .where(eq(conversationDocuments.conversationId, seed.conversation.id)),
+                  ),
                   eq(documents.projectId, projectId),
                 ),
               );

@@ -16,7 +16,7 @@ import { StorageQuota } from "~/modules/limits/server/storage.ts";
 export const createFromWord = Effect.fn("documents.createFromWord")(function* (
   userId: string,
   input: {
-    readonly owner: { projectId: string } | { conversationId: string; createdByMessageId: string };
+    readonly owner: { projectId: string } | { conversationId: string; answerMessageId: string };
     readonly title?: string | undefined;
     readonly by: "user" | "model";
     /** The language a title made up for it is in. */

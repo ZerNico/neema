@@ -41,8 +41,9 @@ let server: ReturnType<typeof fakeDocumentServer>;
 let panel: DetailPanelApi;
 const fresh = (): SeedDocument => ({
   id: "document-1",
+  userId: "user",
   conversationId: "conversation",
-  createdByMessageId: "m-answer",
+  answerMessageId: "m-answer",
   title: "Notes",
   content: "Original",
   revision: 1,
