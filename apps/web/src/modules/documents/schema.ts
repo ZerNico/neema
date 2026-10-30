@@ -53,6 +53,7 @@ export const DocumentShareChange = Schema.Union([
   Schema.Struct({ action: Schema.Literal("removeUser"), userId: EntityId }),
   Schema.Struct({ action: Schema.Literal("addGroup"), groupId: EntityId, role: DocumentShareRole }),
   Schema.Struct({ action: Schema.Literal("removeGroup"), groupId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("setPublicLink"), enabled: Schema.Boolean }),
 ]);
 export type DocumentShareChange = typeof DocumentShareChange.Type;
 export const ShareDocumentInput = Schema.Struct({
@@ -65,7 +66,24 @@ export interface DocumentSharing {
   users: ReadonlyArray<{ userId: string; name: string; email: string; role: "viewer" | "editor" }>;
   groups: ReadonlyArray<{ groupId: string; name: string; role: "viewer" | "editor" }>;
   eligibleGroups: ReadonlyArray<{ id: string; name: string }>;
+  /** The owner's only: the link's token when on, and whether they may turn one on. */
+  publicLink: { token: string | null; canPublish: boolean } | null;
 }
+/** A document as anyone with its public link reads it: the tree, its images through the link. */
+export interface PublicDocument {
+  title: string;
+  ownerName: string;
+  updatedAt: string;
+  /** The tree as JSON text. */
+  content: string;
+}
+export const PublicDocumentInput = Schema.Struct({
+  // Any string: one that names no link reads as gone, the same as one turned off.
+  token: Schema.String.check(Schema.isMaxLength(64)),
+});
+export const publicDocumentPath = (token: string) => `/d/${encodeURIComponent(token)}`;
+export const publicDocumentImagePath = (token: string, attachmentId: string) =>
+  `/api/public/documents/${encodeURIComponent(token)}/images/${encodeURIComponent(attachmentId)}`;
 export const MoveDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
 export const RenameDocumentInput = Schema.Struct({
   documentId: EntityId,

@@ -7,6 +7,7 @@ import {
   conversations,
   documentComments,
   documentGroupGrants,
+  documentPublicLinks,
   documents,
   documentSteps,
   documentUserGrants,
@@ -526,6 +527,10 @@ export class DocumentRepo extends Context.Service<
             yield* tx
               .delete(documentGroupGrants)
               .where(eq(documentGroupGrants.documentId, documentId))
+              .pipe(Effect.orDie);
+            yield* tx
+              .delete(documentPublicLinks)
+              .where(eq(documentPublicLinks.documentId, documentId))
               .pipe(Effect.orDie);
           },
         ),

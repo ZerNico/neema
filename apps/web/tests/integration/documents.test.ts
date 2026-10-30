@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { Node } from "@tiptap/pm/model";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   Cause,
   Deferred,
@@ -1138,6 +1138,65 @@ describe("sharing", () => {
     await service((s) => s.remove(owner, document.id));
     expect(changedEvents(member).length).toBe(before + 1);
     expect(await get(member, document)).toBeNull();
+  });
+
+  it("opens a public link only while it is on and its owner may publish", async () => {
+    const owner = await createUser();
+    const document = await create(owner, await createConversation(owner));
+    const link = async () => (await service((s) => s.sharing(owner, document.id))).publicLink;
+    const readPublic = (token: string) => service((s) => s.readPublic(token));
+    // Off unless a group grants it.
+    expect(await link()).toEqual({ token: null, canPublish: false });
+    await expect(
+      share(owner, document.id, { action: "setPublicLink", enabled: true }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+
+    const groupId = uuidv7();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(groups)
+          .values({ id: groupId, name: "Publishers" })
+          .pipe(Effect.andThen(db.insert(groupMembers).values({ groupId, userId: owner }))),
+      ),
+    );
+    await share(owner, document.id, { action: "setPublicLink", enabled: true });
+    const first = (await link())?.token;
+    expect(first).toEqual(expect.any(String));
+    const opened = await readPublic(first!);
+    expect(opened).toMatchObject({ title: "Release", ownerName: "Document owner" });
+    expect(opened?.content).toContain("tag build");
+    // Publishing keeps it, and nobody else learns the link.
+    expect(await get(owner, document)).toMatchObject({ answerMessageId: null });
+    const reader = await createUser();
+    await share(owner, document.id, { action: "addUser", email: `${reader}@t.io`, role: "viewer" });
+    expect((await service((s) => s.sharing(reader, document.id))).publicLink).toBeNull();
+
+    const publish = (allowed: boolean) =>
+      run(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(groups)
+            .set({
+              capabilities: sql`${groups.capabilities} || ${JSON.stringify({ publicLinks: allowed })}::jsonb`,
+            })
+            .where(eq(groups.id, groupId)),
+        ),
+      );
+    await publish(false);
+    expect(await readPublic(first!)).toBeNull();
+    expect(await service((s) => s.publicDocumentId(first!))).toBeNull();
+    await publish(true);
+    expect(await service((s) => s.publicDocumentId(first!))).toBe(document.id);
+
+    // Off ends it; on again is a new link, never the old one back.
+    await share(owner, document.id, { action: "setPublicLink", enabled: false });
+    expect(await readPublic(first!)).toBeNull();
+    await share(owner, document.id, { action: "setPublicLink", enabled: true });
+    const second = (await link())?.token;
+    expect(second).not.toBe(first);
+    expect(await readPublic(second!)).not.toBeNull();
+    expect(await readPublic("not-a-link")).toBeNull();
   });
 });
 

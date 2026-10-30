@@ -104,6 +104,8 @@
   "admin_groups_feature_documents_description": "Ein Markdown-Dokument neben dem Chat entwerfen und bearbeiten.",
   "admin_groups_feature_mcp_servers": "Eigene MCP-Server",
   "admin_groups_feature_mcp_servers_description": "Öffentliche MCP-Server für sich selbst hinzufügen.",
+  "admin_groups_feature_public_links": "Öffentliche Dokumentlinks",
+  "admin_groups_feature_public_links_description": "Alle mit einem Link ihre Dokumente lesen lassen.",
   "admin_groups_feature_memory": "Erinnerungen",
   "admin_groups_feature_memory_description": "Fakten über die Person chatübergreifend merken.",
   "admin_groups_feature_research": "Recherche",
@@ -5697,5 +5699,11 @@
   "documents_share_description": "Bearbeitende schreiben mit dir darin, Lesende lesen es. Es bleibt deins.",
   "documents_library_shared": "Mit dir geteilt",
   "documents_library_yours": "Deine",
-  "documents_library_shared_by": "{name} · Aktualisiert {age}"
+  "documents_library_shared_by": "{name} · Aktualisiert {age}",
+  "documents_public_link": "Öffentlicher Link",
+  "documents_public_link_description": "Alle mit dem Link können es ohne Anmeldung lesen.",
+  "documents_public_link_failed": "Der öffentliche Link konnte nicht geändert werden",
+  "documents_public_link_error_not_allowed": "Du darfst keine Dokumente veröffentlichen.",
+  "documents_public_unavailable": "Dieser Link öffnet kein Dokument",
+  "documents_public_unavailable_description": "Er wurde vielleicht ausgeschaltet oder das Dokument gelöscht."
 }

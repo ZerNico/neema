@@ -1,7 +1,9 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
+import { and, asc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   documentGroupGrants,
+  documentPublicLinks,
   documents,
   documentUserGrants,
   groupMembers,
@@ -13,6 +15,7 @@ import {
   addressableByEmailSql,
   verificationRequiredIn,
 } from "~/modules/auth/server/account-eligibility.ts";
+import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
 import { m } from "~/paraglide/messages.js";
 import type { DbTx } from "~/server/db.ts";
 import {
@@ -95,11 +98,30 @@ export const documentSharing = (tx: Reader, documentId: string, ownerId: string 
           .limit(200)
           .pipe(Effect.orDie)
       : [];
+    const publicLink = ownerId
+      ? yield* tx
+          .select({
+            token: sql<
+              string | null
+            >`(select ${documentPublicLinks.token} from ${documentPublicLinks} where ${documentPublicLinks.documentId} = ${documentId})`,
+            canPublish: capabilityAllowedSql(ownerId, "publicLinks"),
+          })
+          .from(user)
+          .where(eq(user.id, ownerId))
+          .pipe(
+            Effect.orDie,
+            Effect.map(([row]) => ({
+              token: row?.token ?? null,
+              canPublish: row?.canPublish === true,
+            })),
+          )
+      : null;
     return {
       ownerName: owner?.name ?? "",
       users,
       groups: granted,
       eligibleGroups,
+      publicLink,
     } satisfies DocumentSharing;
   });
 
@@ -246,5 +268,51 @@ export const changeDocumentSharing = (
           .pipe(Effect.orDie);
         return losing.map((row) => row.userId);
       }
+      case "setPublicLink": {
+        if (!change.enabled) {
+          yield* tx
+            .delete(documentPublicLinks)
+            .where(eq(documentPublicLinks.documentId, documentId))
+            .pipe(Effect.orDie);
+          return [];
+        }
+        const [allowed] = yield* tx
+          .select({ value: capabilityAllowedSql(ownerId, "publicLinks") })
+          .from(user)
+          .where(eq(user.id, ownerId))
+          .pipe(Effect.orDie);
+        if (!allowed?.value) return yield* refuse(m.documents_public_link_error_not_allowed);
+        yield* tx
+          .insert(documentPublicLinks)
+          .values({ documentId, token: randomBytes(24).toString("base64url") })
+          .onConflictDoNothing()
+          .pipe(Effect.orDie);
+        return [];
+      }
     }
   });
+
+/**
+ * The document a public link opens and the owner it is read as, while the
+ * link stands: the document is still a person's and kept, and its owner may
+ * still use documents and publish, with an account still in use.
+ */
+export const publicLinkTarget = (tx: Reader, token: string) =>
+  tx
+    .select({ documentId: documents.id, ownerId: sql<string>`${documents.userId}` })
+    .from(documentPublicLinks)
+    .innerJoin(documents, eq(documents.id, documentPublicLinks.documentId))
+    .where(
+      and(
+        eq(documentPublicLinks.token, token),
+        isNotNull(documents.userId),
+        isNull(documents.projectId),
+        isNull(documents.answerMessageId),
+        capabilityAllowedSql(documents.userId, "documents"),
+        capabilityAllowedSql(documents.userId, "publicLinks"),
+      ),
+    )
+    .pipe(
+      Effect.orDie,
+      Effect.map(([row]) => row ?? null),
+    );

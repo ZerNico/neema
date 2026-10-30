@@ -62,6 +62,7 @@ import {
   type LibraryDocument,
   type DocumentShareChange,
   type DocumentSharing,
+  type PublicDocument,
   type PushDocumentResult,
 } from "../schema.ts";
 import { type Localized, localized } from "~/i18n/localized.ts";
@@ -78,7 +79,13 @@ import {
   personComment,
   threadResolution,
 } from "./live-shared.ts";
-import { changeDocumentSharing, documentAudience, documentSharing } from "./document-sharing.ts";
+import {
+  changeDocumentSharing,
+  documentAudience,
+  documentSharing,
+  publicLinkTarget,
+} from "./document-sharing.ts";
+import { publicTree } from "./public-document.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 /** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
@@ -362,6 +369,10 @@ export class DocumentService extends Context.Service<
       documentId: string,
       change: DocumentShareChange,
     ): Effect.Effect<void, DocumentError>;
+    /** The document a public link opens, as anyone holding it reads it; null once it no longer does. */
+    readPublic(token: string): Effect.Effect<PublicDocument | null>;
+    /** Which document a public link still opens, for loading its images. */
+    publicDocumentId(token: string): Effect.Effect<string | null>;
     /**
      * Unties a person's document from the answer that wrote it, so retrying
      * or deleting that answer, or its chat, leaves it be.
@@ -1647,6 +1658,25 @@ export class DocumentService extends Context.Service<
           if (!document || document.projectId)
             return yield* new DocumentNotAvailable({ documentId });
           return yield* documentSharing(db, documentId, document.userId === userId ? userId : null);
+        }),
+        readPublic: Effect.fn("DocumentService.readPublic")(function* (token) {
+          const target = yield* publicLinkTarget(db, token);
+          if (!target) return null;
+          const loaded = yield* exclusive(target.documentId)(
+            load(target.ownerId, target.documentId),
+          ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+          if (!loaded) return null;
+          return {
+            title: loaded.document.title,
+            ownerName: yield* documents.userName(target.ownerId),
+            updatedAt: loaded.document.updatedAt,
+            content: JSON.stringify(
+              publicTree(loaded.entry.doc.toJSON(), target.documentId, token),
+            ),
+          } satisfies PublicDocument;
+        }),
+        publicDocumentId: Effect.fn("DocumentService.publicDocumentId")(function* (token) {
+          return (yield* publicLinkTarget(db, token))?.documentId ?? null;
         }),
         share: Effect.fn("DocumentService.share")(function* (userId, documentId, change) {
           const { document, affected } = yield* exclusive(documentId)(

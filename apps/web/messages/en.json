@@ -104,6 +104,8 @@
   "admin_groups_feature_documents_description": "Draft and edit a Markdown document beside the chat.",
   "admin_groups_feature_mcp_servers": "Their own MCP servers",
   "admin_groups_feature_mcp_servers_description": "Add public MCP servers for themselves.",
+  "admin_groups_feature_public_links": "Public document links",
+  "admin_groups_feature_public_links_description": "Let anyone with a link read their documents.",
   "admin_groups_feature_memory": "Memory",
   "admin_groups_feature_memory_description": "Remember facts about them across chats.",
   "admin_groups_feature_research": "Deep research",
@@ -5697,5 +5699,11 @@
   "documents_share_description": "Editors write in it with you, viewers read it. It stays yours.",
   "documents_library_shared": "Shared with you",
   "documents_library_yours": "Yours",
-  "documents_library_shared_by": "{name} · Updated {age}"
+  "documents_library_shared_by": "{name} · Updated {age}",
+  "documents_public_link": "Public link",
+  "documents_public_link_description": "Anyone with the link can read it without signing in.",
+  "documents_public_link_failed": "Couldn’t change the public link",
+  "documents_public_link_error_not_allowed": "You can’t publish documents.",
+  "documents_public_unavailable": "This link doesn’t open a document",
+  "documents_public_unavailable_description": "It may have been turned off, or the document deleted."
 }

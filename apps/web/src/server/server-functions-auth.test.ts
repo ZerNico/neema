@@ -5,13 +5,14 @@ import { describe, expect, it } from "vitest";
 const SOURCE = join(import.meta.dirname, "..");
 
 /**
- * The server functions anyone may call, signed in or not, each for its page
- * before sign-in. Every other one must name a `require…` middleware.
+ * The server functions anyone may call, signed in or not: each page before
+ * sign-in, and a document's public link. Every other one must name a `require…` middleware.
  */
 const PUBLIC = new Set([
   "modules/auth/server/signup-functions.ts#getSignInOptions",
   "modules/auth/server/signup-functions.ts#getNeedsSetup",
   "modules/auth/server/functions.ts#getMe",
+  "modules/documents/server/public-document-functions.ts#getPublicDocument",
 ]);
 
 const sources = (directory: string): string[] =>

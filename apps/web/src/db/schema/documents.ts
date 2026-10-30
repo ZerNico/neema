@@ -142,6 +142,19 @@ export const documentGroupGrants = pgTable(
 );
 
 /**
+ * A person's document readable by anyone holding the token, without signing
+ * in. One per document; turning it off deletes the row, so a new link is a
+ * new token. It reads only while the owner may still publish.
+ */
+export const documentPublicLinks = pgTable("document_public_links", {
+  documentId: text("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  token: text().notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * Every step after the snapshot, one row each; `revision` is the version the
  * step produced. Kept long so an editor that was offline can still rebase.
  */
