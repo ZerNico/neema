@@ -1,5 +1,5 @@
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
-import { and, asc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
@@ -24,6 +24,7 @@ import {
   DocumentRejected,
   type DocumentComment,
   type EditableDocument,
+  type LibraryDocument,
 } from "../schema.ts";
 import { localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
@@ -123,6 +124,8 @@ export class DocumentRepo extends Context.Service<
     imageOwner(userId: string, owner: DocumentOwner, tx?: Reader): Effect.Effect<string | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
+    /** The person's own documents they can reach now, last changed first. */
+    library(userId: string): Effect.Effect<LibraryDocument[]>;
     /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
     /**
@@ -175,7 +178,6 @@ export class DocumentRepo extends Context.Service<
       snapshot: Record<string, unknown>,
       revision: number,
     ): Effect.Effect<void>;
-    /** Deletes a project's document; a chat's goes with its answer instead. */
     remove(tx: DbTx, documentId: string): Effect.Effect<void>;
     lockConversation(
       tx: DbTx,
@@ -184,6 +186,8 @@ export class DocumentRepo extends Context.Service<
     ): Effect.Effect<void, DocumentNotAvailable>;
     /** Oldest first, with each author's name. */
     comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
+    /** Unties a document from its answer, so it outlives it. Caller holds the document's lock. */
+    keep(tx: DbTx, documentId: string): Effect.Effect<void>;
     /** Hands a chat's document to a project. Caller holds the document's lock. */
     moveToProject(tx: DbTx, documentId: string, projectId: string): Effect.Effect<void>;
     /** A person's display name, for the cursor others see. */
@@ -318,6 +322,24 @@ export class DocumentRepo extends Context.Service<
             .pipe(Effect.orDie);
           return rows.map(toDocument);
         }),
+        library: Effect.fn("DocumentRepo.library")(function* (userId) {
+          const rows = yield* db
+            .select({
+              ...documentColumns(userId),
+              conversationTitle: sql<string | null>`(
+                select ${conversations.title} from ${conversations}
+                where ${conversations.id} = ${documentOriginSql} and ${conversations.deletedAt} is null
+              )`,
+            })
+            .from(documents)
+            .where(and(eq(documents.userId, userId), isNotNull(accessSql(userId))))
+            .orderBy(desc(documents.updatedAt), desc(documents.id))
+            .pipe(Effect.orDie);
+          return rows.map(({ conversationTitle, ...row }) => ({
+            ...toDocument(row),
+            conversationTitle,
+          }));
+        }),
         loadState: Effect.fn("DocumentRepo.loadState")(function* (userId, documentId) {
           // The share lock holds off a compaction between the two reads, which
           // would hand back a snapshot newer than the steps read after it.
@@ -426,6 +448,13 @@ export class DocumentRepo extends Context.Service<
         }),
         remove: Effect.fn("DocumentRepo.remove")(function* (tx, documentId) {
           yield* tx.delete(documents).where(eq(documents.id, documentId)).pipe(Effect.orDie);
+        }),
+        keep: Effect.fn("DocumentRepo.keep")(function* (tx, documentId) {
+          yield* tx
+            .update(documents)
+            .set({ answerMessageId: null })
+            .where(eq(documents.id, documentId))
+            .pipe(Effect.orDie);
         }),
         moveToProject: Effect.fn("DocumentRepo.moveToProject")(
           function* (tx, documentId, projectId) {

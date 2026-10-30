@@ -14,6 +14,7 @@ import {
   DocumentIdInput,
   DocumentImageInput,
   DocumentVersionInput,
+  MoveDocumentInput,
   ProjectDocumentsInput,
   PushDocumentInput,
   RenameDocumentInput,
@@ -145,7 +146,41 @@ export const addDocumentImage = createServerFn({ method: "POST" })
       Effect.flatMap(DocumentService, (service) => service.addImage(context.session.user.id, data)),
     ),
   );
-export const deleteProjectDocument = createServerFn({ method: "POST" })
+/** The person's own documents, for their library. */
+export const listDocumentLibrary = createServerFn({ method: "GET" })
+  .middleware([requireSession])
+  .handler(({ context }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) => service.library(context.session.user.id)),
+    ),
+  );
+/** Unties a person's document from the answer that wrote it. */
+export const keepDocument = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(DocumentIdInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) =>
+        service.keep(context.session.user.id, data.documentId),
+      ),
+    ),
+  );
+export const moveDocumentToProject = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(MoveDocumentInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) =>
+        service.moveToProject(
+          context.session.user.id,
+          data.documentId,
+          data.projectId,
+          () => Effect.void,
+        ),
+      ),
+    ),
+  );
+export const deleteDocument = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(Schema.toStandardSchemaV1(DocumentIdInput))
   .handler(({ context, data }) =>

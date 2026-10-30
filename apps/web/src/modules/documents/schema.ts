@@ -36,6 +36,7 @@ export const CreateProjectDocumentInput = Schema.Struct({
   projectId: EntityId,
   title: DocumentTitle,
 });
+export const MoveDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
 export const RenameDocumentInput = Schema.Struct({
   documentId: EntityId,
   title: DocumentTitle,
@@ -195,6 +196,11 @@ export interface EditableDocument {
   canEdit: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A row of a person's library: their own document, with the chat it was made in. */
+export interface LibraryDocument extends EditableDocument {
+  conversationTitle: string | null;
 }
 
 /** What one model edit did: the blocks it wrote, or why it changed nothing. */

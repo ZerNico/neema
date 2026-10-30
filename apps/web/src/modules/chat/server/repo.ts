@@ -229,7 +229,12 @@ export interface ConversationDefaults {
   /** Schedule drafts the conversation owns, discovered the same way. */
   readonly scheduleDrafts?: ReadonlyArray<DraftSummary>;
   /** Mutable chat documents stay out of history; the loader carries summaries only. */
-  readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
+  readonly documents?: ReadonlyArray<{
+    id: string;
+    title: string;
+    messageId: string | null;
+    kept: boolean;
+  }>;
   /** Unpublished working files kept for later answers, named so a rewind can say it removes them. */
   readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
   /** Set where defaults were read from a stored chat, so an attempt can move its image lock. */
@@ -950,6 +955,8 @@ export class ChatRepo extends Context.Service<
       messageId: string;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
+      /** The person chose to keep the documents those answers wrote. */
+      keepDocuments?: boolean | undefined;
       /**
        * Compaction boundaries this rewind invalidates. Deleted messages take
        * their checkpoints with them via cascade, but a retried assistant and

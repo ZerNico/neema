@@ -28,10 +28,10 @@ export const SyncEvent = Schema.Union([
     scheduleId: Schema.String,
     runId: Schema.String,
   }),
-  // Exactly one owner: the chat, or the project whose members all hear of it.
+  // A project's reaches its members; a person's only them, with no chat
+  // named, since any number of their chats may show it.
   Schema.Struct({
     type: Schema.Literal("document.changed"),
-    conversationId: Schema.optionalKey(Schema.String),
     projectId: Schema.optionalKey(Schema.String),
     documentId: Schema.String,
     /** Only its text changed: nothing listed about it, so a chat's detail stands. */

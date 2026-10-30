@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
 import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
+import { DocumentLifecycleItems } from "./document-lifecycle.tsx";
 import { RenameDocumentDialog } from "./rename-document-dialog.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
@@ -136,6 +137,12 @@ export function DocumentPanelActions({
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               {m.documents_export_word()}
             </DropdownMenuItem>
+            {document?.canEdit ? (
+              <>
+                <DropdownMenuSeparator />
+                <DocumentLifecycleItems document={document} />
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
         {document?.canEdit ? (

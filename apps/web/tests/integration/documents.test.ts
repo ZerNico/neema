@@ -875,7 +875,7 @@ describe("ownership, limits and sync", () => {
     expect(changedEvents(owner)).toEqual([
       {
         userId: owner,
-        event: { type: "document.changed", conversationId, documentId: created.id },
+        event: { type: "document.changed", documentId: created.id },
       },
     ]);
     await edit(owner, created, { old: "nothing", new: "x" });
@@ -887,7 +887,7 @@ describe("ownership, limits and sync", () => {
     await vi.waitFor(() => expect(changedEvents(owner)).toHaveLength(2), { timeout: 5_000 });
     expect(changedEvents(owner)[1]).toEqual({
       userId: owner,
-      event: { type: "document.changed", conversationId, documentId: created.id, textOnly: true },
+      event: { type: "document.changed", documentId: created.id, textOnly: true },
     });
     publishingFails = true;
     const second = await create(owner, conversationId);
@@ -975,6 +975,60 @@ describe("ownership, limits and sync", () => {
       ),
     );
     expect(await get(owner, anchored)).toBeNull();
+  });
+
+  it("keeps a document past its answer, lists it in its owner's library, and lets only them delete it", async () => {
+    const owner = await createUser();
+    const stranger = await createUser();
+    const conversationId = await createConversation(owner);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(conversations)
+          .set({ title: "Planning" })
+          .where(eq(conversations.id, conversationId)),
+      ),
+    );
+    const fence = await generation(owner, conversationId);
+    const anchored = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        answerMessageId: fence.messageId,
+        title: "Anchored",
+        content: CHECKLIST,
+      }),
+    ).then((r) => r.document);
+    await expect(service((s) => s.keep(stranger, anchored.id))).rejects.toMatchObject({
+      _tag: "DocumentNotAvailable",
+    });
+    const before = changedEvents(owner).length;
+    expect(await service((s) => s.keep(owner, anchored.id))).toMatchObject({
+      id: anchored.id,
+      answerMessageId: null,
+    });
+    // Kept, it is named in every chat showing it and the library.
+    expect(changedEvents(owner).slice(before)).toEqual([
+      { userId: owner, event: { type: "document.changed", documentId: anchored.id } },
+    ]);
+    // Keeping again changes nothing and says nothing.
+    await service((s) => s.keep(owner, anchored.id));
+    expect(changedEvents(owner)).toHaveLength(before + 1);
+
+    await run(
+      Effect.flatMap(Db, (db) => db.delete(messages).where(eq(messages.id, fence.messageId))),
+    );
+    expect(await get(owner, anchored)).toMatchObject({ id: anchored.id, conversationId });
+    expect(await service((s) => s.library(owner))).toEqual([
+      expect.objectContaining({ id: anchored.id, conversationTitle: "Planning" }),
+    ]);
+    expect(await service((s) => s.library(stranger))).toEqual([]);
+
+    await expect(service((s) => s.remove(stranger, anchored.id))).rejects.toMatchObject({
+      _tag: "DocumentNotAvailable",
+    });
+    await service((s) => s.remove(owner, anchored.id));
+    expect(await get(owner, anchored)).toBeNull();
+    expect(await service((s) => s.library(owner))).toEqual([]);
   });
 });
 

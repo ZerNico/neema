@@ -30,6 +30,7 @@ import {
   QuestionUnavailable,
 } from "../../errors.ts";
 import { lockAccount } from "~/modules/auth/server/account-eligibility.ts";
+import { linkReferencedDocuments } from "~/modules/documents/server/referenced-documents.ts";
 import { readDefaults, readConfig, writeConfig } from "./generation-config.ts";
 import { queueOrder, readQueueGate } from "./queue.ts";
 import { freshLease, joinChunks } from "./generation-writes.ts";
@@ -280,6 +281,12 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               .returning()
               .pipe(Effect.orDie);
             yield* writeConfig(tx, assistantRows[0]!.id, config);
+            yield* linkReferencedDocuments(tx, {
+              userId: input.userId,
+              conversationId: conversation.id,
+              messageId: assistantRows[0]!.id,
+              content: userMessage.content,
+            });
             if (input.scheduleRunId)
               yield* tx
                 .update(scheduleRuns)
@@ -402,6 +409,12 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               .returning()
               .pipe(Effect.orDie);
             yield* writeConfig(tx, assistant!.id, config);
+            yield* linkReferencedDocuments(tx, {
+              userId: input.userId,
+              conversationId: conversation.id,
+              messageId: assistant!.id,
+              content: entry.content,
+            });
             yield* tx
               .update(conversations)
               .set({
@@ -545,6 +558,22 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 )
                 .pipe(Effect.orDie);
             }
+            // Before the deletes, so neither they nor the retry below take them.
+            if (edited)
+              yield* linkReferencedDocuments(tx, {
+                userId: input.userId,
+                conversationId: target.conversationId,
+                messageId: input.messageId,
+                content: edited.content,
+              });
+            if (input.keepDocuments)
+              yield* tx
+                .update(documents)
+                .set({ answerMessageId: null })
+                .where(
+                  inArray(documents.answerMessageId, [input.messageId, ...input.deleteMessageIds]),
+                )
+                .pipe(Effect.orDie);
             if (input.deleteMessageIds.length > 0) {
               orphanedKeys.push(
                 ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),

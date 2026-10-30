@@ -26,7 +26,7 @@ import { projectDocumentsQuery } from "~/modules/documents/client/document-queri
 import {
   createProjectDocument,
   createProjectDocumentFromWord,
-  deleteProjectDocument,
+  deleteDocument,
 } from "~/modules/documents/server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dialog.tsx";
@@ -404,7 +404,7 @@ function ProjectDocumentRow({
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const remove = useMutation({
-    mutationFn: () => deleteProjectDocument({ data: { documentId: document.id } }),
+    mutationFn: () => deleteDocument({ data: { documentId: document.id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
     onError: (error) => toastError(m.projects_documents_delete_failed(), error),
   });

@@ -1,5 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getDocument, listProjectDocuments } from "../server/document-functions.ts";
+import {
+  getDocument,
+  listDocumentLibrary,
+  listProjectDocuments,
+} from "../server/document-functions.ts";
 
 export const documentQuery = (documentId: string) =>
   queryOptions({
@@ -17,3 +21,10 @@ export const projectDocumentsQuery = (projectId: string) =>
     queryFn: () => listProjectDocuments({ data: { projectId } }),
     staleTime: 30_000,
   });
+
+/** Under the documents key, so any change to a person's document refreshes it. */
+export const documentLibraryQuery = queryOptions({
+  queryKey: ["documents", "library"],
+  queryFn: () => listDocumentLibrary(),
+  staleTime: 30_000,
+});

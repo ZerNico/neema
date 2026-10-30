@@ -282,6 +282,8 @@ export const RetryMessageInput = Schema.Struct({
   imageModelId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   timeZone: TimeZone,
   openDocument: OpenDocumentField,
+  /** Keeps the documents the rewound answers wrote instead of deleting them. */
+  keepDocuments: Schema.optionalKey(Schema.Literal(true)),
 });
 
 /** Continues the last answer; the same fields as a retry. */
@@ -298,6 +300,7 @@ export const EditMessageInput = Schema.Union([
     conversationId: Schema.String,
     messageId: Schema.String,
     ...generationFields,
+    keepDocuments: Schema.optionalKey(Schema.Literal(true)),
     questionResponse: Schema.optionalKey(Schema.Never),
   }),
   Schema.Struct({
@@ -310,6 +313,7 @@ export const EditMessageInput = Schema.Union([
     openDocument: OpenDocumentField,
     attachmentIds: AttachmentIds,
     questionResponse: QuestionResponse,
+    keepDocuments: Schema.optionalKey(Schema.Literal(true)),
     content: Schema.optionalKey(Schema.Never),
   }),
 ]);

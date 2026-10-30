@@ -3338,6 +3338,106 @@ describe("conversation documents", () => {
     }
   });
 
+  it("keeps an answer's document through a retry that asks to keep it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [created] = await documentsOf(seed);
+      expect(created!.answerMessageId).toBe(sent.assistantMessageId);
+      authoringScript = () => reply();
+      await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: sent.assistantMessageId,
+            keepDocuments: true,
+          }),
+        ),
+      );
+      await settle(sent.assistantMessageId);
+      expect(await documentsOf(seed)).toEqual([
+        expect.objectContaining({ id: created!.id, answerMessageId: null, content: CHECKLIST }),
+      ]);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      // Still placed under the answer, and no longer named as a rewind's loss.
+      expect(detail.documents).toEqual([
+        {
+          id: created!.id,
+          title: "Release checklist",
+          messageId: sent.assistantMessageId,
+          kept: true,
+        },
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("adds a document the message names to the chat, under its answer, and keeps it", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [created] = await documentsOf(seed);
+      authoringScript = () => reply();
+      const other = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id: uuidv7() },
+            modelId: textModelId,
+            content: `[Release checklist](/documents/${created!.id}) Shorten it. [Not mine](/documents/${uuidv7()})`,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await settle(other.assistantMessageId);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, other.conversationId),
+      );
+      expect(detail.documents).toEqual([
+        {
+          id: created!.id,
+          title: "Release checklist",
+          messageId: other.assistantMessageId,
+          kept: true,
+        },
+      ]);
+      // Still in the chat it was made in, and no longer tied to that answer.
+      expect(await documentsOf(seed)).toEqual([
+        expect.objectContaining({ id: created!.id, answerMessageId: null }),
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("interrupts a stale generation's write once a retry has claimed the message", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;

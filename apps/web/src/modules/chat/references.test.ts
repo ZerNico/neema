@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentAuthoringRequest } from "~/modules/agents/authoring.ts";
 import { scheduleAuthoringRequest } from "~/modules/schedules/authoring.ts";
-import { extractReferences, restoreReferences } from "./references.ts";
+import { extractReferences, referenceLabel, restoreReferences } from "./references.ts";
 
 describe("message references", () => {
   it("shows an edit request as plain words and sends it unchanged", () => {
@@ -22,6 +22,17 @@ describe("message references", () => {
     expect(restoreReferences("Make it shorter", [reference!])).toBe(
       "[this agent](/agents/a1) Make it shorter",
     );
+  });
+
+  it("reads a named document back, with words a link can carry", () => {
+    const label = referenceLabel("Plan [draft]\nv2");
+    expect(label).toBe("Plan draft v2");
+    const content = restoreReferences("Summarise it", [{ kind: "document", id: "d1", label }]);
+    expect(content).toBe("[Plan draft v2](/documents/d1) Summarise it");
+    expect(extractReferences(content).references).toEqual([
+      { kind: "document", id: "d1", label: "Plan draft v2" },
+    ]);
+    expect(referenceLabel("[]")).toBe("…");
   });
 
   it("leaves ordinary links and other paths alone", () => {

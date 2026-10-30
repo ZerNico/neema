@@ -2,10 +2,12 @@ import { m } from "~/paraglide/messages.js";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
 import { useTagSync } from "./use-tag-sync.ts";
 import { SkillPicker } from "~/modules/skills/ui/skill-picker.tsx";
+import { DocumentPicker } from "~/modules/documents/ui/document-picker.tsx";
 import {
   AiBrain01Icon,
   ArrowUp02Icon,
   Attachment01Icon,
+  File01Icon,
   Book02Icon,
   FolderAddIcon,
   GlobalSearchIcon,
@@ -81,7 +83,7 @@ import type {
 } from "~/modules/integrations/client/use-chat-integrations.ts";
 import { AddIntegrationDialog } from "~/modules/integrations/ui/add-integration-dialog.tsx";
 import { IntegrationLogo } from "~/modules/integrations/ui/integration-logo.tsx";
-import type { MessageReference } from "../references.ts";
+import { referenceLabel, type MessageReference } from "../references.ts";
 import type { ComposerFolders } from "~/modules/computer/client/use-composer-folders.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 
@@ -195,11 +197,13 @@ export const ChatInput = forwardRef<
     integrations?: ComposerIntegrations | undefined;
     /** The chat's folders on this machine, in the desktop app only; absent hides the entry. */
     folders?: ComposerFolders | undefined;
-    /** The agent or schedule this message is about, shown as chips. */
+    /** The agent, schedule or documents this message is about, shown as chips. */
     references?:
       | {
           items: readonly MessageReference[];
           onRemove: (reference: MessageReference) => void;
+          /** Offers the person's documents in the "+" menu. */
+          onAdd?: ((reference: MessageReference) => void) | undefined;
         }
       | undefined;
     placeholder?: string;
@@ -272,6 +276,7 @@ export const ChatInput = forwardRef<
   const canChooseAgent = !!capabilities?.agentsUse;
   const canChooseKnowledge = !!capabilities?.knowledgeUse;
   const canChooseSkills = !!capabilities?.skillsUse;
+  const addDocument = capabilities?.documents ? references?.onAdd : undefined;
   const canResearch = !!capabilities?.deepResearch && !!capabilities.webSearch;
   const modeDisabled = controlsDisabled || !!target?.queued || !onResearchEnabledChange;
   const reduced = useAppReducedMotion();
@@ -382,13 +387,14 @@ export const ChatInput = forwardRef<
   // each other is what a submenu would have avoided and this avoids too.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
-  const [pendingPicker, setPendingPicker] = useState<ContextPickerKind | "skills" | null>(null);
-  const [picker, setPicker] = useState<ContextPickerKind | "skills" | null>(null);
+  type Picker = ContextPickerKind | "skills" | "documents";
+  const [pendingPicker, setPendingPicker] = useState<Picker | null>(null);
+  const [picker, setPicker] = useState<Picker | null>(null);
   // The popup opens on the side the menu did: on an empty new chat both drop
   // below the composer, and a picker above it would send the pointer across it.
   const menuPopup = useRef<HTMLDivElement>(null);
   const [pickerSide, setPickerSide] = useState<"top" | "bottom">("top");
-  const choosePicker = (kind: ContextPickerKind | "skills") => {
+  const choosePicker = (kind: Picker) => {
     setPickerSide(menuPopup.current?.dataset.side === "bottom" ? "bottom" : "top");
     setPendingPicker(kind);
   };
@@ -695,6 +701,15 @@ export const ChatInput = forwardRef<
                   {m.chat_composer_attach_files()}
                 </DropdownMenuItem>
               ) : null}
+              {addDocument ? (
+                <DropdownMenuItem
+                  disabled={controlsDisabled}
+                  onClick={() => choosePicker("documents")}
+                >
+                  <HugeiconsIcon icon={File01Icon} strokeWidth={2} />
+                  {m.chat_composer_add_document()}
+                </DropdownMenuItem>
+              ) : null}
               {folders ? (
                 <DropdownMenuItem
                   onClick={folders.onAdd}
@@ -807,6 +822,21 @@ export const ChatInput = forwardRef<
               onOpenChange={(open) => setPicker(open ? "skills" : null)}
               anchor={menuAnchor}
               side={pickerSide}
+            />
+          ) : null}
+          {addDocument ? (
+            <DocumentPicker
+              open={picker === "documents"}
+              onOpenChange={(open) => setPicker(open ? "documents" : null)}
+              anchor={menuAnchor}
+              side={pickerSide}
+              onPick={(document) =>
+                addDocument({
+                  kind: "document",
+                  id: document.id,
+                  label: referenceLabel(document.title),
+                })
+              }
             />
           ) : null}
           {context && canChooseAgent && !context.agentLocked ? (

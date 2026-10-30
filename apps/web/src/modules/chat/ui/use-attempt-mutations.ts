@@ -201,7 +201,7 @@ export function useAttemptMutations({
     // `modelId` omitted regenerates with the model that answered before; an
     // explicit choice also selects the composer model once the retry succeeds.
     // The persisted conversation default and earlier messages keep theirs.
-    mutationFn: async (input: { messageId: string; modelId?: string }) =>
+    mutationFn: async (input: { messageId: string; modelId?: string; keepDocuments?: true }) =>
       retryMessage({
         data: {
           conversationId,
@@ -287,6 +287,7 @@ export function useAttemptMutations({
         reasoningEffort?: ReasoningEffort | null;
         attachmentIds: ReadonlyArray<string>;
         releaseUploads?: () => void;
+        keepDocuments?: true;
       } & (
         | {
             content: string;
@@ -309,6 +310,7 @@ export function useAttemptMutations({
         ...(await desktopAttemptFields()),
         timeZone: browserTimeZone(),
         ...documentFocus(),
+        ...(input.keepDocuments ? { keepDocuments: true as const } : {}),
       };
       return editMessage({
         data: input.questionResponse
@@ -404,14 +406,15 @@ export function useAttemptMutations({
   const documentLoss = useCallback(
     (fromMessageId: string, inclusive: boolean) => {
       const index = data.messages.findIndex((message) => message.id === fromMessageId);
-      if (index < 0) return "";
+      if (index < 0) return { text: "", documents: false };
       const removed = new Set(
         data.messages.slice(inclusive ? index : index + 1).map((message) => message.id),
       );
       const lost = <T extends { messageId: string | null }>(items: ReadonlyArray<T> | undefined) =>
         (items ?? []).filter((item) => item.messageId && removed.has(item.messageId));
-      return lossSentence([
-        ...lost(data.documents).map((document) => ({
+      const documents = lost(data.documents?.filter((document) => !document.kept));
+      const text = lossSentence([
+        ...documents.map((document) => ({
           kind: "document" as const,
           name: document.title,
         })),
@@ -428,6 +431,7 @@ export function useAttemptMutations({
           name: file.name,
         })),
       ]);
+      return { text, documents: documents.length > 0 };
     },
     [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts, data.workingFiles],
   );
@@ -448,20 +452,23 @@ export function useAttemptMutations({
   const retry = useCallback(
     async (messageId: string, pickedModelId?: string) => {
       const later = messageId !== lastAssistantId;
-      const losing = documentLoss(messageId, true) + steerLoss(messageId);
-      if (
-        (later || losing) &&
-        !(await confirm({
-          title: m.chat_retry_confirm_title(),
-          description: `${later ? m.chat_retry_confirm_later() : ""}${losing}`.trim(),
-          confirmLabel: m.chat_retry_confirm(),
-        }))
-      ) {
-        return;
-      }
-      mutateRetry(
-        pickedModelId === undefined ? { messageId } : { messageId, modelId: pickedModelId },
-      );
+      const loss = documentLoss(messageId, true);
+      const losing = loss.text + steerLoss(messageId);
+      const answer =
+        !later && !losing
+          ? true
+          : await confirm({
+              title: m.chat_retry_confirm_title(),
+              description: `${later ? m.chat_retry_confirm_later() : ""}${losing}`.trim(),
+              confirmLabel: m.chat_retry_confirm(),
+              alternativeLabel: loss.documents ? m.chat_retry_keep() : undefined,
+            });
+      if (!answer) return;
+      mutateRetry({
+        messageId,
+        ...(pickedModelId === undefined ? {} : { modelId: pickedModelId }),
+        ...(answer === "alternative" ? { keepDocuments: true } : {}),
+      });
     },
     [confirm, documentLoss, lastAssistantId, mutateRetry, steerLoss],
   );
@@ -475,15 +482,16 @@ export function useAttemptMutations({
       const responseIndex = after.findIndex((message) => message.role === "assistant");
       const removesLaterTurns =
         responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
-      const losing = documentLoss(messageId, false) + steerLoss(after[responseIndex]?.id);
-      return (
-        (!removesLaterTurns && !losing) ||
-        (await confirm({
-          title: m.chat_edit_confirm_title(),
-          description: `${removesLaterTurns ? m.chat_edit_confirm_later() : ""}${losing}`.trim(),
-          confirmLabel: m.chat_edit_confirm(),
-        }))
-      );
+      const loss = documentLoss(messageId, false);
+      const losing = loss.text + steerLoss(after[responseIndex]?.id);
+      if (!removesLaterTurns && !losing) return true;
+      // "alternative" keeps the documents the rewound answers wrote.
+      return confirm({
+        title: m.chat_edit_confirm_title(),
+        description: `${removesLaterTurns ? m.chat_edit_confirm_later() : ""}${losing}`.trim(),
+        confirmLabel: m.chat_edit_confirm(),
+        alternativeLabel: loss.documents ? m.chat_edit_keep() : undefined,
+      });
     },
     [confirm, documentLoss, steerLoss, turnMessages],
   );
@@ -499,9 +507,11 @@ export function useAttemptMutations({
         generating
       )
         return false;
-      if (!(await confirmEdit(activeEditingMessage.id))) return false;
+      const answer = await confirmEdit(activeEditingMessage.id);
+      if (!answer) return false;
       await mutateQuestionEdit({
         messageId: activeEditingMessage.id,
+        ...(answer === "alternative" ? { keepDocuments: true } : {}),
         questionResponse,
         modelId: effectiveModelId,
         reasoningEffort,
@@ -529,7 +539,8 @@ export function useAttemptMutations({
       if (!effectiveModelId || editPending) return;
       if (!content && editUploadCount === 0) return;
 
-      if (!(await confirmEdit(activeEditingMessage.id))) return;
+      const answer = await confirmEdit(activeEditingMessage.id);
+      if (!answer) return;
 
       // Queues behind any upload still in flight, then sends the full ordered
       // replacement set. Omitted ids are released server-side.
@@ -537,6 +548,7 @@ export function useAttemptMutations({
         if (!content && attachmentIds.length === 0) return;
         mutateEdit({
           messageId: activeEditingMessage.id,
+          ...(answer === "alternative" ? { keepDocuments: true } : {}),
           content,
           modelId: effectiveModelId,
           searchEnabled,

@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   conversationAgents,
@@ -101,6 +101,8 @@ export const readDefaults = Effect.fn("chat.readDefaults")(function* (
       // The answer whose card shows it here, so the transcript can place a
       // card whose creating tool row a rewind took with it. Never any content.
       messageId: conversationDocuments.messageId,
+      // Outlives a retry or edit of that answer, so a rewind does not name it as lost.
+      kept: sql<boolean>`${documents.answerMessageId} is null`,
     })
     .from(conversationDocuments)
     .innerJoin(documents, eq(documents.id, conversationDocuments.documentId))

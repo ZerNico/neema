@@ -59,6 +59,7 @@ import {
   type DocumentFrame,
   type DocumentPresence,
   type EditableDocument,
+  type LibraryDocument,
   type PushDocumentResult,
 } from "../schema.ts";
 import { type Localized, localized } from "~/i18n/localized.ts";
@@ -141,7 +142,6 @@ interface Entry {
   readonly feeds: Map<string, number>;
   comments: DocumentComment[];
   readonly frames: PubSub.PubSub<DocumentFrame>;
-  readonly conversationId: string | null;
   readonly projectId: string | null;
   subscribers: number;
   touched: number;
@@ -343,8 +343,14 @@ export class DocumentService extends Context.Service<
   {
     get(userId: string, documentId: string): Effect.Effect<EditableDocument | null>;
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
-    /** Deletes a project's document; a chat's goes only with its answer. */
+    library(userId: string): Effect.Effect<LibraryDocument[]>;
+    /** By its owner, or a project's by anyone who may edit it. */
     remove(userId: string, documentId: string): Effect.Effect<void, DocumentError>;
+    /**
+     * Unties a person's document from the answer that wrote it, so retrying
+     * or deleting that answer, or its chat, leaves it be.
+     */
+    keep(userId: string, documentId: string): Effect.Effect<EditableDocument, DocumentError>;
     /** A new title, by anyone who may edit the document. */
     rename(
       userId: string,
@@ -422,8 +428,9 @@ export class DocumentService extends Context.Service<
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<EditableDocument | null, DocumentError | E, R>;
     /**
-     * Hands a streamed creation's document to the project, once the call that
-     * made it turns out to want it there: it streams in private until then.
+     * Hands a person's document to a project they may edit, keeping it. The
+     * model does so once a streamed creation turns out to want the project:
+     * it streams in private until then.
      */
     moveToProject<E = never, R = never>(
       userId: string,
@@ -583,7 +590,6 @@ export class DocumentService extends Context.Service<
             feeds: new Map(),
             comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
-            conversationId: state.document.conversationId,
             projectId: state.document.projectId,
             subscribers: 0,
             touched: now,
@@ -605,11 +611,7 @@ export class DocumentService extends Context.Service<
                 entry.changedPending = false;
                 return documentChanged(
                   userId,
-                  {
-                    id: documentId,
-                    conversationId: entry.conversationId,
-                    projectId: entry.projectId,
-                  },
+                  { id: documentId, projectId: entry.projectId },
                   true,
                 );
               }),
@@ -1045,6 +1047,10 @@ export class DocumentService extends Context.Service<
             Effect.gen(function* () {
               yield* guard(tx);
               const before = yield* documents.lock(tx, userId, documentId);
+              if (before.projectId)
+                return yield* new DocumentRejected({
+                  reason: localized(m.documents_error_already_in_project),
+                });
               yield* lockProjectForEditing(tx, userId, projectId);
               yield* documents.moveToProject(tx, documentId, projectId);
               return { before, after: (yield* documents.get(userId, documentId, tx))! };
@@ -1586,15 +1592,29 @@ export class DocumentService extends Context.Service<
         list: Effect.fn(function* (userId, owner) {
           return yield* documents.list(userId, owner);
         }),
+        library: Effect.fn(function* (userId) {
+          return yield* documents.library(userId);
+        }),
+        keep: Effect.fn("DocumentService.keep")(function* (userId, documentId) {
+          const { document, changed } = yield* exclusive(documentId)(
+            transaction((tx) =>
+              Effect.gen(function* () {
+                const locked = yield* documents.lock(tx, userId, documentId);
+                if (!locked.answerMessageId) return { document: locked, changed: false };
+                yield* documents.keep(tx, documentId);
+                return { document: { ...locked, answerMessageId: null }, changed: true };
+              }),
+            ),
+          );
+          if (changed) yield* documentChanged(userId, document);
+          return document;
+        }),
         remove: Effect.fn("DocumentService.remove")(function* (userId, documentId) {
           const removed = yield* exclusive(documentId)(
             transaction((tx) =>
               Effect.gen(function* () {
+                // Editing a person's document is owning it, so this is its owner.
                 const document = yield* documents.lock(tx, userId, documentId);
-                if (!document.projectId)
-                  return yield* new DocumentRejected({
-                    reason: localized(m.documents_error_chat_document_delete),
-                  });
                 yield* documents.remove(tx, documentId);
                 return document;
               }),

@@ -2,6 +2,7 @@ import {
   Book02Icon,
   BubbleChatIcon,
   Calendar03Icon,
+  File01Icon,
   Folder01Icon,
   FolderLibraryIcon,
   Robot01Icon,
@@ -18,6 +19,12 @@ const DESTINATIONS = {
     label: m.navigation_projects,
     icon: Folder01Icon,
     gate: "projectsUse",
+  },
+  documents: {
+    to: "/documents",
+    label: m.navigation_documents,
+    icon: File01Icon,
+    gate: "documents",
   },
   agents: { to: "/agents", label: m.navigation_agents, icon: Robot01Icon, gate: "agentsUse" },
   knowledge: {

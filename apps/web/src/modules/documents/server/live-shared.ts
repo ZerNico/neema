@@ -39,14 +39,10 @@ export function documentLocks() {
       );
 }
 
-/** Tells lists and cards a document changed: a chat's concerns its owner, a project's every member. */
+/** Tells lists and cards a document changed: a person's concerns its owner, a project's every member. */
 export const notifyDocumentChanged =
   (db: Db["Service"], bus: SyncBus["Service"]) =>
-  (
-    userId: string,
-    document: Pick<EditableDocument, "id" | "conversationId" | "projectId">,
-    textOnly = false,
-  ) =>
+  (userId: string, document: Pick<EditableDocument, "id" | "projectId">, textOnly = false) =>
     Effect.gen(function* () {
       const audience = document.projectId
         ? yield* projectAudience(db, document.projectId)
@@ -56,9 +52,7 @@ export const notifyDocumentChanged =
         (memberId) =>
           bus.publish(memberId, {
             type: "document.changed",
-            ...(document.conversationId
-              ? { conversationId: document.conversationId }
-              : { projectId: document.projectId! }),
+            ...(document.projectId ? { projectId: document.projectId } : {}),
             documentId: document.id,
             ...(textOnly ? { textOnly: true as const } : {}),
           }),

@@ -1,3 +1,4 @@
+import { linkReferencedDocuments } from "~/modules/documents/server/referenced-documents.ts";
 import { GenerationFence, lockGeneration } from "../generation-fence.ts";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Effect } from "effect";
@@ -342,6 +343,12 @@ export const queueMethods = ({ db, attachments }: RepoContext) =>
               yield* attachments.transferQueueEntry(tx, {
                 queueEntryId: entry.id,
                 messageId: message!.id,
+              });
+              yield* linkReferencedDocuments(tx, {
+                userId: fence.userId,
+                conversationId: input.conversationId,
+                messageId: input.messageId,
+                content: entry.content,
               });
               steered.push({
                 ...message!,

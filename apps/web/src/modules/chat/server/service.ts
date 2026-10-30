@@ -224,6 +224,7 @@ export class ChatService extends Context.Service<
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
       openDocument?: OpenDocument | undefined;
+      keepDocuments?: boolean | undefined;
     }): Effect.Effect<
       { assistantMessageId: string; generationId: string },
       | ConversationNotFound
@@ -295,6 +296,7 @@ export class ChatService extends Context.Service<
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
+        keepDocuments?: boolean | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** The composer's image model; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
@@ -741,6 +743,7 @@ function makeChatService() {
       imageModelId?: string | null | undefined;
       timeZone?: string | undefined;
       openDocument?: OpenDocument | undefined;
+      keepDocuments?: boolean | undefined;
       deleteMessageIds: ReadonlyArray<string>;
       invalidateCheckpointThroughMessageIds: ReadonlyArray<string>;
       edit?: EditChoices & {
@@ -758,6 +761,7 @@ function makeChatService() {
         messageId: input.assistantMessageId,
         modelId: input.modelId,
         deleteMessageIds: input.deleteMessageIds,
+        keepDocuments: input.keepDocuments,
         invalidateCheckpointThroughMessageIds: input.invalidateCheckpointThroughMessageIds,
         resolve: resolver({
           userId: input.userId,
@@ -826,6 +830,7 @@ function makeChatService() {
       deviceSessionId?: string | undefined;
       timeZone?: string | undefined;
       openDocument?: OpenDocument | undefined;
+      keepDocuments?: boolean | undefined;
     }) {
       yield* repo.research?.reap() ?? Effect.void;
       // ownership check
@@ -902,6 +907,7 @@ function makeChatService() {
         imageModelId: input.imageModelId,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
+        keepDocuments: input.keepDocuments,
         deleteMessageIds: after.map((row) => row.id),
         // From the retried answer onward: a summary that ends at this message
         // describes the response about to be thrown away. Rows after it are
@@ -1135,6 +1141,7 @@ function makeChatService() {
         deviceSessionId?: string | undefined;
         timeZone?: string | undefined;
         openDocument?: OpenDocument | undefined;
+        keepDocuments?: boolean | undefined;
         attachmentIds: ReadonlyArray<string>;
         /** The composer's image model; absent keeps the chat's own. */
         imageModelId?: string | null | undefined;
@@ -1201,6 +1208,7 @@ function makeChatService() {
         imageModelId: input.imageModelId,
         timeZone: input.timeZone,
         openDocument: input.openDocument,
+        keepDocuments: input.keepDocuments,
         deleteMessageIds: all.slice(assistantIndex + 1).map((candidate) => candidate.id),
         // From the edited user message onward, its text changes while the
         // row survives, so any summary covering it is stale.
