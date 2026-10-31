@@ -25,7 +25,7 @@ import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
 import {
   createProjectDocument,
-  createProjectDocumentFromWord,
+  createProjectDocumentFromFile,
   deleteDocument,
 } from "~/modules/documents/server/document-functions.ts";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
@@ -485,7 +485,7 @@ function NewDocumentDialog({
   const id = useId();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
-  // A text document may start from a Word file instead of blank.
+  // A text document may start from a Word, Markdown or text file instead of blank.
   const [file, setFile] = useState<File | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const reset = () => {
@@ -499,7 +499,7 @@ function NewDocumentDialog({
         data.set("file", file);
         data.set("projectId", projectId);
         data.set("title", title.trim());
-        const imported = await createProjectDocumentFromWord({ data });
+        const imported = await createProjectDocumentFromFile({ data });
         if (imported.dropped.length)
           toast(m.projects_documents_left_out({ parts: imported.dropped.join(", ") }));
         return imported.document;
@@ -536,13 +536,13 @@ function NewDocumentDialog({
         >
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={`${id}-file`}>{m.projects_documents_from_word()}</FieldLabel>
+              <FieldLabel htmlFor={`${id}-file`}>{m.projects_documents_from_file()}</FieldLabel>
               <div className="flex items-center gap-2">
                 <Input
                   ref={picker}
                   id={`${id}-file`}
                   type="file"
-                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".docx,.md,.markdown,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
                   disabled={save.isPending}
                   onChange={(event) => {
                     const picked = event.target.files?.[0] ?? null;
@@ -566,7 +566,7 @@ function NewDocumentDialog({
                   </Button>
                 ) : null}
               </div>
-              <FieldDescription>{m.projects_documents_optional()}</FieldDescription>
+              <FieldDescription>{m.projects_documents_from_file_description()}</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor={`${id}-title`}>{m.projects_documents_title_label()}</FieldLabel>

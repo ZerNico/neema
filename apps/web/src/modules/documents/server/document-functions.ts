@@ -23,7 +23,11 @@ import {
 } from "../schema.ts";
 import { DocumentService } from "./document-service.ts";
 import { createFromWord } from "./create-from-word.ts";
+import { plainTextMarkdown } from "../editor/plain-text.ts";
 import { WORD_LIMITS } from "~/modules/word/limits.ts";
+
+/** A Markdown or text upload; the document's own character cap still applies after. */
+const TEXT_UPLOAD_BYTES = 1024 * 1024;
 
 export const getDocument = createServerFn({ method: "GET" })
   .middleware([requireSession])
@@ -97,15 +101,54 @@ export const createProjectDocument = createServerFn({ method: "POST" })
  * A project document started from a Word file: multipart, since the file is
  * bytes. Answers what the file held that a document cannot, to show the person.
  */
-export const createProjectDocumentFromWord = createServerFn({ method: "POST" })
+/** How an upload starts a document, by its name: Word is imported, Markdown and text are read. */
+const uploadKind = (name: string) => {
+  const extension = name.toLowerCase().match(/\.([a-z]+)$/)?.[1];
+  if (extension === "docx") return "word";
+  if (extension === "md" || extension === "markdown") return "markdown";
+  if (extension === "txt") return "text";
+  return null;
+};
+
+/** A project document started from a Word, Markdown or text file. */
+export const createProjectDocumentFromFile = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator((data: FormData) => data)
   .handler(async ({ context, data }) => {
     const file = data.get("file");
     const projectId = data.get("projectId");
     const title = data.get("title");
-    if (!(file instanceof File) || typeof projectId !== "string" || !projectId)
-      throw refusal(400, localized(m.documents_import_expected_word_file));
+    const kind = file instanceof File ? uploadKind(file.name) : null;
+    if (!(file instanceof File) || !kind || typeof projectId !== "string" || !projectId)
+      throw refusal(400, localized(m.documents_import_expected_file));
+    const named = typeof title === "string" ? title.slice(0, DOCUMENT_LIMITS.title) : undefined;
+    if (kind !== "word") {
+      if (file.size > TEXT_UPLOAD_BYTES)
+        throw refusal(
+          413,
+          localized(m.documents_import_text_too_large, { max: TEXT_UPLOAD_BYTES / 1024 / 1024 }),
+        );
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+      } catch {
+        throw refusal(422, localized(m.documents_import_text_unreadable));
+      }
+      const document = await runServerFn(
+        Effect.flatMap(DocumentService, (service) =>
+          service.create(context.session.user.id, {
+            projectId,
+            title: (named?.trim() || file.name.replace(/\.[^.]+$/, "").trim() || file.name).slice(
+              0,
+              DOCUMENT_LIMITS.title,
+            ),
+            content: kind === "text" ? plainTextMarkdown(text) : text,
+            by: "user",
+          }),
+        ).pipe(Effect.map((result) => result.document)),
+      );
+      return { document, dropped: [] as string[] };
+    }
     if (file.size > WORD_LIMITS.compressedBytes)
       throw refusal(
         413,
@@ -119,7 +162,7 @@ export const createProjectDocumentFromWord = createServerFn({ method: "POST" })
     const created = await runServerFn(
       createFromWord(context.session.user.id, {
         owner: { projectId },
-        title: typeof title === "string" ? title.slice(0, DOCUMENT_LIMITS.title) : undefined,
+        title: named,
         by: "user",
         locale,
         file: { name: file.name, mediaType: file.type, bytes },
