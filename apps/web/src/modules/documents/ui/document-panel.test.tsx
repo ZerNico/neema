@@ -215,10 +215,12 @@ describe("document panel", () => {
     click.mockRestore();
   });
 
-  it("copies the current source and offers no rename, delete or download", async () => {
+  it("copies the current source from the menu and offers no rename, delete or download", async () => {
     await fixture();
     await openSource();
-    fireEvent.click(screen.getByRole("button", { name: "Copy document" }));
+    expect(screen.queryByRole("button", { name: "Copy as Markdown" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy as Markdown" }));
     await waitFor(() =>
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(server.content("document-1")),
     );

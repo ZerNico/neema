@@ -2388,7 +2388,7 @@
   "documents_comments_text_removed": "Text entfernt",
   "documents_comments_title": "Kommentare",
   "documents_connecting": "Verbindung zum Dokument wird hergestellt",
-  "documents_copy": "Dokument kopieren",
+  "documents_copy": "Als Markdown kopieren",
   "documents_date_label": "Datum: {date}",
   "documents_date_none": "Kein Datum",
   "documents_details_fold": "Abschnitt einklappen",
