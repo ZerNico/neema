@@ -69,6 +69,7 @@ import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import { DocumentRepo, type DocumentOwner, type ImageOwner } from "./document-repo.ts";
 import { groupVersions, type DocumentVersion } from "./versions.ts";
+import { documentImageOf, imageSources } from "./word-export.ts";
 import { placeImported, type ImportedText } from "./word-import.ts";
 import type { TreeNode } from "~/modules/word/server/document-tree.ts";
 import {
@@ -323,6 +324,33 @@ const withOutline = (parsed: Node, outline: ReadonlyArray<string>) => {
 const ownerOf = (document: Pick<EditableDocument, "projectId" | "userId">): ImageOwner =>
   document.projectId ? { projectId: document.projectId } : { userId: document.userId ?? "" };
 
+/**
+ * A copy's tree: the source's own images at the copy's address, under the
+ * upload each was stored again as. Comment marks go, their threads staying
+ * with the source.
+ */
+const copiedTree = (
+  node: TreeNode,
+  from: string,
+  to: string,
+  images: ReadonlyMap<string, string>,
+): TreeNode | null => {
+  if (node.type === "image") {
+    const own = documentImageOf(from, node.attrs?.src);
+    const copy = own && images.get(own);
+    if (own)
+      return copy ? { ...node, attrs: { ...node.attrs, src: documentImagePath(to, copy) } } : null;
+  }
+  const marks = node.marks?.filter((mark) => mark.type !== "comment");
+  return {
+    ...node,
+    ...(marks ? { marks } : {}),
+    ...(node.content
+      ? { content: node.content.flatMap((child) => copiedTree(child, from, to, images) ?? []) }
+      : {}),
+  };
+};
+
 /** A tree read from a file, as the schema builds it, every block given an ID; refused if it does not fit. */
 const importedDocument = (json: TreeNode) =>
   Effect.try({
@@ -461,6 +489,16 @@ export class DocumentService extends Context.Service<
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<EditableDocument, DocumentError | E, R>;
     /**
+     * A new document of a project the person may edit, copied from one they
+     * may read. Its images are stored again for the project; comments stay
+     * with the original.
+     */
+    copyToProject(
+      userId: string,
+      documentId: string,
+      projectId: string,
+    ): Effect.Effect<EditableDocument, DocumentError>;
+    /**
      * Deletes a chat document an unclaimed streamed creation left behind,
      * unless someone has written in it since `ifRevision`: then it is theirs.
      */
@@ -545,7 +583,8 @@ export class DocumentService extends Context.Service<
       const storage = yield* StorageQuota;
       const documents = yield* DocumentRepo;
       const attachments = yield* AttachmentRepo;
-      const files = attachmentWriter(attachments, yield* BlobStore);
+      const blobs = yield* BlobStore;
+      const files = attachmentWriter(attachments, blobs);
       const bus = yield* SyncBus;
       const scope = yield* Effect.scope;
       // One process owns every document's live state (see docs/internals/documents.md).
@@ -1087,6 +1126,82 @@ export class DocumentService extends Context.Service<
           ),
           Effect.map(({ after }) => after),
         );
+
+      const copyToProject = Effect.fn("DocumentService.copyToProject")(function* (
+        userId: string,
+        documentId: string,
+        projectId: string,
+      ) {
+        yield* requireDocuments(userId);
+        // Asked before any image is stored; the creating transaction asks again under the lock.
+        yield* transaction((tx) => lockProjectForEditing(tx, userId, projectId));
+        const { document: source, entry } = yield* exclusive(documentId)(load(userId, documentId));
+        const tree = entry.doc.toJSON() as TreeNode;
+        const images = (yield* Effect.forEach(
+          new Set(imageSources(entry.doc).flatMap((src) => documentImageOf(documentId, src) ?? [])),
+          (attachmentId) => attachments.findDocumentImage(documentId, attachmentId),
+        )).filter((image) => image !== null);
+        // Stored again as the person's own uploads, then claimed as those are.
+        // The project's owner pays for them, which `planImages` admits; only
+        // when that is the person do their own uploads stay.
+        if ((yield* documents.imageOwner(userId, { projectId })) === userId)
+          yield* storage
+            .admitFor(userId, userId, images)
+            .pipe(
+              Effect.catchTag("StorageFull", (full) =>
+                Effect.fail(new DocumentRejected({ reason: full.reason })),
+              ),
+            );
+        const uploads = new Map<string, string>();
+        for (const image of images) {
+          const bytes = yield* blobs.get(image.storageKey).pipe(Effect.orDie);
+          const upload = yield* files
+            .upload({
+              userId,
+              fileName: image.fileName,
+              declaredMediaType: image.mediaType,
+              bytes,
+              allowedKinds: ["image"],
+            })
+            .pipe(
+              Effect.catchTag("AttachmentRejected", (rejected) =>
+                Effect.fail(new DocumentRejected({ reason: rejected.reason })),
+              ),
+            );
+          uploads.set(image.id, upload.id);
+        }
+        const owner: ImageOwner = { projectId };
+        const plan = yield* planImages(userId, owner, [...uploads.values()], true);
+        const id = uuidv7();
+        const claimedAs = new Map(
+          [...uploads].map(([image, upload]) => [image, plan.copies.get(upload) ?? upload]),
+        );
+        const doc = Node.fromJSON(
+          documentSchema,
+          copiedTree(tree, documentId, id, claimedAs) ?? { type: "doc", content: [] },
+        );
+        yield* withinTreeCap(doc);
+        const { document, spent } = yield* transaction((tx) =>
+          Effect.gen(function* () {
+            yield* requireDocuments(userId, tx);
+            yield* lockProjectForEditing(tx, userId, projectId);
+            const created = yield* documents.create(tx, userId, owner, {
+              id,
+              title: source.title,
+              lastEditedBy: "user",
+              snapshot: doc.toJSON() as Record<string, unknown>,
+            });
+            const keys = uploads.size
+              ? yield* claimImages(tx, userId, id, owner, plan, [...uploads.values()])
+              : [];
+            if (!keys) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+            return { document: created, spent: keys };
+          }),
+        );
+        yield* files.deleteBlobs(spent);
+        yield* documentChanged(userId, document);
+        return document;
+      });
 
       const discard = <E = never, R = never>(
         userId: string,
@@ -1755,6 +1870,7 @@ export class DocumentService extends Context.Service<
         rewrite,
         discard,
         moveToProject,
+        copyToProject,
         push,
         subscribe,
         beginLive,

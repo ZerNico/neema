@@ -7,18 +7,25 @@ import {
   fakeDocumentServer,
   freshDocumentDevice,
 } from "../../../../tests/fixtures/document-server.ts";
-import { getDocument, pushDocument, renameDocument } from "../server/document-functions.ts";
+import {
+  copyDocumentToProject,
+  getDocument,
+  pushDocument,
+  renameDocument,
+} from "../server/document-functions.ts";
 import { DocumentOwner } from "./document-owner.tsx";
 import { DocumentWidget } from "~/modules/chat/ui/document-activity-block.tsx";
 import { ConfirmProvider } from "~/ui/confirm.tsx";
 import { DetailPanelProvider, DetailPanelRail, type DetailPanelApi } from "~/ui/detail-panel.tsx";
 import { useDetailPanel } from "~/ui/detail-panel-context.ts";
 import { AppMotionProvider } from "~/ui/motion";
+import { projectsQuery } from "~/modules/projects/client/queries.ts";
 
 vi.mock("../server/document-functions.ts", () => ({
   getDocument: vi.fn(),
   pushDocument: vi.fn(),
   renameDocument: vi.fn(),
+  copyDocumentToProject: vi.fn(),
 }));
 vi.mock("./rich-editor/document-editor.tsx", async () => ({
   default: (await import("../../../../tests/fixtures/fake-source-editor.tsx")).FakeSourceEditor,
@@ -27,7 +34,9 @@ vi.mock("@tanstack/react-router", () => ({
   useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
     select({ location: { pathname: "/chat/conversation" }, matches: [] }),
   useBlocker: vi.fn(),
+  useNavigate: () => navigate,
 }));
+const navigate = vi.fn();
 vi.mock("~/ui/use-mobile", () => ({ useIsMobile: () => false }));
 
 let server: ReturnType<typeof fakeDocumentServer>;
@@ -225,6 +234,50 @@ describe("document panel", () => {
     expect(screen.queryByRole("textbox", { name: "Document title" })).not.toBeInTheDocument();
     for (const name of [/Rename document/, /Delete document/, /Download document/])
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+
+    act(() => panel.hide());
+  });
+
+  it("starts a new chat about it, with the document attached", async () => {
+    await fixture();
+    await openSource();
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Chat about it" }));
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: {},
+      state: { chatPrefill: "[Checklist](/documents/document-1)" },
+    });
+
+    act(() => panel.hide());
+  });
+
+  it("copies the document into any project they may edit", async () => {
+    vi.mocked(copyDocumentToProject).mockResolvedValue({
+      ...server.row("document-1")!,
+      id: "document-2",
+      userId: null,
+      projectId: "p-edit",
+    });
+    const { client } = await fixture();
+    act(() =>
+      client.setQueryData(projectsQuery.queryKey, [
+        { id: "p-edit", name: "Relaunch", role: "editor" },
+        { id: "p-view", name: "Archive", role: "viewer" },
+      ] as never),
+    );
+    await openSource();
+    fireEvent.click(screen.getByRole("button", { name: "Document actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy to project" }));
+    const target = await screen.findByRole("menuitem", { name: "Relaunch" });
+    // A project they only view is no place to copy it.
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).not.toBeInTheDocument();
+    fireEvent.click(target);
+    await waitFor(() =>
+      expect(copyDocumentToProject).toHaveBeenCalledWith({
+        data: { documentId: "document-1", projectId: "p-edit" },
+      }),
+    );
 
     act(() => panel.hide());
   });

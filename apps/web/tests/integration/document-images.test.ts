@@ -13,7 +13,7 @@ import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
 import { DocumentRepo } from "~/modules/documents/server/document-repo.ts";
 import { DocumentService } from "~/modules/documents/server/document-service.ts";
-import { IMAGE_REFUSED } from "~/modules/documents/schema.ts";
+import { IMAGE_REFUSED, documentImagePath } from "~/modules/documents/schema.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { ProjectService } from "~/modules/projects/server/service.ts";
@@ -345,6 +345,68 @@ describe("serving a document image", () => {
     // An upload nothing claimed is not served through a document either.
     const loose = await upload(owner, png(6));
     expect((await fetchImage(documentId, loose.id, owner)).status).toBe(404);
+  });
+});
+
+describe("copying a document into a project", () => {
+  it("stores its images again for the project and leaves the original as it was", async () => {
+    const { owner, editor, viewer, projectId } = await projectDocument();
+    const { document: source } = await run(
+      Effect.flatMap(DocumentService, (s) =>
+        s.create(editor, { title: "Notes", content: "Intro", by: "user" }),
+      ),
+    );
+    const bytes = png(31);
+    const image = claimedId(await addImage(editor, source.id, (await upload(editor, bytes)).id));
+    await run(
+      Effect.flatMap(DocumentService, (s) =>
+        s.rewrite(
+          editor,
+          {
+            documentId: source.id,
+            content: `Intro\n\n![chart](${documentImagePath(source.id, image)})`,
+          },
+          () => Effect.void,
+        ),
+      ),
+    );
+
+    const copy = await run(
+      Effect.flatMap(DocumentService, (s) => s.copyToProject(editor, source.id, projectId)),
+    );
+    expect(copy).toMatchObject({ projectId, userId: null, title: "Notes" });
+    const read = (userId: string, documentId: string) =>
+      run(Effect.flatMap(DocumentService, (s) => s.read(userId, documentId)));
+    const tree = JSON.stringify((await read(viewer, copy.id))!.doc.toJSON());
+    const copied = decodeURIComponent(
+      new RegExp(`/api/documents/${copy.id}/images/([^"]+)`).exec(tree)?.[1] ?? "",
+    );
+    expect(copied).not.toBe("");
+    expect(copied).not.toBe(image);
+    // The project's file, so it outlives the member who copied it.
+    expect((await attachmentRow(copied))?.userId).toBe(owner);
+    const response = await fetchImage(copy.id, copied, viewer);
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(bytes);
+
+    // The original stays the editor's own, image and all, and the project's members never see it.
+    expect((await read(editor, source.id))?.document).toMatchObject({ userId: editor });
+    expect((await fetchImage(source.id, image, editor)).status).toBe(200);
+    expect(await read(viewer, source.id)).toBeNull();
+
+    // Copying needs the right to edit the project, not only to read it.
+    const refused = await runtime.runPromiseExit(
+      Effect.flatMap(DocumentService, (s) => s.copyToProject(viewer, copy.id, projectId)),
+    );
+    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toMatchObject({
+      _tag: "DocumentRejected",
+    });
+    // Refused before anything was stored for it.
+    const stored = await run(
+      Effect.flatMap(Db, (db) =>
+        db.select({ id: attachments.id }).from(attachments).where(eq(attachments.userId, viewer)),
+      ),
+    );
+    expect(stored).toEqual([]);
   });
 });
 

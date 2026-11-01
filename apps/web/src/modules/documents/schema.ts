@@ -34,8 +34,9 @@ export const DocumentIdInput = Schema.Struct({ documentId: EntityId });
 export type DocumentIdInput = typeof DocumentIdInput.Type;
 export const ConversationIdInput = Schema.Struct({ conversationId: EntityId });
 export const ProjectDocumentsInput = Schema.Struct({ projectId: EntityId });
-export const CreateProjectDocumentInput = Schema.Struct({
-  projectId: EntityId,
+/** A blank document a person starts: in a project, or their own without one. */
+export const NewDocumentInput = Schema.Struct({
+  projectId: Schema.optionalKey(EntityId),
   title: DocumentTitle,
 });
 export const DocumentShareRole = Schema.Literals(["viewer", "editor"]);
@@ -84,7 +85,7 @@ export const PublicDocumentInput = Schema.Struct({
 export const publicDocumentPath = (token: string) => `/d/${encodeURIComponent(token)}`;
 export const publicDocumentImagePath = (token: string, attachmentId: string) =>
   `/api/public/documents/${encodeURIComponent(token)}/images/${encodeURIComponent(attachmentId)}`;
-export const MoveDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
+export const CopyDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
 export const RenameDocumentInput = Schema.Struct({
   documentId: EntityId,
   title: DocumentTitle,

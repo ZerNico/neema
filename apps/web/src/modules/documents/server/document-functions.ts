@@ -8,13 +8,13 @@ import { refusal } from "~/server/refusal.ts";
 import { runServerFn } from "~/server/run-server-fn.ts";
 import {
   CommentInput,
-  CreateProjectDocumentInput,
+  NewDocumentInput,
   DOCUMENT_LIMITS,
   DeleteCommentInput,
   DocumentIdInput,
   DocumentImageInput,
   DocumentVersionInput,
-  MoveDocumentInput,
+  CopyDocumentInput,
   ShareDocumentInput,
   ProjectDocumentsInput,
   PushDocumentInput,
@@ -81,15 +81,15 @@ export const listProjectDocuments = createServerFn({ method: "GET" })
       ),
     ),
   );
-/** A person starting a blank document in a project; the model has its own tool. */
-export const createProjectDocument = createServerFn({ method: "POST" })
+/** A person starting a blank document, in a project or their own; the model has its own tool. */
+export const createDocument = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(CreateProjectDocumentInput))
+  .validator(Schema.toStandardSchemaV1(NewDocumentInput))
   .handler(({ context, data }) =>
     runServerFn(
       Effect.flatMap(DocumentService, (service) =>
         service.create(context.session.user.id, {
-          projectId: data.projectId,
+          ...(data.projectId ? { projectId: data.projectId } : {}),
           title: data.title,
           content: "",
           by: "user",
@@ -97,10 +97,6 @@ export const createProjectDocument = createServerFn({ method: "POST" })
       ).pipe(Effect.map((result) => result.document)),
     ),
   );
-/**
- * A project document started from a Word file: multipart, since the file is
- * bytes. Answers what the file held that a document cannot, to show the person.
- */
 /** How an upload starts a document, by its name: Word is imported, Markdown and text are read. */
 const uploadKind = (name: string) => {
   const extension = name.toLowerCase().match(/\.([a-z]+)$/)?.[1];
@@ -110,8 +106,12 @@ const uploadKind = (name: string) => {
   return null;
 };
 
-/** A project document started from a Word, Markdown or text file. */
-export const createProjectDocumentFromFile = createServerFn({ method: "POST" })
+/**
+ * A document started from a Word, Markdown or text file, in a project or the
+ * person's own: multipart, since the file is bytes. Answers what the file held
+ * that a document cannot, to show the person.
+ */
+export const createDocumentFromFile = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator((data: FormData) => data)
   .handler(async ({ context, data }) => {
@@ -119,8 +119,9 @@ export const createProjectDocumentFromFile = createServerFn({ method: "POST" })
     const projectId = data.get("projectId");
     const title = data.get("title");
     const kind = file instanceof File ? uploadKind(file.name) : null;
-    if (!(file instanceof File) || !kind || typeof projectId !== "string" || !projectId)
+    if (!(file instanceof File) || !kind || (projectId !== null && typeof projectId !== "string"))
       throw refusal(400, localized(m.documents_import_expected_file));
+    const place = projectId ? { projectId } : {};
     const named = typeof title === "string" ? title.slice(0, DOCUMENT_LIMITS.title) : undefined;
     if (kind !== "word") {
       if (file.size > TEXT_UPLOAD_BYTES)
@@ -137,7 +138,7 @@ export const createProjectDocumentFromFile = createServerFn({ method: "POST" })
       const document = await runServerFn(
         Effect.flatMap(DocumentService, (service) =>
           service.create(context.session.user.id, {
-            projectId,
+            ...place,
             title: (named?.trim() || file.name.replace(/\.[^.]+$/, "").trim() || file.name).slice(
               0,
               DOCUMENT_LIMITS.title,
@@ -161,7 +162,7 @@ export const createProjectDocumentFromFile = createServerFn({ method: "POST" })
     const locale = getLocale();
     const created = await runServerFn(
       createFromWord(context.session.user.id, {
-        owner: { projectId },
+        owner: projectId ? { projectId } : { userId: context.session.user.id },
         title: named,
         by: "user",
         locale,
@@ -198,18 +199,14 @@ export const listDocumentLibrary = createServerFn({ method: "GET" })
       Effect.flatMap(DocumentService, (service) => service.library(context.session.user.id)),
     ),
   );
-export const moveDocumentToProject = createServerFn({ method: "POST" })
+/** A copy of a document the person may read, into a project they may edit. */
+export const copyDocumentToProject = createServerFn({ method: "POST" })
   .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(MoveDocumentInput))
+  .validator(Schema.toStandardSchemaV1(CopyDocumentInput))
   .handler(({ context, data }) =>
     runServerFn(
       Effect.flatMap(DocumentService, (service) =>
-        service.moveToProject(
-          context.session.user.id,
-          data.documentId,
-          data.projectId,
-          () => Effect.void,
-        ),
+        service.copyToProject(context.session.user.id, data.documentId, data.projectId),
       ),
     ),
   );

@@ -244,13 +244,11 @@ export const editDocument = defineTool({
 export const createDocument = defineTool({
   name: "create_document",
   title: "Create a document",
-  // Only in a project: a chat's documents belong to the answers that made
-  // them, and one made from outside would hang off whichever answer came last.
   description:
-    "Creates a text document in one of this person's projects (projectId from list_projects), written from Markdown.",
+    "Creates a text document written from Markdown: in one of this person's projects (projectId from list_projects), or without projectId as their own.",
   scope: "documents:write",
   input: Schema.Struct({
-    projectId: Schema.String,
+    projectId: Schema.optionalKey(Schema.String),
     title: DocumentTitle,
     content: Schema.String,
   }),
@@ -259,7 +257,7 @@ export const createDocument = defineTool({
     Effect.gen(function* () {
       const created = yield* DocumentService.use((service) =>
         service.create(principal.userId, {
-          projectId: args.projectId,
+          ...(args.projectId ? { projectId: args.projectId } : {}),
           title: args.title,
           content: args.content,
           by: "user",

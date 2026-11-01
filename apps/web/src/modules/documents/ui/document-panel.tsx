@@ -152,7 +152,7 @@ export function DocumentPanelActions({
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               {m.documents_export_word()}
             </DropdownMenuItem>
-            {document && (document.userId !== null || document.canEdit) ? (
+            {document ? (
               <>
                 <DropdownMenuSeparator />
                 <DocumentLifecycleItems document={document} onShare={() => setSharing(true)} />

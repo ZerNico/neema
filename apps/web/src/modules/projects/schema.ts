@@ -65,10 +65,6 @@ export const MoveConversationInput = Schema.Struct({
   conversationId: EntityId,
   projectId: Schema.NullOr(EntityId),
 });
-export const CreateProjectDocumentInput = Schema.Struct({
-  projectId: EntityId,
-  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
-});
 
 export interface ProjectSummary {
   id: string;

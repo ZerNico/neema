@@ -1,19 +1,28 @@
 import {
+  BubbleChatAddIcon,
   Delete02Icon,
   FolderAddIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useSessionUser } from "~/modules/auth/client.ts";
-import { useWritableChatProject } from "~/modules/projects/ui/writable-chat-project-context.ts";
+import { referenceLabel, restoreReferences } from "~/modules/chat/references.ts";
+import { projectsQuery } from "~/modules/projects/client/queries.ts";
+import { projectCan } from "~/modules/projects/schema.ts";
 import { m } from "~/paraglide/messages.js";
 import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
-import { DropdownMenuItem } from "~/ui/primitives/dropdown-menu";
+import {
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "~/ui/primitives/dropdown-menu";
 import type { EditableDocument } from "../schema.ts";
-import { deleteDocument, moveDocumentToProject } from "../server/document-functions.ts";
+import { copyDocumentToProject, deleteDocument } from "../server/document-functions.ts";
 
 type Lifecycle = Pick<EditableDocument, "id" | "title" | "userId" | "projectId" | "canEdit">;
 
@@ -27,7 +36,7 @@ const refresh = (queryClient: ReturnType<typeof useQueryClient>, documentId: str
   ]);
 
 /**
- * Share, move into the chat's project and delete. A person's document
+ * Chat about it, share, copy into a project and delete. A person's document
  * is its owner's to change, though anyone reading it sees who else does; a
  * project's may be deleted by anyone who may edit it. `onShare` opens the
  * dialog, which outlives the menu.
@@ -42,36 +51,84 @@ export function DocumentLifecycleItems({
   const me = useSessionUser();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-  const project = useWritableChatProject();
-  const move = useMutation({
-    mutationFn: (projectId: string) =>
-      moveDocumentToProject({ data: { documentId: document.id, projectId } }),
-    onSuccess: () => {
-      if (project) toast.success(m.documents_move_done({ project: project.name }));
-      return refresh(queryClient, document.id);
+  const navigate = useNavigate();
+  const personal = document.userId !== null;
+  const mine = personal && document.userId === me?.id;
+  // The menu mounts its items only while open, so this asks then.
+  const projects = useQuery(projectsQuery);
+  const targets = (projects.data ?? []).filter(
+    (project) => projectCan.edit(project.role) && project.id !== document.projectId,
+  );
+  // The menu closes on the click, so the toast is what shows it working.
+  const copy = useMutation({
+    mutationFn: (project: { id: string; name: string }) =>
+      copyDocumentToProject({ data: { documentId: document.id, projectId: project.id } }),
+    onMutate: (project) => toast.loading(m.documents_copying({ project: project.name })),
+    onSuccess: (made, project, pending) => {
+      toast.success(m.documents_copy_done({ project: project.name }), {
+        id: pending,
+        action: {
+          label: m.documents_copy_open(),
+          onClick: () =>
+            void navigate({
+              to: "/projects/$projectId",
+              params: { projectId: project.id },
+              search: { document: made.id },
+            }),
+        },
+      });
+      return queryClient.invalidateQueries({ queryKey: ["projects", "documents", project.id] });
     },
-    onError: (error) => toastError(m.documents_move_failed(), error),
+    onError: (error, _project, pending) => {
+      toast.dismiss(pending);
+      toastError(m.documents_copy_failed(), error);
+    },
   });
   const remove = useMutation({
     mutationFn: () => deleteDocument({ data: { documentId: document.id } }),
     onSuccess: () => refresh(queryClient, document.id),
     onError: (error) => toastError(m.documents_delete_failed(), error),
   });
-  const personal = document.userId !== null;
-  const mine = personal && document.userId === me?.id;
   return (
     <>
+      <DropdownMenuItem
+        onClick={() =>
+          void navigate({
+            to: "/",
+            // A project's document is read in a chat of that project.
+            search: document.projectId ? { project: document.projectId } : {},
+            state: {
+              chatPrefill: restoreReferences("", [
+                { kind: "document", id: document.id, label: referenceLabel(document.title) },
+              ]),
+            },
+          })
+        }
+      >
+        <HugeiconsIcon icon={BubbleChatAddIcon} strokeWidth={2} />
+        {m.documents_chat_about()}
+      </DropdownMenuItem>
       {personal ? (
         <DropdownMenuItem onClick={onShare}>
           <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
-          {m.documents_share()}
+          {/* Only the owner changes it; anyone else may see who has it. */}
+          {mine ? m.documents_share() : m.documents_access()}
         </DropdownMenuItem>
       ) : null}
-      {mine && project ? (
-        <DropdownMenuItem disabled={move.isPending} onClick={() => move.mutate(project.id)}>
-          <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
-          {m.documents_move_to_project({ project: project.name })}
-        </DropdownMenuItem>
+      {targets.length > 0 ? (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger disabled={copy.isPending}>
+            <HugeiconsIcon icon={FolderAddIcon} strokeWidth={2} />
+            {m.documents_copy_to_project()}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {targets.map((project) => (
+              <DropdownMenuItem key={project.id} onClick={() => copy.mutate(project)}>
+                {project.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
       ) : null}
       {mine || (!personal && document.canEdit) ? (
         <DropdownMenuItem
