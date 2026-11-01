@@ -163,6 +163,10 @@ export function setFindOpen(editor: Editor, open: FindState["open"]) {
   editor.view.dispatch(editor.state.tr.setMeta(findKey, { open, query } satisfies FindMeta));
 }
 
+/** Shows or hides replacing in an open bar, keeping its query: a selection here is a match, not a new search. */
+export const setFindMode = (editor: Editor, mode: "find" | "replace") =>
+  editor.view.dispatch(editor.state.tr.setMeta(findKey, { open: mode } satisfies FindMeta));
+
 /** Searches for `query`, highlighting every match. */
 export const search = (editor: Editor, query: string, options: FindOptions) =>
   editor.view.dispatch(editor.state.tr.setMeta(findKey, { query, options } satisfies FindMeta));

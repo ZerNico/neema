@@ -4,6 +4,7 @@ import {
   ArrowUp01Icon,
   Cancel01Icon,
   MoreVerticalIcon,
+  SearchReplaceIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { Editor } from "@tiptap/core";
@@ -23,6 +24,7 @@ import {
   replaceAll,
   replaceCurrent,
   search,
+  setFindMode,
   setFindOpen,
   type FindOptions,
 } from "./find.ts";
@@ -38,9 +40,8 @@ export function DocumentFindBar({ editor }: { editor: Editor }) {
     selector: ({ editor: current }) => findState(current.state),
   });
   if (!find.open) return null;
-  return (
-    <OpenFindBar key={String(find.open)} editor={editor} replacing={find.open === "replace"} />
-  );
+  // Not keyed by mode: showing replace keeps the query and the replacement typed so far.
+  return <OpenFindBar editor={editor} replacing={find.open === "replace"} />;
 }
 
 function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean }) {
@@ -52,6 +53,8 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
   const [query, setQuery] = useState(find.query);
   const [replacement, setReplacement] = useState("");
   const [replaced, setReplaced] = useState<number | null>(null);
+  // Shown by the toggle, the replace field takes focus; opened with the bar, the query keeps it.
+  const [toggled, setToggled] = useState(false);
   const editable = editor.isEditable;
   const count = find.matches.length;
   const close = () => {
@@ -79,6 +82,22 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
       className="border-border shrink-0 border-b px-3"
     >
       <div className="flex h-9 items-center gap-1">
+        {editable ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={
+              replacing ? m.documents_find_hide_replace() : m.documents_find_show_replace()
+            }
+            aria-expanded={replacing}
+            onClick={() => {
+              setToggled(true);
+              setFindMode(editor, replacing ? "find" : "replace");
+            }}
+          >
+            <HugeiconsIcon icon={SearchReplaceIcon} strokeWidth={2} />
+          </Button>
+        ) : null}
         <Input
           autoFocus
           aria-label={m.documents_find_label()}
@@ -157,6 +176,8 @@ function OpenFindBar({ editor, replacing }: { editor: Editor; replacing: boolean
       {replacing && editable ? (
         <div className="flex h-9 items-center gap-1">
           <Input
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- shown by the toggle for typing
+            autoFocus={toggled}
             aria-label={m.documents_find_replace_with()}
             placeholder={m.documents_find_replace_with()}
             value={replacement}

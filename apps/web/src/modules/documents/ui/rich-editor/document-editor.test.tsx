@@ -13,6 +13,7 @@ import { parseMarkdown, toMarkdown } from "../../editor/markdown.ts";
 import { DOCUMENT_LIMITS } from "../../schema.ts";
 import DocumentEditor from "./document-editor.tsx";
 import { addImages } from "./image-upload.ts";
+import { setFindOpen } from "./find.ts";
 import { sortColumn } from "./table-sort.ts";
 import { linkTarget, openLink } from "./links.ts";
 import { filterSlashItems, SLASH_ITEMS } from "./slash-command.tsx";
@@ -466,6 +467,34 @@ describe("document editor", () => {
       key: "Escape",
     });
     expect(screen.queryByRole("search")).not.toBeInTheDocument();
+  });
+
+  it("switches between finding and replacing in the open bar, keeping the query", async () => {
+    const sync = await replica("Ship the plan.");
+    mount(sync);
+    const editor = await editorOf();
+    fireEvent.keyDown(editor.view.dom, { key: "f", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Find in document" }), {
+      target: { value: "plan" },
+    });
+    expect(screen.queryByRole("textbox", { name: "Replace with" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show replace" }));
+    expect(await screen.findByRole("textbox", { name: "Replace with" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Find in document" })).toHaveValue("plan");
+    expect(screen.getByText("1 of 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide replace" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Replace with" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("textbox", { name: "Find in document" })).toHaveValue("plan");
+  });
+
+  it("offers no replacing to a reader", async () => {
+    mount(await replica("Ship the plan."), { readOnly: true });
+    const editor = await editorOf();
+    act(() => setFindOpen(editor, "find"));
+    await screen.findByRole("textbox", { name: "Find in document" });
+    expect(screen.queryByRole("button", { name: "Show replace" })).not.toBeInTheDocument();
   });
 
   it("counts words under the text and jumps to a heading from the outline", async () => {
