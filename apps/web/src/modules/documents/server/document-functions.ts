@@ -14,6 +14,7 @@ import {
   DocumentIdInput,
   DocumentImageInput,
   DocumentVersionInput,
+  NameDocumentVersionInput,
   CopyDocumentInput,
   ShareDocumentInput,
   ProjectDocumentsInput,
@@ -58,6 +59,22 @@ export const getDocumentVersion = createServerFn({ method: "GET" })
     runServerFn(
       Effect.flatMap(DocumentService, (service) =>
         service.versionAt(context.session.user.id, data.documentId, data.revision),
+      ),
+    ),
+  );
+/** Names a version so it is kept, or takes the name off when blank. */
+export const nameDocumentVersion = createServerFn({ method: "POST" })
+  .middleware([requireSession])
+  .validator(Schema.toStandardSchemaV1(NameDocumentVersionInput))
+  .handler(({ context, data }) =>
+    runServerFn(
+      Effect.flatMap(DocumentService, (service) =>
+        service.nameVersion(
+          context.session.user.id,
+          data.documentId,
+          data.revision,
+          data.name.trim() || null,
+        ),
       ),
     ),
   );

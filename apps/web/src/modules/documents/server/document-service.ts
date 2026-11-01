@@ -9,7 +9,11 @@ import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { and, eq, inArray } from "drizzle-orm";
-import { attachmentBlobs, attachments as attachmentRows } from "~/db/schema/index.ts";
+import {
+  attachmentBlobs,
+  attachments as attachmentRows,
+  type documentVersions,
+} from "~/db/schema/index.ts";
 import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -68,7 +72,14 @@ import {
 import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import { DocumentRepo, type DocumentOwner, type ImageOwner } from "./document-repo.ts";
-import { groupVersions, type DocumentVersion } from "./versions.ts";
+import {
+  groupVersions,
+  NAMED_VERSIONS,
+  thinnedCheckpoints,
+  versionEnds,
+  type DocumentVersion,
+  type VersionAuthor,
+} from "./versions.ts";
 import { documentImageOf, imageSources } from "./word-export.ts";
 import { placeImported, type ImportedText } from "./word-import.ts";
 import type { TreeNode } from "~/modules/word/server/document-tree.ts";
@@ -428,6 +439,16 @@ export class DocumentService extends Context.Service<
      * anyone who may edit it; null when that revision is no longer kept.
      */
     versionAt(userId: string, documentId: string, revision: number): Effect.Effect<string | null>;
+    /**
+     * Names a listed version, keeping its text for good, or takes the name
+     * off with null, for anyone who may edit the document.
+     */
+    nameVersion(
+      userId: string,
+      documentId: string,
+      revision: number,
+      name: string | null,
+    ): Effect.Effect<void, DocumentError>;
     /** The live tree, for rendering what the model reads. Null when not this person's. */
     read(
       userId: string,
@@ -791,6 +812,69 @@ export class DocumentService extends Context.Service<
         while (count < all.length - COMPACT_STEPS && all[count]!.createdAt < cutoff) count++;
         return count;
       };
+      /**
+       * Keeps the text at the end of each version whose steps are about to be
+       * folded away, thinned as history keeps them, and answers with the
+       * tree at the last one so the fold goes on from there.
+       */
+      const foldedVersions = (
+        tx: DbTx,
+        documentId: string,
+        entry: Entry,
+        all: ReadonlyArray<KeptStep>,
+        through: number,
+        now: number,
+      ) =>
+        Effect.gen(function* () {
+          // The step after the fold tells whether the last folded run has ended.
+          const ends = versionEnds(
+            yield* documents.stepAuthors(documentId, entry.snapshotRevision, through + 1, tx),
+          ).filter((end) => end.revision <= through && end.author !== null);
+          const dropped = new Set(
+            thinnedCheckpoints(
+              ends.map((end) => ({ revision: end.revision, at: end.at, named: false })),
+              now,
+            ),
+          );
+          let doc = entry.snapshot;
+          let revision = entry.snapshotRevision;
+          const rows: Array<typeof documentVersions.$inferInsert> = [];
+          for (const end of ends) {
+            if (dropped.has(end.revision)) continue;
+            doc = (yield* applySteps(
+              doc,
+              all
+                .slice(revision - entry.snapshotRevision, end.revision - entry.snapshotRevision)
+                .map((step) => step.json),
+            ).pipe(Effect.orDie)).doc;
+            revision = end.revision;
+            rows.push({
+              documentId,
+              revision,
+              snapshot: doc.toJSON() as Record<string, unknown>,
+              origin: end.origin,
+              userId: end.userId,
+              endedAt: end.at,
+            });
+          }
+          if (rows.length) {
+            yield* documents.keepCheckpoints(tx, rows);
+            const kept = yield* documents.checkpoints(documentId, tx);
+            yield* documents.dropCheckpoints(
+              tx,
+              documentId,
+              thinnedCheckpoints(
+                kept.map((each) => ({
+                  revision: each.revision,
+                  at: each.endedAt,
+                  named: each.name !== null,
+                })),
+                now,
+              ),
+            );
+          }
+          return { doc, revision };
+        });
       /** Stores steps the caller already applied to `doc`. Caller holds the row lock. */
       const store = (
         tx: DbTx,
@@ -826,11 +910,15 @@ export class DocumentService extends Context.Service<
           let compacted: Stored["compacted"] = null;
           if (folded) {
             const all = [...entry.steps, ...kept];
+            const through = entry.snapshotRevision + folded;
+            const checkpoints = yield* foldedVersions(tx, documentId, entry, all, through, now);
             const { doc: snapshot } = yield* applySteps(
-              entry.snapshot,
-              all.slice(0, folded).map((step) => step.json),
+              checkpoints.doc,
+              all
+                .slice(checkpoints.revision - entry.snapshotRevision, folded)
+                .map((step) => step.json),
             ).pipe(Effect.orDie);
-            compacted = { snapshot, revision: entry.snapshotRevision + folded };
+            compacted = { snapshot, revision: through };
             yield* documents.compact(
               tx,
               documentId,
@@ -1834,19 +1922,42 @@ export class DocumentService extends Context.Service<
           if (!loaded?.document.canEdit) return null;
           const { entry } = loaded;
           const authors = yield* documents.stepAuthors(documentId, entry.snapshotRevision);
+          const checkpoints = yield* documents.checkpoints(documentId);
           const oldest = entry.steps[0]?.createdAt ?? Date.now();
-          return groupVersions(authors, {
+          const recent = groupVersions(authors, {
             revision: entry.snapshotRevision,
             at: new Date(oldest),
           });
+          // Kept versions from a fold reach further back than the snapshot,
+          // which is then only that fold's edge. One named since is no such version.
+          if (checkpoints.some((each) => each.revision <= entry.snapshotRevision)) recent.pop();
+          const listed = new Map(recent.map((version) => [version.revision, version]));
+          for (const checkpoint of checkpoints) {
+            const author: VersionAuthor | null =
+              checkpoint.origin === "model"
+                ? { kind: "assistant" }
+                : checkpoint.userName !== null
+                  ? { kind: "person", name: checkpoint.userName }
+                  : null;
+            const known = listed.get(checkpoint.revision);
+            listed.set(checkpoint.revision, {
+              revision: checkpoint.revision,
+              at: known?.at ?? checkpoint.endedAt.toISOString(),
+              author: known ? known.author : author,
+              name: checkpoint.name,
+            });
+          }
+          return [...listed.values()].toSorted((a, b) => b.revision - a.revision);
         }),
         versionAt: Effect.fn("DocumentService.versionAt")(function* (userId, documentId, revision) {
-          return yield* exclusive(documentId)(
+          const replayed = yield* exclusive(documentId)(
             Effect.gen(function* () {
               const { entry, document } = yield* load(userId, documentId);
               if (!document.canEdit) return null;
               const count = revision - entry.snapshotRevision;
-              if (!Number.isInteger(count) || count < 0 || count > entry.steps.length) return null;
+              if (!Number.isInteger(count) || count > entry.steps.length) return null;
+              // Folded away: only a kept version still has it.
+              if (count < 0) return "kept" as const;
               const { doc } = yield* applySteps(
                 entry.snapshot,
                 entry.steps.slice(0, count).map((step) => step.json),
@@ -1854,7 +1965,70 @@ export class DocumentService extends Context.Service<
               return JSON.stringify(doc.toJSON());
             }),
           ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+          if (replayed !== "kept") return replayed;
+          const kept = yield* documents.checkpointAt(documentId, revision);
+          return kept ? JSON.stringify(kept) : null;
         }),
+        nameVersion: Effect.fn("DocumentService.nameVersion")(
+          function* (userId, documentId, revision, name) {
+            yield* exclusive(documentId)(
+              Effect.gen(function* () {
+                const { entry } = yield* load(userId, documentId);
+                yield* transaction((tx) =>
+                  Effect.gen(function* () {
+                    yield* documents.lock(tx, userId, documentId);
+                    const kept = yield* documents.checkpoints(documentId, tx);
+                    const existing = kept.find((each) => each.revision === revision);
+                    if (
+                      name !== null &&
+                      !existing?.name &&
+                      kept.filter((each) => each.name !== null).length >= NAMED_VERSIONS
+                    )
+                      return yield* new DocumentRejected({
+                        reason: localized(m.documents_error_too_many_named, {
+                          max: NAMED_VERSIONS,
+                        }),
+                      });
+                    if (existing)
+                      return yield* documents.nameCheckpoint(tx, documentId, revision, name);
+                    if (name === null) return;
+                    const count = revision - entry.snapshotRevision;
+                    if (!Number.isInteger(count) || count < 0 || count > entry.steps.length)
+                      return yield* new DocumentRejected({
+                        reason: localized(m.documents_error_version_gone),
+                      });
+                    const { doc } = yield* applySteps(
+                      entry.snapshot,
+                      entry.steps.slice(0, count).map((step) => step.json),
+                    ).pipe(Effect.orDie);
+                    // Whoever's run ends there, repairs joining it as history shows them.
+                    const end = count
+                      ? versionEnds(
+                          yield* documents.stepAuthors(
+                            documentId,
+                            entry.snapshotRevision,
+                            revision,
+                            tx,
+                          ),
+                        ).at(-1)
+                      : undefined;
+                    yield* documents.keepCheckpoints(tx, [
+                      {
+                        documentId,
+                        revision,
+                        snapshot: doc.toJSON() as Record<string, unknown>,
+                        origin: end?.origin ?? null,
+                        userId: end?.userId ?? null,
+                        endedAt: end?.at ?? new Date(entry.steps[0]?.createdAt ?? Date.now()),
+                        name,
+                      },
+                    ]);
+                  }),
+                );
+              }),
+            );
+          },
+        ),
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {
           return yield* exclusive(documentId)(
             load(userId, documentId).pipe(

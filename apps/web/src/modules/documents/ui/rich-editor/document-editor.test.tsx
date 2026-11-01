@@ -23,6 +23,7 @@ import {
   addDocumentImage,
   getDocumentVersion,
   getDocumentVersions,
+  nameDocumentVersion,
 } from "../../server/document-functions.ts";
 
 // The network boundary for images: the upload and the claim the editor calls.
@@ -31,6 +32,7 @@ vi.mock("../../server/document-functions.ts", () => ({
   addDocumentImage: vi.fn(),
   getDocumentVersions: vi.fn(),
   getDocumentVersion: vi.fn(),
+  nameDocumentVersion: vi.fn(),
 }));
 
 beforeAll(() => {
@@ -581,9 +583,14 @@ describe("document editor", () => {
     mount(sync);
     const editor = await editorOf();
     vi.mocked(getDocumentVersions).mockResolvedValue([
-      { revision: 7, at: "2026-10-11T12:00:00.000Z", author: { kind: "person", name: "Ada" } },
-      { revision: 4, at: "2026-10-11T11:00:00.000Z", author: { kind: "assistant" } },
-      { revision: 0, at: "2026-10-11T10:00:00.000Z", author: null },
+      {
+        revision: 7,
+        at: "2026-10-11T12:00:00.000Z",
+        author: { kind: "person", name: "Ada" },
+        name: null,
+      },
+      { revision: 4, at: "2026-10-11T11:00:00.000Z", author: { kind: "assistant" }, name: null },
+      { revision: 0, at: "2026-10-11T10:00:00.000Z", author: null, name: null },
     ]);
     vi.mocked(getDocumentVersion).mockResolvedValue(
       JSON.stringify(parseMarkdown("Plan v1").toJSON()),
@@ -603,6 +610,48 @@ describe("document editor", () => {
       editor.commands.undo();
     });
     expect(sync.markdown()).toBe("Plan v2, revised");
+  });
+
+  it("names a version and narrows the history to named ones", async () => {
+    const sync = await replica("Plan v2");
+    mount(sync);
+    await editorOf();
+    vi.mocked(getDocumentVersions).mockResolvedValue([
+      { revision: 9, at: "2026-10-11T12:00:00.000Z", author: { kind: "assistant" }, name: null },
+      {
+        revision: 5,
+        at: "2026-10-11T11:00:00.000Z",
+        author: { kind: "person", name: "Ada" },
+        name: "Sent to legal",
+      },
+      { revision: 2, at: "2026-10-11T10:00:00.000Z", author: { kind: "assistant" }, name: null },
+    ]);
+    vi.mocked(getDocumentVersion).mockResolvedValue(JSON.stringify(parseMarkdown("Plan").toJSON()));
+    vi.mocked(nameDocumentVersion).mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Version history" }));
+    const versions = await screen.findByRole("list", { name: "Versions" });
+    await waitFor(() => expect(within(versions).getAllByRole("listitem")).toHaveLength(3));
+
+    fireEvent.click(within(versions).getAllByRole("button", { name: "Name this version" })[1]!);
+    const field = screen.getByRole("textbox", { name: "Version name" });
+    fireEvent.change(field, { target: { value: "First draft" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(nameDocumentVersion).toHaveBeenCalledWith({
+        data: { documentId: sync.id, revision: 2, name: "First draft" },
+      }),
+    );
+
+    // Escape leaves the name as it was, and the dialog open.
+    fireEvent.click(within(versions).getAllByRole("button", { name: "Name this version" })[0]!);
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Version name" }), { key: "Escape" });
+    expect(screen.getByRole("list", { name: "Versions" })).toBeInTheDocument();
+    expect(nameDocumentVersion).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Named versions only" }));
+    expect(within(versions).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(versions).getByText("Sent to legal")).toBeInTheDocument();
   });
 
   it("keeps inserting and reviewing on their own tabs", async () => {

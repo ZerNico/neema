@@ -95,6 +95,12 @@ export const DocumentVersionInput = Schema.Struct({
   documentId: EntityId,
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
+/** A version's name; an empty one takes the name off. */
+export const NameDocumentVersionInput = Schema.Struct({
+  documentId: EntityId,
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  name: Schema.String.check(Schema.isMaxLength(100)),
+});
 export const DocumentImageInput = Schema.Struct({
   documentId: EntityId,
   attachmentId: EntityId,

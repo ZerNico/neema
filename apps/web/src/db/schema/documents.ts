@@ -172,6 +172,29 @@ export const documentSteps = pgTable(
 );
 
 /**
+ * The text at the end of a version whose steps were folded into the
+ * snapshot, so history reaches past the steps kept for rebasing. Older ones
+ * are thinned to one a day, then one a week; a named one is kept.
+ */
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    revision: integer().notNull(),
+    snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
+    /** Who wrote the version; null for the document's start, which nobody's steps made. */
+    origin: text().$type<"user" | "model">(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    /** When its last step came. */
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    name: text(),
+  },
+  (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
+);
+
+/**
  * Comments on a document's text. A thread is its first comment and the
  * replies naming it; the text it is about carries a `comment` mark with the
  * thread's ID, so the anchor moves with edits and goes with deleted text,

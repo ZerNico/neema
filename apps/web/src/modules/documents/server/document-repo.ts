@@ -11,6 +11,7 @@ import {
   documents,
   documentSteps,
   documentUserGrants,
+  documentVersions,
   groupMembers,
   projects,
   user,
@@ -28,8 +29,18 @@ import {
 } from "../schema.ts";
 import { localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
+import type { StepAuthor } from "./versions.ts";
 
 type DocumentRow = typeof documents.$inferSelect;
+/** A kept version as history lists it. */
+export interface Checkpoint {
+  revision: number;
+  origin: "user" | "model" | null;
+  userId: string | null;
+  userName: string | null;
+  endedAt: Date;
+  name: string | null;
+}
 type DocumentWrite = Partial<
   Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
@@ -172,15 +183,33 @@ export class DocumentRepo extends Context.Service<
     stepAuthors(
       documentId: string,
       afterRevision: number,
-    ): Effect.Effect<
-      ReadonlyArray<{
-        revision: number;
-        origin: "user" | "model";
-        userId: string | null;
-        userName: string | null;
-        createdAt: Date;
-      }>
-    >;
+      through?: number,
+      tx?: DbTx,
+    ): Effect.Effect<ReadonlyArray<StepAuthor>>;
+    /** The text kept at the end of each folded version, newest first, without the text. */
+    checkpoints(documentId: string, tx?: DbTx): Effect.Effect<ReadonlyArray<Checkpoint>>;
+    /** One kept version's tree, or null. */
+    checkpointAt(
+      documentId: string,
+      revision: number,
+    ): Effect.Effect<Record<string, unknown> | null>;
+    /** Keeps each version's text, leaving one already kept at that revision as it is. Caller holds the lock. */
+    keepCheckpoints(
+      tx: DbTx,
+      rows: ReadonlyArray<typeof documentVersions.$inferInsert>,
+    ): Effect.Effect<void>;
+    /** Names a kept version, or takes its name off with null. Caller holds the lock. */
+    nameCheckpoint(
+      tx: DbTx,
+      documentId: string,
+      revision: number,
+      name: string | null,
+    ): Effect.Effect<void>;
+    dropCheckpoints(
+      tx: DbTx,
+      documentId: string,
+      revisions: ReadonlyArray<number>,
+    ): Effect.Effect<void>;
     /**
      * Locks the document row alone, for someone allowed to edit it. A
      * person's batches arrive several times a second, and the conversation
@@ -437,26 +466,94 @@ export class DocumentRepo extends Context.Service<
             )
             .pipe(Effect.orDie);
         }),
-        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(function* (documentId, afterRevision) {
-          return yield* db
+        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(
+          function* (documentId, afterRevision, through, tx) {
+            return yield* (tx ?? db)
+              .select({
+                revision: documentSteps.revision,
+                origin: documentSteps.origin,
+                userId: documentSteps.userId,
+                userName: user.name,
+                createdAt: documentSteps.createdAt,
+              })
+              .from(documentSteps)
+              .leftJoin(user, eq(user.id, documentSteps.userId))
+              .where(
+                and(
+                  eq(documentSteps.documentId, documentId),
+                  gt(documentSteps.revision, afterRevision),
+                  through === undefined ? undefined : lte(documentSteps.revision, through),
+                ),
+              )
+              .orderBy(asc(documentSteps.revision))
+              .pipe(Effect.orDie);
+          },
+        ),
+        checkpoints: Effect.fn("DocumentRepo.checkpoints")(function* (documentId, tx) {
+          return yield* (tx ?? db)
             .select({
-              revision: documentSteps.revision,
-              origin: documentSteps.origin,
-              userId: documentSteps.userId,
+              revision: documentVersions.revision,
+              origin: documentVersions.origin,
+              userId: documentVersions.userId,
               userName: user.name,
-              createdAt: documentSteps.createdAt,
+              endedAt: documentVersions.endedAt,
+              name: documentVersions.name,
             })
-            .from(documentSteps)
-            .leftJoin(user, eq(user.id, documentSteps.userId))
-            .where(
-              and(
-                eq(documentSteps.documentId, documentId),
-                gt(documentSteps.revision, afterRevision),
-              ),
-            )
-            .orderBy(asc(documentSteps.revision))
+            .from(documentVersions)
+            .leftJoin(user, eq(user.id, documentVersions.userId))
+            .where(eq(documentVersions.documentId, documentId))
+            .orderBy(desc(documentVersions.revision))
             .pipe(Effect.orDie);
         }),
+        checkpointAt: Effect.fn("DocumentRepo.checkpointAt")(function* (documentId, revision) {
+          const [row] = yield* db
+            .select({ snapshot: documentVersions.snapshot })
+            .from(documentVersions)
+            .where(
+              and(
+                eq(documentVersions.documentId, documentId),
+                eq(documentVersions.revision, revision),
+              ),
+            )
+            .pipe(Effect.orDie);
+          return row?.snapshot ?? null;
+        }),
+        keepCheckpoints: Effect.fn("DocumentRepo.keepCheckpoints")(function* (tx, rows) {
+          if (!rows.length) return;
+          yield* tx
+            .insert(documentVersions)
+            .values([...rows])
+            .onConflictDoNothing()
+            .pipe(Effect.orDie);
+        }),
+        nameCheckpoint: Effect.fn("DocumentRepo.nameCheckpoint")(
+          function* (tx, documentId, revision, name) {
+            yield* tx
+              .update(documentVersions)
+              .set({ name })
+              .where(
+                and(
+                  eq(documentVersions.documentId, documentId),
+                  eq(documentVersions.revision, revision),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
+        dropCheckpoints: Effect.fn("DocumentRepo.dropCheckpoints")(
+          function* (tx, documentId, revisions) {
+            if (!revisions.length) return;
+            yield* tx
+              .delete(documentVersions)
+              .where(
+                and(
+                  eq(documentVersions.documentId, documentId),
+                  inArray(documentVersions.revision, [...revisions]),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
         lock: Effect.fn("DocumentRepo.lock")(function* (tx, userId, documentId) {
           const [row] = yield* tx
             .select(documentColumns(userId))
