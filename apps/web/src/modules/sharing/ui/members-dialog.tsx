@@ -189,7 +189,7 @@ export function MembersDialog({
         }}
         disabled={pending}
       >
-        <SelectTrigger size="sm" aria-label={label}>
+        <SelectTrigger size="sm" aria-label={label} className="shrink-0">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -271,7 +271,8 @@ export function MembersDialog({
                       }
                     >
                       <HugeiconsIcon icon={PlusSignIcon} strokeWidth={2} data-icon="inline-start" />
-                      {m.projects_members_add()}
+                      {/* A long label (German) shortens rather than running under the role. */}
+                      <span className="truncate">{m.projects_members_add()}</span>
                     </ComboboxTrigger>
                     <ComboboxContent align="start" className="w-[var(--anchor-width)] min-w-72">
                       <ComboboxInput
