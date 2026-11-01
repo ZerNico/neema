@@ -16,7 +16,10 @@ import { StorageQuota } from "~/modules/limits/server/storage.ts";
 export const createFromWord = Effect.fn("documents.createFromWord")(function* (
   userId: string,
   input: {
-    readonly owner: { projectId: string } | { conversationId: string; answerMessageId: string };
+    readonly owner:
+      | { projectId: string }
+      | { userId: string }
+      | { conversationId: string; messageId: string };
     readonly title?: string | undefined;
     readonly by: "user" | "model";
     /** The language a title made up for it is in. */
@@ -56,7 +59,8 @@ export const createFromWord = Effect.fn("documents.createFromWord")(function* (
   const created = yield* DocumentService.use((service) =>
     service.create(
       userId,
-      { ...input.owner, title, content: "", by: input.by },
+      // A person's own names no place.
+      { ...("userId" in input.owner ? {} : input.owner), title, content: "", by: input.by },
       guard,
       read.imported,
     ),

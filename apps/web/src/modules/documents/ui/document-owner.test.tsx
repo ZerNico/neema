@@ -43,7 +43,6 @@ const fresh = (): SeedDocument => ({
   id: "document-1",
   userId: "user",
   conversationId: "conversation",
-  answerMessageId: "m-answer",
   title: "Notes",
   content: "Original",
   revision: 1,

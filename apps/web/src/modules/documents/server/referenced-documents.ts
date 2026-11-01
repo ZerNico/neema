@@ -7,8 +7,7 @@ import { documentAccessSql } from "./document-repo.ts";
 
 /**
  * Adds the documents a message names to its chat, under the answer it gets:
- * the sender's own, kept, since naming one is choosing it, and any shared
- * with them, which stays its owner's to keep. A document already in the chat
+ * the sender's own and any shared with them. A document already in the chat
  * keeps its place. Caller holds the turn's transaction.
  */
 export const linkReferencedDocuments = (
@@ -21,7 +20,7 @@ export const linkReferencedDocuments = (
       .map((reference) => reference.id);
     if (named.length === 0) return;
     const readable = yield* tx
-      .select({ id: documents.id, userId: documents.userId })
+      .select({ id: documents.id })
       .from(documents)
       .where(
         and(
@@ -32,18 +31,6 @@ export const linkReferencedDocuments = (
       )
       .pipe(Effect.orDie);
     if (readable.length === 0) return;
-    const own = readable.filter((document) => document.userId === input.userId);
-    if (own.length > 0)
-      yield* tx
-        .update(documents)
-        .set({ answerMessageId: null })
-        .where(
-          inArray(
-            documents.id,
-            own.map((document) => document.id),
-          ),
-        )
-        .pipe(Effect.orDie);
     yield* tx
       .insert(conversationDocuments)
       .values(

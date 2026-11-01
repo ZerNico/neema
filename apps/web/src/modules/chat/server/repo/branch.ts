@@ -13,6 +13,7 @@ import { readQuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import {
   conversationAgents,
   conversationCompactionCheckpoints,
+  conversationDocuments,
   conversations,
   messageCompactionEvents,
   messageGenerationConfig,
@@ -379,6 +380,30 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 )
                 .pipe(Effect.orDie);
             }
+
+            // The documents the copied answers show stay shown, and in use
+            // here: a temporary source's purge must not take a kept branch's.
+            const links = yield* tx
+              .select()
+              .from(conversationDocuments)
+              .where(
+                and(
+                  eq(conversationDocuments.conversationId, source.id),
+                  inArray(conversationDocuments.messageId, [...clonedIds.keys()]),
+                ),
+              )
+              .pipe(Effect.orDie);
+            if (links.length)
+              yield* tx
+                .insert(conversationDocuments)
+                .values(
+                  links.map((link) => ({
+                    conversationId: branch.id,
+                    documentId: link.documentId,
+                    messageId: clonedIds.get(link.messageId!)!,
+                  })),
+                )
+                .pipe(Effect.orDie);
 
             // Agent/knowledge configuration is copied verbatim, never
             // re-resolved: the branch shows the same answers the same way,

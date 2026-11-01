@@ -28,12 +28,9 @@ type ProseMirrorJson = Record<string, unknown>;
  * Markdown is made from the tree only where it is wanted, never stored.
  *
  * A document belongs to one person or one project; chats only show it,
- * through `conversation_documents`. One the model made stays tied to its
- * answer (`answer_message_id`) until someone keeps it, and rewinding past that
- * answer removes it, which is why the cascade is here rather than in
- * application code: edit, message delete and conversation delete all go
- * through it. A kept document, or a project's, outlives any answer and is
- * deleted explicitly.
+ * through `conversation_documents`. It outlives the answer and the chat that
+ * made it and is deleted explicitly, except one made in a temporary chat and
+ * used nowhere else, which that chat's purge takes.
  */
 export const documents = pgTable(
   "documents",
@@ -42,9 +39,13 @@ export const documents = pgTable(
     /** A personal document's owner; null for a project's. */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
-    /** The answer it still goes with; null once kept. */
-    answerMessageId: text("answer_message_id").references(() => messages.id, {
-      onDelete: "cascade",
+    /**
+     * The chat that made it, set once at creation; null for one started
+     * elsewhere or once that chat is gone. Never derived from links: naming a
+     * document in a chat must not make it that chat's.
+     */
+    originConversationId: text("origin_conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
     }),
     title: text().notNull(),
     revision: integer().notNull().default(0),
@@ -60,23 +61,17 @@ export const documents = pgTable(
   (t) => [
     index("documents_user_idx").on(t.userId),
     index("documents_project_idx").on(t.projectId),
-    // Each deleted message cascades here; retry deletes by it too.
-    index("documents_answer_message_idx")
-      .on(t.answerMessageId)
-      .where(sql`${t.answerMessageId} is not null`),
+    index("documents_origin_idx")
+      .on(t.originConversationId)
+      .where(sql`${t.originConversationId} is not null`),
     check("documents_one_owner", sql`(${t.userId} is null) <> (${t.projectId} is null)`),
-    check(
-      "documents_answer_is_personal",
-      sql`${t.answerMessageId} is null or ${t.userId} is not null`,
-    ),
   ],
 );
 
 /**
  * The chats that show a document. A link grants nothing: the reader still
  * needs access to the document itself. `message_id` is the answer whose card
- * shows it, kept apart from the document's own `answer_message_id` so a kept
- * document still knows where its card goes.
+ * shows it.
  */
 export const conversationDocuments = pgTable(
   "conversation_documents",
@@ -101,8 +96,7 @@ export const conversationDocuments = pgTable(
 
 /**
  * A person's document shared with another account, as viewer or editor.
- * Project documents are shared by their project instead, and only a kept
- * document is shared: sharing keeps it.
+ * Project documents are shared by their project instead.
  */
 export const documentUserGrants = pgTable(
   "document_user_grants",

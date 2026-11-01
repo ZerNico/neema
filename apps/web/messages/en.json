@@ -1584,18 +1584,6 @@
   ],
   "chat_loss_agent_draft_named": "The agent draft “{name}” will also be deleted.",
   "chat_loss_agent_draft_untitled": "An untitled agent draft will also be deleted.",
-  "chat_loss_document_count": [
-    {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
-      "match": {
-        "countPlural=one": "{count} document",
-        "countPlural=other": "{count} documents"
-      }
-    }
-  ],
-  "chat_loss_document_named": "The document “{name}” will also be deleted.",
-  "chat_loss_document_untitled": "An untitled document will also be deleted.",
   "chat_loss_schedule_draft_count": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -5665,15 +5653,12 @@
   "computer_folder_detach": "Detach {name}",
   "computer_folder_detach_failed": "Couldn’t detach the folder",
   "documents_error_already_in_project": "it is in a project already",
-  "documents_keep": "Keep in library",
-  "documents_keep_done": "Kept in your library",
-  "documents_keep_failed": "Couldn’t keep the document",
   "documents_move_to_project": "Move to {project}",
   "documents_move_done": "Moved to {project}",
   "documents_move_failed": "Couldn’t move the document",
   "documents_delete": "Delete document",
   "documents_delete_title": "Delete “{title}”?",
-  "documents_delete_description": "It’s removed from every chat that shows it.",
+  "documents_delete_description": "It’s removed from every chat that shows it and for everyone it’s shared with.",
   "documents_delete_failed": "Couldn’t delete the document",
   "documents_library_title": "Documents",
   "documents_library_description": "Your documents from every chat.",
@@ -5683,9 +5668,6 @@
   "documents_library_from_chat": "{chat} · Updated {age}",
   "documents_library_updated": "Updated {age}",
   "documents_library_actions": "Actions for {title}",
-  "documents_library_answer_bound": "Goes with its answer",
-  "chat_retry_keep": "Retry and keep documents",
-  "chat_edit_keep": "Save and keep documents",
   "navigation_documents": "Documents",
   "chat_context_document": "Document",
   "chat_context_document_unavailable": "Document unavailable",

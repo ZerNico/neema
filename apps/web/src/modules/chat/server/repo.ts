@@ -42,6 +42,7 @@ import {
   conversationCompactionCheckpoints,
   conversations,
   conversationQueueEntries,
+  documents,
   messageChunks,
   messageCompactionEvents,
   messageGenerationConfig,
@@ -51,6 +52,7 @@ import {
   schedules,
 } from "~/db/schema/index.ts";
 import { deleteMark, ownedConversation, ownedConversationById } from "./owned-conversation.ts";
+import { temporaryOnlySql } from "~/modules/documents/server/document-repo.ts";
 import type { ResolvedAgentConfig, UnavailableAgentDependency } from "~/db/schema/agents.ts";
 import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -233,7 +235,6 @@ export interface ConversationDefaults {
     id: string;
     title: string;
     messageId: string | null;
-    kept: boolean;
   }>;
   /** Unpublished working files kept for later answers, named so a rewind can say it removes them. */
   readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
@@ -955,8 +956,6 @@ export class ChatRepo extends Context.Service<
       messageId: string;
       modelId: string;
       deleteMessageIds: ReadonlyArray<string>;
-      /** The person chose to keep the documents those answers wrote. */
-      keepDocuments?: boolean | undefined;
       /**
        * Compaction boundaries this rewind invalidates. Deleted messages take
        * their checkpoints with them via cascade, but a retried assistant and
@@ -1053,11 +1052,27 @@ export class ChatRepo extends Context.Service<
           .transaction((tx) =>
             Effect.gen(function* () {
               const [owned] = yield* tx
-                .select({ userId: conversations.userId, machineId: conversations.machineId })
+                .select({
+                  userId: conversations.userId,
+                  machineId: conversations.machineId,
+                  temporary: conversations.temporary,
+                })
                 .from(conversations)
                 .where(and(eq(conversations.id, conversationId), condition))
                 .for("update");
               if (!owned) return null;
+              // Documents outlive their chat, except a temporary one's that is
+              // used nowhere else: listed nowhere, nobody would find it again.
+              if (owned.temporary)
+                yield* tx
+                  .delete(documents)
+                  .where(
+                    and(
+                      eq(documents.userId, owned.userId),
+                      eq(documents.originConversationId, conversationId),
+                      temporaryOnlySql,
+                    ),
+                  );
               yield* research.finalizeBeforeDelete(tx, conversationId);
 
               const rows = yield* tx

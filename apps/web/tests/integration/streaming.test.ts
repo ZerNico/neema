@@ -2225,6 +2225,19 @@ describe("conversation documents", () => {
       ),
     );
   /** A chat's documents, each with its tree as Markdown, made on demand. */
+  /** The person's library, with each document's text. */
+  const libraryOf = (seed: Effect.Success<typeof ordinaryChat>) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const service = yield* DocumentService;
+        const listed = yield* service.library(seed.userId);
+        return yield* Effect.forEach(listed, (document) =>
+          service
+            .read(seed.userId, document.id)
+            .pipe(Effect.map((read) => ({ ...document, content: toMarkdown(read!.doc) }))),
+        );
+      }),
+    );
   const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
     runtime.runPromise(
       Effect.gen(function* () {
@@ -2381,7 +2394,9 @@ describe("conversation documents", () => {
         const detail = await runtime.runPromise(
           loadConversationDetail(seed.userId, seed.conversation.id),
         );
-        expect(document!.answerMessageId).toBe(detail.messages.at(-1)?.id);
+        expect(detail.documents).toEqual([
+          expect.objectContaining({ id: document!.id, messageId: detail.messages.at(-1)?.id }),
+        ]);
         expect(detail.messages.at(-1)?.status).toBe("complete");
         expect(detail.toolCalls.map((call) => call.arguments)).toEqual([{}, {}]);
         expect(detail.toolCalls.map((call) => call.result)).toEqual([
@@ -3338,7 +3353,7 @@ describe("conversation documents", () => {
     }
   });
 
-  it("keeps an answer's document through a retry that asks to keep it", async () => {
+  it("takes a retried answer's document out of the chat and keeps it in the library", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;
     authoringScript = (input) => {
@@ -3354,7 +3369,6 @@ describe("conversation documents", () => {
       const sent = await send(seed);
       await settle(sent.assistantMessageId);
       const [created] = await documentsOf(seed);
-      expect(created!.answerMessageId).toBe(sent.assistantMessageId);
       authoringScript = () => reply();
       await runtime.runPromise(
         Effect.flatMap(ChatService, (service) =>
@@ -3362,32 +3376,25 @@ describe("conversation documents", () => {
             userId: seed.userId,
             conversationId: seed.conversation.id,
             messageId: sent.assistantMessageId,
-            keepDocuments: true,
           }),
         ),
       );
       await settle(sent.assistantMessageId);
-      expect(await documentsOf(seed)).toEqual([
-        expect.objectContaining({ id: created!.id, answerMessageId: null, content: CHECKLIST }),
-      ]);
+      // The new attempt starts clean: neither the reader nor the model meets the old one here.
+      expect(await documentsOf(seed)).toEqual([]);
       const detail = await runtime.runPromise(
         loadConversationDetail(seed.userId, seed.conversation.id),
       );
-      // Still placed under the answer, and no longer named as a rewind's loss.
-      expect(detail.documents).toEqual([
-        {
-          id: created!.id,
-          title: "Release checklist",
-          messageId: sent.assistantMessageId,
-          kept: true,
-        },
+      expect(detail.documents).toEqual([]);
+      expect(await libraryOf(seed)).toEqual([
+        expect.objectContaining({ id: created!.id, content: CHECKLIST }),
       ]);
     } finally {
       authoringScript = null;
     }
   });
 
-  it("adds a document the message names to the chat, under its answer, and keeps it", async () => {
+  it("adds a document the message names to the chat, under its answer", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;
     authoringScript = (input) => {
@@ -3422,17 +3429,10 @@ describe("conversation documents", () => {
         loadConversationDetail(seed.userId, other.conversationId),
       );
       expect(detail.documents).toEqual([
-        {
-          id: created!.id,
-          title: "Release checklist",
-          messageId: other.assistantMessageId,
-          kept: true,
-        },
+        { id: created!.id, title: "Release checklist", messageId: other.assistantMessageId },
       ]);
-      // Still in the chat it was made in, and no longer tied to that answer.
-      expect(await documentsOf(seed)).toEqual([
-        expect.objectContaining({ id: created!.id, answerMessageId: null }),
-      ]);
+      // Still in the chat it was made in.
+      expect(await documentsOf(seed)).toEqual([expect.objectContaining({ id: created!.id })]);
     } finally {
       authoringScript = null;
     }
@@ -3491,9 +3491,12 @@ describe("conversation documents", () => {
       const assistantMessageId = await runtime.runPromise(Deferred.await(retried));
       expect(assistantMessageId).toBe(sent.assistantMessageId);
       await settle(assistantMessageId);
-      // Retrying the answer discards what that answer created. The stale edit
-      // is fenced, and the fresh answer did not create a replacement.
+      // The document stays the person's through the retry, the stale edit is
+      // fenced, and the fresh answer did not create a second one.
       expect(await documentsOf(seed)).toEqual([]);
+      expect(await libraryOf(seed)).toEqual([
+        expect.objectContaining({ title: "Release checklist", content: CHECKLIST }),
+      ]);
       const message = await runtime.runPromise(
         ChatRepo.use((repo) => repo.getMessage(assistantMessageId)),
       );

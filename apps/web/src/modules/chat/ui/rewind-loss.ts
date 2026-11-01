@@ -1,7 +1,7 @@
 import { m } from "~/paraglide/messages.js";
 import { getLocale } from "~/paraglide/runtime.js";
 
-type LossKind = "document" | "agentDraft" | "scheduleDraft" | "workingFile";
+type LossKind = "agentDraft" | "scheduleDraft" | "workingFile";
 
 /** Each kind's own sentences, since its noun's gender changes the German around it. */
 const WORDS: Record<
@@ -12,11 +12,6 @@ const WORDS: Record<
     count: (inputs: { count: number }) => string;
   }
 > = {
-  document: {
-    named: m.chat_loss_document_named,
-    untitled: m.chat_loss_document_untitled,
-    count: m.chat_loss_document_count,
-  },
   agentDraft: {
     named: m.chat_loss_agent_draft_named,
     untitled: m.chat_loss_agent_draft_untitled,
@@ -35,7 +30,7 @@ const WORDS: Record<
 };
 
 /**
- * " The document “Plan” will also be deleted." for one casualty; counts per
+ * " The draft “Plan” will also be deleted." for one casualty; counts per
  * kind for several. Empty when a rewind takes nothing of the sort.
  */
 export function lossSentence(items: ReadonlyArray<{ kind: LossKind; name: string }>) {

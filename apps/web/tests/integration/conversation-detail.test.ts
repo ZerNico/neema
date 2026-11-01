@@ -373,12 +373,12 @@ describe("loadConversationDetail", () => {
     const expectedDocuments =
       firstId.localeCompare(secondId) < 0
         ? [
-            { id: firstId, title: "First", messageId: null, kept: true },
-            { id: secondId, title: "Second", messageId: null, kept: true },
+            { id: firstId, title: "First", messageId: null },
+            { id: secondId, title: "Second", messageId: null },
           ]
         : [
-            { id: secondId, title: "Second", messageId: null, kept: true },
-            { id: firstId, title: "First", messageId: null, kept: true },
+            { id: secondId, title: "Second", messageId: null },
+            { id: firstId, title: "First", messageId: null },
           ];
     expect(detail.documents).toEqual(expectedDocuments);
     expect(JSON.stringify(detail)).not.toContain("PRIVATE FIRST SOURCE");

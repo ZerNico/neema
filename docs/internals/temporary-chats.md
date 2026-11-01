@@ -1,7 +1,7 @@
 # Temporary chats
 
 A temporary chat is an ordinary conversation with `conversations.temporary` set when it was
-created. Everything else about it (agents, knowledge, research, documents) is unchanged.
+created. Everything else about it (agents, knowledge, research) is unchanged.
 Three things differ: nothing lists it, it has no memory (nor the [history tools](history-tools.md),
 which read past chats as memory does and are never offered in it), and it is deleted a day after
 its last activity. **Keep** clears the flag. Nothing sets the flag after creation, and that is the rule
@@ -33,6 +33,10 @@ the rest of this page depends on.
   while the schedule still pointed at it.
 - A branch copies the flag: a copy of a temporary chat must not outlive it in the sidebar.
   Its day starts when the branch is created.
+- Documents made in a temporary chat and used nowhere else stay out of the library and go
+  with the chat's purge, since every other document outlives its chat. Keeping the chat,
+  carrying one into another chat, sharing or publishing it keeps it.
+  See [documents](documents.md).
 - A temporary chat never joins a [project](projects.md): a check constraint refuses the pair,
   since a project lists its chats and remembers what they settle.
 - A temporary chat may have a computer. The sweep purges it like any chat, and the purge tells

@@ -349,7 +349,6 @@ export const retryMessage = createServerFn({ method: "POST" })
           imageModelId: data.imageModelId,
           timeZone: data.timeZone,
           openDocument: data.openDocument,
-          keepDocuments: data.keepDocuments,
         }),
       ),
       usedBefore,

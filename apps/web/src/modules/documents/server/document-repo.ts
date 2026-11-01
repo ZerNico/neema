@@ -12,14 +12,10 @@ import {
   documentSteps,
   documentUserGrants,
   groupMembers,
-  messages,
   projects,
   user,
 } from "~/db/schema/index.ts";
-import {
-  ownedConversation,
-  ownedConversationById,
-} from "~/modules/chat/server/owned-conversation.ts";
+import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -58,9 +54,7 @@ const grantedSql = (userId: string, editor: boolean) => sql`(
 /**
  * The reader's standing on the document in scope: a person's document is its
  * owner's and whoever it is shared with, the highest grant winning; a
- * project's follows the project role. One still tied to its answer is
- * reachable only while that answer's chat is, so a deleted chat's documents
- * wait out its grace hidden with it. Null means no access, which is also
+ * project's follows the project role. Null means no access, which is also
  * every document while the documents feature is off for them.
  */
 export const documentAccessSql = (userId: string) => sql<ProjectRole | null>`(case
@@ -68,24 +62,35 @@ export const documentAccessSql = (userId: string) => sql<ProjectRole | null>`(ca
   when ${documents.projectId} is not null then (
     select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId}
   )
-  when ${documents.userId} = ${userId} then (case
-    when ${documents.answerMessageId} is null then 'owner'
-    else (
-      select 'owner' from ${messages}
-      join ${conversations} on ${conversations.id} = ${messages.conversationId}
-      where ${messages.id} = ${documents.answerMessageId} and ${ownedConversation(userId)}
-    )
-  end)
-  when ${documents.answerMessageId} is not null then null
+  when ${documents.userId} = ${userId} then 'owner'
   when ${grantedSql(userId, true)} then 'editor'
   when ${grantedSql(userId, false)} then 'viewer'
 end)`;
 const accessSql = documentAccessSql;
-/** The chat it was made in: its first link, which only a move into a project removes. */
-export const documentOriginSql = sql<string | null>`(
-  select ${conversationDocuments.conversationId} from ${conversationDocuments}
-  where ${conversationDocuments.documentId} = ${documents.id}
-  order by ${conversationDocuments.createdAt} limit 1
+/**
+ * Made in a temporary chat and used nowhere else: no other chat shows it,
+ * nobody else has it and it has no public link. Only such a document is left
+ * out of the library and goes with that chat.
+ */
+export const temporaryOnlySql = sql<boolean>`(
+  exists (
+    select 1 from ${conversations}
+    where ${conversations.id} = ${documents.originConversationId} and ${conversations.temporary}
+  )
+  and not exists (
+    select 1 from ${conversationDocuments}
+    where ${conversationDocuments.documentId} = ${documents.id}
+      and ${conversationDocuments.conversationId} <> ${documents.originConversationId}
+  )
+  and not exists (
+    select 1 from ${documentUserGrants} where ${documentUserGrants.documentId} = ${documents.id}
+  )
+  and not exists (
+    select 1 from ${documentGroupGrants} where ${documentGroupGrants.documentId} = ${documents.id}
+  )
+  and not exists (
+    select 1 from ${documentPublicLinks} where ${documentPublicLinks.documentId} = ${documents.id}
+  )
 )`;
 const documentColumns = (userId: string) => ({
   id: documents.id,
@@ -93,9 +98,8 @@ const documentColumns = (userId: string) => ({
   // Another's chat is theirs alone, even by id.
   conversationId: sql<
     string | null
-  >`(case when ${documents.userId} = ${userId} then ${documentOriginSql} end)`,
+  >`(case when ${documents.userId} = ${userId} then ${documents.originConversationId} end)`,
   projectId: documents.projectId,
-  answerMessageId: documents.answerMessageId,
   title: documents.title,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
@@ -104,7 +108,7 @@ const documentColumns = (userId: string) => ({
   updatedAt: documents.updatedAt,
   access: accessSql(userId),
 });
-type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
+type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision" | "originConversationId"> & {
   conversationId: string | null;
   access: ProjectRole | null;
 };
@@ -136,13 +140,14 @@ export type ImageOwner = DocumentOwner | { userId: string };
 export class DocumentRepo extends Context.Service<
   DocumentRepo,
   {
-    /** Caller holds the owner's lock (the conversation's, or the project's row). */
+    /** Caller holds the owner's lock (the conversation's, or the project's row); a person's own needs none. */
     create(
       tx: DbTx,
       userId: string,
-      owner: DocumentOwner,
+      owner: ImageOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
-        answerMessageId?: string | null;
+        /** The answer whose card shows it in its chat. */
+        messageId?: string | null;
         /** Given when the snapshot already names the document, as an imported image's address does. */
         id?: string;
       },
@@ -218,9 +223,7 @@ export class DocumentRepo extends Context.Service<
     ): Effect.Effect<void, DocumentNotAvailable>;
     /** Oldest first, with each author's name. */
     comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
-    /** Unties a document from its answer, so it outlives it. Caller holds the document's lock. */
-    keep(tx: DbTx, documentId: string): Effect.Effect<void>;
-    /** Hands a chat's document to a project. Caller holds the document's lock. */
+    /** Hands a person's document to a project. Caller holds the document's lock. */
     moveToProject(tx: DbTx, documentId: string, projectId: string): Effect.Effect<void>;
     /** A person's display name, for the cursor others see. */
     userName(userId: string): Effect.Effect<string>;
@@ -288,17 +291,16 @@ export class DocumentRepo extends Context.Service<
         lockConversation,
         create: Effect.fn("DocumentRepo.create")(function* (tx, userId, owner, values) {
           const id = values.id ?? uuidv7();
-          const answerMessageId = values.answerMessageId ?? null;
           // The caller holds the chat's lock as its owner, so a chat's document is the caller's.
           yield* tx
             .insert(documents)
             .values({
               id,
-              ...("conversationId" in owner ? { userId } : { projectId: owner.projectId }),
+              ...("projectId" in owner ? { projectId: owner.projectId } : { userId }),
+              ...("conversationId" in owner ? { originConversationId: owner.conversationId } : {}),
               title: values.title,
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
-              answerMessageId,
               snapshot: values.snapshot,
               snapshotRevision: 0,
             })
@@ -309,7 +311,7 @@ export class DocumentRepo extends Context.Service<
               .values({
                 conversationId: owner.conversationId,
                 documentId: id,
-                messageId: answerMessageId,
+                messageId: values.messageId ?? null,
               })
               .pipe(Effect.orDie);
           return (yield* get(userId, id, tx))!;
@@ -365,13 +367,16 @@ export class DocumentRepo extends Context.Service<
               )`,
               conversationTitle: sql<string | null>`(
                 select ${conversations.title} from ${conversations}
-                where ${conversations.id} = ${documentOriginSql} and ${conversations.deletedAt} is null
+                where ${conversations.id} = ${documents.originConversationId}
+                  and ${conversations.userId} = ${documents.userId}
+                  and ${conversations.deletedAt} is null
               )`,
             })
             .from(documents)
             .where(
               and(
                 isNull(documents.projectId),
+                sql`not ${temporaryOnlySql}`,
                 or(eq(documents.userId, userId), grantedSql(userId, false)),
                 isNotNull(accessSql(userId)),
               ),
@@ -495,13 +500,6 @@ export class DocumentRepo extends Context.Service<
         remove: Effect.fn("DocumentRepo.remove")(function* (tx, documentId) {
           yield* tx.delete(documents).where(eq(documents.id, documentId)).pipe(Effect.orDie);
         }),
-        keep: Effect.fn("DocumentRepo.keep")(function* (tx, documentId) {
-          yield* tx
-            .update(documents)
-            .set({ answerMessageId: null })
-            .where(eq(documents.id, documentId))
-            .pipe(Effect.orDie);
-        }),
         moveToProject: Effect.fn("DocumentRepo.moveToProject")(
           function* (tx, documentId, projectId) {
             yield* tx
@@ -509,7 +507,6 @@ export class DocumentRepo extends Context.Service<
               .set({
                 projectId,
                 userId: null,
-                answerMessageId: null,
                 updatedAt: new Date(),
               })
               .where(eq(documents.id, documentId))

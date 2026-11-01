@@ -307,7 +307,6 @@ export const publicLinkTarget = (tx: Reader, token: string) =>
         eq(documentPublicLinks.token, token),
         isNotNull(documents.userId),
         isNull(documents.projectId),
-        isNull(documents.answerMessageId),
         capabilityAllowedSql(documents.userId, "documents"),
         capabilityAllowedSql(documents.userId, "publicLinks"),
       ),

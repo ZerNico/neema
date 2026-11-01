@@ -7,18 +7,9 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   /** Style the confirm button as destructive (default true, since deletes are the common case). */
   destructive?: boolean;
-  alternativeLabel?: string | undefined;
 }
 
-/**
- * With `alternativeLabel`, a second way to go ahead sits beside confirm and
- * answers `"alternative"`.
- */
-export interface ConfirmFn {
-  (options: ConfirmOptions & { alternativeLabel: string | undefined }): Promise<ConfirmAnswer>;
-  (options: ConfirmOptions): Promise<boolean>;
-}
-export type ConfirmAnswer = boolean | "alternative";
+export type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
 
 export const ConfirmContext = createContext<ConfirmFn | null>(null);
 

@@ -347,7 +347,7 @@ const liveSpot = (doc: Node, live: LiveEdit) => {
   return { parent: range.parent, startIndex: index, endIndex: index, from: at, to: at };
 };
 
-/** Keeping, moving, deleting and sharing a person's document are its owner's alone. */
+/** Moving, deleting and sharing a person's document are its owner's alone. */
 const ownerOnly = (document: EditableDocument, userId: string) =>
   document.projectId === null && document.userId !== userId
     ? Effect.fail(new DocumentRejected({ reason: localized(m.documents_share_error_owner_only) }))
@@ -363,7 +363,7 @@ export class DocumentService extends Context.Service<
     remove(userId: string, documentId: string): Effect.Effect<void, DocumentError>;
     /** Who a person's document is shared with, for anyone who may read it. */
     sharing(userId: string, documentId: string): Effect.Effect<DocumentSharing, DocumentError>;
-    /** One change to who a person's document is shared with, by its owner; sharing keeps it. */
+    /** One change to who a person's document is shared with, by its owner. */
     share(
       userId: string,
       documentId: string,
@@ -373,11 +373,6 @@ export class DocumentService extends Context.Service<
     readPublic(token: string): Effect.Effect<PublicDocument | null>;
     /** Which document a public link still opens, for loading its images. */
     publicDocumentId(token: string): Effect.Effect<string | null>;
-    /**
-     * Unties a person's document from the answer that wrote it, so retrying
-     * or deleting that answer, or its chat, leaves it be.
-     */
-    keep(userId: string, documentId: string): Effect.Effect<EditableDocument, DocumentError>;
     /** A new title, by anyone who may edit the document. */
     rename(
       userId: string,
@@ -926,15 +921,16 @@ export class DocumentService extends Context.Service<
             CreateDocumentInput,
             localized(m.documents_error_invalid_document),
           )(input);
-          const owner = parsed.projectId
-            ? { projectId: parsed.projectId }
-            : parsed.conversationId
-              ? { conversationId: parsed.conversationId }
-              : null;
-          if (!owner || (parsed.projectId && parsed.conversationId))
+          if (parsed.projectId && parsed.conversationId)
             return yield* new DocumentRejected({
               reason: localized(m.documents_error_one_owner),
             });
+          // Neither names the place: it is the person's own, outside any chat.
+          const owner: ImageOwner = parsed.projectId
+            ? { projectId: parsed.projectId }
+            : parsed.conversationId
+              ? { conversationId: parsed.conversationId }
+              : { userId };
           const images = from?.images ?? [];
           const plan = yield* planImages(
             userId,
@@ -958,13 +954,12 @@ export class DocumentService extends Context.Service<
               yield* requireDocuments(userId, tx);
               if ("conversationId" in owner)
                 yield* documents.lockConversation(tx, userId, owner.conversationId);
-              else yield* lockProjectForEditing(tx, userId, owner.projectId);
+              else if ("projectId" in owner)
+                yield* lockProjectForEditing(tx, userId, owner.projectId);
               const created = yield* documents.create(tx, userId, owner, {
                 id,
                 title: parsed.title,
-                // Only a chat's document dies with the answer that made it.
-                answerMessageId:
-                  "conversationId" in owner ? (parsed.answerMessageId ?? null) : null,
+                messageId: parsed.messageId ?? null,
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: doc.toJSON() as Record<string, unknown>,
               });
@@ -1623,21 +1618,6 @@ export class DocumentService extends Context.Service<
         library: Effect.fn(function* (userId) {
           return yield* documents.library(userId);
         }),
-        keep: Effect.fn("DocumentService.keep")(function* (userId, documentId) {
-          const { document, changed } = yield* exclusive(documentId)(
-            transaction((tx) =>
-              Effect.gen(function* () {
-                const locked = yield* documents.lock(tx, userId, documentId);
-                yield* ownerOnly(locked, userId);
-                if (!locked.answerMessageId) return { document: locked, changed: false };
-                yield* documents.keep(tx, documentId);
-                return { document: { ...locked, answerMessageId: null }, changed: true };
-              }),
-            ),
-          );
-          if (changed) yield* documentChanged(userId, document);
-          return document;
-        }),
         remove: Effect.fn("DocumentService.remove")(function* (userId, documentId) {
           const removed = yield* exclusive(documentId)(
             transaction((tx) =>
@@ -1688,7 +1668,6 @@ export class DocumentService extends Context.Service<
                     reason: localized(m.documents_error_already_in_project),
                   });
                 yield* ownerOnly(locked, userId);
-                yield* documents.keep(tx, documentId);
                 return {
                   document: locked,
                   affected: yield* changeDocumentSharing(tx, userId, documentId, change),

@@ -104,12 +104,12 @@ export const documentImagePath = (documentId: string, attachmentId: string) =>
   `/api/documents/${encodeURIComponent(documentId)}/images/${encodeURIComponent(attachmentId)}`;
 /** One answer for every refused claim, so it never tells whether the upload exists. */
 export const IMAGE_REFUSED = localized(m.documents_error_image_refused);
-/** Exactly one place: a chat, which its owner then owns, or a project. */
+/** At most one place: a chat, which its owner then owns, or a project; neither is the person's own. */
 export const CreateDocumentInput = Schema.Struct({
   conversationId: Schema.optionalKey(EntityId),
   projectId: Schema.optionalKey(EntityId),
-  /** A chat document's answer; rewinding past it deletes the document until it is kept. */
-  answerMessageId: Schema.optionalKey(EntityId),
+  /** The answer whose card shows a chat's document. */
+  messageId: Schema.optionalKey(EntityId),
   title: DocumentTitle,
   content: Schema.String,
   /** Planned sections after the content, each one placeholder's intent. */
@@ -234,8 +234,6 @@ export interface EditableDocument {
   /** The chat it was made in, while that chat still shows it. */
   conversationId: string | null;
   projectId: string | null;
-  /** The answer it still goes with; null once kept, and for a project's. */
-  answerMessageId?: string | null;
   title: string;
   revision: number;
   lastEditedBy: "user" | "model";

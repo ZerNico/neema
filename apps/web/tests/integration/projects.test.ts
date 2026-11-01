@@ -635,7 +635,7 @@ describe("project documents", () => {
         .values({ id: fence, conversationId, role: "assistant", status: "complete" }),
     );
     const theirs = await docs((s) =>
-      s.create(owner, { conversationId, answerMessageId: fence, title: "Plan", content: "x" }),
+      s.create(owner, { conversationId, messageId: fence, title: "Plan", content: "x" }),
     ).then((r) => r.document);
     const moved = await docs((s) =>
       s.moveToProject(owner, theirs.id, project.id, () => Effect.void),
@@ -644,7 +644,6 @@ describe("project documents", () => {
       projectId: project.id,
       userId: null,
       conversationId: null,
-      answerMessageId: null,
     });
     expect((await docs((s) => s.get(viewer, theirs.id)))!.canEdit).toBe(false);
     // Once the project's, it does not move again.

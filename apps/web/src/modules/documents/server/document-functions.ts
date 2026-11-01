@@ -198,17 +198,6 @@ export const listDocumentLibrary = createServerFn({ method: "GET" })
       Effect.flatMap(DocumentService, (service) => service.library(context.session.user.id)),
     ),
   );
-/** Unties a person's document from the answer that wrote it. */
-export const keepDocument = createServerFn({ method: "POST" })
-  .middleware([requireSession])
-  .validator(Schema.toStandardSchemaV1(DocumentIdInput))
-  .handler(({ context, data }) =>
-    runServerFn(
-      Effect.flatMap(DocumentService, (service) =>
-        service.keep(context.session.user.id, data.documentId),
-      ),
-    ),
-  );
 export const moveDocumentToProject = createServerFn({ method: "POST" })
   .middleware([requireSession])
   .validator(Schema.toStandardSchemaV1(MoveDocumentInput))

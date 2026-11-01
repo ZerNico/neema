@@ -7,9 +7,10 @@ import { uuidv7 } from "uuidv7";
 import {
   conversationAgents,
   conversationCompactionCheckpoints,
+  conversationDocuments,
   conversationDrafts,
-  documents,
   conversations,
+  documents,
   conversationQueueEntries,
   messageChunks,
   messageCompactionEvents,
@@ -558,6 +559,28 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 )
                 .pipe(Effect.orDie);
             }
+            // What the rewound answers made leaves the chat, so neither the
+            // reader nor the next attempt meets it here. It stays its owner's,
+            // in the library. Before the references below link anything.
+            yield* tx
+              .delete(conversationDocuments)
+              .where(
+                and(
+                  eq(conversationDocuments.conversationId, target.conversationId),
+                  inArray(conversationDocuments.messageId, [
+                    input.messageId,
+                    ...input.deleteMessageIds,
+                  ]),
+                  inArray(
+                    conversationDocuments.documentId,
+                    tx
+                      .select({ id: documents.id })
+                      .from(documents)
+                      .where(eq(documents.originConversationId, target.conversationId)),
+                  ),
+                ),
+              )
+              .pipe(Effect.orDie);
             // Before the deletes, so neither they nor the retry below take them.
             if (edited)
               yield* linkReferencedDocuments(tx, {
@@ -566,14 +589,6 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 messageId: input.messageId,
                 content: edited.content,
               });
-            if (input.keepDocuments)
-              yield* tx
-                .update(documents)
-                .set({ answerMessageId: null })
-                .where(
-                  inArray(documents.answerMessageId, [input.messageId, ...input.deleteMessageIds]),
-                )
-                .pipe(Effect.orDie);
             if (input.deleteMessageIds.length > 0) {
               orphanedKeys.push(
                 ...(yield* attachments.releaseForMessages(tx, input.deleteMessageIds)),
@@ -591,14 +606,10 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
               .delete(messageToolCalls)
               .where(eq(messageToolCalls.messageId, input.messageId))
               .pipe(Effect.orDie);
-            // This answer is being generated again, so what it produced goes
-            // with it. Messages that are deleted outright take their
-            // documents and drafts through the foreign key instead; retry
-            // keeps the row id, so those have to be removed explicitly.
-            yield* tx
-              .delete(documents)
-              .where(eq(documents.answerMessageId, input.messageId))
-              .pipe(Effect.orDie);
+            // This answer is being generated again, so the drafts it made go
+            // with it. Messages that are deleted outright take theirs through
+            // the foreign key instead; retry keeps the row id, so those have to
+            // be removed explicitly.
             yield* tx
               .delete(conversationDrafts)
               .where(eq(conversationDrafts.createdByMessageId, input.messageId))

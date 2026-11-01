@@ -10,12 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/ui/primitives/alert-dialog";
-import {
-  ConfirmContext,
-  type ConfirmAnswer,
-  type ConfirmFn,
-  type ConfirmOptions,
-} from "./confirm-context.ts";
+import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "./confirm-context.ts";
 import { m } from "~/paraglide/messages.js";
 
 /**
@@ -24,25 +19,24 @@ import { m } from "~/paraglide/messages.js";
  *   const confirm = useConfirm()
  *   if (await confirm({ title: "Delete model?" })) { ... }
  *
- * Resolves true on confirm, false on cancel or dismiss, and "alternative" on
- * the second way ahead when the options name one. A new confirmation
+ * Resolves true on confirm, false on cancel or dismiss. A new confirmation
  * dismisses the previous one as false. Built on AlertDialog: outside clicks
  * don't dismiss, only Escape or an answer.
  */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
-  const resolveRef = useRef<((answer: ConfirmAnswer) => void) | null>(null);
+  const resolveRef = useRef<((answer: boolean) => void) | null>(null);
 
-  const confirm = useCallback((opts: ConfirmOptions) => {
-    return new Promise<ConfirmAnswer>((resolve) => {
+  const confirm: ConfirmFn = useCallback((opts: ConfirmOptions) => {
+    return new Promise<boolean>((resolve) => {
       // A confirm opened while another is pending dismisses the previous one.
       resolveRef.current?.(false);
       resolveRef.current = resolve;
       setOptions(opts);
     });
-  }, []) as ConfirmFn;
+  }, []);
 
-  const settle = useCallback((answer: ConfirmAnswer) => {
+  const settle = useCallback((answer: boolean) => {
     resolveRef.current?.(answer);
     resolveRef.current = null;
     setOptions(null);
@@ -61,11 +55,6 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{options?.cancelLabel ?? m.common_cancel()}</AlertDialogCancel>
-            {options?.alternativeLabel ? (
-              <AlertDialogAction variant="outline" onClick={() => settle("alternative")}>
-                {options.alternativeLabel}
-              </AlertDialogAction>
-            ) : null}
             <AlertDialogAction
               variant={(options?.destructive ?? true) ? "destructive" : "default"}
               onClick={() => settle(true)}

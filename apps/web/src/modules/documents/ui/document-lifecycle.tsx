@@ -1,5 +1,4 @@
 import {
-  Archive02Icon,
   Delete02Icon,
   FolderAddIcon,
   UserGroupIcon,
@@ -14,16 +13,9 @@ import { useConfirm } from "~/ui/confirm-context.ts";
 import { toastError } from "~/ui/error-toast.ts";
 import { DropdownMenuItem } from "~/ui/primitives/dropdown-menu";
 import type { EditableDocument } from "../schema.ts";
-import {
-  deleteDocument,
-  keepDocument,
-  moveDocumentToProject,
-} from "../server/document-functions.ts";
+import { deleteDocument, moveDocumentToProject } from "../server/document-functions.ts";
 
-type Lifecycle = Pick<
-  EditableDocument,
-  "id" | "title" | "userId" | "projectId" | "answerMessageId" | "canEdit"
->;
+type Lifecycle = Pick<EditableDocument, "id" | "title" | "userId" | "projectId" | "canEdit">;
 
 /** Lists showing the document; the sync event follows, this is only sooner. */
 const refresh = (queryClient: ReturnType<typeof useQueryClient>, documentId: string) =>
@@ -35,7 +27,7 @@ const refresh = (queryClient: ReturnType<typeof useQueryClient>, documentId: str
   ]);
 
 /**
- * Share, keep, move into the chat's project and delete. A person's document
+ * Share, move into the chat's project and delete. A person's document
  * is its owner's to change, though anyone reading it sees who else does; a
  * project's may be deleted by anyone who may edit it. `onShare` opens the
  * dialog, which outlives the menu.
@@ -51,14 +43,6 @@ export function DocumentLifecycleItems({
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const project = useWritableChatProject();
-  const keep = useMutation({
-    mutationFn: () => keepDocument({ data: { documentId: document.id } }),
-    onSuccess: () => {
-      toast.success(m.documents_keep_done());
-      return refresh(queryClient, document.id);
-    },
-    onError: (error) => toastError(m.documents_keep_failed(), error),
-  });
   const move = useMutation({
     mutationFn: (projectId: string) =>
       moveDocumentToProject({ data: { documentId: document.id, projectId } }),
@@ -81,12 +65,6 @@ export function DocumentLifecycleItems({
         <DropdownMenuItem onClick={onShare}>
           <HugeiconsIcon icon={UserGroupIcon} strokeWidth={2} />
           {m.documents_share()}
-        </DropdownMenuItem>
-      ) : null}
-      {mine && document.answerMessageId ? (
-        <DropdownMenuItem disabled={keep.isPending} onClick={() => keep.mutate()}>
-          <HugeiconsIcon icon={Archive02Icon} strokeWidth={2} />
-          {m.documents_keep()}
         </DropdownMenuItem>
       ) : null}
       {mine && project ? (
