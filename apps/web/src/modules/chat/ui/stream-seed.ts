@@ -8,6 +8,7 @@ import {
   type CompactionActivity,
   type ToolActivity,
 } from "../client/use-message-stream.ts";
+import { reasoningRoundsOf } from "../schema.ts";
 import type { AssistantSteer } from "./assistant-body.ts";
 import type { ConversationData } from "./conversation-window.ts";
 import { epoch, timedActivity, toCompactionActivity } from "./stored-activities.ts";
@@ -64,6 +65,7 @@ export function streamSeed(
     text,
     reasoning,
     reasoningSeen: reasoningChunks.length > 0,
+    reasoningRounds: reasoningRoundsOf(data.pendingChunks),
     tools,
     compactions,
     lookups: lookupsOf(streamingMessage.assistantOutput),

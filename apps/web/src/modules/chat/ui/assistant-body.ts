@@ -17,6 +17,7 @@ import type {
 import { isOfficeActivity } from "../client/use-message-stream.ts";
 import { isBrowserTool } from "~/modules/browser/tool-schema.ts";
 import { scanUiFences } from "~/modules/genui/fences.ts";
+import type { ReasoningRound } from "../schema.ts";
 
 /**
  * A message the person steered into this answer while it ran. It belongs to
@@ -35,7 +36,17 @@ export interface AssistantSteer {
   queueEntryId?: string;
 }
 
+/** One round's reasoning: a slice of the answer's reasoning text. */
+interface ReasoningSlice {
+  turnIndex: number;
+  textOffset: number;
+  start: number;
+  /** Where the next round's begins; open while this one may still grow. */
+  end?: number;
+}
+
 type PositionedActivity =
+  | { kind: "reasoning"; activity: ReasoningSlice }
   | { kind: "file"; activity: AssistantFile }
   | { kind: "tool"; activity: BodyToolActivity }
   | { kind: "compaction"; activity: CompactionActivity }
@@ -46,8 +57,8 @@ type BodyToolActivity = Exclude<ToolActivity, ToolLoadActivity>;
 
 export type AssistantBodyPart =
   | { kind: "file"; key: string; file: AssistantFile }
-  /** The answer's reasoning, drawn as the first step of the work it leads. */
-  | { kind: "reasoning"; key: string }
+  /** Reasoning, `start` to `end` of the answer's: one round's, or all of an older answer's. */
+  | { kind: "reasoning"; key: string; start: number; end?: number }
   | WorkPart
   | {
       kind: "text";
@@ -222,13 +233,28 @@ const placeWorkingFiles = (parts: ReadonlyArray<AssistantBodyPart>): AssistantBo
 
 const turnOf = (item: PositionedActivity) =>
   item.kind !== "compaction" ? (item.activity.turnIndex ?? 0) : item.activity.beforeTurnIndex;
-const orderOf = (item: PositionedActivity) =>
-  item.kind === "compaction"
-    ? item.activity.passIndex
-    : // Claimed only once its round's results are terminal: after all of them.
-      item.kind === "steer"
-      ? Number.MAX_SAFE_INTEGER
-      : (item.activity.callIndex ?? 0);
+const orderOf = (item: PositionedActivity) => {
+  if (item.kind === "compaction") return item.activity.passIndex;
+  // A round thinks before it calls anything.
+  if (item.kind === "reasoning") return -1;
+  // Claimed only once its round's results are terminal: after all of them.
+  if (item.kind === "steer") return Number.MAX_SAFE_INTEGER;
+  return item.activity.callIndex ?? 0;
+};
+
+/**
+ * Each round's reasoning as its own slice. A round that showed nothing (the
+ * provider hid it) is dropped once a later one began, or once the answer ended.
+ */
+const reasoningSlices = (
+  rounds: ReadonlyArray<ReasoningRound>,
+  length: number | undefined,
+): ReasoningSlice[] =>
+  rounds.flatMap((round, index) => {
+    const end = rounds[index + 1]?.start ?? length;
+    if (end === round.start) return [];
+    return [end === undefined ? round : { ...round, end }];
+  });
 
 /** Original UTF-16 offsets, never rendered markdown lengths or clamped anchors. */
 export function projectAssistantBody({
@@ -239,7 +265,7 @@ export function projectAssistantBody({
   compactions,
   files = [],
   steers = [],
-  reasoning = false,
+  reasoning,
 }: {
   content: string;
   rawTextLength?: number;
@@ -248,8 +274,14 @@ export function projectAssistantBody({
   compactions: CompactionActivity[];
   files?: ReadonlyArray<AssistantFile>;
   steers?: ReadonlyArray<AssistantSteer>;
-  /** Whether the answer reasoned; its one block leads the first run of work. */
-  reasoning?: boolean;
+  reasoning?: {
+    /** A reasoning phase happened, even one whose content is hidden. */
+    seen: boolean;
+    /** Null on an answer from before rounds were kept: one block leads its work. */
+    rounds: ReadonlyArray<ReasoningRound> | null | undefined;
+    /** Known once the answer stopped growing. */
+    length?: number;
+  };
 }): { chronological: boolean; parts: AssistantBodyPart[] } {
   const researchRuns = new Set(
     tools.flatMap((activity) =>
@@ -292,6 +324,12 @@ export function projectAssistantBody({
       .filter((activity) => !(activity.runId && researchRuns.has(activity.runId)))
       .map((activity): PositionedActivity => ({ kind: "compaction", activity })),
     ...steers.map((activity): PositionedActivity => ({ kind: "steer", activity })),
+    ...(reasoning?.rounds?.length
+      ? reasoningSlices(reasoning.rounds, reasoning.length).map((activity): PositionedActivity => ({
+          kind: "reasoning",
+          activity,
+        }))
+      : []),
   ];
   // Logical ordering is authoritative for equal offsets and legacy messages.
   // oxlint-disable-next-line no-array-sort -- fresh array
@@ -320,9 +358,29 @@ export function projectAssistantBody({
     return true;
   });
 
-  const parts: AssistantBodyPart[] = reasoning ? [{ kind: "reasoning", key: "reasoning" }] : [];
+  // An older answer's reasoning, or what a copy of one had before its rounds.
+  const firstRound = reasoning?.rounds?.[0]?.start;
+  const parts: AssistantBodyPart[] =
+    reasoning?.seen && firstRound !== 0
+      ? [
+          {
+            kind: "reasoning",
+            key: "reasoning",
+            start: 0,
+            ...(firstRound === undefined ? {} : { end: firstRound }),
+          },
+        ]
+      : [];
   const appendActivity = (item: PositionedActivity) => {
-    if (item.kind === "file") {
+    if (item.kind === "reasoning") {
+      const { turnIndex, start, end } = item.activity;
+      parts.push({
+        kind: "reasoning",
+        key: `reasoning-${turnIndex}`,
+        start,
+        ...(end === undefined ? {} : { end }),
+      });
+    } else if (item.kind === "file") {
       parts.push({
         kind: "file",
         key: `file-${item.activity.attachment.id}`,

@@ -19,6 +19,7 @@ import type { RepoContext } from "./context.ts";
 import type { DbTx } from "~/server/db.ts";
 import { storedModelResult } from "../stored-arguments.ts";
 import type { ChatRepo } from "../repo.ts";
+import { reasoningRoundsOf } from "../../schema.ts";
 
 // How long a streaming row may go without a heartbeat before it is treated as
 // abandoned. Flushes run every 250ms, so this survives a slow provider call
@@ -159,6 +160,7 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
                   status: "error",
                   content: joined("text"),
                   reasoning: joined("reasoning"),
+                  reasoningRounds: reasoningRoundsOf(chunks),
                   error: { tag: "GenerationFailed", message: INTERRUPTED_MESSAGE },
                   completedAt: new Date(),
                 })
@@ -451,6 +453,7 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
               status: "error",
               content: joined("text"),
               reasoning: joined("reasoning"),
+              reasoningRounds: reasoningRoundsOf(chunks),
               error: { tag: "GenerationFailed", message: input.error },
               completedAt: new Date(),
             })
@@ -477,6 +480,7 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
               status: input.status,
               content: input.content,
               reasoning: input.reasoning ?? "",
+              reasoningRounds: input.reasoningRounds ?? [],
               usage: input.usage,
               error: input.error,
               completedAt: new Date(),

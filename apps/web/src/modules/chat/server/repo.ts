@@ -34,7 +34,12 @@ import {
 import { Context, Effect, Layer } from "effect";
 import { type AskUserParams, QuestionResponse } from "~/modules/tools/ask-user-schema.ts";
 import type { QueuedTurnInput } from "../queued-turn.ts";
-import { DELETED_CHAT_GRACE_SECONDS, TEMPORARY_CHAT_HOURS, type OpenDocument } from "../schema.ts";
+import {
+  DELETED_CHAT_GRACE_SECONDS,
+  TEMPORARY_CHAT_HOURS,
+  type OpenDocument,
+  type ReasoningRound,
+} from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import type { ResearchStore } from "./research/repo.ts";
 import { uuidv7 } from "uuidv7";
@@ -366,7 +371,15 @@ export type HistorySnapshot = ReadonlyArray<
   >
 >;
 
-export type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
+export type ChunkKind =
+  | "text"
+  | "reasoning"
+  | "reasoning-round"
+  | "tool"
+  | "compaction"
+  | "file"
+  | "steer"
+  | "writing";
 export type ChunkRow = { seq: number; kind: ChunkKind; delta: string };
 /** A persisted chunk with the time it was written, which a replay reports as its own. */
 export type StoredChunk = ChunkRow & { createdAt: Date };
@@ -944,6 +957,7 @@ export class ChatRepo extends Context.Service<
       status: "complete" | "error" | "aborted";
       content: string;
       reasoning?: string;
+      reasoningRounds?: ReadonlyArray<ReasoningRound>;
       usage?: {
         inputTokens?: number;
         outputTokens?: number;

@@ -27,7 +27,7 @@ const group = (...activities: ToolActivity[]): WorkPart => ({
   kind: "work",
   key: "work-1",
   steps: [
-    { kind: "reasoning", key: "reasoning" },
+    { kind: "reasoning", key: "reasoning", start: 0 },
     {
       kind: "web",
       key: "web-1",
@@ -103,12 +103,12 @@ describe("a run of work", () => {
     const read = call("r", { name: "read_url", targets: ["https://a.test", "https://b.test"] });
     expect(
       workSummary([
-        { kind: "reasoning", key: "r" },
+        { kind: "reasoning", key: "r", start: 0 },
         { kind: "web", key: "w", activities: [call("a"), read] as never },
         { kind: "compaction", key: "c", activity: {} as never },
       ]),
     ).toBe("Searched the web, read 2 pages and summarized earlier messages");
-    expect(workSummary([{ kind: "reasoning", key: "r" }])).toBe("Thought");
+    expect(workSummary([{ kind: "reasoning", key: "r", start: 0 }])).toBe("Thought");
   });
 
   it("keeps German nouns capitalised inside a summary and the first clause capitalised", () => {

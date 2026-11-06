@@ -4,6 +4,7 @@ import type { FileReferenceAliases } from "~/modules/chat/file-reference-aliases
 import type { ProviderReplay } from "~/modules/chat/server/provider-replay.ts";
 import type { AnswerOpening } from "~/modules/chat/server/answer-opening.ts";
 import type { QueuedTurnInput } from "~/modules/chat/queued-turn.ts";
+import type { ReasoningRound } from "~/modules/chat/schema.ts";
 import { desc, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
@@ -184,6 +185,9 @@ export const messages = pgTable(
     steerTurnIndex: integer("steer_turn_index"),
     // final assembled reasoning/thinking text; empty for non-reasoning models
     reasoning: text().notNull().default(""),
+    // Where each model round's reasoning begins; null on answers from before
+    // rounds were recorded, which draw their reasoning as one block.
+    reasoningRounds: jsonb("reasoning_rounds").$type<ReadonlyArray<ReasoningRound>>(),
     modelId: text("model_id").references(() => models.id, { onDelete: "set null" }),
     usage: jsonb().$type<{
       inputTokens?: number;
@@ -285,7 +289,18 @@ export const messageChunks = pgTable(
     // what the delta belongs to: the visible answer, the reasoning trace, or a
     // tool/compaction activity marker (JSON envelope in delta). Plain text
     // column, so a new marker kind is a TypeScript change only.
-    kind: text({ enum: ["text", "reasoning", "tool", "compaction", "file", "steer", "writing"] })
+    kind: text({
+      enum: [
+        "text",
+        "reasoning",
+        "reasoning-round",
+        "tool",
+        "compaction",
+        "file",
+        "steer",
+        "writing",
+      ],
+    })
       .notNull()
       .default("text"),
     delta: text().notNull(),

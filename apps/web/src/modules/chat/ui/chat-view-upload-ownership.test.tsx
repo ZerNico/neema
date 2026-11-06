@@ -141,6 +141,7 @@ const message = (id: string, role: "user" | "assistant", content: string) => ({
   status: "complete" as const,
   content,
   reasoning: "",
+  reasoningRounds: null,
   modelId: "m1",
   usage: null,
   generationId: null,

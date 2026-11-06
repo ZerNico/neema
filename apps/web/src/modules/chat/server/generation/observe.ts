@@ -438,14 +438,14 @@ export const observePart = (
         // The adapter writes encrypted reasoning as the text
         // "[REDACTED]"; the encrypted part still rides the
         // replay, so the reader gets the bare thinking marker.
-        sink.push("reasoning", part.delta === "[REDACTED]" ? "" : part.delta);
+        sink.pushReasoning(turn, part.delta === "[REDACTED]" ? "" : part.delta);
         if (sink.buffered() >= 16 || sink.awaitingFirstWords()) yield* sink.flush;
         return;
       }
       case "reasoning-start": {
         // Hidden-reasoning marker: an empty reasoning chunk lets
         // the UI show "Thinking…" even if no readable trace follows.
-        sink.push("reasoning", "");
+        sink.pushReasoning(turn, "");
         return;
       }
       case "tool-call": {

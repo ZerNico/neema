@@ -587,6 +587,86 @@ describe("conversational agent authoring", () => {
     return { ...seed, conversation };
   });
 
+  it("records where each round's reasoning begins, live and on the row", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    const thinking = (id: string, delta: string) => [
+      AiResponse.makePart("reasoning-start", { id }),
+      AiResponse.makePart("reasoning-delta", { id, delta }),
+      AiResponse.makePart("reasoning-end", { id }),
+    ];
+    let round = 0;
+    authoringScript = (input) => {
+      round += 1;
+      if (round === 1)
+        return authoringTool(
+          input,
+          "create_file",
+          { name: "notes.txt", content: "x" },
+          false,
+          thinking("r1", "First I write the file."),
+        );
+      return Stream.make(
+        ...thinking("r2", "Now I say so."),
+        AiResponse.makePart("text-delta", { id: "t", delta: "Done." }),
+        authoringFinish(),
+      );
+    };
+    try {
+      const { assistantMessageId } = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "existing", id: seed.conversation.id },
+            modelId: textModelId,
+            content: "Write a note.",
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await collectDraftTurn(assistantMessageId);
+      const { message, chunks } = await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          return {
+            message: yield* (yield* ChatRepo).getMessage(assistantMessageId),
+            chunks: yield* db
+              .select({ kind: messageChunks.kind, delta: messageChunks.delta })
+              .from(messageChunks)
+              .where(eq(messageChunks.messageId, assistantMessageId))
+              .orderBy(messageChunks.seq),
+          };
+        }),
+      );
+      const first = "First I write the file.";
+      const rounds = [
+        { turnIndex: 0, start: 0, textOffset: 0 },
+        { turnIndex: 1, start: first.length, textOffset: 0 },
+      ];
+      expect(message?.reasoning).toBe(`${first}Now I say so.`);
+      expect(message?.reasoningRounds).toEqual(rounds);
+      // The stream carries the same marks, each ahead of the reasoning it begins.
+      expect(
+        chunks.map((chunk) => chunk.kind).filter((kind) => kind.startsWith("reasoning")),
+      ).toEqual([
+        "reasoning-round",
+        "reasoning",
+        "reasoning",
+        "reasoning-round",
+        "reasoning",
+        "reasoning",
+      ]);
+      expect(
+        chunks.flatMap((chunk) =>
+          chunk.kind === "reasoning-round" ? [JSON.parse(chunk.delta) as unknown] : [],
+        ),
+      ).toEqual(rounds);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("writes a text file and delivers it as the answer's attachment", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;
@@ -5664,8 +5744,14 @@ describe("resumable streaming pipeline", () => {
           .where(eq(messageGenerationConfig.messageId, seed.assistant.id));
         yield* db.insert(messageChunks).values([
           { messageId: seed.assistant.id, seq: 1, kind: "text", delta: "partial " },
-          { messageId: seed.assistant.id, seq: 2, kind: "reasoning", delta: "thought" },
-          { messageId: seed.assistant.id, seq: 3, kind: "text", delta: "answer" },
+          {
+            messageId: seed.assistant.id,
+            seq: 2,
+            kind: "reasoning-round",
+            delta: JSON.stringify({ turnIndex: 0, start: 0, textOffset: 8 }),
+          },
+          { messageId: seed.assistant.id, seq: 3, kind: "reasoning", delta: "thought" },
+          { messageId: seed.assistant.id, seq: 4, kind: "text", delta: "answer" },
         ]);
         const runningTool = uuidv7();
         const completedTool = uuidv7();
@@ -5725,6 +5811,7 @@ describe("resumable streaming pipeline", () => {
       status: "error",
       content: "partial answer",
       reasoning: "thought",
+      reasoningRounds: [{ turnIndex: 0, start: 0, textOffset: 8 }],
     });
     expect(result.tools.map((call) => call.status)).toEqual(["error", "complete"]);
     expect(result.compactions.map((event) => event.status)).toEqual(["error"]);

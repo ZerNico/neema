@@ -69,4 +69,18 @@ describe("ReasoningBlock", () => {
     rerender(<ReasoningBlock reasoning="First thoughts" active />);
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
   });
+
+  it("folds one round's thought to a line in a work line, its newest line while it grows", () => {
+    const thought = "**Opening the inbox**\nThe inbox is open. I'll find Anna's mail.";
+    const { rerender } = render(<ReasoningBlock reasoning={thought} active inline />);
+    const line = () => screen.getByRole("button");
+    expect(line()).toHaveAttribute("aria-expanded", "false");
+    expect(line()).toHaveTextContent("The inbox is open. I'll find Anna's mail.");
+
+    rerender(<ReasoningBlock reasoning={thought} active={false} inline />);
+    expect(line()).toHaveTextContent(/^Opening the inbox$/);
+    act(() => line().click());
+    expect(line()).toHaveAttribute("aria-expanded", "true");
+    expect(document.body.textContent).toContain("I'll find Anna's mail.");
+  });
 });
