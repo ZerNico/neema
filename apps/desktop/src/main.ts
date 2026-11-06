@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   session,
   shell,
   Tray,
@@ -13,6 +14,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -43,7 +45,17 @@ import { guardWindowPermissions } from "./window-permissions.ts";
 import { makeConnectFlow } from "./connect-flow.ts";
 import { attachLoadRecovery } from "./load-recovery.ts";
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
-import { DesktopTheme, NoPayload, makeDesktopResponder, refusalReply } from "@chat/desktop-rpc";
+import {
+  APP_USE_PAUSE,
+  APP_USE_STATE,
+  APP_USE_UPDATE,
+  AppUseChat,
+  AppUsePause,
+  DesktopTheme,
+  NoPayload,
+  makeDesktopResponder,
+  refusalReply,
+} from "@chat/desktop-rpc";
 import { attachBrowserGuests } from "./browser/guests.ts";
 import { BROWSER_PROFILE_ARGUMENT } from "./browser/partitions.ts";
 import { browserProfile } from "./browser/profile.ts";
@@ -63,6 +75,10 @@ import { ComputerHost } from "./computer/host.ts";
 import { microsandbox } from "./computer/hypervisor.ts";
 import { SANDBOX_IMAGE, SANDBOX_INSECURE_REGISTRY } from "./computer/image.ts";
 import { computerDialogs } from "./computer/dialogs.ts";
+import { SharedAppDriver } from "./app-use/host.ts";
+import { chatKey, parseChatKey } from "./app-use/chat-key.ts";
+import { LiveView } from "./app-use/live.ts";
+import { appUseStatus } from "./app-use/status.ts";
 import { RememberedFolders, stillMountable } from "./computer/folder-access.ts";
 import {
   SIGN_IN_SCHEME,
@@ -138,6 +154,17 @@ const onPage = <S extends Schema.Decoder<unknown>>(
 const isConnectSender = (event: IpcMainInvokeEvent) =>
   isPageSender(event, connectWindow?.webContents, (url) => url === connectUrl);
 let tray: Tray | undefined;
+/** The tray's own items, below what app use adds at the top. */
+let trayActions: MenuItemConstructorOptions[] = [];
+let trayAppUse = "";
+/** Shows app use on the tray, rebuilding its menu only when what it shows changed. */
+const showAppUse = () => {
+  const status = appUseStatus(liveApps, serverOrigin);
+  if (!tray || status.signature === trayAppUse) return;
+  trayAppUse = status.signature;
+  if (process.platform === "darwin") tray.setTitle(status.title);
+  tray.setContextMenu(Menu.buildFromTemplate([...status.items, ...trayActions]));
+};
 let workState = { active: 0, needsApproval: 0 };
 const hasWork = () => executions.active > 0 || workState.active > 0 || workState.needsApproval > 0;
 let respond: ReturnType<typeof makeDesktopResponder>;
@@ -168,6 +195,8 @@ const lifecycle = makeLifecycle({
     await executions.dispose();
     await runtime.dispose();
     tray?.destroy();
+    // App use may still notify until quit; a destroyed tray must not be written to.
+    tray = undefined;
   },
   quit: () => app.quit(),
   reportError: (cause) => {
@@ -218,6 +247,36 @@ const hypervisor = microsandbox(
   },
   { insecureRegistry: SANDBOX_INSECURE_REGISTRY },
 );
+/**
+ * The app driver, one for the app's life whichever server it serves: replayd stalls two capturing
+ * processes of one identity. Built beside the bundle on macOS (build.mjs); elsewhere there is
+ * none. It exits by itself when the app does, its input closing.
+ */
+const appDriver = new SharedAppDriver(
+  existsSync(join(here, "app-driver")) ? join(here, "app-driver") : null,
+  () => {
+    const blocker = powerSaveBlocker.start("prevent-display-sleep");
+    return () => powerSaveBlocker.stop(blocker);
+  },
+);
+/**
+ * The live view of app use, one like the driver (docs/internals/app-use.md): each chat's view,
+ * told to its page for the chat's panel tab.
+ */
+const liveApps = new LiveView({ driver: appDriver, locale: (origin) => shellLocale(origin) });
+// The page hears only of the chats it asked about, its person's own; see `LiveView.view`.
+liveApps.subscribe((chat) => {
+  const update = liveApps.update(chat);
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    update &&
+    liveApps.told(chat) &&
+    parseChatKey(chat)?.scope === serverOrigin
+  )
+    mainWindow.webContents.send(APP_USE_UPDATE, update);
+});
+liveApps.subscribe(showAppUse);
 const stopComputer = async () => {
   const current = computer;
   computer = null;
@@ -240,6 +299,8 @@ const startComputer = (origin: string) => {
     locale: () => shellLocale(origin),
     appData: userData,
     agentSocket: () => settings().agentSocket(),
+    // .../neema.app/Contents/MacOS/neema; in development, Electron's own app.
+    appBundle: resolve(process.execPath, "../../.."),
     remembered: new RememberedFolders(
       join(
         userData,
@@ -318,6 +379,8 @@ const startComputer = (origin: string) => {
     agentSocket: () => settings().agentSocket(),
     remote: () => settings().get().remote,
     ask: dialogs,
+    appDriver,
+    appWatch: liveApps,
     attach: async (conversationId, hostPath) => {
       const key = { origin, conversationId };
       const attached = await runtime.runPromise(
@@ -507,6 +570,8 @@ const connectFlow = makeConnectFlow({
     sweepTransientWorkspaces();
     mainWindow = openMainWindow(origin);
     startComputer(origin);
+    // Another server: the tray shows its chats, not the last one's.
+    showAppUse();
   },
   closeMain: () => {
     const window = mainWindow;
@@ -585,6 +650,8 @@ const openMainWindow = (origin: string) => {
   });
   window.webContents.on("did-finish-load", flushPendingTicket);
   window.webContents.on("did-navigate", flushPendingTicket);
+  // A page that loads afresh may be another person's: it is told of no chat it did not ask about.
+  window.webContents.on("did-navigate", () => liveApps.pageLoaded(origin));
   void recovery.retry();
   return window;
 };
@@ -747,6 +814,7 @@ void app.whenReady().then(async () => {
       : nativeImage.createFromPath(appIconFile).resize({ width: 32, height: 32 }),
   );
   tray.setToolTip("neema");
+  trayActions = actions;
   tray.setContextMenu(Menu.buildFromTemplate(actions));
   tray.on("click", restoreWindow);
 
@@ -769,6 +837,14 @@ void app.whenReady().then(async () => {
   });
   // Only the server's page asks, when someone clicks one of its notifications.
   onPage(CHROME_SHOW_WINDOW, NoPayload, () => restoreWindow());
+  // A chat's page sees and steers only the chats it asked about, its server's and person's own.
+  onPage(APP_USE_STATE, AppUseChat, ({ conversationId }) =>
+    serverOrigin ? liveApps.view(chatKey(serverOrigin, conversationId)) : null,
+  );
+  onPage(APP_USE_PAUSE, AppUsePause, ({ conversationId, paused }) => {
+    const chat = serverOrigin && chatKey(serverOrigin, conversationId);
+    if (chat && liveApps.told(chat)) liveApps.pause(chat, paused);
+  });
   registerBrowserIpc({
     page: fromPage,
     guests: (event) => {
@@ -844,4 +920,7 @@ void app.whenReady().then(async () => {
 app.on("window-all-closed", () => {});
 app.on("before-quit", (event) => {
   void lifecycle.beforeQuit(event);
+});
+app.on("will-quit", () => {
+  liveApps.close();
 });

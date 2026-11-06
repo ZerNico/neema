@@ -187,6 +187,8 @@ describe("restricted bundled preloads", () => {
     const { exposed } = probe("preload.ts", "https:");
     const bridge = exposed.get("__chatDesktop")!;
     expect(Object.keys(bridge).toSorted()).toEqual([
+      // The sandbox is a Mac, the one platform with an app driver whose work the page could show.
+      "appUse",
       "auth",
       "browser",
       "build",

@@ -1,4 +1,5 @@
 import type { Prompt } from "effect/ai";
+import { APP_TOOLS_SYSTEM_HINT } from "~/modules/app-use/tool-schema.ts";
 import { BROWSER_TOOLS_SYSTEM_HINT } from "~/modules/browser/tool-schema.ts";
 import { computerSystemHint } from "~/modules/desktop/tool-schema.ts";
 import { DOCUMENT_APP_POLICY } from "~/modules/documents/server/document-prompt.ts";
@@ -73,6 +74,8 @@ export interface FixedPrefixInput {
   /** Whether the computer's tools are offered; its state goes after history, not here. */
   readonly desktop: boolean;
   readonly browser: boolean;
+  /** The app family is offered: the person has a Mac connected. */
+  readonly apps?: boolean;
   /** `read_history` is offered; `otherChats` when `search_chats` and `read_chat` are too. */
   readonly history?: { readonly otherChats: boolean } | null;
   /** `generate_image` is offered; which model it uses is told after history. */
@@ -124,6 +127,7 @@ export const buildFixedPrefix = (input: FixedPrefixInput): Prompt.MessageEncoded
     ...(input.research ? [system(RESEARCH_APP_POLICY)] : []),
     ...(input.desktop ? [system(computerSystemHint())] : []),
     ...(input.browser ? [system(BROWSER_TOOLS_SYSTEM_HINT)] : []),
+    ...(input.apps ? [system(APP_TOOLS_SYSTEM_HINT)] : []),
     ...(input.images ? [system(IMAGE_APP_POLICY)] : []),
     ...(input.history ? [system(historyToolsHint(input.history.otherChats))] : []),
     ...input.memory,

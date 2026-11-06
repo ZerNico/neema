@@ -286,6 +286,35 @@ describe("ComputerCalls", () => {
     }),
   );
 
+  it.effect("an unbound chat's app call binds to a Mac, never its Windows sender", () =>
+    Effect.gen(function* () {
+      const { calls, open, connect } = yield* setup(fakeRepo());
+      yield* connect("pc", { name: "PC", platform: "win32" });
+      // App use needs no VM, so a Mac without one may still take the chat.
+      yield* connect("mac", { name: "Mac", computer: { status: "unavailable", reason: "none" } });
+      yield* open("call-1", "app_list", {}, "pc");
+      expect(yield* calls.pending(USER)).toEqual([
+        expect.objectContaining({ approval: "bind", machine: { id: "mac", name: "Mac" } }),
+      ]);
+    }),
+  );
+
+  it.effect("an app call from another device never binds to a Mac that refuses remote use", () =>
+    Effect.gen(function* () {
+      const repo = fakeRepo();
+      const { calls, open, connect } = yield* setup(repo);
+      yield* connect("pc", { name: "PC", platform: "win32" });
+      yield* connect("mac", { name: "Mac", remote: false });
+      const { waiting } = yield* open("call-1", "app_list", {}, "pc");
+      expect(yield* calls.pending(USER)).toEqual([]);
+      expect(repo.chat.machineId).toBeNull();
+      expect(yield* Fiber.join(waiting)).toMatchObject({
+        ok: false,
+        summary: "Mac does not allow remote use",
+      });
+    }),
+  );
+
   it.effect("ask asks before a command; allow-rest stops asking for the rest of the chat", () =>
     Effect.gen(function* () {
       const { calls, open, connect } = yield* setup(fakeRepo({ machineId: "laptop" }));

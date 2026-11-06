@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { context } from "esbuild";
-import { buildOptions } from "./build.mjs";
+import { buildAppDriver, buildOptions } from "./build.mjs";
 import { compileMessages } from "./paraglide.ts";
 import { electronBinary } from "./electron-app.mjs";
 import { makeDevReloader } from "./src/dev-reloader.ts";
@@ -24,6 +24,8 @@ const reloader = makeDevReloader({
 });
 
 await compileMessages();
+// Once per start: the shell relaunches on TypeScript changes, not on the driver's Swift.
+buildAppDriver();
 const ctx = await context({
   ...buildOptions(),
   plugins: [

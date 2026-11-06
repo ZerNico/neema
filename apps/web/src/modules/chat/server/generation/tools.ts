@@ -67,6 +67,7 @@ import { mergeToolGroups, prepareWebTools, toolFamilies } from "~/modules/tools/
 import type { ToolFamily } from "~/modules/tools/families.ts";
 import { createUrlAuthority } from "~/modules/tools/server/url-authority.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
+import { prepareAppTools } from "~/modules/app-use/server/tools.ts";
 import { findScheduleFire, prepareNotifyTool } from "~/modules/schedules/server/notify-tool.ts";
 
 import { isWebSource } from "~/modules/tools/sources.ts";
@@ -354,10 +355,19 @@ export const prepareGenerationTools = (
       );
     // Offered once the person has connected a desktop app, from any device and machine online or
     // not, so the list is stable per person. Without the app nobody pays for these schemas.
-    const desktopTools =
-      permissions.work && (yield* deps.computerRepo.machines(input.userId)).length > 0
-        ? prepareDesktopTools({ rowIdFor })
+    const machines = permissions.work ? yield* deps.computerRepo.machines(input.userId) : [];
+    const desktopTools = machines.length > 0 ? prepareDesktopTools({ rowIdFor }) : null;
+    // App use has a driver on macOS only: offered where the chat's computer is a Mac, or, before
+    // the chat has one, once the person has a Mac, which its first app call then binds.
+    const bound =
+      machines.length > 0
+        ? ((yield* deps.computerRepo.chat(input.userId, input.conversationId))?.machineId ?? null)
         : null;
+    const appTools = machines.some(
+      (machine) => machine.platform === "darwin" && (bound === null || machine.id === bound),
+    )
+      ? prepareAppTools({ rowIdFor })
+      : null;
     // Attempts from an app that can embed pages; they run in the sending app's own tabs.
     const browserTools =
       permissions.work && config.desktopBrowser ? prepareBrowserTools({ rowIdFor }) : null;
@@ -846,7 +856,9 @@ export const prepareGenerationTools = (
               ? permissions.schedules
               : family === "browser"
                 ? browserTools !== null
-                : offeredOffice.has(family),
+                : family === "app"
+                  ? appTools !== null
+                  : offeredOffice.has(family),
         )
         .map((family) => ({ family, summary: fixedFamilySummary(family) })),
       ...(integrationTools?.lazy ?? []),
@@ -892,6 +904,7 @@ export const prepareGenerationTools = (
       ...(researchTool ? [researchTool.group] : []),
       ...(desktopTools ? [desktopTools] : []),
       ...(browserTools ? [browserTools] : []),
+      ...(appTools ? [appTools] : []),
       ...(skillTools ? [skillTools.group] : []),
       ...(webTools ? [webTools.group] : []),
       ...(planTools ? [planTools.group] : []),
@@ -1009,6 +1022,7 @@ export const prepareGenerationTools = (
       callRowReady,
       desktopTools,
       browserTools,
+      appTools,
       planTools,
       notifyTools,
       mapRouteTools,

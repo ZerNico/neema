@@ -26,6 +26,8 @@ export const ToolResult = Schema.Struct({
   ),
   /** The web page a browser call left its tab on, for the transcript to link. */
   page: Schema.optionalKey(Schema.Struct({ url: Schema.String, title: Schema.String })),
+  /** The app an app call used, as macOS names it, for the transcript row. */
+  app: Schema.optionalKey(Schema.Struct({ name: Schema.String })),
 });
 export type ToolResult = typeof ToolResult.Type;
 
@@ -80,6 +82,11 @@ export const MachineEvent = Schema.Union([
     attachments: Schema.optionalKey(
       Schema.Array(Schema.Struct({ id: Id, path: Schema.String.check(Schema.isMaxLength(1024)) })),
     ),
+    /**
+     * The message came from this machine, judged by the server from the sending session. Only
+     * then may the machine ask its person anything; absent is false.
+     */
+    local: Schema.optionalKey(Schema.Boolean),
   }),
   /** Stop a call: Stop, a lost lease or the deadline. */
   Schema.Struct({ type: Schema.Literal("cancel"), callId: Id }),

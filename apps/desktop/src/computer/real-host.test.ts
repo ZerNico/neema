@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { MACHINE_HELLO_HEADER, type MachineEvent, type ToolResult } from "@chat/desktop-rpc";
 import { ComputerHost } from "./host.ts";
+import { SharedAppDriver } from "../app-use/host.ts";
 import { microsandbox } from "./hypervisor.ts";
 
 /**
@@ -135,7 +136,10 @@ describe.skipIf(!IMAGE)("a machine running calls the server sends", () => {
         folder: async ({ path }) =>
           path ? { hostPath: path } : { refused: "The user picked no folder." },
         agent: async () => "allowed" as const,
+        app: async () => "deny" as const,
+        appPermissions: async () => {},
       },
+      appDriver: new SharedAppDriver(null),
       attach: async (_conversationId, hostPath) => ({ name: hostPath.split("/").pop()! }),
       log: () => {},
     });

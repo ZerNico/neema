@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { build } from "esbuild";
 import { compileMessages } from "./paraglide.ts";
 
@@ -69,8 +70,30 @@ export const buildOptions = () => ({
   },
 });
 
+/**
+ * The macOS app driver (docs/internals/app-use.md), built with Swift and placed beside the bundle
+ * in dist/, which ships as a plain folder. Elsewhere there is no driver. Without Swift the build
+ * goes on and app use says it is unavailable, so a checkout without Xcode can still work on the
+ * rest; a release has it, being built on a Mac runner.
+ */
+export const buildAppDriver = () => {
+  if (process.platform !== "darwin") return;
+  const packagePath = "native/app-driver/macos";
+  try {
+    execFileSync("swift", ["build", "-c", "release", "--package-path", packagePath], {
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+  } catch (error) {
+    console.warn(`build: the app driver was not built, so app use is off: ${error}`);
+    return;
+  }
+  mkdirSync("dist", { recursive: true });
+  copyFileSync(`${packagePath}/.build/release/app-driver`, "dist/app-driver");
+};
+
 // Run directly: one build. Imported by dev.mjs: the options only.
 if (import.meta.main) {
   await compileMessages();
+  buildAppDriver();
   await build(buildOptions());
 }

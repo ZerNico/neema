@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { BRIDGE_KEY, PROTOCOL_VERSION } from "@chat/desktop-rpc";
 import { makeChromeBridge, makeLocalChromeBridge } from "./chrome-preload.ts";
 import { canChangeServer, makeAuthBridge } from "./auth-preload.ts";
+import { makeAppUseBridge } from "./app-use-preload.ts";
 import { makeBrowserBridge } from "./browser-preload.ts";
 import { CHANGE_SERVER, RECOVERY_RETRY } from "./chrome.ts";
 import { systemLocaleFromArgv } from "./system-locale.ts";
@@ -25,6 +26,8 @@ if (location.protocol === "file:") {
     chrome: makeChromeBridge(ipcRenderer, process.platform),
     auth: makeAuthBridge(ipcRenderer, process.argv),
     browser: makeBrowserBridge(ipcRenderer, process.argv),
+    // Only a Mac has a driver to show; elsewhere the page offers no view.
+    ...(process.platform === "darwin" ? { appUse: makeAppUseBridge(ipcRenderer) } : {}),
     request: (tag: unknown, payload: unknown) =>
       ipcRenderer.invoke("chat-desktop:request", { tag, payload }),
   });

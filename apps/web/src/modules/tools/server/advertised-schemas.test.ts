@@ -22,6 +22,7 @@ import {
 import { editWordFileTool, inspectWordFileTool } from "~/modules/word/server/tools.ts";
 import { askUserTool } from "./ask-user.ts";
 import { prepareBrowserTools } from "~/modules/browser/server/tools.ts";
+import { prepareAppTools } from "~/modules/app-use/server/tools.ts";
 import { updatePlanTool } from "./plan-tool.ts";
 import { notifyUserTool } from "~/modules/schedules/server/notify-tool.ts";
 
@@ -75,6 +76,7 @@ describe("tool parameters the model is offered", () => {
       updatePlanTool,
       notifyUserTool,
       ...toolsOf(prepareBrowserTools({ rowIdFor: () => Effect.succeed(undefined) }).toolkit),
+      ...toolsOf(prepareAppTools({ rowIdFor: () => Effect.succeed(undefined) }).toolkit),
       ...toolsOf(
         prepareHistoryTools({
           ...base,

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import { Tool, Toolkit } from "effect/ai";
 import { AgentDraftToolName } from "~/modules/agents/tool-schema.ts";
+import { APP_TOOL_NAMES } from "~/modules/app-use/tool-schema.ts";
 import { BROWSER_TOOL_NAMES } from "~/modules/browser/tool-schema.ts";
 import { OFFICE_FAMILIES } from "~/modules/office/families.ts";
 import { ScheduleDraftToolName } from "~/modules/schedules/tool-schema.ts";
@@ -21,6 +22,7 @@ export const LAZY_FAMILY_TOOLS: Record<LazyToolFamily, ReadonlyArray<string>> = 
   "agent-draft": AgentDraftToolName.literals,
   "schedule-draft": ScheduleDraftToolName.literals,
   browser: BROWSER_TOOL_NAMES,
+  app: APP_TOOL_NAMES,
 };
 
 /** One line each, in the catalogue the model chooses from. */
@@ -32,6 +34,7 @@ const LAZY_FAMILY_SUMMARIES: Record<LazyToolFamily, string> = {
   "schedule-draft": "Draft a scheduled task that runs a prompt on a recurring schedule.",
   browser:
     "Use a web browser on the user's computer, logged in wherever they are, for pages that need their session or interaction.",
+  app: "Computer use: operate the apps on the user's own computer (Excel, Mail, Finder, any desktop app) by looking at their windows, clicking and typing.",
 };
 
 /** The family a tool belongs to: a fixed one, or its integration's, whether or not that is lazy here. */
