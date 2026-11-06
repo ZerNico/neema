@@ -1101,21 +1101,6 @@
       }
     }
   ],
-  "chat_browser_browsed_many": [
-    {
-      "declarations": ["input count", "input first", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
-      "match": {
-        "countPlural=one": "Browsed {first} and {count} other site",
-        "countPlural=other": "Browsed {first} and {count} other sites"
-      }
-    }
-  ],
-  "chat_browser_browsed_one": "Browsed {site}",
-  "chat_browser_browsed_two": "Browsed {first} and {second}",
-  "chat_browser_failed": "Couldn’t use the browser",
-  "chat_browser_used": "Used the browser",
-  "chat_browser_waiting": "Waiting for you",
   "chat_collection_documents": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],

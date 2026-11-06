@@ -771,6 +771,17 @@ const AssistantBody = memo(function AssistantBody({
       ),
     [message.toolActivities],
   );
+  // Each browser run links pages from where the one before it left off.
+  const pageBefore = useMemo(() => {
+    const before = new Map<string, string | undefined>();
+    let url: string | undefined;
+    for (const part of parts.flatMap((item) => (item.kind === "work" ? item.steps : [item])))
+      if (part.kind === "browser") {
+        before.set(part.key, url);
+        url = part.activities.findLast((call) => call.result?.page)?.result?.page?.url ?? url;
+      }
+    return before;
+  }, [parts]);
   const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>) => {
     if (part.kind === "reasoning")
       return (
@@ -824,7 +835,7 @@ const AssistantBody = memo(function AssistantBody({
         <BrowserActivityBlock
           key={part.key}
           activities={part.activities}
-          approvals={message.desktopApprovals}
+          pageBefore={pageBefore.get(part.key)}
         />
       );
     if (part.kind === "compaction") {

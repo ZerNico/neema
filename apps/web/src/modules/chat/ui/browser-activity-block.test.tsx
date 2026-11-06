@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { DesktopToolActivity } from "../client/use-message-stream.ts";
 import { BrowserActivityBlock } from "./browser-activity-block.tsx";
@@ -34,36 +34,29 @@ const step = (
   },
   ...overrides,
 });
-const block = (
-  activities: DesktopToolActivity[],
-  approvals?: Parameters<typeof BrowserActivityBlock>[0]["approvals"],
-) => (
-  <QueryClientProvider client={client}>
-    <AppMotionProvider>
-      <BrowserActivityBlock activities={activities} approvals={approvals} />
-    </AppMotionProvider>
-  </QueryClientProvider>
-);
 const client = new QueryClient();
-const show = (
-  activities: DesktopToolActivity[],
-  approvals?: Parameters<typeof BrowserActivityBlock>[0]["approvals"],
-) => render(block(activities, approvals));
+const show = (activities: DesktopToolActivity[]) =>
+  render(
+    <QueryClientProvider client={client}>
+      <AppMotionProvider>
+        <BrowserActivityBlock activities={activities} />
+      </AppMotionProvider>
+    </QueryClientProvider>,
+  );
 
 const example = { url: "https://example.com/", title: "Example Domain" };
 const iana = { url: "https://www.iana.org/domains", title: "Domain Name Services" };
 
 describe("browser activity block", () => {
-  it("collapses a run into one row naming the sites, and lists the steps on demand", () => {
+  it("lists each step as its own line and links each page once, where the run reached it", () => {
     show([
       step("browser_open", "Opened example.com", example),
       step("browser_click", "Clicked the “Learn more” link", iana),
       step("browser_scroll", "Scrolled down", iana),
     ]);
-    const header = screen.getByRole("button", { name: /Browsed example\.com and iana\.org/ });
-    fireEvent.click(header);
+    expect(screen.getByText("Opened example.com")).toBeInTheDocument();
     expect(screen.getByText("Clicked the “Learn more” link")).toBeInTheDocument();
-    // Each page is linked once, where the run reached it.
+    expect(screen.getByText("Scrolled down")).toBeInTheDocument();
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Example Domain",
       "Domain Name Services",
@@ -72,40 +65,47 @@ describe("browser activity block", () => {
     expect(screen.queryByText(/written for the model/)).not.toBeInTheDocument();
   });
 
-  it("says it waits on the user, and leaves the question to the dock", () => {
-    const { result: _none, ...click } = step("browser_click", "", undefined, {
-      status: "running",
-      args: { ref: "e1" },
-    });
-    show(
-      [step("browser_open", "Opened example.com", example), click],
-      new Map([
-        [
-          click.callId,
-          {
-            kind: "browser-action",
-            args: { ref: "e1", target: 'link "Learn more"' },
-            decide: vi.fn(),
-          },
-        ],
-      ]),
-    );
-    expect(screen.getByText("Waiting for you")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
-  });
-
-  it("stays folded while running, since the work line around it is what opens", () => {
+  it("keeps a finished step's own line between calls, rather than a summary of the sites", () => {
     const { result: _none, ...open } = step("browser_open", "", undefined, {
       status: "running",
       args: { url: "https://example.com" },
     });
-    show([open]);
-    const header = screen.getAllByRole("button")[0]!;
-    expect(header).toHaveAttribute("aria-expanded", "false");
+    const { rerender } = show([open]);
+    expect(screen.getByText(/Opening example\.com/)).toBeInTheDocument();
+    rerender(
+      <QueryClientProvider client={client}>
+        <AppMotionProvider>
+          <BrowserActivityBlock
+            activities={[
+              step("browser_open", "Opened example.com", example, { callId: open.callId }),
+            ]}
+          />
+        </AppMotionProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Opened example.com")).toBeInTheDocument();
+    expect(screen.queryByText(/Browsed/)).not.toBeInTheDocument();
   });
 
-  it("owns up when nothing worked", () => {
+  it("links nothing again when the run before it already reached the page", () => {
+    render(
+      <QueryClientProvider client={client}>
+        <AppMotionProvider>
+          <BrowserActivityBlock
+            activities={[
+              step("browser_click", "Clicked “Reply”", iana),
+              step("browser_open", "Opened example.com", example),
+            ]}
+            pageBefore={iana.url}
+          />
+        </AppMotionProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(["Example Domain"]);
+  });
+
+  it("says what failed on the step that failed", () => {
     show([step("browser_open", "You didn’t allow c.test", undefined, { status: "error" })]);
-    expect(screen.getByText("Couldn’t use the browser")).toBeInTheDocument();
+    expect(screen.getByText("You didn’t allow c.test")).toBeInTheDocument();
   });
 });

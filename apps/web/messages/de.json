@@ -1100,21 +1100,6 @@
       }
     }
   ],
-  "chat_browser_browsed_many": [
-    {
-      "declarations": ["input count", "input first", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
-      "match": {
-        "countPlural=one": "{first} und {count} weitere Website besucht",
-        "countPlural=other": "{first} und {count} weitere Websites besucht"
-      }
-    }
-  ],
-  "chat_browser_browsed_one": "{site} besucht",
-  "chat_browser_browsed_two": "{first} und {second} besucht",
-  "chat_browser_failed": "Der Browser konnte nicht genutzt werden",
-  "chat_browser_used": "Den Browser genutzt",
-  "chat_browser_waiting": "Wartet auf dich",
   "chat_collection_documents": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
