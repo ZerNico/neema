@@ -1,0 +1,701 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "8cae3690-5aa1-43e7-9947-19d54122cfff",
+  "prevIds": [
+    "cfc2d827-6f0c-4100-924c-8590a3eb9df2"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_documents"
+      ],
+      "writes": [
+        "s|tbl|public.conversation_documents",
+        "n|tbl|public.conversation_documents",
+        "e|tbl|public.conversation_documents",
+        "n|rel|public.conversation_documents",
+        "n|type|public.conversation_documents",
+        "n|rel|public.conversation_documents_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "documents"
+      ],
+      "writes": [
+        "s|fk|public.documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "n|fk|public.documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "e|fk|public.documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "n|con|public.documents.conversation_documents_conversation_id_conversations_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "e|col|public.documents.conversation_id"
+      ]
+    },
+    {
+      "statementType": "rename_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "documents",
+        "created_by_message_id"
+      ],
+      "writes": [
+        "s|col|public.documents.created_by_message_id",
+        "n|col|public.documents.created_by_message_id",
+        "s|col|public.documents.answer_message_id",
+        "n|col|public.documents.answer_message_id"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "documents"
+      ],
+      "writes": [
+        "s|ck|public.documents.documents_answer_in_conversation",
+        "n|ck|public.documents.documents_answer_in_conversation",
+        "e|ck|public.documents.documents_answer_in_conversation",
+        "n|con|public.documents.documents_answer_in_conversation"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "e|col|public.documents.conversation_id"
+      ]
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "documents",
+        "documents_conversation_idx"
+      ],
+      "writes": [
+        "s|idx|public.documents_conversation_idx",
+        "n|idx|public.documents_conversation_idx",
+        "e|idx|public.documents_conversation_idx",
+        "n|rel|public.documents_conversation_idx"
+      ],
+      "reads": [
+        "e|tbl|public.documents",
+        "n|sch|public",
+        "e|col|public.documents.conversation_id"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "drop_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "documents",
+        "documents_created_by_message_idx"
+      ],
+      "writes": [
+        "s|idx|public.documents_created_by_message_idx",
+        "n|idx|public.documents_created_by_message_idx",
+        "e|idx|public.documents_created_by_message_idx",
+        "n|rel|public.documents_created_by_message_idx"
+      ],
+      "reads": [
+        "e|tbl|public.documents",
+        "n|sch|public",
+        "e|col|public.documents.answer_message_id"
+      ],
+      "sharedWrites": []
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "documents",
+        "user_id"
+      ],
+      "writes": [
+        "s|col|public.documents.user_id",
+        "n|col|public.documents.user_id",
+        "e|col|public.documents.user_id"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "drop_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "documents",
+        "conversation_id"
+      ],
+      "writes": [
+        "s|col|public.documents.conversation_id",
+        "n|col|public.documents.conversation_id",
+        "e|col|public.documents.conversation_id"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "conversation_documents",
+        "conversation_documents_document_idx"
+      ],
+      "writes": [
+        "s|idx|public.conversation_documents_document_idx",
+        "n|idx|public.conversation_documents_document_idx",
+        "e|idx|public.conversation_documents_document_idx",
+        "n|rel|public.conversation_documents_document_idx"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_documents",
+        "n|sch|public",
+        "n|col|public.conversation_documents.document_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "conversation_documents",
+        "conversation_documents_message_idx"
+      ],
+      "writes": [
+        "s|idx|public.conversation_documents_message_idx",
+        "n|idx|public.conversation_documents_message_idx",
+        "e|idx|public.conversation_documents_message_idx",
+        "n|rel|public.conversation_documents_message_idx"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_documents",
+        "n|sch|public",
+        "n|col|public.conversation_documents.message_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "documents",
+        "documents_user_idx"
+      ],
+      "writes": [
+        "s|idx|public.documents_user_idx",
+        "n|idx|public.documents_user_idx",
+        "e|idx|public.documents_user_idx",
+        "n|rel|public.documents_user_idx"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.documents.user_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "documents",
+        "documents_answer_message_idx"
+      ],
+      "writes": [
+        "s|idx|public.documents_answer_message_idx",
+        "n|idx|public.documents_answer_message_idx",
+        "e|idx|public.documents_answer_message_idx",
+        "n|rel|public.documents_answer_message_idx"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.documents.answer_message_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_documents"
+      ],
+      "writes": [
+        "s|fk|public.conversation_documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "n|fk|public.conversation_documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "e|fk|public.conversation_documents.conversation_documents_conversation_id_conversations_id_fkey",
+        "n|con|public.conversation_documents.conversation_documents_conversation_id_conversations_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_documents",
+        "n|sch|public",
+        "n|tbl|public.conversations",
+        "n|sch|public",
+        "n|col|public.conversation_documents.conversation_id",
+        "n|col|public.conversations.id",
+        "e|uniqueness|public.conversations.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_documents"
+      ],
+      "writes": [
+        "s|fk|public.conversation_documents.conversation_documents_document_id_documents_id_fkey",
+        "n|fk|public.conversation_documents.conversation_documents_document_id_documents_id_fkey",
+        "e|fk|public.conversation_documents.conversation_documents_document_id_documents_id_fkey",
+        "n|con|public.conversation_documents.conversation_documents_document_id_documents_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_documents",
+        "n|sch|public",
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.conversation_documents.document_id",
+        "n|col|public.documents.id",
+        "e|uniqueness|public.documents.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "conversation_documents"
+      ],
+      "writes": [
+        "s|fk|public.conversation_documents.conversation_documents_message_id_messages_id_fkey",
+        "n|fk|public.conversation_documents.conversation_documents_message_id_messages_id_fkey",
+        "e|fk|public.conversation_documents.conversation_documents_message_id_messages_id_fkey",
+        "n|con|public.conversation_documents.conversation_documents_message_id_messages_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.conversation_documents",
+        "n|sch|public",
+        "n|tbl|public.messages",
+        "n|sch|public",
+        "n|col|public.conversation_documents.message_id",
+        "n|col|public.messages.id",
+        "e|uniqueness|public.messages.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "documents"
+      ],
+      "writes": [
+        "s|fk|public.documents.documents_user_id_user_id_fkey",
+        "n|fk|public.documents.documents_user_id_user_id_fkey",
+        "e|fk|public.documents.documents_user_id_user_id_fkey",
+        "n|con|public.documents.documents_user_id_user_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|tbl|public.user",
+        "n|sch|public",
+        "n|col|public.documents.user_id",
+        "n|col|public.user.id",
+        "e|uniqueness|public.user.id"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "documents"
+      ],
+      "writes": [
+        "s|ck|public.documents.documents_answer_is_personal",
+        "n|ck|public.documents.documents_answer_is_personal",
+        "e|ck|public.documents.documents_answer_is_personal",
+        "n|con|public.documents.documents_answer_is_personal"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.documents.answer_message_id",
+        "n|col|public.documents.user_id"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "documents"
+      ],
+      "writes": [
+        "s|ck|public.documents.documents_one_owner"
+      ],
+      "reads": [
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.documents.user_id",
+        "n|col|public.documents.project_id",
+        "e|col|public.documents.project_id"
+      ],
+      "sqlHash": "0599f686b560e27f"
+    }
+  ],
+  "deltas": [
+    {
+      "op": "rename",
+      "key": "columns\u0000[\"public\",\"documents\",\"created_by_message_id\"]",
+      "set": {
+        "name": "answer_message_id"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "conversation_documents",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "document_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "message_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "documents",
+        "name": "user_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_document_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "document_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_message_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "message_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"message_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "documents",
+        "name": "documents_user_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "user_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "documents",
+        "name": "documents_answer_message_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "answer_message_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"answer_message_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_conversation_id_conversations_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "conversation_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "conversations",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_document_id_documents_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "document_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "documents",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_message_id_messages_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "message_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "messages",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "documents",
+        "name": "documents_user_id_user_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "user_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "user",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "conversation_documents",
+        "name": "conversation_documents_pkey",
+        "columns": [
+          "conversation_id",
+          "document_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "documents",
+        "name": "documents_answer_is_personal",
+        "value": "\"answer_message_id\" is null or \"user_id\" is not null",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "drop",
+      "key": "columns\u0000[\"public\",\"documents\",\"conversation_id\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"documents_conversation_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "indexes\u0000[\"public\",\"documents_created_by_message_idx\"]"
+    },
+    {
+      "op": "drop",
+      "key": "fks\u0000[\"public\",\"documents\",\"conversation_documents_conversation_id_conversations_id_fkey\"]"
+    },
+    {
+      "op": "drop",
+      "key": "checks\u0000[\"public\",\"documents\",\"documents_answer_in_conversation\"]"
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"documents\",\"documents_one_owner\"]",
+      "set": {
+        "value": "(\"user_id\" is null) <> (\"project_id\" is null)"
+      }
+    }
+  ]
+}

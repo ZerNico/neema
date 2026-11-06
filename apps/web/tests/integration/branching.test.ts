@@ -7,7 +7,9 @@ import { uuidv7 } from "uuidv7";
 import {
   attachmentBlobs,
   attachments,
+  conversationDocuments,
   conversations as conversationsTable,
+  documents,
   conversationWorkingFiles,
   messageAttachments,
   messageToolCalls,
@@ -300,6 +302,52 @@ describe("branching a conversation", () => {
     expect(result.sourceContents).toEqual(["u1", "a1", "u2", "a2", "u3", "a3"]);
   });
 
+  it("shows the copied answers' documents, and none from after the chosen one", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const db = yield* Db;
+        const userId = yield* makeUser();
+        const source = yield* seedThread(userId, [
+          { user: "u1", assistant: "a1" },
+          { user: "u2", assistant: "a2" },
+        ]);
+        const [early, late] = [uuidv7(), uuidv7()];
+        yield* db.insert(documents).values(
+          [early, late].map((id) => ({
+            id,
+            userId,
+            originConversationId: source.conversation.id,
+            title: id,
+            lastEditedBy: "model" as const,
+            snapshot: { type: "doc", content: [] },
+          })),
+        );
+        yield* db.insert(conversationDocuments).values([
+          {
+            conversationId: source.conversation.id,
+            documentId: early,
+            messageId: source.messages[1]!.id,
+          },
+          {
+            conversationId: source.conversation.id,
+            documentId: late,
+            messageId: source.messages[3]!.id,
+          },
+        ]);
+        const forked = yield* branch(userId, source.conversation.id, source.messages[1]!.id);
+        const links = yield* db
+          .select()
+          .from(conversationDocuments)
+          .where(eq(conversationDocuments.conversationId, forked.conversation.id));
+        return { early, links, answer: forked.messages[1]!.id };
+      }),
+    );
+    // Under the copy of its answer, so a temporary source's purge leaves it to the branch.
+    expect(result.links).toEqual([
+      expect.objectContaining({ documentId: result.early, messageId: result.answer }),
+    ]);
+  });
+
   it("copies a deleted agent association as a tombstone rather than making a plain chat", async () => {
     await run(
       Effect.gen(function* () {
@@ -387,6 +435,7 @@ describe("branching a conversation", () => {
           id: callId,
           status: "complete",
           result: { sources: [{ url: "https://example.com", title: "Example", status: "ok" }] },
+          modelResult: { pages: [{ url: "https://example.com", text: "The page itself." }] },
         });
         yield* repo.appendChunks(answer.id, [{ seq: 1, kind: "text", delta: "a1" }]);
 
@@ -397,6 +446,7 @@ describe("branching a conversation", () => {
         return {
           cloned,
           original,
+          handed: yield* repo.listToolResults(cloned.map((call) => call.id)),
           clonedChunks: yield* repo.chunksAfter(clonedAnswer.id, 0),
           sourceChunks: yield* repo.chunksAfter(answer.id, 0),
         };
@@ -426,6 +476,9 @@ describe("branching a conversation", () => {
       arguments: { query: "effect 4" },
       result: { sources: [{ url: "https://example.com", title: "Example", status: "ok" }] },
       status: "complete",
+    });
+    expect(result.handed.get(cloned.id)).toEqual({
+      pages: [{ url: "https://example.com", text: "The page itself." }],
     });
     // Chunks only exist so a live stream can be resumed; nothing here is live.
     expect(result.clonedChunks).toEqual([]);

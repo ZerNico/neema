@@ -103,25 +103,6 @@ export function formatQuestionResponse(
   return content.length <= 32_000 ? content : null;
 }
 
-export function formatQuestionContext(questions: AskUserParams["questions"]): string {
-  return (
-    "Clarification questions presented to the user:\n" +
-    questions
-      .map(
-        (question, index) =>
-          `Q${index + 1}: ${question.question}\n` +
-          question.options
-            .map(
-              (option, choice) =>
-                `${choice + 1}. ${option.label}${option.description ? `: ${option.description}` : ""}`,
-            )
-            .join("\n") +
-          `\n${question.multiSelect ? "Select one or more, and/or write a custom answer." : "Choose one or write a custom answer."}`,
-      )
-      .join("\n\n")
-  );
-}
-
 /**
  * Durable answer association must agree with the arguments the tool accepted,
  * not only a decodable result left on an inconsistent historical row.

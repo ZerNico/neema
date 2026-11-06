@@ -22,6 +22,7 @@ import {
   effectiveLimits,
   formatAmount,
   limitKey,
+  LIMIT_PERIODS,
   type EffectiveLimit,
   type LimitMetric,
   type LimitPeriod,
@@ -253,10 +254,18 @@ export class UsageLimits extends Context.Service<
         if (!limits.length) return;
         const zone = yield* timeZone(tx);
         // Of several used up, the one that resets last says when answers can start again.
+        // On the last day of a month a day and a month reset together; the month is named.
         let blocking: { limit: EffectiveLimit; resetsAt: Date } | null = null;
+        const longer = (a: EffectiveLimit, b: EffectiveLimit) =>
+          LIMIT_PERIODS.indexOf(a.period) > LIMIT_PERIODS.indexOf(b.period);
         for (const limit of limits) {
           const { used, resetsAt } = yield* usageOf(userId, limit, zone, tx);
-          if (used >= limit.amount && (!blocking || resetsAt > blocking.resetsAt))
+          if (
+            used >= limit.amount &&
+            (!blocking ||
+              resetsAt > blocking.resetsAt ||
+              (resetsAt.getTime() === blocking.resetsAt.getTime() && longer(limit, blocking.limit)))
+          )
             blocking = { limit, resetsAt };
         }
         if (!blocking) return;

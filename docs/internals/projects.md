@@ -41,13 +41,14 @@ the chat: model, agent, collections, skills and search stay ordinary composer ch
 
 ## Documents and memory
 
-- A document belongs to exactly one chat or one project (`documents_one_owner`). A project's
-  document outlives any answer and is deleted explicitly by an editor; a chat's still goes
-  with its answer. Editors write, viewers follow along read-only, cursor included. See
+- A document belongs to exactly one person or one project (`documents_one_owner`), and a
+  project's belongs to the project, never to the member who made it, so it stays when they
+  leave. It outlives any answer and is deleted explicitly by an editor; a person's own
+  document comes in as a copy from its menu, the original staying theirs. Editors write, viewers follow along read-only, cursor included. See
   [documents](documents.md).
 - In a project chat the model's manifest lists both kinds with a `scope`. A new document
   goes into the project by default when the person may edit it: someone working in a
-  project means the shared copy, and nothing moves a document between the two later.
+  project means the shared copy.
   `scope: "chat"` keeps private scratch in the chat; a viewer's documents always stay in
   the chat, and their model sees project documents as read-only. Plain chats keep the
   manifest they had. The card and the panel say "Project" so the two never look alike.

@@ -557,7 +557,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
             ? { projectId: input.project!.id, title: decodedTitle.value, content: "" }
             : {
                 conversationId: input.conversationId,
-                createdByMessageId: input.messageId,
+                messageId: input.messageId,
                 title: decodedTitle.value,
                 content: "",
               },
@@ -811,7 +811,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           ? { projectId: input.project!.id, title, content, ...(outline ? { outline } : {}) }
           : {
               conversationId: input.conversationId,
-              createdByMessageId: input.messageId,
+              messageId: input.messageId,
               title,
               content,
               ...(outline ? { outline } : {}),
@@ -866,7 +866,7 @@ export const prepareDocumentTools = Effect.fn("documents.prepareTools")(function
           ? { projectId: input.project!.id, title, content: "" }
           : {
               conversationId: input.conversationId,
-              createdByMessageId: input.messageId,
+              messageId: input.messageId,
               title,
               content: "",
             },

@@ -12,6 +12,7 @@ import {
   documents,
   groupMembers,
   groups,
+  messages,
   projectGroupGrants,
   projectMemories,
   user,
@@ -599,6 +600,57 @@ describe("project documents", () => {
       expect(ownerEditor.heard().slice(before)).not.toContain(taken);
     }
     expect(ownerEditor.markdown()).toBe(await markdownOf(owner, document.id));
+  });
+
+  it("takes a person's chat document in, kept and out of the chat, only from someone who may edit it", async () => {
+    const owner = await createUser();
+    const viewer = await createUser();
+    const project = await newProject(owner);
+    await projects((s) =>
+      s.changeMembers(owner, project.id, {
+        action: "addUser",
+        email: email(viewer),
+        role: "viewer",
+      }),
+    );
+    const chatOf = async (userId: string) => {
+      const id = uuidv7();
+      await db((d) => d.insert(conversations).values({ id, userId }));
+      return id;
+    };
+    const viewerChat = await chatOf(viewer);
+    const mine = await docs((s) =>
+      s.create(viewer, { conversationId: viewerChat, title: "Notes", content: "x" }),
+    ).then((r) => r.document);
+    // A viewer may not add to the project.
+    await expect(
+      docs((s) => s.moveToProject(viewer, mine.id, project.id, () => Effect.void)),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+
+    const conversationId = await chatOf(owner);
+    const fence = uuidv7();
+    await db((d) =>
+      d
+        .insert(messages)
+        .values({ id: fence, conversationId, role: "assistant", status: "complete" }),
+    );
+    const theirs = await docs((s) =>
+      s.create(owner, { conversationId, messageId: fence, title: "Plan", content: "x" }),
+    ).then((r) => r.document);
+    const moved = await docs((s) =>
+      s.moveToProject(owner, theirs.id, project.id, () => Effect.void),
+    );
+    expect(moved).toMatchObject({
+      projectId: project.id,
+      userId: null,
+      conversationId: null,
+    });
+    expect((await docs((s) => s.get(viewer, theirs.id)))!.canEdit).toBe(false);
+    // Once the project's, it does not move again.
+    const other = await newProject(owner, "Other");
+    await expect(
+      docs((s) => s.moveToProject(owner, theirs.id, other.id, () => Effect.void)),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
   });
 
   it("lets editors write together and viewers read, move a cursor, but never change the text", async () => {

@@ -6,6 +6,7 @@ import {
   Book02Icon,
   Calendar03Icon,
   Cancel01Icon,
+  File01Icon,
   FolderLibraryIcon,
   Robot01Icon,
 } from "@hugeicons/core-free-icons";
@@ -16,6 +17,7 @@ import { agentsQuery } from "~/modules/agents/client/queries.ts";
 import type { AgentSummary } from "~/modules/agents/schema.ts";
 import { knowledgeCollectionsQuery } from "~/modules/knowledge/client/queries.ts";
 import { schedulesQuery } from "~/modules/schedules/client/queries.ts";
+import { documentQuery } from "~/modules/documents/client/document-queries.ts";
 import type { MessageReference } from "../references.ts";
 import { KNOWLEDGE_LIMITS, type CollectionSummary } from "~/modules/knowledge/schema.ts";
 import { Button } from "~/ui/primitives/button";
@@ -296,7 +298,7 @@ export function CollectionPicker({
  * read as one row: an icon tile, a name, and a one-line note underneath.
  */
 export interface ContextChipItem {
-  readonly kind: "agent" | "collection" | "schedule" | "skill";
+  readonly kind: "agent" | "collection" | "schedule" | "skill" | "document";
   readonly id: string | null;
   /** Null when the id no longer resolves to something the viewer may read. */
   readonly name: string | null;
@@ -369,7 +371,9 @@ export function ContextChip({
         ? m.chat_context_skill_unavailable()
         : item.kind === "schedule"
           ? m.chat_context_schedule_unavailable()
-          : m.chat_context_collection_unavailable());
+          : item.kind === "document"
+            ? m.chat_context_document_unavailable()
+            : m.chat_context_collection_unavailable());
   return (
     <span
       title={label}
@@ -388,7 +392,9 @@ export function ContextChip({
                 ? Book02Icon
                 : item.kind === "schedule"
                   ? Calendar03Icon
-                  : FolderLibraryIcon
+                  : item.kind === "document"
+                    ? File01Icon
+                    : FolderLibraryIcon
           }
           strokeWidth={2}
           className="size-4"
@@ -421,8 +427,8 @@ export function ContextChip({
 }
 
 /**
- * The agent or schedule a message is about, by its current name. Until the
- * list arrives the link's own words stand in; a reference that no longer
+ * The agent, schedule or document a message is about, by its current name.
+ * Until it loads the link's own words stand in; a reference that no longer
  * resolves says so, the way an unavailable collection does.
  */
 export function ReferenceChip({
@@ -434,11 +440,20 @@ export function ReferenceChip({
 }) {
   const agents = useQuery({ ...agentsQuery, enabled: reference.kind === "agent" });
   const schedules = useQuery({ ...schedulesQuery, enabled: reference.kind === "schedule" });
+  const document = useQuery({
+    ...documentQuery(reference.id),
+    enabled: reference.kind === "document",
+  });
   const agent = agents.data?.find((candidate) => candidate.id === reference.id);
   const schedule = schedules.data?.find((candidate) => candidate.id === reference.id);
   const loaded =
-    reference.kind === "agent" ? agents.data !== undefined : schedules.data !== undefined;
-  const name = agent?.name ?? schedule?.name ?? (loaded ? null : reference.label);
+    reference.kind === "agent"
+      ? agents.data !== undefined
+      : reference.kind === "schedule"
+        ? schedules.data !== undefined
+        : document.data !== undefined;
+  const name =
+    agent?.name ?? schedule?.name ?? document.data?.title ?? (loaded ? null : reference.label);
   return (
     <ContextChip
       item={{
@@ -446,7 +461,12 @@ export function ReferenceChip({
         id: reference.id,
         name,
         icon: agent?.icon,
-        note: reference.kind === "agent" ? m.chat_context_agent() : m.chat_context_schedule(),
+        note:
+          reference.kind === "agent"
+            ? m.chat_context_agent()
+            : reference.kind === "schedule"
+              ? m.chat_context_schedule()
+              : m.chat_context_document(),
       }}
       onRemove={onRemove}
     />

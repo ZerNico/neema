@@ -2,11 +2,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
+import { and, eq, gt, lte } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Redacted, Stream } from "effect";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { english, type Localized } from "~/i18n/localized.ts";
-import { user } from "~/db/schema/index.ts";
+import { documentSteps, documentVersions, user } from "~/db/schema/index.ts";
 import { fsBlobStoreLayer } from "~/modules/attachments/server/fs-blob-store.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { AttachmentService } from "~/modules/attachments/server/service.ts";
@@ -31,6 +32,7 @@ type Services =
   | FeaturePolicy;
 let database: TestDatabase;
 let runtime: ManagedRuntime.ManagedRuntime<Services, unknown>;
+let appLayer: Layer.Layer<Services, unknown>;
 const run = <A, E>(effect: Effect.Effect<A, E, Services>) => runtime.runPromise(effect);
 
 beforeAll(async () => {
@@ -49,11 +51,12 @@ beforeAll(async () => {
     Layer.provideMerge(StorageQuota.layer),
     Layer.provideMerge(infrastructure),
   );
-  runtime = ManagedRuntime.make(
-    Layer.mergeAll(DocumentService.layer, ProjectService.layer, AttachmentService.layer).pipe(
-      Layer.provideMerge(core),
-    ),
-  );
+  appLayer = Layer.mergeAll(
+    DocumentService.layer,
+    ProjectService.layer,
+    AttachmentService.layer,
+  ).pipe(Layer.provideMerge(core));
+  runtime = ManagedRuntime.make(appLayer);
 }, 180_000);
 afterAll(async () => {
   await runtime?.dispose();
@@ -185,5 +188,91 @@ describe("a document's version history", () => {
         Effect.flatMap(DocumentService, (s) => s.versionAt(editor, documentId, revision + 5)),
       ),
     ).toBeNull();
+  });
+
+  it("keeps the versions it folds away, names them, and goes with the document", async () => {
+    const { owner, editor, viewer, documentId } = await projectDocument();
+    const push = (userId: string, revision: number, steps: string[]) =>
+      run(
+        Effect.flatMap(DocumentService, (s) =>
+          s.push(userId, { documentId, clientId: userId, revision, steps }),
+        ),
+      );
+    await push(editor, 0, typing("Draft", 1));
+    await push(owner, 5, typing("x".repeat(2_000), 6));
+    const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        Effect.all([
+          db
+            .update(documentSteps)
+            .set({ createdAt: daysAgo(50) })
+            .where(and(eq(documentSteps.documentId, documentId), lte(documentSteps.revision, 5))),
+          db
+            .update(documentSteps)
+            .set({ createdAt: daysAgo(45) })
+            .where(and(eq(documentSteps.documentId, documentId), gt(documentSteps.revision, 5))),
+        ]),
+      ),
+    );
+
+    // The in-memory steps carry their own times: a new process reads the backdated ones.
+    const fresh = ManagedRuntime.make(appLayer);
+    const later = <A, E>(effect: Effect.Effect<A, E, Services>) => fresh.runPromise(effect);
+    try {
+      // One more step folds the editor's run and the first of the owner's.
+      await later(
+        Effect.flatMap(DocumentService, (s) =>
+          s.push(owner, { documentId, clientId: owner, revision: 2_005, steps: typing("y", 1) }),
+        ),
+      );
+      const versions = await later(
+        Effect.flatMap(DocumentService, (s) => s.versions(editor, documentId)),
+      );
+      // The editor's draft is kept past the fold. The blank start, on the same day, is thinned.
+      expect(versions?.at(-1)).toMatchObject({
+        revision: 5,
+        author: { kind: "person", name: "Member" },
+      });
+      const textAt = (revision: number) =>
+        later(Effect.flatMap(DocumentService, (s) => s.versionAt(editor, documentId, revision)));
+      expect(textOf(await textAt(5))).toBe("Draft");
+      // Inside a folded run, or thinned away, nothing is kept.
+      expect(await textAt(3)).toBeNull();
+      expect(await textAt(0)).toBeNull();
+
+      const nameAs = (userId: string, revision: number, named: string | null) =>
+        fresh.runPromiseExit(
+          Effect.flatMap(DocumentService, (s) =>
+            s.nameVersion(userId, documentId, revision, named),
+          ),
+        );
+      expect(Exit.isSuccess(await nameAs(editor, 5, "Sent to legal"))).toBe(true);
+      // A recent version is kept as soon as it is named.
+      expect(Exit.isSuccess(await nameAs(editor, 2_006, "Latest"))).toBe(true);
+      expect(Exit.isFailure(await nameAs(viewer, 5, "Mine"))).toBe(true);
+      const named = await later(
+        Effect.flatMap(DocumentService, (s) => s.versions(editor, documentId)),
+      );
+      expect(
+        named
+          ?.filter((version) => version.name !== null)
+          .map(({ revision, name }) => [revision, name]),
+      ).toEqual([
+        [2_006, "Latest"],
+        [5, "Sent to legal"],
+      ]);
+      expect(textOf(await textAt(2_006))).toMatch(/^yDraftx{2000}$/);
+
+      await later(Effect.flatMap(DocumentService, (s) => s.remove(owner, documentId)));
+      const left = await later(
+        Effect.flatMap(Db, (db) =>
+          db.select().from(documentVersions).where(eq(documentVersions.documentId, documentId)),
+        ),
+      );
+      expect(left).toEqual([]);
+    } finally {
+      await fresh.dispose();
+    }
   });
 });

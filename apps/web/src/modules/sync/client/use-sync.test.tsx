@@ -181,13 +181,22 @@ describe("useSync", () => {
     ]);
   });
 
-  it("refreshes one document and both summary lists when a document changes", () => {
+  it("refreshes one document, the chats showing it and the library when a person's document changes", () => {
     const { invalidate, source } = renderSync();
-    source.emit("sync", { type: "document.changed", conversationId: "c1", documentId: "doc1" });
+    source.emit("sync", { type: "document.changed", documentId: "doc1" });
     expect(invalidate.mock.calls).toEqual([
       [{ queryKey: ["documents", "doc1"] }],
-      [{ queryKey: ["documents", "list", "c1"] }],
-      [{ queryKey: ["conversation", "c1"] }],
+      [{ queryKey: ["conversation"] }],
+      [{ queryKey: ["documents", "library"] }],
+    ]);
+  });
+
+  it("refreshes a project's list when its document changes", () => {
+    const { invalidate, source } = renderSync();
+    source.emit("sync", { type: "document.changed", projectId: "p1", documentId: "doc1" });
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ["documents", "doc1"] }],
+      [{ queryKey: ["projects", "documents", "p1"] }],
     ]);
   });
 
@@ -210,22 +219,14 @@ describe("useSync", () => {
     });
     source.emit("sync", { type: "conversation.purged", conversationId: "c1" });
     expect(storage()).toBe(2);
-    source.emit("sync", { type: "document.changed", conversationId: "c1", documentId: "doc1" });
+    source.emit("sync", { type: "document.changed", documentId: "doc1" });
     expect(storage()).toBe(2);
   });
 
   it("leaves the chat's detail alone when only a document's text changed", () => {
     const { invalidate, source } = renderSync();
-    source.emit("sync", {
-      type: "document.changed",
-      conversationId: "c1",
-      documentId: "doc1",
-      textOnly: true,
-    });
-    expect(invalidate.mock.calls).toEqual([
-      [{ queryKey: ["documents", "doc1"] }],
-      [{ queryKey: ["documents", "list", "c1"] }],
-    ]);
+    source.emit("sync", { type: "document.changed", documentId: "doc1", textOnly: true });
+    expect(invalidate.mock.calls).toEqual([[{ queryKey: ["documents", "doc1"] }]]);
   });
 
   it("coalesces indexing bursts into knowledge-only invalidation without starving refresh", async () => {

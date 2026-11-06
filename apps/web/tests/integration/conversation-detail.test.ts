@@ -11,6 +11,7 @@ import {
   conversationQueueEntries,
   conversationQueueEntryAttachments,
   conversations,
+  conversationDocuments,
   documents,
   messageAttachments,
   messageChunks,
@@ -336,22 +337,34 @@ describe("loadConversationDetail", () => {
     const secondId = uuidv7();
     await run(
       Effect.flatMap(Db, (db) =>
-        db.insert(documents).values([
-          {
-            id: secondId,
-            conversationId: thread.conversationId,
-            title: "Second",
-            lastEditedBy: "model",
-            snapshot: privateSource("PRIVATE SECOND SOURCE"),
-          },
-          {
-            id: firstId,
-            conversationId: thread.conversationId,
-            title: "First",
-            lastEditedBy: "user",
-            snapshot: privateSource("PRIVATE FIRST SOURCE"),
-          },
-        ]),
+        db
+          .insert(documents)
+          .values([
+            {
+              id: secondId,
+              userId,
+              title: "Second",
+              lastEditedBy: "model",
+              snapshot: privateSource("PRIVATE SECOND SOURCE"),
+            },
+            {
+              id: firstId,
+              userId,
+              title: "First",
+              lastEditedBy: "user",
+              snapshot: privateSource("PRIVATE FIRST SOURCE"),
+            },
+          ])
+          .pipe(
+            Effect.andThen(
+              db.insert(conversationDocuments).values(
+                [secondId, firstId].map((documentId) => ({
+                  conversationId: thread.conversationId,
+                  documentId,
+                })),
+              ),
+            ),
+          ),
       ),
     );
 

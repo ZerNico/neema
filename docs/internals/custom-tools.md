@@ -176,9 +176,9 @@ next retry, edit or new turn resolves the modules again as they are then. Reload
 branch carry nothing here, since a tool-call row is self-describing. Deleting the
 creating admin does not delete modules.
 
-Tool page bodies and source are never persisted in tool-call rows. The continuation
-transcript receives the normalized result, while durable activity stores only a
-bounded preview, character count and bounded error.
+A tool-call row's activity stores only a bounded preview, character count and
+bounded error, never the module's source. The normalized result the model received is
+kept beside it for later turns, like every family's (see [compaction](compaction.md)).
 
 ## Files
 

@@ -3,6 +3,7 @@ import { Schema } from "effect";
 /** Pages that can sit on the sidebar rail, in the one order both the rail and "…" use. */
 export const DESTINATION_IDS = [
   "projects",
+  "documents",
   "agents",
   "knowledge",
   "schedules",

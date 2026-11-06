@@ -1,0 +1,210 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "6115f5cc-a457-4f57-b46a-69e33fd814d0",
+  "prevIds": [
+    "8403d466-80e2-48a7-ab90-751ce7efc980"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "document_public_links"
+      ],
+      "writes": [
+        "s|tbl|public.document_public_links",
+        "n|tbl|public.document_public_links",
+        "e|tbl|public.document_public_links",
+        "n|rel|public.document_public_links",
+        "n|type|public.document_public_links",
+        "n|rel|public.document_public_links_pkey",
+        "n|rel|public.document_public_links_token_key"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "default_capabilities",
+        "capabilities"
+      ],
+      "writes": [
+        "s|colprop|public.default_capabilities.capabilities.default"
+      ],
+      "reads": [
+        "n|tbl|public.default_capabilities",
+        "n|sch|public",
+        "n|col|public.default_capabilities.capabilities"
+      ],
+      "sqlHash": "54dea6d61b5fedb9"
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "groups",
+        "capabilities"
+      ],
+      "writes": [
+        "s|colprop|public.groups.capabilities.default"
+      ],
+      "reads": [
+        "n|tbl|public.groups",
+        "n|sch|public",
+        "n|col|public.groups.capabilities"
+      ],
+      "sqlHash": "65f3e05d670390db"
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "document_public_links"
+      ],
+      "writes": [
+        "s|fk|public.document_public_links.document_public_links_document_id_documents_id_fkey",
+        "n|fk|public.document_public_links.document_public_links_document_id_documents_id_fkey",
+        "e|fk|public.document_public_links.document_public_links_document_id_documents_id_fkey",
+        "n|con|public.document_public_links.document_public_links_document_id_documents_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.document_public_links",
+        "n|sch|public",
+        "n|tbl|public.documents",
+        "n|sch|public",
+        "n|col|public.document_public_links.document_id",
+        "n|col|public.documents.id",
+        "e|uniqueness|public.documents.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "document_public_links",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "document_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "token",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "document_public_links_document_id_documents_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "document_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "documents",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "document_public_links_pkey",
+        "columns": [
+          "document_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "document_public_links",
+        "name": "document_public_links_token_key",
+        "nameExplicit": false,
+        "columns": [
+          "token"
+        ],
+        "nullsNotDistinct": false,
+        "entityType": "uniques"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"default_capabilities\",\"capabilities\"]",
+      "set": {
+        "default": "'{\"agentsUse\":true,\"agentsCreate\":true,\"knowledgeUse\":true,\"knowledgeCreate\":true,\"skillsUse\":true,\"skillsCreate\":true,\"projectsUse\":true,\"projectsCreate\":true,\"schedules\":true,\"webSearch\":true,\"deepResearch\":true,\"memory\":true,\"documents\":true,\"customTools\":true,\"work\":true,\"attachments\":true,\"mcp\":true,\"apiKeys\":true,\"mcpServers\":true,\"publicLinks\":true}'"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"groups\",\"capabilities\"]",
+      "set": {
+        "default": "'{\"agentsUse\":true,\"agentsCreate\":true,\"knowledgeUse\":true,\"knowledgeCreate\":true,\"skillsUse\":true,\"skillsCreate\":true,\"projectsUse\":true,\"projectsCreate\":true,\"schedules\":true,\"webSearch\":true,\"deepResearch\":true,\"memory\":true,\"documents\":true,\"customTools\":true,\"work\":true,\"attachments\":true,\"mcp\":true,\"apiKeys\":true,\"mcpServers\":true,\"publicLinks\":true}'"
+      }
+    }
+  ]
+}

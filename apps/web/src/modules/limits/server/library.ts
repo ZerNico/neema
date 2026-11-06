@@ -121,7 +121,7 @@ export class StorageLibrary extends Context.Service<
                 documentId: documents.id,
                 documentTitle: documents.title,
                 documentProject: documents.projectId,
-                documentConversation: documents.conversationId,
+                documentConversation: documents.originConversationId,
               })
               .from(attachments)
               .leftJoin(messageAttachments, eq(messageAttachments.attachmentId, attachments.id))

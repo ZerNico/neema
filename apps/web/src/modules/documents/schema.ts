@@ -20,6 +20,8 @@ export const DOCUMENT_LIMITS = {
   quote: 500,
   /** Comments one document may hold, replies included. */
   comments: 1_000,
+  /** People, and groups, one document may be shared with each. */
+  shares: 200,
 } as const;
 
 export const DocumentTitle = Schema.String.check(
@@ -32,10 +34,58 @@ export const DocumentIdInput = Schema.Struct({ documentId: EntityId });
 export type DocumentIdInput = typeof DocumentIdInput.Type;
 export const ConversationIdInput = Schema.Struct({ conversationId: EntityId });
 export const ProjectDocumentsInput = Schema.Struct({ projectId: EntityId });
-export const CreateProjectDocumentInput = Schema.Struct({
-  projectId: EntityId,
+/** A blank document a person starts: in a project, or their own without one. */
+export const NewDocumentInput = Schema.Struct({
+  projectId: Schema.optionalKey(EntityId),
   title: DocumentTitle,
 });
+export const DocumentShareRole = Schema.Literals(["viewer", "editor"]);
+export const DocumentShareChange = Schema.Union([
+  Schema.Struct({
+    action: Schema.Literal("addUser"),
+    email: Schema.String.check(Schema.isMinLength(3), Schema.isMaxLength(254)),
+    role: DocumentShareRole,
+  }),
+  Schema.Struct({
+    action: Schema.Literal("setUserRole"),
+    userId: EntityId,
+    role: DocumentShareRole,
+  }),
+  Schema.Struct({ action: Schema.Literal("removeUser"), userId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("addGroup"), groupId: EntityId, role: DocumentShareRole }),
+  Schema.Struct({ action: Schema.Literal("removeGroup"), groupId: EntityId }),
+  Schema.Struct({ action: Schema.Literal("setPublicLink"), enabled: Schema.Boolean }),
+]);
+export type DocumentShareChange = typeof DocumentShareChange.Type;
+export const ShareDocumentInput = Schema.Struct({
+  documentId: EntityId,
+  change: DocumentShareChange,
+});
+/** Who a person's document is shared with; the owner also gets the groups they may add. */
+export interface DocumentSharing {
+  ownerName: string;
+  users: ReadonlyArray<{ userId: string; name: string; email: string; role: "viewer" | "editor" }>;
+  groups: ReadonlyArray<{ groupId: string; name: string; role: "viewer" | "editor" }>;
+  eligibleGroups: ReadonlyArray<{ id: string; name: string }>;
+  /** The owner's only: the link's token when on, and whether they may turn one on. */
+  publicLink: { token: string | null; canPublish: boolean } | null;
+}
+/** A document as anyone with its public link reads it: the tree, its images through the link. */
+export interface PublicDocument {
+  title: string;
+  ownerName: string;
+  updatedAt: string;
+  /** The tree as JSON text. */
+  content: string;
+}
+export const PublicDocumentInput = Schema.Struct({
+  // Any string: one that names no link reads as gone, the same as one turned off.
+  token: Schema.String.check(Schema.isMaxLength(64)),
+});
+export const publicDocumentPath = (token: string) => `/d/${encodeURIComponent(token)}`;
+export const publicDocumentImagePath = (token: string, attachmentId: string) =>
+  `/api/public/documents/${encodeURIComponent(token)}/images/${encodeURIComponent(attachmentId)}`;
+export const CopyDocumentInput = Schema.Struct({ documentId: EntityId, projectId: EntityId });
 export const RenameDocumentInput = Schema.Struct({
   documentId: EntityId,
   title: DocumentTitle,
@@ -44,6 +94,12 @@ export const RenameDocumentInput = Schema.Struct({
 export const DocumentVersionInput = Schema.Struct({
   documentId: EntityId,
   revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+/** A version's name; an empty one takes the name off. */
+export const NameDocumentVersionInput = Schema.Struct({
+  documentId: EntityId,
+  revision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  name: Schema.String.check(Schema.isMaxLength(100)),
 });
 export const DocumentImageInput = Schema.Struct({
   documentId: EntityId,
@@ -55,12 +111,12 @@ export const documentImagePath = (documentId: string, attachmentId: string) =>
   `/api/documents/${encodeURIComponent(documentId)}/images/${encodeURIComponent(attachmentId)}`;
 /** One answer for every refused claim, so it never tells whether the upload exists. */
 export const IMAGE_REFUSED = localized(m.documents_error_image_refused);
-/** Exactly one owner: a chat, or a project. */
+/** At most one place: a chat, which its owner then owns, or a project; neither is the person's own. */
 export const CreateDocumentInput = Schema.Struct({
   conversationId: Schema.optionalKey(EntityId),
   projectId: Schema.optionalKey(EntityId),
-  /** A chat document's answer; rewinding past it deletes the document. */
-  createdByMessageId: Schema.optionalKey(EntityId),
+  /** The answer whose card shows a chat's document. */
+  messageId: Schema.optionalKey(EntityId),
   title: DocumentTitle,
   content: Schema.String,
   /** Planned sections after the content, each one placeholder's intent. */
@@ -177,12 +233,14 @@ export type DocumentFrame =
   /** The document was deleted, or this subscriber lost access to it. */
   | { type: "gone" };
 
-/** A chat's or a project's document: exactly one of the two owners is set. */
+/** A person's or a project's document: exactly one of the two owners is set. */
 export interface EditableDocument {
   id: string;
+  /** The personal document's owner; null for a project's. */
+  userId: string | null;
+  /** The chat it was made in, while that chat still shows it. */
   conversationId: string | null;
   projectId: string | null;
-  createdByMessageId?: string | null;
   title: string;
   revision: number;
   lastEditedBy: "user" | "model";
@@ -191,6 +249,13 @@ export interface EditableDocument {
   canEdit: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A row of a person's library: their own, with the chat it was made in, or one shared with them. */
+export interface LibraryDocument extends EditableDocument {
+  conversationTitle: string | null;
+  /** The owner's name, for one shared with the reader; null for their own. */
+  sharedBy: string | null;
 }
 
 /** What one model edit did: the blocks it wrote, or why it changed nothing. */

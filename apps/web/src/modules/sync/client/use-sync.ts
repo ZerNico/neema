@@ -236,21 +236,17 @@ export function useSync(
           break;
         case "document.changed":
           void queryClient.invalidateQueries({ queryKey: ["documents", event.documentId] });
-          if (event.conversationId) {
-            void queryClient.invalidateQueries({
-              queryKey: ["documents", "list", event.conversationId],
-            });
-            // Creation, rename and deletion change the loader's summary list;
-            // typing does not, and would otherwise reload the chat once a second.
-            if (!event.textOnly)
-              void queryClient.invalidateQueries({
-                queryKey: ["conversation", event.conversationId],
-              });
-          }
           if (event.projectId)
             void queryClient.invalidateQueries({
               queryKey: ["projects", "documents", event.projectId],
             });
+          // Creation, rename, keeping and deletion change chats' summary lists
+          // and the library; typing does not, and would otherwise reload the
+          // open chat once a second. Only the open chat refetches now.
+          else if (!event.textOnly) {
+            void queryClient.invalidateQueries({ queryKey: ["conversation"] });
+            void queryClient.invalidateQueries({ queryKey: ["documents", "library"] });
+          }
           break;
         case "project.changed":
           void queryClient.invalidateQueries({ queryKey: ["projects"] });

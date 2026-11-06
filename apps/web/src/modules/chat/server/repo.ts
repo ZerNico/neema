@@ -42,15 +42,18 @@ import {
   conversationCompactionCheckpoints,
   conversations,
   conversationQueueEntries,
+  documents,
   messageChunks,
   messageCompactionEvents,
   messageGenerationConfig,
   messages,
   messageToolCalls,
+  messageToolResults,
   messageUiStates,
   schedules,
 } from "~/db/schema/index.ts";
 import { deleteMark, ownedConversation, ownedConversationById } from "./owned-conversation.ts";
+import { temporaryOnlySql } from "~/modules/documents/server/document-repo.ts";
 import type { ResolvedAgentConfig, UnavailableAgentDependency } from "~/db/schema/agents.ts";
 import type { ResolvedProject } from "~/modules/projects/schema.ts";
 import type { AgentNotAvailable } from "~/modules/agents/errors.ts";
@@ -229,7 +232,11 @@ export interface ConversationDefaults {
   /** Schedule drafts the conversation owns, discovered the same way. */
   readonly scheduleDrafts?: ReadonlyArray<DraftSummary>;
   /** Mutable chat documents stay out of history; the loader carries summaries only. */
-  readonly documents?: ReadonlyArray<{ id: string; title: string; messageId: string | null }>;
+  readonly documents?: ReadonlyArray<{
+    id: string;
+    title: string;
+    messageId: string | null;
+  }>;
   /** Unpublished working files kept for later answers, named so a rewind can say it removes them. */
   readonly workingFiles?: ReadonlyArray<{ id: string; name: string; messageId: string }>;
   /** Set where defaults were read from a stored chat, so an attempt can move its image lock. */
@@ -802,6 +809,8 @@ export class ChatRepo extends Context.Service<
       result: JsonValue;
       status: "complete" | "error";
       error?: { code: string; message: string };
+      /** What the model was handed, for later turns; see `message_tool_results`. */
+      modelResult?: unknown;
     }): Effect.Effect<void>;
     /**
      * Ends a call whose body was written as it ran, so the stored result stands.
@@ -810,6 +819,7 @@ export class ChatRepo extends Context.Service<
       id: string;
       status: "complete" | "error";
       error?: { code: string; message: string };
+      modelResult?: unknown;
     }): Effect.Effect<void>;
     /**
      * Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
@@ -827,6 +837,8 @@ export class ChatRepo extends Context.Service<
      */
     sweepCompletedChunks(): Effect.Effect<number>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
+    /** What these calls handed the model, by call id; never sent to a client. */
+    listToolResults(callIds: ReadonlyArray<string>): Effect.Effect<ReadonlyMap<string, JsonValue>>;
     /** Saved ```ui block state for these answers; the client drops rows whose hash no longer matches. */
     listUiStates(messageIds: ReadonlyArray<string>): Effect.Effect<UiStateRow[]>;
     /**
@@ -1046,11 +1058,27 @@ export class ChatRepo extends Context.Service<
           .transaction((tx) =>
             Effect.gen(function* () {
               const [owned] = yield* tx
-                .select({ userId: conversations.userId, machineId: conversations.machineId })
+                .select({
+                  userId: conversations.userId,
+                  machineId: conversations.machineId,
+                  temporary: conversations.temporary,
+                })
                 .from(conversations)
                 .where(and(eq(conversations.id, conversationId), condition))
                 .for("update");
               if (!owned) return null;
+              // Documents outlive their chat, except a temporary one's that is
+              // used nowhere else: listed nowhere, nobody would find it again.
+              if (owned.temporary)
+                yield* tx
+                  .delete(documents)
+                  .where(
+                    and(
+                      eq(documents.userId, owned.userId),
+                      eq(documents.originConversationId, conversationId),
+                      temporaryOnlySql,
+                    ),
+                  );
               yield* research.finalizeBeforeDelete(tx, conversationId);
 
               const rows = yield* tx
@@ -1982,6 +2010,16 @@ export class ChatRepo extends Context.Service<
               asc(messageToolCalls.callIndex),
             )
             .pipe(Effect.orDie);
+        }),
+
+        listToolResults: Effect.fn("ChatRepo.listToolResults")(function* (callIds) {
+          if (callIds.length === 0) return new Map<string, JsonValue>();
+          const rows = yield* db
+            .select()
+            .from(messageToolResults)
+            .where(inArray(messageToolResults.toolCallId, [...callIds]))
+            .pipe(Effect.orDie);
+          return new Map(rows.map((row) => [row.toolCallId, row.result]));
         }),
 
         listCompactionEvents: Effect.fn("ChatRepo.listCompactionEvents")(function* (messageIds) {

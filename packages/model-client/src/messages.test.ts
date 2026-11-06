@@ -209,6 +209,46 @@ describe("Messages requests", () => {
     }),
   );
 
+  effect("spells another provider's call id the way Anthropic accepts, on both sides", () =>
+    Effect.gen(function* () {
+      const run = bedrock([messagesSse([start(), ...text(0, "Ok"), ...stop("end_turn")])]);
+      const id = "functions.read:0";
+      yield* run.stream(
+        Prompt.fromMessages([
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "Read" })] }),
+          Prompt.makeMessage("assistant", {
+            content: [
+              Prompt.makePart("tool-call", {
+                id,
+                name: "read",
+                params: {},
+                providerExecuted: false,
+              }),
+            ],
+          }),
+          Prompt.makeMessage("tool", {
+            content: [
+              Prompt.makePart("tool-result", {
+                id,
+                name: "read",
+                isFailure: false,
+                providerExecuted: false,
+                result: "page",
+              }),
+            ],
+          }),
+          Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text: "And?" })] }),
+        ]),
+      );
+      const messages = run.exchanges[0]!.body["messages"] as Array<{
+        content: Array<{ id?: string; tool_use_id?: string }>;
+      }>;
+      const sent = messages[1]!.content[0]!.id!;
+      expect(sent).toMatch(/^[a-zA-Z0-9_-]+$/);
+      expect(messages[2]!.content[0]!.tool_use_id).toBe(sent);
+    }),
+  );
+
   effect("asks for summarised adaptive thinking at the chosen effort", () =>
     Effect.gen(function* () {
       const run = bedrock([messagesSse([start(), ...text(0, "Ok"), ...stop("end_turn")])], {

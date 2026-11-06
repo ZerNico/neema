@@ -1,9 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgClient } from "@effect/sql-pg";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime, Redacted } from "effect";
 import { uuidv7 } from "uuidv7";
-import { conversations, messages, schedules } from "~/db/schema/index.ts";
+import {
+  conversationDocuments,
+  conversations,
+  documents,
+  documentUserGrants,
+  messages,
+  schedules,
+} from "~/db/schema/index.ts";
 import { AttachmentRepo } from "~/modules/attachments/server/repo.ts";
 import { ChatRepo, type ConversationCursor } from "~/modules/chat/server/repo.ts";
 import { Db } from "~/server/db.ts";
@@ -454,6 +461,69 @@ describe("temporary chat expiry", () => {
       deleted: null,
       temporary: false,
     });
+  });
+
+  it("takes the documents made in it and used nowhere else, and leaves every other", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const userId = yield* makeUser();
+        const friend = yield* makeUser();
+        const db = yield* Db;
+        const repo = yield* ChatRepo;
+        const long = new Date(Date.now() - 25 * HOUR);
+        const temporary = uuidv7();
+        const ordinary = uuidv7();
+        yield* db.insert(conversations).values([
+          { id: temporary, userId, temporary: true, createdAt: long, lastMessageAt: long },
+          { id: ordinary, userId, createdAt: long },
+        ]);
+        const blank = { type: "doc", content: [] };
+        const add = (originConversationId: string | null) => {
+          const id = uuidv7();
+          return db
+            .insert(documents)
+            .values({
+              id,
+              userId,
+              originConversationId,
+              title: id,
+              lastEditedBy: "model" as const,
+              snapshot: blank,
+            })
+            .pipe(Effect.as(id));
+        };
+        const made = yield* add(temporary);
+        // Made elsewhere, or started in the library, and only named in the temporary chat.
+        const shown = yield* add(ordinary);
+        const started = yield* add(null);
+        // Made in the temporary chat, then carried into an ordinary one, or shared.
+        const carried = yield* add(temporary);
+        const shared = yield* add(temporary);
+        yield* db.insert(conversationDocuments).values([
+          { conversationId: temporary, documentId: made },
+          { conversationId: ordinary, documentId: shown, createdAt: long },
+          { conversationId: temporary, documentId: shown },
+          { conversationId: temporary, documentId: started },
+          { conversationId: temporary, documentId: carried },
+          { conversationId: ordinary, documentId: carried },
+          { conversationId: temporary, documentId: shared },
+        ]);
+        yield* db
+          .insert(documentUserGrants)
+          .values({ documentId: shared, userId: friend, role: "viewer" });
+        yield* repo.purgeExpired(temporary);
+        const left = yield* db
+          .select({ id: documents.id })
+          .from(documents)
+          .where(inArray(documents.id, [made, shown, started, carried, shared]));
+        return {
+          gone: [made],
+          kept: [shown, started, carried, shared],
+          left: left.map((row) => row.id),
+        };
+      }),
+    );
+    expect(result.left.toSorted()).toEqual(result.kept.toSorted());
   });
 });
 

@@ -1981,6 +1981,7 @@ describe("ChatView documents", () => {
       rpc.mockReset();
     const current: SeedDocument = {
       id: "document-1",
+      userId: "user",
       conversationId: "01990f4e-6650-7a33-a768-611e2e4bf4c7",
       title: "Trip plan",
       content: "Original source",

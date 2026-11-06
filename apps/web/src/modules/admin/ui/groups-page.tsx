@@ -193,6 +193,11 @@ const featureGroups: ReadonlyArray<{
         description: m.admin_groups_feature_mcp_servers_description,
         key: "mcpServers",
       },
+      {
+        label: m.admin_groups_feature_public_links,
+        description: m.admin_groups_feature_public_links_description,
+        key: "publicLinks",
+      },
     ],
   },
   {

@@ -1,5 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getDocument, listProjectDocuments } from "../server/document-functions.ts";
+import {
+  getDocument,
+  getDocumentSharing,
+  listDocumentLibrary,
+  listProjectDocuments,
+} from "../server/document-functions.ts";
 
 export const documentQuery = (documentId: string) =>
   queryOptions({
@@ -16,4 +21,18 @@ export const projectDocumentsQuery = (projectId: string) =>
     queryKey: ["projects", "documents", projectId],
     queryFn: () => listProjectDocuments({ data: { projectId } }),
     staleTime: 30_000,
+  });
+
+/** Under the documents key, so any change to a person's document refreshes it. */
+export const documentLibraryQuery = queryOptions({
+  queryKey: ["documents", "library"],
+  queryFn: () => listDocumentLibrary(),
+  staleTime: 30_000,
+});
+
+/** Under the document's key, so its change event refreshes who it is shared with too. */
+export const documentSharingQuery = (documentId: string) =>
+  queryOptions({
+    queryKey: ["documents", documentId, "sharing"],
+    queryFn: () => getDocumentSharing({ data: { documentId } }),
   });

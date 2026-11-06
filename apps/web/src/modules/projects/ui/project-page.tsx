@@ -23,11 +23,8 @@ import { sendMessage } from "~/modules/chat/server/functions.ts";
 import type { DocumentAsk } from "~/modules/documents/ui/rich-editor/editor-hooks.ts";
 import { relativeAgeLabel } from "~/modules/chat/ui/timestamps.ts";
 import { projectDocumentsQuery } from "~/modules/documents/client/document-queries.ts";
-import {
-  createProjectDocument,
-  createProjectDocumentFromWord,
-  deleteProjectDocument,
-} from "~/modules/documents/server/document-functions.ts";
+import { DocumentLifecycleItems } from "~/modules/documents/ui/document-lifecycle.tsx";
+import { NewDocumentDialog } from "~/modules/documents/ui/new-document-dialog.tsx";
 import { DocumentOwner, type DocumentOwnerHandle } from "~/modules/documents/ui/document-owner.tsx";
 import { RenameDocumentDialog } from "~/modules/documents/ui/rename-document-dialog.tsx";
 import { useDocumentPanel } from "~/modules/documents/ui/document-panel-context.ts";
@@ -50,23 +47,13 @@ import { PendingButton } from "~/ui/pending-button.tsx";
 import { Badge } from "~/ui/primitives/badge";
 import { Button, buttonVariants } from "~/ui/primitives/button";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/ui/primitives/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/ui/primitives/dropdown-menu";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "~/ui/primitives/field";
-import { Input } from "~/ui/primitives/input";
+import { Field, FieldLabel } from "~/ui/primitives/field";
 import { Textarea } from "~/ui/primitives/textarea";
 import { projectChatsQuery, projectQuery } from "../client/queries.ts";
 import { PROJECT_LIMITS, projectCan, type ProjectDetail } from "../schema.ts";
@@ -78,7 +65,14 @@ import { roleLabel } from "./role-labels.ts";
 
 const notFound = (error: unknown) => error instanceof Error && /not found/i.test(error.message);
 
-export function ProjectPage({ projectId }: { projectId: string }) {
+export function ProjectPage({
+  projectId,
+  openDocument = null,
+}: {
+  projectId: string;
+  /** A document to open once its row is there. */
+  openDocument?: string | null;
+}) {
   const project = useQuery(projectQuery(projectId));
   if (project.isError)
     return (
@@ -110,10 +104,16 @@ export function ProjectPage({ projectId }: { projectId: string }) {
         <ListSkeleton label={m.projects_page_loading()} />
       </Page>
     );
-  return <LoadedProject project={project.data} />;
+  return <LoadedProject project={project.data} openDocument={openDocument} />;
 }
 
-function LoadedProject({ project }: { project: ProjectDetail }) {
+function LoadedProject({
+  project,
+  openDocument,
+}: {
+  project: ProjectDetail;
+  openDocument: string | null;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -189,7 +189,7 @@ function LoadedProject({ project }: { project: ProjectDetail }) {
       }
     >
       <InstructionsSection project={project} editable={editable} />
-      <DocumentsSection project={project} editable={editable} />
+      <DocumentsSection project={project} editable={editable} openFirst={openDocument} />
       <ProjectFilesSection projectId={project.id} editable={editable} />
       <ProjectMemorySection projectId={project.id} editable={editable} />
       <ChatsSection projectId={project.id} />
@@ -266,11 +266,19 @@ function InstructionsSection({ project, editable }: { project: ProjectDetail; ed
   );
 }
 
-function DocumentsSection({ project, editable }: { project: ProjectDetail; editable: boolean }) {
+function DocumentsSection({
+  project,
+  editable,
+  openFirst,
+}: {
+  project: ProjectDetail;
+  editable: boolean;
+  openFirst: string | null;
+}) {
   const documents = useQuery(projectDocumentsQuery(project.id));
   const [creating, setCreating] = useState(false);
-  // A document just made here opens once its row and connection exist.
-  const [justCreated, setJustCreated] = useState<string | null>(null);
+  // A document just made, here or as a copy elsewhere, opens once its row and connection exist.
+  const [justCreated, setJustCreated] = useState<string | null>(openFirst);
   const rows = documents.data ?? [];
   const owner = useRef<DocumentOwnerHandle>(null);
   const askInNewChat = useAskInNewChat(project.id, owner);
@@ -400,14 +408,7 @@ function ProjectDocumentRow({
     open();
     onOpened();
   }, [openNow, open, onOpened]);
-  const confirm = useConfirm();
-  const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
-  const remove = useMutation({
-    mutationFn: () => deleteProjectDocument({ data: { documentId: document.id } }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects", "documents"] }),
-    onError: (error) => toastError(m.projects_documents_delete_failed(), error),
-  });
   const detail = m.projects_documents_updated({
     age: relativeAgeLabel(document.updatedAt, undefined, formatLocale()),
   });
@@ -427,178 +428,33 @@ function ProjectDocumentRow({
         <span className="truncate text-sm font-medium">{entry?.title ?? document.title}</span>
         <span className="text-muted-foreground truncate text-xs">{detail}</span>
       </button>
-      {editable ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={m.projects_documents_actions({ title: document.title })}
-              />
-            }
-          >
-            <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={m.projects_documents_actions({ title: document.title })}
+            />
+          }
+        >
+          <HugeiconsIcon icon={MoreHorizontalIcon} strokeWidth={2} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {editable ? (
             <DropdownMenuItem onClick={() => setRenaming(true)}>
               <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={2} />
               {m.common_rename()}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={remove.isPending}
-              onClick={() => {
-                void confirm({
-                  title: m.projects_documents_delete_title({ title: document.title }),
-                  description: m.projects_documents_delete_description(),
-                  confirmLabel: m.projects_documents_delete(),
-                }).then((confirmed) => {
-                  if (confirmed) remove.mutate();
-                });
-              }}
-            >
-              <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
-              {m.common_delete()}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+          ) : null}
+          {/* A project's document is shared by its project, so there is nothing to share here. */}
+          <DocumentLifecycleItems document={document} onShare={() => undefined} />
+        </DropdownMenuContent>
+      </DropdownMenu>
       {editable ? (
         <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
       ) : null}
     </ListRow>
-  );
-}
-
-function NewDocumentDialog({
-  projectId,
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  projectId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: (documentId: string) => void;
-}) {
-  const id = useId();
-  const queryClient = useQueryClient();
-  const [title, setTitle] = useState("");
-  // A text document may start from a Word file instead of blank.
-  const [file, setFile] = useState<File | null>(null);
-  const picker = useRef<HTMLInputElement>(null);
-  const reset = () => {
-    setTitle("");
-    setFile(null);
-  };
-  const save = useMutation({
-    mutationFn: async () => {
-      if (file) {
-        const data = new FormData();
-        data.set("file", file);
-        data.set("projectId", projectId);
-        data.set("title", title.trim());
-        const imported = await createProjectDocumentFromWord({ data });
-        if (imported.dropped.length)
-          toast(m.projects_documents_left_out({ parts: imported.dropped.join(", ") }));
-        return imported.document;
-      }
-      return createProjectDocument({ data: { projectId, title: title.trim() } });
-    },
-    onSuccess: async (document) => {
-      onCreated(document.id);
-      await queryClient.invalidateQueries({ queryKey: ["projects", "documents", projectId] });
-      onOpenChange(false);
-      reset();
-    },
-  });
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && save.isPending) return;
-        if (!next) reset();
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{m.projects_documents_new()}</DialogTitle>
-          <DialogDescription>{m.projects_documents_new_description()}</DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (title.trim()) save.mutate();
-          }}
-        >
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${id}-file`}>{m.projects_documents_from_word()}</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Input
-                  ref={picker}
-                  id={`${id}-file`}
-                  type="file"
-                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  disabled={save.isPending}
-                  onChange={(event) => {
-                    const picked = event.target.files?.[0] ?? null;
-                    setFile(picked);
-                    if (picked && !title.trim())
-                      setTitle(picked.name.replace(/\.[^.]+$/, "").slice(0, 200));
-                  }}
-                />
-                {file ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={save.isPending}
-                    onClick={() => {
-                      setFile(null);
-                      if (picker.current) picker.current.value = "";
-                    }}
-                  >
-                    {m.projects_documents_clear()}
-                  </Button>
-                ) : null}
-              </div>
-              <FieldDescription>{m.projects_documents_optional()}</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-title`}>{m.projects_documents_title_label()}</FieldLabel>
-              <Input
-                id={`${id}-title`}
-                value={title}
-                maxLength={200}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder={m.projects_documents_title_placeholder()}
-                disabled={save.isPending}
-                autoFocus
-              />
-            </Field>
-          </FieldGroup>
-          {save.isError ? (
-            <FieldError>
-              {file && save.error instanceof Error && save.error.message
-                ? save.error.message
-                : m.projects_documents_create_failed()}
-            </FieldError>
-          ) : null}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" disabled={save.isPending} />}>
-              {m.common_cancel()}
-            </DialogClose>
-            <PendingButton type="submit" pending={save.isPending} disabled={!title.trim()}>
-              {m.projects_documents_create()}
-            </PendingButton>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
 

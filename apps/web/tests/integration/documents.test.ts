@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PgClient } from "@effect/sql-pg";
 import { Node } from "@tiptap/pm/model";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   Cause,
   Deferred,
@@ -20,12 +20,22 @@ import { Client } from "pg";
 import { uuidv7 } from "uuidv7";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { english, type Localized } from "~/i18n/localized.ts";
-import { conversations, documents, documentSteps, messages, user } from "~/db/schema/index.ts";
+import {
+  conversationDocuments,
+  conversations,
+  documents,
+  documentSteps,
+  groupMembers,
+  groups,
+  messages,
+  user,
+} from "~/db/schema/index.ts";
 import { lockGeneration } from "~/modules/chat/server/generation-fence.ts";
 import {
   DOCUMENT_LIMITS,
   type EditableDocument,
   type DocumentFrame,
+  type DocumentShareChange,
 } from "~/modules/documents/schema.ts";
 import { blockIdOf } from "~/modules/documents/editor/block-ids.ts";
 import { commentAnchors } from "~/modules/documents/editor/comments.ts";
@@ -868,7 +878,7 @@ describe("ownership, limits and sync", () => {
     expect(changedEvents(owner)).toEqual([
       {
         userId: owner,
-        event: { type: "document.changed", conversationId, documentId: created.id },
+        event: { type: "document.changed", documentId: created.id },
       },
     ]);
     await edit(owner, created, { old: "nothing", new: "x" });
@@ -880,7 +890,7 @@ describe("ownership, limits and sync", () => {
     await vi.waitFor(() => expect(changedEvents(owner)).toHaveLength(2), { timeout: 5_000 });
     expect(changedEvents(owner)[1]).toEqual({
       userId: owner,
-      event: { type: "document.changed", conversationId, documentId: created.id, textOnly: true },
+      event: { type: "document.changed", documentId: created.id, textOnly: true },
     });
     publishingFails = true;
     const second = await create(owner, conversationId);
@@ -889,48 +899,279 @@ describe("ownership, limits and sync", () => {
     expect(changedEvents(owner)).toHaveLength(2);
   });
 
-  it("removes a document with the answer that created it", async () => {
+  it("keeps a document when the answer and the chat that made it go", async () => {
     const owner = await createUser();
     const conversationId = await createConversation(owner);
     const fence = await generation(owner, conversationId);
-    const anchored = await service((s) =>
+    const made = await service((s) =>
       s.create(owner, {
         conversationId,
-        createdByMessageId: fence.messageId,
-        title: "Anchored",
+        messageId: fence.messageId,
+        title: "Made",
         content: CHECKLIST,
       }),
     ).then((r) => r.document);
-    const loose = await create(owner, conversationId, "no anchor", "Loose");
-    expect(anchored.createdByMessageId).toBe(fence.messageId);
 
-    // Rewinding past that answer deletes the message; the document goes with it
-    // rather than surviving as an artifact of a conversation prefix that is gone.
+    // A rewind deletes the answer; the document is the person's and stays.
     await run(
       Effect.flatMap(Db, (db) => db.delete(messages).where(eq(messages.id, fence.messageId))),
     );
+    expect(await get(owner, made)).toMatchObject({ id: made.id, conversationId });
 
-    expect(await get(owner, anchored)).toBeNull();
-    expect(await get(owner, loose)).toEqual(loose);
-  });
-
-  it("removes documents with their conversation", async () => {
-    const owner = await createUser();
-    const conversationId = await createConversation(owner);
-    const created = await create(owner, conversationId);
+    // A chat waiting out a delete does not hide it either, and its purge leaves it.
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(conversations)
+          .set({ deletedAt: new Date() })
+          .where(eq(conversations.id, conversationId)),
+      ),
+    );
+    expect(await get(owner, made)).toMatchObject({ id: made.id });
     await run(
       Effect.flatMap(Db, (db) =>
         db.delete(conversations).where(eq(conversations.id, conversationId)),
       ),
     );
-    expect(await get(owner, created)).toBeNull();
+    expect(await get(owner, made)).toMatchObject({ id: made.id, conversationId: null });
     expect(
       await run(
         Effect.flatMap(Db, (db) =>
-          db.select().from(documents).where(eq(documents.conversationId, conversationId)),
+          db
+            .select()
+            .from(conversationDocuments)
+            .where(eq(conversationDocuments.conversationId, conversationId)),
         ),
       ),
     ).toEqual([]);
+  });
+
+  it("lists a person's documents in their library, starts one outside any chat, and lets only them delete it", async () => {
+    const owner = await createUser();
+    const stranger = await createUser();
+    const conversationId = await createConversation(owner);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .update(conversations)
+          .set({ title: "Planning" })
+          .where(eq(conversations.id, conversationId)),
+      ),
+    );
+    const made = await create(owner, conversationId, CHECKLIST, "Made");
+    const own = await service((s) =>
+      s.create(owner, { title: "Notes", content: "", by: "user" }),
+    ).then((r) => r.document);
+    expect(own).toMatchObject({ userId: owner, conversationId: null, projectId: null });
+    expect(await service((s) => s.library(owner))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: made.id, conversationTitle: "Planning" }),
+        expect.objectContaining({ id: own.id, conversationTitle: null }),
+      ]),
+    );
+    expect(await service((s) => s.library(stranger))).toEqual([]);
+
+    // A temporary chat's documents are listed nowhere else, so not here either.
+    const temporary = await createConversation(owner);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(conversations).set({ temporary: true }).where(eq(conversations.id, temporary)),
+      ),
+    );
+    const passing = await create(owner, temporary, CHECKLIST, "Passing");
+    expect((await service((s) => s.library(owner))).map((row) => row.id)).not.toContain(passing.id);
+    // Named there, a document from elsewhere stays theirs and listed: naming makes no origin.
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.insert(conversationDocuments).values({ conversationId: temporary, documentId: own.id }),
+      ),
+    );
+    expect((await service((s) => s.library(owner))).map((row) => row.id)).toContain(own.id);
+    // Carried into an ordinary chat, one made there is in use and listed too.
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(conversationDocuments)
+          .values({ conversationId: conversationId, documentId: passing.id }),
+      ),
+    );
+    expect((await service((s) => s.library(owner))).map((row) => row.id)).toContain(passing.id);
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.delete(conversationDocuments).where(eq(conversationDocuments.documentId, passing.id)),
+      ),
+    );
+
+    await expect(service((s) => s.remove(stranger, made.id))).rejects.toMatchObject({
+      _tag: "DocumentNotAvailable",
+    });
+    await service((s) => s.remove(owner, made.id));
+    expect(await get(owner, made)).toBeNull();
+    expect((await service((s) => s.library(owner))).map((row) => row.id)).toEqual([own.id]);
+  });
+});
+
+describe("sharing", () => {
+  const share = (owner: string, documentId: string, change: DocumentShareChange) =>
+    service((s) => s.share(owner, documentId, change));
+
+  it("lets an editor write and a viewer read, keeps it, and ends both on revoke", async () => {
+    const owner = await createUser();
+    const editor = await createUser();
+    const viewer = await createUser();
+    const conversationId = await createConversation(owner);
+    const fence = await generation(owner, conversationId);
+    const shared = await service((s) =>
+      s.create(owner, {
+        conversationId,
+        messageId: fence.messageId,
+        title: "Shared",
+        content: CHECKLIST,
+      }),
+    ).then((r) => r.document);
+    expect(await get(editor, shared)).toBeNull();
+
+    await share(owner, shared.id, { action: "addUser", email: `${editor}@t.io`, role: "editor" });
+    await share(owner, shared.id, { action: "addUser", email: `${viewer}@t.io`, role: "viewer" });
+    // The recipients never learn the owner's chat.
+    expect(await get(owner, shared)).toMatchObject({ conversationId });
+    expect(await get(editor, shared)).toMatchObject({ canEdit: true, conversationId: null });
+    expect(await get(viewer, shared)).toMatchObject({ canEdit: false });
+    expect(await service((s) => s.library(editor))).toEqual([
+      expect.objectContaining({
+        id: shared.id,
+        sharedBy: "Document owner",
+        conversationTitle: null,
+      }),
+    ]);
+    expect(changedEvents(viewer).length).toBeGreaterThan(0);
+
+    const edited = await edit(editor, (await get(editor, shared))!, {
+      old: "ship",
+      new: "ship it",
+    });
+    expect(edited).toMatchObject({ outcome: "updated" });
+    await expect(
+      edit(viewer, (await get(viewer, shared))!, { old: "announce", new: "x" }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    // Only the owner keeps, shares or deletes it.
+    for (const attempt of [
+      service((s) => s.remove(editor, shared.id)),
+      share(editor, shared.id, { action: "removeUser", userId: viewer }),
+    ])
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Two refusals, each checked alone.
+      await expect(attempt).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    expect(await service((s) => s.sharing(viewer, shared.id))).toMatchObject({
+      ownerName: "Document owner",
+      eligibleGroups: [],
+      users: expect.arrayContaining([
+        expect.objectContaining({ userId: editor, role: "editor" }),
+        expect.objectContaining({ userId: viewer, role: "viewer" }),
+      ]),
+    });
+
+    await share(owner, shared.id, { action: "removeUser", userId: editor });
+    expect(await get(editor, shared)).toBeNull();
+    await share(owner, shared.id, { action: "setUserRole", userId: viewer, role: "editor" });
+    expect(await get(viewer, shared)).toMatchObject({ canEdit: true });
+  });
+
+  it("shares with a group only for an owner the group lets share", async () => {
+    const owner = await createUser();
+    const member = await createUser();
+    const groupId = uuidv7();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(groups)
+          .values({ id: groupId, name: "Team" })
+          .pipe(
+            Effect.andThen(
+              db.insert(groupMembers).values([
+                { groupId, userId: owner },
+                { groupId, userId: member },
+              ]),
+            ),
+          ),
+      ),
+    );
+    const document = await create(owner, await createConversation(owner));
+    await expect(
+      share(owner, document.id, { action: "addGroup", groupId, role: "viewer" }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db.update(groupMembers).set({ shareProjects: true }).where(eq(groupMembers.userId, owner)),
+      ),
+    );
+    await share(owner, document.id, { action: "addGroup", groupId, role: "viewer" });
+    expect(await get(member, document)).toMatchObject({ canEdit: false });
+    expect((await service((s) => s.sharing(owner, document.id))).eligibleGroups).toEqual([
+      { id: groupId, name: "Team" },
+    ]);
+    // Deleted, it tells every reader, not only the owner.
+    const before = changedEvents(member).length;
+    await service((s) => s.remove(owner, document.id));
+    expect(changedEvents(member).length).toBe(before + 1);
+    expect(await get(member, document)).toBeNull();
+  });
+
+  it("opens a public link only while it is on and its owner may publish", async () => {
+    const owner = await createUser();
+    const document = await create(owner, await createConversation(owner));
+    const link = async () => (await service((s) => s.sharing(owner, document.id))).publicLink;
+    const readPublic = (token: string) => service((s) => s.readPublic(token));
+    // Off unless a group grants it.
+    expect(await link()).toEqual({ token: null, canPublish: false });
+    await expect(
+      share(owner, document.id, { action: "setPublicLink", enabled: true }),
+    ).rejects.toMatchObject({ _tag: "DocumentRejected" });
+
+    const groupId = uuidv7();
+    await run(
+      Effect.flatMap(Db, (db) =>
+        db
+          .insert(groups)
+          .values({ id: groupId, name: "Publishers" })
+          .pipe(Effect.andThen(db.insert(groupMembers).values({ groupId, userId: owner }))),
+      ),
+    );
+    await share(owner, document.id, { action: "setPublicLink", enabled: true });
+    const first = (await link())?.token;
+    expect(first).toEqual(expect.any(String));
+    const opened = await readPublic(first!);
+    expect(opened).toMatchObject({ title: "Release", ownerName: "Document owner" });
+    expect(opened?.content).toContain("tag build");
+    // Nobody else learns the link.
+    const reader = await createUser();
+    await share(owner, document.id, { action: "addUser", email: `${reader}@t.io`, role: "viewer" });
+    expect((await service((s) => s.sharing(reader, document.id))).publicLink).toBeNull();
+
+    const publish = (allowed: boolean) =>
+      run(
+        Effect.flatMap(Db, (db) =>
+          db
+            .update(groups)
+            .set({
+              capabilities: sql`${groups.capabilities} || ${JSON.stringify({ publicLinks: allowed })}::jsonb`,
+            })
+            .where(eq(groups.id, groupId)),
+        ),
+      );
+    await publish(false);
+    expect(await readPublic(first!)).toBeNull();
+    expect(await service((s) => s.publicDocumentId(first!))).toBeNull();
+    await publish(true);
+    expect(await service((s) => s.publicDocumentId(first!))).toBe(document.id);
+
+    // Off ends it; on again is a new link, never the old one back.
+    await share(owner, document.id, { action: "setPublicLink", enabled: false });
+    expect(await readPublic(first!)).toBeNull();
+    await share(owner, document.id, { action: "setPublicLink", enabled: true });
+    const second = (await link())?.token;
+    expect(second).not.toBe(first);
+    expect(await readPublic(second!)).not.toBeNull();
+    expect(await readPublic("not-a-link")).toBeNull();
   });
 });
 

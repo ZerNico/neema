@@ -125,6 +125,7 @@ describe("sidebar keyboard shortcut", () => {
     const server = fakeDocumentServer();
     server.seed({
       id: "sidebar-document",
+      userId: "user",
       conversationId: "chat",
       projectId: null,
       title: "Plan",

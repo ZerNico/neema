@@ -10,11 +10,14 @@ import {
   messageCompactionEvents,
   messages,
   messageToolCalls,
+  messageToolResults,
   toolCallDebugArguments,
   usageEvents,
 } from "~/db/schema/index.ts";
 import { leaseFor } from "~/server/sql.ts";
 import type { RepoContext } from "./context.ts";
+import type { DbTx } from "~/server/db.ts";
+import { storedModelResult } from "../stored-arguments.ts";
 import type { ChatRepo } from "../repo.ts";
 
 // How long a streaming row may go without a heartbeat before it is treated as
@@ -38,6 +41,17 @@ export const joinChunks = (
     .filter((chunk) => chunk.kind === kind)
     .map((chunk) => chunk.delta)
     .join("");
+
+/** Settling a call keeps what the model was handed beside it, in the same transaction. */
+const keepModelResult = (tx: DbTx, toolCallId: string, result: unknown) => {
+  const stored = result === undefined ? undefined : storedModelResult(result);
+  if (stored === undefined) return Effect.void;
+  return tx
+    .insert(messageToolResults)
+    .values({ toolCallId, result: stored })
+    .onConflictDoUpdate({ target: messageToolResults.toolCallId, set: { result: stored } })
+    .pipe(Effect.orDie, Effect.asVoid);
+};
 
 export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
   ({
@@ -213,11 +227,14 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
 
     settleToolCall: Effect.fn("ChatRepo.settleToolCall")(function* (input) {
       return yield* generationWrite((tx) =>
-        tx
-          .update(messageToolCalls)
-          .set({ status: input.status, error: input.error, completedAt: new Date() })
-          .where(eq(messageToolCalls.id, input.id))
-          .pipe(Effect.orDie, Effect.asVoid),
+        Effect.gen(function* () {
+          yield* tx
+            .update(messageToolCalls)
+            .set({ status: input.status, error: input.error, completedAt: new Date() })
+            .where(eq(messageToolCalls.id, input.id))
+            .pipe(Effect.orDie);
+          yield* keepModelResult(tx, input.id, input.modelResult);
+        }),
       );
     }),
     completeToolCall: Effect.fn("ChatRepo.completeToolCall")(function* (input) {
@@ -233,6 +250,7 @@ export const generationWriteMethods = ({ db, generationWrite }: RepoContext) =>
             })
             .where(eq(messageToolCalls.id, input.id))
             .pipe(Effect.orDie);
+          yield* keepModelResult(tx, input.id, input.modelResult);
         }),
       );
     }),

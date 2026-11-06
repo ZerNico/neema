@@ -1,19 +1,22 @@
 import { capabilityAllowedSql } from "~/modules/groups/server/policy.ts";
-import { and, asc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { uuidv7 } from "uuidv7";
 import {
+  conversationDocuments,
   conversations,
   documentComments,
+  documentGroupGrants,
+  documentPublicLinks,
   documents,
   documentSteps,
+  documentUserGrants,
+  documentVersions,
+  groupMembers,
   projects,
   user,
 } from "~/db/schema/index.ts";
-import {
-  ownedConversation,
-  ownedConversationById,
-} from "~/modules/chat/server/owned-conversation.ts";
+import { ownedConversationById } from "~/modules/chat/server/owned-conversation.ts";
 import { projectCan, type ProjectRole } from "~/modules/projects/schema.ts";
 import { projectRoleSql } from "~/modules/projects/server/access.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -22,34 +25,92 @@ import {
   DocumentRejected,
   type DocumentComment,
   type EditableDocument,
+  type LibraryDocument,
 } from "../schema.ts";
 import { localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
+import type { StepAuthor } from "./versions.ts";
 
 type DocumentRow = typeof documents.$inferSelect;
+/** A kept version as history lists it. */
+export interface Checkpoint {
+  revision: number;
+  origin: "user" | "model" | null;
+  userId: string | null;
+  userName: string | null;
+  endedAt: Date;
+  name: string | null;
+}
 type DocumentWrite = Partial<
   Pick<DocumentRow, "title" | "revision" | "lastEditedBy" | "lastEditorUserId">
 >;
 type Reader = Pick<DbTx, "select">;
 
-/**
- * The reader's standing on the document in scope: a chat's document is its
- * owner's alone, a project's follows the project role. Null means no access,
- * which is also every document while the documents feature is off for them.
- */
-const accessSql = (userId: string) => sql<ProjectRole | null>`(case
-  when not (${capabilityAllowedSql(userId, "documents")}) then null
-  when ${documents.conversationId} is not null then (
-    select 'owner' from ${conversations}
-    where ${conversations.id} = ${documents.conversationId} and ${ownedConversation(userId)}
+/** Whether the document in scope is shared with the person, as an editor when `editor`. */
+const grantedSql = (userId: string, editor: boolean) => sql`(
+  exists (
+    select 1 from ${documentUserGrants}
+    where ${documentUserGrants.documentId} = ${documents.id}
+      and ${documentUserGrants.userId} = ${userId}
+      ${editor ? sql`and ${documentUserGrants.role} = 'editor'` : sql``}
   )
-  else (select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId})
+  or exists (
+    select 1 from ${documentGroupGrants}
+    join ${groupMembers} on ${groupMembers.groupId} = ${documentGroupGrants.groupId}
+    where ${documentGroupGrants.documentId} = ${documents.id}
+      and ${groupMembers.userId} = ${userId}
+      ${editor ? sql`and ${documentGroupGrants.role} = 'editor'` : sql``}
+  )
+)`;
+/**
+ * The reader's standing on the document in scope: a person's document is its
+ * owner's and whoever it is shared with, the highest grant winning; a
+ * project's follows the project role. Null means no access, which is also
+ * every document while the documents feature is off for them.
+ */
+export const documentAccessSql = (userId: string) => sql<ProjectRole | null>`(case
+  when not (${capabilityAllowedSql(userId, "documents")}) then null
+  when ${documents.projectId} is not null then (
+    select ${projectRoleSql(userId)} from ${projects} where ${projects.id} = ${documents.projectId}
+  )
+  when ${documents.userId} = ${userId} then 'owner'
+  when ${grantedSql(userId, true)} then 'editor'
+  when ${grantedSql(userId, false)} then 'viewer'
 end)`;
+const accessSql = documentAccessSql;
+/**
+ * Made in a temporary chat and used nowhere else: no other chat shows it,
+ * nobody else has it and it has no public link. Only such a document is left
+ * out of the library and goes with that chat.
+ */
+export const temporaryOnlySql = sql<boolean>`(
+  exists (
+    select 1 from ${conversations}
+    where ${conversations.id} = ${documents.originConversationId} and ${conversations.temporary}
+  )
+  and not exists (
+    select 1 from ${conversationDocuments}
+    where ${conversationDocuments.documentId} = ${documents.id}
+      and ${conversationDocuments.conversationId} <> ${documents.originConversationId}
+  )
+  and not exists (
+    select 1 from ${documentUserGrants} where ${documentUserGrants.documentId} = ${documents.id}
+  )
+  and not exists (
+    select 1 from ${documentGroupGrants} where ${documentGroupGrants.documentId} = ${documents.id}
+  )
+  and not exists (
+    select 1 from ${documentPublicLinks} where ${documentPublicLinks.documentId} = ${documents.id}
+  )
+)`;
 const documentColumns = (userId: string) => ({
   id: documents.id,
-  conversationId: documents.conversationId,
+  userId: documents.userId,
+  // Another's chat is theirs alone, even by id.
+  conversationId: sql<
+    string | null
+  >`(case when ${documents.userId} = ${userId} then ${documents.originConversationId} end)`,
   projectId: documents.projectId,
-  createdByMessageId: documents.createdByMessageId,
   title: documents.title,
   revision: documents.revision,
   lastEditedBy: documents.lastEditedBy,
@@ -58,7 +119,8 @@ const documentColumns = (userId: string) => ({
   updatedAt: documents.updatedAt,
   access: accessSql(userId),
 });
-type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision"> & {
+type Selected = Omit<DocumentRow, "snapshot" | "snapshotRevision" | "originConversationId"> & {
+  conversationId: string | null;
   access: ProjectRole | null;
 };
 const toDocument = ({ access, ...row }: Selected): EditableDocument => ({
@@ -83,29 +145,35 @@ export interface StoredDocumentState {
   steps: StoredStep[];
 }
 export type DocumentOwner = { conversationId: string } | { projectId: string };
+/** A document's place for its images: where it is created, or a person's own once it exists. */
+export type ImageOwner = DocumentOwner | { userId: string };
 
 export class DocumentRepo extends Context.Service<
   DocumentRepo,
   {
-    /** Caller holds the owner's lock (the conversation's, or the project's row). */
+    /** Caller holds the owner's lock (the conversation's, or the project's row); a person's own needs none. */
     create(
       tx: DbTx,
       userId: string,
-      owner: DocumentOwner,
+      owner: ImageOwner,
       values: Pick<DocumentRow, "title" | "lastEditedBy" | "snapshot"> & {
-        createdByMessageId?: string | null;
+        /** The answer whose card shows it in its chat. */
+        messageId?: string | null;
         /** Given when the snapshot already names the document, as an imported image's address does. */
         id?: string;
       },
     ): Effect.Effect<EditableDocument>;
     get(userId: string, documentId: string, tx?: Reader): Effect.Effect<EditableDocument | null>;
     /**
-     * Whose files images in the owner's documents are: the project's owner, or
-     * the chat's. Null unless the caller may edit there.
+     * Whose files images in the owner's documents are: the project's owner,
+     * the chat's, or the person's. Null unless the caller may edit there; for
+     * a person's document the claim's lock checks that.
      */
-    imageOwner(userId: string, owner: DocumentOwner, tx?: Reader): Effect.Effect<string | null>;
+    imageOwner(userId: string, owner: ImageOwner, tx?: Reader): Effect.Effect<string | null>;
     /** Oldest first, so an owner's documents keep the order they were created in. */
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
+    /** The person's own documents they can reach now, last changed first. */
+    library(userId: string): Effect.Effect<LibraryDocument[]>;
     /** Snapshot plus every later step, in revision order: enough to rebuild the tree. */
     loadState(userId: string, documentId: string): Effect.Effect<StoredDocumentState | null>;
     /**
@@ -115,15 +183,33 @@ export class DocumentRepo extends Context.Service<
     stepAuthors(
       documentId: string,
       afterRevision: number,
-    ): Effect.Effect<
-      ReadonlyArray<{
-        revision: number;
-        origin: "user" | "model";
-        userId: string | null;
-        userName: string | null;
-        createdAt: Date;
-      }>
-    >;
+      through?: number,
+      tx?: DbTx,
+    ): Effect.Effect<ReadonlyArray<StepAuthor>>;
+    /** The text kept at the end of each folded version, newest first, without the text. */
+    checkpoints(documentId: string, tx?: DbTx): Effect.Effect<ReadonlyArray<Checkpoint>>;
+    /** One kept version's tree, or null. */
+    checkpointAt(
+      documentId: string,
+      revision: number,
+    ): Effect.Effect<Record<string, unknown> | null>;
+    /** Keeps each version's text, leaving one already kept at that revision as it is. Caller holds the lock. */
+    keepCheckpoints(
+      tx: DbTx,
+      rows: ReadonlyArray<typeof documentVersions.$inferInsert>,
+    ): Effect.Effect<void>;
+    /** Names a kept version, or takes its name off with null. Caller holds the lock. */
+    nameCheckpoint(
+      tx: DbTx,
+      documentId: string,
+      revision: number,
+      name: string | null,
+    ): Effect.Effect<void>;
+    dropCheckpoints(
+      tx: DbTx,
+      documentId: string,
+      revisions: ReadonlyArray<number>,
+    ): Effect.Effect<void>;
     /**
      * Locks the document row alone, for someone allowed to edit it. A
      * person's batches arrive several times a second, and the conversation
@@ -158,7 +244,6 @@ export class DocumentRepo extends Context.Service<
       snapshot: Record<string, unknown>,
       revision: number,
     ): Effect.Effect<void>;
-    /** Deletes a project's document; a chat's goes with its answer instead. */
     remove(tx: DbTx, documentId: string): Effect.Effect<void>;
     lockConversation(
       tx: DbTx,
@@ -167,7 +252,7 @@ export class DocumentRepo extends Context.Service<
     ): Effect.Effect<void, DocumentNotAvailable>;
     /** Oldest first, with each author's name. */
     comments(documentId: string, tx?: Reader): Effect.Effect<DocumentComment[]>;
-    /** Hands a chat's document to a project. Caller holds the document's lock. */
+    /** Hands a person's document to a project. Caller holds the document's lock. */
     moveToProject(tx: DbTx, documentId: string, projectId: string): Effect.Effect<void>;
     /** A person's display name, for the cursor others see. */
     userName(userId: string): Effect.Effect<string>;
@@ -235,25 +320,34 @@ export class DocumentRepo extends Context.Service<
         lockConversation,
         create: Effect.fn("DocumentRepo.create")(function* (tx, userId, owner, values) {
           const id = values.id ?? uuidv7();
+          // The caller holds the chat's lock as its owner, so a chat's document is the caller's.
           yield* tx
             .insert(documents)
             .values({
               id,
-              ...("conversationId" in owner
-                ? { conversationId: owner.conversationId }
-                : { projectId: owner.projectId }),
+              ...("projectId" in owner ? { projectId: owner.projectId } : { userId }),
+              ...("conversationId" in owner ? { originConversationId: owner.conversationId } : {}),
               title: values.title,
               lastEditedBy: values.lastEditedBy,
               lastEditorUserId: userId,
-              createdByMessageId: values.createdByMessageId ?? null,
               snapshot: values.snapshot,
               snapshotRevision: 0,
             })
             .pipe(Effect.orDie);
+          if ("conversationId" in owner)
+            yield* tx
+              .insert(conversationDocuments)
+              .values({
+                conversationId: owner.conversationId,
+                documentId: id,
+                messageId: values.messageId ?? null,
+              })
+              .pipe(Effect.orDie);
           return (yield* get(userId, id, tx))!;
         }),
         get,
         imageOwner: Effect.fn("DocumentRepo.imageOwner")(function* (userId, owner, tx) {
+          if ("userId" in owner) return owner.userId || null;
           if ("conversationId" in owner) {
             const [chat] = yield* (tx ?? db)
               .select({ userId: conversations.userId })
@@ -277,7 +371,13 @@ export class DocumentRepo extends Context.Service<
             .where(
               and(
                 "conversationId" in owner
-                  ? eq(documents.conversationId, owner.conversationId)
+                  ? inArray(
+                      documents.id,
+                      db
+                        .select({ id: conversationDocuments.documentId })
+                        .from(conversationDocuments)
+                        .where(eq(conversationDocuments.conversationId, owner.conversationId)),
+                    )
                   : eq(documents.projectId, owner.projectId),
                 isNotNull(access),
               ),
@@ -285,6 +385,40 @@ export class DocumentRepo extends Context.Service<
             .orderBy(asc(documents.id))
             .pipe(Effect.orDie);
           return rows.map(toDocument);
+        }),
+        library: Effect.fn("DocumentRepo.library")(function* (userId) {
+          const rows = yield* db
+            .select({
+              ...documentColumns(userId),
+              sharedBy: sql<string | null>`(
+                select ${user.name} from ${user}
+                where ${user.id} = ${documents.userId} and ${user.id} <> ${userId}
+              )`,
+              conversationTitle: sql<string | null>`(
+                select ${conversations.title} from ${conversations}
+                where ${conversations.id} = ${documents.originConversationId}
+                  and ${conversations.userId} = ${documents.userId}
+                  and ${conversations.deletedAt} is null
+              )`,
+            })
+            .from(documents)
+            .where(
+              and(
+                isNull(documents.projectId),
+                sql`not ${temporaryOnlySql}`,
+                or(eq(documents.userId, userId), grantedSql(userId, false)),
+                isNotNull(accessSql(userId)),
+              ),
+            )
+            .orderBy(desc(documents.updatedAt), desc(documents.id))
+            .limit(500)
+            .pipe(Effect.orDie);
+          return rows.map(({ conversationTitle, sharedBy, ...row }) => ({
+            ...toDocument(row),
+            // Another's chat is theirs to know about.
+            conversationTitle: sharedBy === null ? conversationTitle : null,
+            sharedBy,
+          }));
         }),
         loadState: Effect.fn("DocumentRepo.loadState")(function* (userId, documentId) {
           // The share lock holds off a compaction between the two reads, which
@@ -332,26 +466,94 @@ export class DocumentRepo extends Context.Service<
             )
             .pipe(Effect.orDie);
         }),
-        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(function* (documentId, afterRevision) {
-          return yield* db
+        stepAuthors: Effect.fn("DocumentRepo.stepAuthors")(
+          function* (documentId, afterRevision, through, tx) {
+            return yield* (tx ?? db)
+              .select({
+                revision: documentSteps.revision,
+                origin: documentSteps.origin,
+                userId: documentSteps.userId,
+                userName: user.name,
+                createdAt: documentSteps.createdAt,
+              })
+              .from(documentSteps)
+              .leftJoin(user, eq(user.id, documentSteps.userId))
+              .where(
+                and(
+                  eq(documentSteps.documentId, documentId),
+                  gt(documentSteps.revision, afterRevision),
+                  through === undefined ? undefined : lte(documentSteps.revision, through),
+                ),
+              )
+              .orderBy(asc(documentSteps.revision))
+              .pipe(Effect.orDie);
+          },
+        ),
+        checkpoints: Effect.fn("DocumentRepo.checkpoints")(function* (documentId, tx) {
+          return yield* (tx ?? db)
             .select({
-              revision: documentSteps.revision,
-              origin: documentSteps.origin,
-              userId: documentSteps.userId,
+              revision: documentVersions.revision,
+              origin: documentVersions.origin,
+              userId: documentVersions.userId,
               userName: user.name,
-              createdAt: documentSteps.createdAt,
+              endedAt: documentVersions.endedAt,
+              name: documentVersions.name,
             })
-            .from(documentSteps)
-            .leftJoin(user, eq(user.id, documentSteps.userId))
-            .where(
-              and(
-                eq(documentSteps.documentId, documentId),
-                gt(documentSteps.revision, afterRevision),
-              ),
-            )
-            .orderBy(asc(documentSteps.revision))
+            .from(documentVersions)
+            .leftJoin(user, eq(user.id, documentVersions.userId))
+            .where(eq(documentVersions.documentId, documentId))
+            .orderBy(desc(documentVersions.revision))
             .pipe(Effect.orDie);
         }),
+        checkpointAt: Effect.fn("DocumentRepo.checkpointAt")(function* (documentId, revision) {
+          const [row] = yield* db
+            .select({ snapshot: documentVersions.snapshot })
+            .from(documentVersions)
+            .where(
+              and(
+                eq(documentVersions.documentId, documentId),
+                eq(documentVersions.revision, revision),
+              ),
+            )
+            .pipe(Effect.orDie);
+          return row?.snapshot ?? null;
+        }),
+        keepCheckpoints: Effect.fn("DocumentRepo.keepCheckpoints")(function* (tx, rows) {
+          if (!rows.length) return;
+          yield* tx
+            .insert(documentVersions)
+            .values([...rows])
+            .onConflictDoNothing()
+            .pipe(Effect.orDie);
+        }),
+        nameCheckpoint: Effect.fn("DocumentRepo.nameCheckpoint")(
+          function* (tx, documentId, revision, name) {
+            yield* tx
+              .update(documentVersions)
+              .set({ name })
+              .where(
+                and(
+                  eq(documentVersions.documentId, documentId),
+                  eq(documentVersions.revision, revision),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
+        dropCheckpoints: Effect.fn("DocumentRepo.dropCheckpoints")(
+          function* (tx, documentId, revisions) {
+            if (!revisions.length) return;
+            yield* tx
+              .delete(documentVersions)
+              .where(
+                and(
+                  eq(documentVersions.documentId, documentId),
+                  inArray(documentVersions.revision, [...revisions]),
+                ),
+              )
+              .pipe(Effect.orDie);
+          },
+        ),
         lock: Effect.fn("DocumentRepo.lock")(function* (tx, userId, documentId) {
           const [row] = yield* tx
             .select(documentColumns(userId))
@@ -401,11 +603,28 @@ export class DocumentRepo extends Context.Service<
               .update(documents)
               .set({
                 projectId,
-                conversationId: null,
-                createdByMessageId: null,
+                userId: null,
                 updatedAt: new Date(),
               })
               .where(eq(documents.id, documentId))
+              .pipe(Effect.orDie);
+            // A project chat lists the project's documents already; a link would list it twice.
+            yield* tx
+              .delete(conversationDocuments)
+              .where(eq(conversationDocuments.documentId, documentId))
+              .pipe(Effect.orDie);
+            // The project's members are who reads it now.
+            yield* tx
+              .delete(documentUserGrants)
+              .where(eq(documentUserGrants.documentId, documentId))
+              .pipe(Effect.orDie);
+            yield* tx
+              .delete(documentGroupGrants)
+              .where(eq(documentGroupGrants.documentId, documentId))
+              .pipe(Effect.orDie);
+            yield* tx
+              .delete(documentPublicLinks)
+              .where(eq(documentPublicLinks.documentId, documentId))
               .pipe(Effect.orDie);
           },
         ),

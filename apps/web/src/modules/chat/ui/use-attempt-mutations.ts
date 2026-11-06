@@ -398,10 +398,10 @@ export function useAttemptMutations({
     [data.messages],
   );
   const tailMessageId = turnMessages.at(-1)?.id;
-  // A rewind takes the documents, drafts and unpublished files those answers
-  // created with it, so the dialog names them: a checklist someone has been
-  // ticking, or a deck someone has been building, is not a silent casualty.
-  const documentLoss = useCallback(
+  // A rewind takes the drafts and unpublished files those answers created
+  // with it, so the dialog names them: a deck someone has been building is
+  // not a silent casualty. Documents are the person's and stay.
+  const rewindLoss = useCallback(
     (fromMessageId: string, inclusive: boolean) => {
       const index = data.messages.findIndex((message) => message.id === fromMessageId);
       if (index < 0) return "";
@@ -411,10 +411,6 @@ export function useAttemptMutations({
       const lost = <T extends { messageId: string | null }>(items: ReadonlyArray<T> | undefined) =>
         (items ?? []).filter((item) => item.messageId && removed.has(item.messageId));
       return lossSentence([
-        ...lost(data.documents).map((document) => ({
-          kind: "document" as const,
-          name: document.title,
-        })),
         ...lost(data.agentDrafts).map((draft) => ({
           kind: "agentDraft" as const,
           name: draft.name,
@@ -429,7 +425,7 @@ export function useAttemptMutations({
         })),
       ]);
     },
-    [data.agentDrafts, data.documents, data.messages, data.scheduleDrafts, data.workingFiles],
+    [data.agentDrafts, data.messages, data.scheduleDrafts, data.workingFiles],
   );
 
   // A steer goes with the answer it was sent into, and it is the person's own
@@ -448,22 +444,22 @@ export function useAttemptMutations({
   const retry = useCallback(
     async (messageId: string, pickedModelId?: string) => {
       const later = messageId !== lastAssistantId;
-      const losing = documentLoss(messageId, true) + steerLoss(messageId);
-      if (
-        (later || losing) &&
-        !(await confirm({
-          title: m.chat_retry_confirm_title(),
-          description: `${later ? m.chat_retry_confirm_later() : ""}${losing}`.trim(),
-          confirmLabel: m.chat_retry_confirm(),
-        }))
-      ) {
-        return;
-      }
-      mutateRetry(
-        pickedModelId === undefined ? { messageId } : { messageId, modelId: pickedModelId },
-      );
+      const losing = rewindLoss(messageId, true) + steerLoss(messageId);
+      const answer =
+        !later && !losing
+          ? true
+          : await confirm({
+              title: m.chat_retry_confirm_title(),
+              description: `${later ? m.chat_retry_confirm_later() : ""}${losing}`.trim(),
+              confirmLabel: m.chat_retry_confirm(),
+            });
+      if (!answer) return;
+      mutateRetry({
+        messageId,
+        ...(pickedModelId === undefined ? {} : { modelId: pickedModelId }),
+      });
     },
-    [confirm, documentLoss, lastAssistantId, mutateRetry, steerLoss],
+    [confirm, lastAssistantId, mutateRetry, rewindLoss, steerLoss],
   );
   const branchAt = useCallback((messageId: string) => mutateBranch(messageId), [mutateBranch]);
 
@@ -475,17 +471,15 @@ export function useAttemptMutations({
       const responseIndex = after.findIndex((message) => message.role === "assistant");
       const removesLaterTurns =
         responseIndex === -1 ? after.length > 0 : after.slice(responseIndex + 1).length > 0;
-      const losing = documentLoss(messageId, false) + steerLoss(after[responseIndex]?.id);
-      return (
-        (!removesLaterTurns && !losing) ||
-        (await confirm({
-          title: m.chat_edit_confirm_title(),
-          description: `${removesLaterTurns ? m.chat_edit_confirm_later() : ""}${losing}`.trim(),
-          confirmLabel: m.chat_edit_confirm(),
-        }))
-      );
+      const losing = rewindLoss(messageId, false) + steerLoss(after[responseIndex]?.id);
+      if (!removesLaterTurns && !losing) return true;
+      return confirm({
+        title: m.chat_edit_confirm_title(),
+        description: `${removesLaterTurns ? m.chat_edit_confirm_later() : ""}${losing}`.trim(),
+        confirmLabel: m.chat_edit_confirm(),
+      });
     },
-    [confirm, documentLoss, steerLoss, turnMessages],
+    [confirm, rewindLoss, steerLoss, turnMessages],
   );
 
   const saveQuestionEdit = useCallback(
@@ -499,7 +493,8 @@ export function useAttemptMutations({
         generating
       )
         return false;
-      if (!(await confirmEdit(activeEditingMessage.id))) return false;
+      const answer = await confirmEdit(activeEditingMessage.id);
+      if (!answer) return false;
       await mutateQuestionEdit({
         messageId: activeEditingMessage.id,
         questionResponse,
@@ -529,7 +524,8 @@ export function useAttemptMutations({
       if (!effectiveModelId || editPending) return;
       if (!content && editUploadCount === 0) return;
 
-      if (!(await confirmEdit(activeEditingMessage.id))) return;
+      const answer = await confirmEdit(activeEditingMessage.id);
+      if (!answer) return;
 
       // Queues behind any upload still in flight, then sends the full ordered
       // replacement set. Omitted ids are released server-side.

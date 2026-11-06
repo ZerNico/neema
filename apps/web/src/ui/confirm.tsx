@@ -25,9 +25,9 @@ import { m } from "~/paraglide/messages.js";
  */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
-  const resolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const resolveRef = useRef<((answer: boolean) => void) | null>(null);
 
-  const confirm = useCallback<ConfirmFn>((opts) => {
+  const confirm: ConfirmFn = useCallback((opts: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
       // A confirm opened while another is pending dismisses the previous one.
       resolveRef.current?.(false);
@@ -36,8 +36,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const settle = useCallback((confirmed: boolean) => {
-    resolveRef.current?.(confirmed);
+  const settle = useCallback((answer: boolean) => {
+    resolveRef.current?.(answer);
     resolveRef.current = null;
     setOptions(null);
   }, []);

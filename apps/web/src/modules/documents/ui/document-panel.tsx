@@ -3,7 +3,6 @@ import {
   Download04Icon,
   MoreVerticalIcon,
   PencilEdit02Icon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence } from "motion/react";
@@ -27,6 +26,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/ui/primitives/tooltip
 import { cn } from "~/ui/utils";
 import type { DocumentController as Controller } from "../client/use-document.ts";
 import type { EditorHooks } from "./rich-editor/editor-hooks.ts";
+import { useSessionUser } from "~/modules/auth/client.ts";
+import { DocumentLifecycleItems } from "./document-lifecycle.tsx";
+import { DocumentShareDialog } from "./document-share-dialog.tsx";
 import { RenameDocumentDialog } from "./rename-document-dialog.tsx";
 
 // The editor and its schema load with the first open document, not the chat.
@@ -67,13 +69,14 @@ export function DocumentPanelActions({
   /** Receives the element the editor puts its formatting controls in. */
   toolbarSlot: (element: HTMLElement | null) => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const me = useSessionUser();
   const document = controller.document;
   return (
-    // Comments, the menu and Copy line up with the ribbon's tab row, not the middle of both lines.
+    // Comments and the menu line up with the ribbon's tab row, not the middle of both lines.
     <div className="flex items-start gap-2">
-      {/* The editor's ribbon fills the row; Copy sits at its end. */}
+      {/* The editor's ribbon fills the row; the menu sits at its end. */}
       <div ref={toolbarSlot} className="flex min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-0.5">
         {controller.sync ? (
@@ -117,6 +120,19 @@ export function DocumentPanelActions({
             ) : null}
             <DropdownMenuItem
               disabled={!controller.sync}
+              onClick={() => {
+                const sync = controller.sync;
+                if (!sync) return;
+                void markdownOf(sync)
+                  .then((text) => navigator.clipboard.writeText(text))
+                  .then(() => toast.success(m.common_copied()));
+              }}
+            >
+              <HugeiconsIcon icon={Copy01Icon} strokeWidth={2} />
+              {m.documents_copy()}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!controller.sync}
               onClick={() => void exportAs(controller, "pdf")}
             >
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
@@ -136,37 +152,25 @@ export function DocumentPanelActions({
               <HugeiconsIcon icon={Download04Icon} strokeWidth={2} />
               {m.documents_export_word()}
             </DropdownMenuItem>
+            {document ? (
+              <>
+                <DropdownMenuSeparator />
+                <DocumentLifecycleItems document={document} onShare={() => setSharing(true)} />
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
         {document?.canEdit ? (
           <RenameDocumentDialog document={document} open={renaming} onOpenChange={setRenaming} />
         ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={m.documents_copy()}
-                className="text-muted-foreground"
-                disabled={!controller.sync}
-                onClick={() => {
-                  const sync = controller.sync;
-                  if (!sync) return;
-                  void markdownOf(sync)
-                    .then((text) => navigator.clipboard.writeText(text))
-                    .then(() => {
-                      setCopied(true);
-                      window.setTimeout(() => setCopied(false), 1_500);
-                    });
-                }}
-              />
-            }
-          >
-            <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} strokeWidth={2} />
-          </TooltipTrigger>
-          <TooltipContent>{copied ? m.common_copied() : m.documents_copy()}</TooltipContent>
-        </Tooltip>
+        {document?.userId ? (
+          <DocumentShareDialog
+            document={document}
+            manage={document.userId === me?.id}
+            open={sharing}
+            onOpenChange={setSharing}
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import {
   conversationAgents,
+  conversationDocuments,
   conversationDrafts,
   documents,
   conversations,
@@ -97,12 +98,13 @@ export const readDefaults = Effect.fn("chat.readDefaults")(function* (
     .select({
       id: documents.id,
       title: documents.title,
-      // The answer it belongs to, so the transcript can place a card whose
-      // creating tool row a rewind took with it. Never any content.
-      messageId: documents.createdByMessageId,
+      // The answer whose card shows it here, so the transcript can place a
+      // card whose creating tool row a rewind took with it. Never any content.
+      messageId: conversationDocuments.messageId,
     })
-    .from(documents)
-    .where(eq(documents.conversationId, conversationId))
+    .from(conversationDocuments)
+    .innerJoin(documents, eq(documents.id, conversationDocuments.documentId))
+    .where(eq(conversationDocuments.conversationId, conversationId))
     .orderBy(asc(documents.id))
     .pipe(Effect.orDie);
   const workingFiles = (yield* readKeptWorkingFiles(tx, conversationId)).map((file) => ({

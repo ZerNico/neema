@@ -302,11 +302,18 @@ export const observePart = (
           failure: call.status === "error" ? (call.error?.message ?? "") : null,
         });
       });
+    // Read when the row settles, after a family has rewritten what the model
+    // gets (bytes taken out, delivery noted), so later turns read the same.
+    const modelResult = () =>
+      part.type === "tool-result" && !isPreliminary ? { modelResult: part.encodedResult } : {};
     const repo: typeof deps.repo = {
       ...deps.repo,
       completeToolCall: (call) =>
-        deps.repo.completeToolCall(call).pipe(Effect.tap(noteSettled(call))),
-      settleToolCall: (call) => deps.repo.settleToolCall(call).pipe(Effect.tap(noteSettled(call))),
+        deps.repo
+          .completeToolCall({ ...call, ...modelResult() })
+          .pipe(Effect.tap(noteSettled(call))),
+      settleToolCall: (call) =>
+        deps.repo.settleToolCall({ ...call, ...modelResult() }).pipe(Effect.tap(noteSettled(call))),
     };
     const { fence, model, imageOutput } = ctx;
     const {
@@ -1610,7 +1617,7 @@ export const observePart = (
         }
 
         const ok = !part.isFailure && result?.ok !== false;
-        // Persist summary + source list only, never page bodies.
+        // The row shows the summary and sources; the pages go with the model's result.
         const summary = {
           targets: result?.targets ?? [],
           ...(result?.resultCount !== undefined ? { resultCount: result.resultCount } : {}),

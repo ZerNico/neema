@@ -15,6 +15,7 @@ import {
 import { localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
 import type { DocumentRepo } from "./document-repo.ts";
+import { documentAudience } from "./document-sharing.ts";
 
 /**
  * Runs every read-modify-write of one document alone, so a live entry in
@@ -39,26 +40,29 @@ export function documentLocks() {
       );
 }
 
-/** Tells lists and cards a document changed: a chat's concerns its owner, a project's every member. */
+/**
+ * Tells lists and cards a document changed: a person's concerns its owner and
+ * everyone it is shared with, a project's every member. `alsoTo` reaches
+ * those who just lost it, or all of a deleted one's readers, named before.
+ */
 export const notifyDocumentChanged =
   (db: Db["Service"], bus: SyncBus["Service"]) =>
   (
     userId: string,
-    document: Pick<EditableDocument, "id" | "conversationId" | "projectId">,
+    document: Pick<EditableDocument, "id" | "projectId">,
     textOnly = false,
+    alsoTo: ReadonlyArray<string> = [],
   ) =>
     Effect.gen(function* () {
       const audience = document.projectId
         ? yield* projectAudience(db, document.projectId)
-        : [userId];
+        : yield* documentAudience(db, document.id);
       yield* Effect.forEach(
-        audience,
+        new Set([userId, ...audience, ...alsoTo]),
         (memberId) =>
           bus.publish(memberId, {
             type: "document.changed",
-            ...(document.conversationId
-              ? { conversationId: document.conversationId }
-              : { projectId: document.projectId! }),
+            ...(document.projectId ? { projectId: document.projectId } : {}),
             documentId: document.id,
             ...(textOnly ? { textOnly: true as const } : {}),
           }),

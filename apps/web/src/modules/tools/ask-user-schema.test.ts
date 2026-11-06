@@ -3,7 +3,6 @@ import { Tool } from "effect/ai";
 import { describe, expect, it } from "vitest";
 import {
   AskUserParams,
-  formatQuestionContext,
   formatQuestionResponse,
   readPresentedQuestions,
   readQuestionResponse,
@@ -175,8 +174,6 @@ describe("ask_user contract", () => {
     expect(formatQuestionResponse(questions, { kind: "skip" })).toContain(
       "skipping is not approval",
     );
-    expect(formatQuestionContext(questions)).toContain("Q1: How much detail?");
-    expect(formatQuestionContext(questions)).toContain("2. Detailed: Include examples");
   });
 
   it("requires accepted arguments and durable question results to agree", () => {

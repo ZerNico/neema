@@ -9,7 +9,11 @@ import { GenerationFence } from "~/modules/chat/server/generation-fence.ts";
 import { FeaturePolicy } from "~/modules/groups/server/policy.ts";
 import { StorageQuota } from "~/modules/limits/server/storage.ts";
 import { and, eq, inArray } from "drizzle-orm";
-import { attachmentBlobs, attachments as attachmentRows } from "~/db/schema/index.ts";
+import {
+  attachmentBlobs,
+  attachments as attachmentRows,
+  type documentVersions,
+} from "~/db/schema/index.ts";
 import { originatingSessionEligible } from "~/modules/auth/server/account-eligibility.ts";
 import { SyncBus } from "~/modules/sync/server/bus.ts";
 import { Db, type DbTx } from "~/server/db.ts";
@@ -59,12 +63,24 @@ import {
   type DocumentFrame,
   type DocumentPresence,
   type EditableDocument,
+  type LibraryDocument,
+  type DocumentShareChange,
+  type DocumentSharing,
+  type PublicDocument,
   type PushDocumentResult,
 } from "../schema.ts";
 import { type Localized, localized } from "~/i18n/localized.ts";
 import { m } from "~/paraglide/messages.js";
-import { DocumentRepo, type DocumentOwner } from "./document-repo.ts";
-import { groupVersions, type DocumentVersion } from "./versions.ts";
+import { DocumentRepo, type DocumentOwner, type ImageOwner } from "./document-repo.ts";
+import {
+  groupVersions,
+  NAMED_VERSIONS,
+  thinnedCheckpoints,
+  versionEnds,
+  type DocumentVersion,
+  type VersionAuthor,
+} from "./versions.ts";
+import { documentImageOf, imageSources } from "./word-export.ts";
 import { placeImported, type ImportedText } from "./word-import.ts";
 import type { TreeNode } from "~/modules/word/server/document-tree.ts";
 import {
@@ -75,6 +91,13 @@ import {
   personComment,
   threadResolution,
 } from "./live-shared.ts";
+import {
+  changeDocumentSharing,
+  documentAudience,
+  documentSharing,
+  publicLinkTarget,
+} from "./document-sharing.ts";
+import { publicTree } from "./public-document.ts";
 
 export type DocumentWriteGuard<E = never, R = never> = (tx: DbTx) => Effect.Effect<unknown, E, R>;
 /** One assistant call on comments: `thread` names an existing one, else `target` starts one. */
@@ -141,7 +164,6 @@ interface Entry {
   readonly feeds: Map<string, number>;
   comments: DocumentComment[];
   readonly frames: PubSub.PubSub<DocumentFrame>;
-  readonly conversationId: string | null;
   readonly projectId: string | null;
   subscribers: number;
   touched: number;
@@ -309,10 +331,36 @@ const withOutline = (parsed: Node, outline: ReadonlyArray<string>) => {
   return ensureIds(squareTables(new Transform(doc))).doc;
 };
 /** Who a document belongs to, as the image owner is read from it. */
-const ownerOf = (document: Pick<EditableDocument, "projectId" | "conversationId">) =>
-  document.projectId
-    ? { projectId: document.projectId }
-    : { conversationId: document.conversationId ?? "" };
+/** Whose files a document's images are: its project's owner, or the person who owns it. */
+const ownerOf = (document: Pick<EditableDocument, "projectId" | "userId">): ImageOwner =>
+  document.projectId ? { projectId: document.projectId } : { userId: document.userId ?? "" };
+
+/**
+ * A copy's tree: the source's own images at the copy's address, under the
+ * upload each was stored again as. Comment marks go, their threads staying
+ * with the source.
+ */
+const copiedTree = (
+  node: TreeNode,
+  from: string,
+  to: string,
+  images: ReadonlyMap<string, string>,
+): TreeNode | null => {
+  if (node.type === "image") {
+    const own = documentImageOf(from, node.attrs?.src);
+    const copy = own && images.get(own);
+    if (own)
+      return copy ? { ...node, attrs: { ...node.attrs, src: documentImagePath(to, copy) } } : null;
+  }
+  const marks = node.marks?.filter((mark) => mark.type !== "comment");
+  return {
+    ...node,
+    ...(marks ? { marks } : {}),
+    ...(node.content
+      ? { content: node.content.flatMap((child) => copiedTree(child, from, to, images) ?? []) }
+      : {}),
+  };
+};
 
 /** A tree read from a file, as the schema builds it, every block given an ID; refused if it does not fit. */
 const importedDocument = (json: TreeNode) =>
@@ -338,13 +386,32 @@ const liveSpot = (doc: Node, live: LiveEdit) => {
   return { parent: range.parent, startIndex: index, endIndex: index, from: at, to: at };
 };
 
+/** Moving, deleting and sharing a person's document are its owner's alone. */
+const ownerOnly = (document: EditableDocument, userId: string) =>
+  document.projectId === null && document.userId !== userId
+    ? Effect.fail(new DocumentRejected({ reason: localized(m.documents_share_error_owner_only) }))
+    : Effect.void;
+
 export class DocumentService extends Context.Service<
   DocumentService,
   {
     get(userId: string, documentId: string): Effect.Effect<EditableDocument | null>;
     list(userId: string, owner: DocumentOwner): Effect.Effect<EditableDocument[]>;
-    /** Deletes a project's document; a chat's goes only with its answer. */
+    library(userId: string): Effect.Effect<LibraryDocument[]>;
+    /** By its owner, or a project's by anyone who may edit it. */
     remove(userId: string, documentId: string): Effect.Effect<void, DocumentError>;
+    /** Who a person's document is shared with, for anyone who may read it. */
+    sharing(userId: string, documentId: string): Effect.Effect<DocumentSharing, DocumentError>;
+    /** One change to who a person's document is shared with, by its owner. */
+    share(
+      userId: string,
+      documentId: string,
+      change: DocumentShareChange,
+    ): Effect.Effect<void, DocumentError>;
+    /** The document a public link opens, as anyone holding it reads it; null once it no longer does. */
+    readPublic(token: string): Effect.Effect<PublicDocument | null>;
+    /** Which document a public link still opens, for loading its images. */
+    publicDocumentId(token: string): Effect.Effect<string | null>;
     /** A new title, by anyone who may edit the document. */
     rename(
       userId: string,
@@ -372,6 +439,16 @@ export class DocumentService extends Context.Service<
      * anyone who may edit it; null when that revision is no longer kept.
      */
     versionAt(userId: string, documentId: string, revision: number): Effect.Effect<string | null>;
+    /**
+     * Names a listed version, keeping its text for good, or takes the name
+     * off with null, for anyone who may edit the document.
+     */
+    nameVersion(
+      userId: string,
+      documentId: string,
+      revision: number,
+      name: string | null,
+    ): Effect.Effect<void, DocumentError>;
     /** The live tree, for rendering what the model reads. Null when not this person's. */
     read(
       userId: string,
@@ -422,8 +499,9 @@ export class DocumentService extends Context.Service<
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<EditableDocument | null, DocumentError | E, R>;
     /**
-     * Hands a streamed creation's document to the project, once the call that
-     * made it turns out to want it there: it streams in private until then.
+     * Hands a person's document to a project they may edit, keeping it. The
+     * model does so once a streamed creation turns out to want the project:
+     * it streams in private until then.
      */
     moveToProject<E = never, R = never>(
       userId: string,
@@ -431,6 +509,16 @@ export class DocumentService extends Context.Service<
       projectId: string,
       guard: DocumentWriteGuard<E, R>,
     ): Effect.Effect<EditableDocument, DocumentError | E, R>;
+    /**
+     * A new document of a project the person may edit, copied from one they
+     * may read. Its images are stored again for the project; comments stay
+     * with the original.
+     */
+    copyToProject(
+      userId: string,
+      documentId: string,
+      projectId: string,
+    ): Effect.Effect<EditableDocument, DocumentError>;
     /**
      * Deletes a chat document an unclaimed streamed creation left behind,
      * unless someone has written in it since `ifRevision`: then it is theirs.
@@ -516,7 +604,8 @@ export class DocumentService extends Context.Service<
       const storage = yield* StorageQuota;
       const documents = yield* DocumentRepo;
       const attachments = yield* AttachmentRepo;
-      const files = attachmentWriter(attachments, yield* BlobStore);
+      const blobs = yield* BlobStore;
+      const files = attachmentWriter(attachments, blobs);
       const bus = yield* SyncBus;
       const scope = yield* Effect.scope;
       // One process owns every document's live state (see docs/internals/documents.md).
@@ -583,7 +672,6 @@ export class DocumentService extends Context.Service<
             feeds: new Map(),
             comments: yield* documents.comments(documentId),
             frames: yield* PubSub.unbounded<DocumentFrame>(),
-            conversationId: state.document.conversationId,
             projectId: state.document.projectId,
             subscribers: 0,
             touched: now,
@@ -605,11 +693,7 @@ export class DocumentService extends Context.Service<
                 entry.changedPending = false;
                 return documentChanged(
                   userId,
-                  {
-                    id: documentId,
-                    conversationId: entry.conversationId,
-                    projectId: entry.projectId,
-                  },
+                  { id: documentId, projectId: entry.projectId },
                   true,
                 );
               }),
@@ -630,7 +714,7 @@ export class DocumentService extends Context.Service<
        */
       const planImages = (
         userId: string,
-        owner: DocumentOwner | null,
+        owner: ImageOwner | null,
         attachmentIds: ReadonlyArray<string>,
         /** A person's images take the owner's quota; the model's are kept like its files. */
         charged: boolean,
@@ -678,7 +762,7 @@ export class DocumentService extends Context.Service<
         tx: DbTx,
         userId: string,
         documentId: string,
-        owner: DocumentOwner,
+        owner: ImageOwner,
         plan: { ownerId: string | null; copies: ReadonlyMap<string, string> },
         attachmentIds: ReadonlyArray<string>,
       ) =>
@@ -728,6 +812,69 @@ export class DocumentService extends Context.Service<
         while (count < all.length - COMPACT_STEPS && all[count]!.createdAt < cutoff) count++;
         return count;
       };
+      /**
+       * Keeps the text at the end of each version whose steps are about to be
+       * folded away, thinned as history keeps them, and answers with the
+       * tree at the last one so the fold goes on from there.
+       */
+      const foldedVersions = (
+        tx: DbTx,
+        documentId: string,
+        entry: Entry,
+        all: ReadonlyArray<KeptStep>,
+        through: number,
+        now: number,
+      ) =>
+        Effect.gen(function* () {
+          // The step after the fold tells whether the last folded run has ended.
+          const ends = versionEnds(
+            yield* documents.stepAuthors(documentId, entry.snapshotRevision, through + 1, tx),
+          ).filter((end) => end.revision <= through && end.author !== null);
+          const dropped = new Set(
+            thinnedCheckpoints(
+              ends.map((end) => ({ revision: end.revision, at: end.at, named: false })),
+              now,
+            ),
+          );
+          let doc = entry.snapshot;
+          let revision = entry.snapshotRevision;
+          const rows: Array<typeof documentVersions.$inferInsert> = [];
+          for (const end of ends) {
+            if (dropped.has(end.revision)) continue;
+            doc = (yield* applySteps(
+              doc,
+              all
+                .slice(revision - entry.snapshotRevision, end.revision - entry.snapshotRevision)
+                .map((step) => step.json),
+            ).pipe(Effect.orDie)).doc;
+            revision = end.revision;
+            rows.push({
+              documentId,
+              revision,
+              snapshot: doc.toJSON() as Record<string, unknown>,
+              origin: end.origin,
+              userId: end.userId,
+              endedAt: end.at,
+            });
+          }
+          if (rows.length) {
+            yield* documents.keepCheckpoints(tx, rows);
+            const kept = yield* documents.checkpoints(documentId, tx);
+            yield* documents.dropCheckpoints(
+              tx,
+              documentId,
+              thinnedCheckpoints(
+                kept.map((each) => ({
+                  revision: each.revision,
+                  at: each.endedAt,
+                  named: each.name !== null,
+                })),
+                now,
+              ),
+            );
+          }
+          return { doc, revision };
+        });
       /** Stores steps the caller already applied to `doc`. Caller holds the row lock. */
       const store = (
         tx: DbTx,
@@ -763,11 +910,15 @@ export class DocumentService extends Context.Service<
           let compacted: Stored["compacted"] = null;
           if (folded) {
             const all = [...entry.steps, ...kept];
+            const through = entry.snapshotRevision + folded;
+            const checkpoints = yield* foldedVersions(tx, documentId, entry, all, through, now);
             const { doc: snapshot } = yield* applySteps(
-              entry.snapshot,
-              all.slice(0, folded).map((step) => step.json),
+              checkpoints.doc,
+              all
+                .slice(checkpoints.revision - entry.snapshotRevision, folded)
+                .map((step) => step.json),
             ).pipe(Effect.orDie);
-            compacted = { snapshot, revision: entry.snapshotRevision + folded };
+            compacted = { snapshot, revision: through };
             yield* documents.compact(
               tx,
               documentId,
@@ -897,15 +1048,16 @@ export class DocumentService extends Context.Service<
             CreateDocumentInput,
             localized(m.documents_error_invalid_document),
           )(input);
-          const owner = parsed.projectId
-            ? { projectId: parsed.projectId }
-            : parsed.conversationId
-              ? { conversationId: parsed.conversationId }
-              : null;
-          if (!owner || (parsed.projectId && parsed.conversationId))
+          if (parsed.projectId && parsed.conversationId)
             return yield* new DocumentRejected({
               reason: localized(m.documents_error_one_owner),
             });
+          // Neither names the place: it is the person's own, outside any chat.
+          const owner: ImageOwner = parsed.projectId
+            ? { projectId: parsed.projectId }
+            : parsed.conversationId
+              ? { conversationId: parsed.conversationId }
+              : { userId };
           const images = from?.images ?? [];
           const plan = yield* planImages(
             userId,
@@ -929,13 +1081,12 @@ export class DocumentService extends Context.Service<
               yield* requireDocuments(userId, tx);
               if ("conversationId" in owner)
                 yield* documents.lockConversation(tx, userId, owner.conversationId);
-              else yield* lockProjectForEditing(tx, userId, owner.projectId);
+              else if ("projectId" in owner)
+                yield* lockProjectForEditing(tx, userId, owner.projectId);
               const created = yield* documents.create(tx, userId, owner, {
                 id,
                 title: parsed.title,
-                // Only a chat's document dies with the answer that made it.
-                createdByMessageId:
-                  "conversationId" in owner ? (parsed.createdByMessageId ?? null) : null,
+                messageId: parsed.messageId ?? null,
                 lastEditedBy: parsed.by ?? "model",
                 snapshot: doc.toJSON() as Record<string, unknown>,
               });
@@ -1045,6 +1196,11 @@ export class DocumentService extends Context.Service<
             Effect.gen(function* () {
               yield* guard(tx);
               const before = yield* documents.lock(tx, userId, documentId);
+              if (before.projectId)
+                return yield* new DocumentRejected({
+                  reason: localized(m.documents_error_already_in_project),
+                });
+              yield* ownerOnly(before, userId);
               yield* lockProjectForEditing(tx, userId, projectId);
               yield* documents.moveToProject(tx, documentId, projectId);
               return { before, after: (yield* documents.get(userId, documentId, tx))! };
@@ -1058,6 +1214,82 @@ export class DocumentService extends Context.Service<
           ),
           Effect.map(({ after }) => after),
         );
+
+      const copyToProject = Effect.fn("DocumentService.copyToProject")(function* (
+        userId: string,
+        documentId: string,
+        projectId: string,
+      ) {
+        yield* requireDocuments(userId);
+        // Asked before any image is stored; the creating transaction asks again under the lock.
+        yield* transaction((tx) => lockProjectForEditing(tx, userId, projectId));
+        const { document: source, entry } = yield* exclusive(documentId)(load(userId, documentId));
+        const tree = entry.doc.toJSON() as TreeNode;
+        const images = (yield* Effect.forEach(
+          new Set(imageSources(entry.doc).flatMap((src) => documentImageOf(documentId, src) ?? [])),
+          (attachmentId) => attachments.findDocumentImage(documentId, attachmentId),
+        )).filter((image) => image !== null);
+        // Stored again as the person's own uploads, then claimed as those are.
+        // The project's owner pays for them, which `planImages` admits; only
+        // when that is the person do their own uploads stay.
+        if ((yield* documents.imageOwner(userId, { projectId })) === userId)
+          yield* storage
+            .admitFor(userId, userId, images)
+            .pipe(
+              Effect.catchTag("StorageFull", (full) =>
+                Effect.fail(new DocumentRejected({ reason: full.reason })),
+              ),
+            );
+        const uploads = new Map<string, string>();
+        for (const image of images) {
+          const bytes = yield* blobs.get(image.storageKey).pipe(Effect.orDie);
+          const upload = yield* files
+            .upload({
+              userId,
+              fileName: image.fileName,
+              declaredMediaType: image.mediaType,
+              bytes,
+              allowedKinds: ["image"],
+            })
+            .pipe(
+              Effect.catchTag("AttachmentRejected", (rejected) =>
+                Effect.fail(new DocumentRejected({ reason: rejected.reason })),
+              ),
+            );
+          uploads.set(image.id, upload.id);
+        }
+        const owner: ImageOwner = { projectId };
+        const plan = yield* planImages(userId, owner, [...uploads.values()], true);
+        const id = uuidv7();
+        const claimedAs = new Map(
+          [...uploads].map(([image, upload]) => [image, plan.copies.get(upload) ?? upload]),
+        );
+        const doc = Node.fromJSON(
+          documentSchema,
+          copiedTree(tree, documentId, id, claimedAs) ?? { type: "doc", content: [] },
+        );
+        yield* withinTreeCap(doc);
+        const { document, spent } = yield* transaction((tx) =>
+          Effect.gen(function* () {
+            yield* requireDocuments(userId, tx);
+            yield* lockProjectForEditing(tx, userId, projectId);
+            const created = yield* documents.create(tx, userId, owner, {
+              id,
+              title: source.title,
+              lastEditedBy: "user",
+              snapshot: doc.toJSON() as Record<string, unknown>,
+            });
+            const keys = uploads.size
+              ? yield* claimImages(tx, userId, id, owner, plan, [...uploads.values()])
+              : [];
+            if (!keys) return yield* new DocumentRejected({ reason: IMAGE_REFUSED });
+            return { document: created, spent: keys };
+          }),
+        );
+        yield* files.deleteBlobs(spent);
+        yield* documentChanged(userId, document);
+        return document;
+      });
 
       const discard = <E = never, R = never>(
         userId: string,
@@ -1586,21 +1818,67 @@ export class DocumentService extends Context.Service<
         list: Effect.fn(function* (userId, owner) {
           return yield* documents.list(userId, owner);
         }),
+        library: Effect.fn(function* (userId) {
+          return yield* documents.library(userId);
+        }),
         remove: Effect.fn("DocumentService.remove")(function* (userId, documentId) {
           const removed = yield* exclusive(documentId)(
             transaction((tx) =>
               Effect.gen(function* () {
                 const document = yield* documents.lock(tx, userId, documentId);
-                if (!document.projectId)
-                  return yield* new DocumentRejected({
-                    reason: localized(m.documents_error_chat_document_delete),
-                  });
+                yield* ownerOnly(document, userId);
+                // Its readers are named before the grants go with it.
+                const readers = document.projectId ? [] : yield* documentAudience(tx, documentId);
                 yield* documents.remove(tx, documentId);
-                return document;
+                return { document, readers };
               }),
             ).pipe(Effect.tap(() => drop(documentId))),
           );
-          yield* documentChanged(userId, removed);
+          yield* documentChanged(userId, removed.document, false, removed.readers);
+        }),
+        sharing: Effect.fn("DocumentService.sharing")(function* (userId, documentId) {
+          const document = yield* documents.get(userId, documentId);
+          if (!document || document.projectId)
+            return yield* new DocumentNotAvailable({ documentId });
+          return yield* documentSharing(db, documentId, document.userId === userId ? userId : null);
+        }),
+        readPublic: Effect.fn("DocumentService.readPublic")(function* (token) {
+          const target = yield* publicLinkTarget(db, token);
+          if (!target) return null;
+          const loaded = yield* exclusive(target.documentId)(
+            load(target.ownerId, target.documentId),
+          ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+          if (!loaded) return null;
+          return {
+            title: loaded.document.title,
+            ownerName: yield* documents.userName(target.ownerId),
+            updatedAt: loaded.document.updatedAt,
+            content: JSON.stringify(
+              publicTree(loaded.entry.doc.toJSON(), target.documentId, token),
+            ),
+          } satisfies PublicDocument;
+        }),
+        publicDocumentId: Effect.fn("DocumentService.publicDocumentId")(function* (token) {
+          return (yield* publicLinkTarget(db, token))?.documentId ?? null;
+        }),
+        share: Effect.fn("DocumentService.share")(function* (userId, documentId, change) {
+          const { document, affected } = yield* exclusive(documentId)(
+            transaction((tx) =>
+              Effect.gen(function* () {
+                const locked = yield* documents.lock(tx, userId, documentId);
+                if (locked.projectId)
+                  return yield* new DocumentRejected({
+                    reason: localized(m.documents_error_already_in_project),
+                  });
+                yield* ownerOnly(locked, userId);
+                return {
+                  document: locked,
+                  affected: yield* changeDocumentSharing(tx, userId, documentId, change),
+                };
+              }),
+            ),
+          );
+          yield* documentChanged(userId, document, false, affected);
         }),
         rename: Effect.fn("DocumentService.rename")(function* (userId, documentId, title) {
           const renamed = yield* exclusive(documentId)(
@@ -1644,19 +1922,42 @@ export class DocumentService extends Context.Service<
           if (!loaded?.document.canEdit) return null;
           const { entry } = loaded;
           const authors = yield* documents.stepAuthors(documentId, entry.snapshotRevision);
+          const checkpoints = yield* documents.checkpoints(documentId);
           const oldest = entry.steps[0]?.createdAt ?? Date.now();
-          return groupVersions(authors, {
+          const recent = groupVersions(authors, {
             revision: entry.snapshotRevision,
             at: new Date(oldest),
           });
+          // Kept versions from a fold reach further back than the snapshot,
+          // which is then only that fold's edge. One named since is no such version.
+          if (checkpoints.some((each) => each.revision <= entry.snapshotRevision)) recent.pop();
+          const listed = new Map(recent.map((version) => [version.revision, version]));
+          for (const checkpoint of checkpoints) {
+            const author: VersionAuthor | null =
+              checkpoint.origin === "model"
+                ? { kind: "assistant" }
+                : checkpoint.userName !== null
+                  ? { kind: "person", name: checkpoint.userName }
+                  : null;
+            const known = listed.get(checkpoint.revision);
+            listed.set(checkpoint.revision, {
+              revision: checkpoint.revision,
+              at: known?.at ?? checkpoint.endedAt.toISOString(),
+              author: known ? known.author : author,
+              name: checkpoint.name,
+            });
+          }
+          return [...listed.values()].toSorted((a, b) => b.revision - a.revision);
         }),
         versionAt: Effect.fn("DocumentService.versionAt")(function* (userId, documentId, revision) {
-          return yield* exclusive(documentId)(
+          const replayed = yield* exclusive(documentId)(
             Effect.gen(function* () {
               const { entry, document } = yield* load(userId, documentId);
               if (!document.canEdit) return null;
               const count = revision - entry.snapshotRevision;
-              if (!Number.isInteger(count) || count < 0 || count > entry.steps.length) return null;
+              if (!Number.isInteger(count) || count > entry.steps.length) return null;
+              // Folded away: only a kept version still has it.
+              if (count < 0) return "kept" as const;
               const { doc } = yield* applySteps(
                 entry.snapshot,
                 entry.steps.slice(0, count).map((step) => step.json),
@@ -1664,7 +1965,70 @@ export class DocumentService extends Context.Service<
               return JSON.stringify(doc.toJSON());
             }),
           ).pipe(Effect.catchTag("DocumentNotAvailable", () => Effect.succeed(null)));
+          if (replayed !== "kept") return replayed;
+          const kept = yield* documents.checkpointAt(documentId, revision);
+          return kept ? JSON.stringify(kept) : null;
         }),
+        nameVersion: Effect.fn("DocumentService.nameVersion")(
+          function* (userId, documentId, revision, name) {
+            yield* exclusive(documentId)(
+              Effect.gen(function* () {
+                const { entry } = yield* load(userId, documentId);
+                yield* transaction((tx) =>
+                  Effect.gen(function* () {
+                    yield* documents.lock(tx, userId, documentId);
+                    const kept = yield* documents.checkpoints(documentId, tx);
+                    const existing = kept.find((each) => each.revision === revision);
+                    if (
+                      name !== null &&
+                      !existing?.name &&
+                      kept.filter((each) => each.name !== null).length >= NAMED_VERSIONS
+                    )
+                      return yield* new DocumentRejected({
+                        reason: localized(m.documents_error_too_many_named, {
+                          max: NAMED_VERSIONS,
+                        }),
+                      });
+                    if (existing)
+                      return yield* documents.nameCheckpoint(tx, documentId, revision, name);
+                    if (name === null) return;
+                    const count = revision - entry.snapshotRevision;
+                    if (!Number.isInteger(count) || count < 0 || count > entry.steps.length)
+                      return yield* new DocumentRejected({
+                        reason: localized(m.documents_error_version_gone),
+                      });
+                    const { doc } = yield* applySteps(
+                      entry.snapshot,
+                      entry.steps.slice(0, count).map((step) => step.json),
+                    ).pipe(Effect.orDie);
+                    // Whoever's run ends there, repairs joining it as history shows them.
+                    const end = count
+                      ? versionEnds(
+                          yield* documents.stepAuthors(
+                            documentId,
+                            entry.snapshotRevision,
+                            revision,
+                            tx,
+                          ),
+                        ).at(-1)
+                      : undefined;
+                    yield* documents.keepCheckpoints(tx, [
+                      {
+                        documentId,
+                        revision,
+                        snapshot: doc.toJSON() as Record<string, unknown>,
+                        origin: end?.origin ?? null,
+                        userId: end?.userId ?? null,
+                        endedAt: end?.at ?? new Date(entry.steps[0]?.createdAt ?? Date.now()),
+                        name,
+                      },
+                    ]);
+                  }),
+                );
+              }),
+            );
+          },
+        ),
         read: Effect.fn("DocumentService.read")(function* (userId, documentId) {
           return yield* exclusive(documentId)(
             load(userId, documentId).pipe(
@@ -1680,6 +2044,7 @@ export class DocumentService extends Context.Service<
         rewrite,
         discard,
         moveToProject,
+        copyToProject,
         push,
         subscribe,
         beginLive,

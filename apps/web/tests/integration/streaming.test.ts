@@ -16,8 +16,9 @@ import {
 } from "effect";
 import { uuidv7 } from "uuidv7";
 import { LanguageModel, Response as AiResponse, type Prompt } from "effect/ai";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
+  conversationDocuments,
   conversationDrafts,
   conversations,
   conversationWorkingFiles,
@@ -735,6 +736,8 @@ describe("conversational agent authoring", () => {
         ),
       );
       await collectDraftTurn(again.assistantMessageId);
+      // The next turn reads what the earlier call returned, not only its summary.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain("row 9876, value 69132");
       const branched = await runtime.runPromise(
         loadConversationDetail(seed.userId, branch.conversationId),
       );
@@ -2224,6 +2227,19 @@ describe("conversation documents", () => {
       ),
     );
   /** A chat's documents, each with its tree as Markdown, made on demand. */
+  /** The person's library, with each document's text. */
+  const libraryOf = (seed: Effect.Success<typeof ordinaryChat>) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const service = yield* DocumentService;
+        const listed = yield* service.library(seed.userId);
+        return yield* Effect.forEach(listed, (document) =>
+          service
+            .read(seed.userId, document.id)
+            .pipe(Effect.map((read) => ({ ...document, content: toMarkdown(read!.doc) }))),
+        );
+      }),
+    );
   const documentsOf = (seed: Effect.Success<typeof ordinaryChat>) =>
     runtime.runPromise(
       Effect.gen(function* () {
@@ -2380,7 +2396,9 @@ describe("conversation documents", () => {
         const detail = await runtime.runPromise(
           loadConversationDetail(seed.userId, seed.conversation.id),
         );
-        expect(document!.createdByMessageId).toBe(detail.messages.at(-1)?.id);
+        expect(detail.documents).toEqual([
+          expect.objectContaining({ id: document!.id, messageId: detail.messages.at(-1)?.id }),
+        ]);
         expect(detail.messages.at(-1)?.status).toBe("complete");
         expect(detail.toolCalls.map((call) => call.arguments)).toEqual([{}, {}]);
         expect(detail.toolCalls.map((call) => call.result)).toEqual([
@@ -2758,7 +2776,13 @@ describe("conversation documents", () => {
               .from(documents)
               .where(
                 or(
-                  eq(documents.conversationId, seed.conversation.id),
+                  inArray(
+                    documents.id,
+                    db
+                      .select({ id: conversationDocuments.documentId })
+                      .from(conversationDocuments)
+                      .where(eq(conversationDocuments.conversationId, seed.conversation.id)),
+                  ),
                   eq(documents.projectId, projectId),
                 ),
               );
@@ -3331,6 +3355,91 @@ describe("conversation documents", () => {
     }
   });
 
+  it("takes a retried answer's document out of the chat and keeps it in the library", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [created] = await documentsOf(seed);
+      authoringScript = () => reply();
+      await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.retryMessage({
+            userId: seed.userId,
+            conversationId: seed.conversation.id,
+            messageId: sent.assistantMessageId,
+          }),
+        ),
+      );
+      await settle(sent.assistantMessageId);
+      // The new attempt starts clean: neither the reader nor the model meets the old one here.
+      expect(await documentsOf(seed)).toEqual([]);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, seed.conversation.id),
+      );
+      expect(detail.documents).toEqual([]);
+      expect(await libraryOf(seed)).toEqual([
+        expect.objectContaining({ id: created!.id, content: CHECKLIST }),
+      ]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
+  it("adds a document the message names to the chat, under its answer", async () => {
+    const seed = await runtime.runPromise(ordinaryChat);
+    let round = 0;
+    authoringScript = (input) => {
+      round++;
+      if (round === 1)
+        return authoringTool(input, "create_document", {
+          title: "Release checklist",
+          content: CHECKLIST,
+        });
+      return reply();
+    };
+    try {
+      const sent = await send(seed);
+      await settle(sent.assistantMessageId);
+      const [created] = await documentsOf(seed);
+      authoringScript = () => reply();
+      const other = await runtime.runPromise(
+        Effect.flatMap(ChatService, (service) =>
+          service.sendMessage({
+            userId: seed.userId,
+            conversation: { kind: "new", id: uuidv7() },
+            modelId: textModelId,
+            content: `[Release checklist](/documents/${created!.id}) Shorten it. [Not mine](/documents/${uuidv7()})`,
+            searchEnabled: false,
+            researchEnabled: false,
+            attachmentIds: [],
+          }),
+        ),
+      );
+      await settle(other.assistantMessageId);
+      const detail = await runtime.runPromise(
+        loadConversationDetail(seed.userId, other.conversationId),
+      );
+      expect(detail.documents).toEqual([
+        { id: created!.id, title: "Release checklist", messageId: other.assistantMessageId },
+      ]);
+      // Still in the chat it was made in.
+      expect(await documentsOf(seed)).toEqual([expect.objectContaining({ id: created!.id })]);
+    } finally {
+      authoringScript = null;
+    }
+  });
+
   it("interrupts a stale generation's write once a retry has claimed the message", async () => {
     const seed = await runtime.runPromise(ordinaryChat);
     let round = 0;
@@ -3384,9 +3493,12 @@ describe("conversation documents", () => {
       const assistantMessageId = await runtime.runPromise(Deferred.await(retried));
       expect(assistantMessageId).toBe(sent.assistantMessageId);
       await settle(assistantMessageId);
-      // Retrying the answer discards what that answer created. The stale edit
-      // is fenced, and the fresh answer did not create a replacement.
+      // The document stays the person's through the retry, the stale edit is
+      // fenced, and the fresh answer did not create a second one.
       expect(await documentsOf(seed)).toEqual([]);
+      expect(await libraryOf(seed)).toEqual([
+        expect.objectContaining({ title: "Release checklist", content: CHECKLIST }),
+      ]);
       const message = await runtime.runPromise(
         ChatRepo.use((repo) => repo.getMessage(assistantMessageId)),
       );
@@ -8560,18 +8672,25 @@ describe("custom tool calls", () => {
             );
           }).pipe(Effect.orDie),
         );
+        // The kept-drafts notice is the offer; earlier results name drafts as history.
+        const notice = (prompt: Prompt.Prompt) =>
+          JSON.stringify(
+            prompt.content.filter((message) =>
+              JSON.stringify(message).includes("Unpublished working files kept"),
+            ),
+          );
         const offered = await promptOf(seed.userId, conversationId);
-        const text = JSON.stringify(offered.prompt);
+        const text = notice(offered.prompt);
         expect(text).toContain(`working:${custom!.workingFileId}@3`);
         // No presentation tools here, so their draft is not advertised.
-        expect(text).not.toContain(deckId);
+        expect(JSON.stringify(offered.prompt)).not.toContain(deckId);
         expect(Object.keys(offered.toolkit?.tools ?? {})).toContain("publish_file");
 
         // Another module's offer does not reach this module's draft.
         await runtime.runPromise(
           CustomToolRepo.use((repo) => repo.setEnabled(toolId, false)).pipe(Effect.orDie),
         );
-        expect(JSON.stringify((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
+        expect(notice((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
           custom!.workingFileId,
         );
         // With no module offered, its kept drafts are not continued. publish_file stays,
@@ -9971,7 +10090,9 @@ describe("resuming an interrupted answer", () => {
       // replayed native calls, then the one-time reminder.
       expect(resumedPrompt).toContain("Drafting the notes. ");
       expect(resumedPrompt).toContain("<application-record>");
-      expect(resumedPrompt).toContain("- create_document: completed.");
+      expect(resumedPrompt).toContain("- create_document: completed. Result: ");
+      // What the call handed the model, not the row's summary.
+      expect(resumedPrompt).not.toContain("Result summary");
       expect(resumedPrompt).toContain("Half of the");
       expect(resumedPrompt).toContain(RESUME_REMINDER);
       expect(resumedPrompt).not.toContain('"type":"tool-call"');

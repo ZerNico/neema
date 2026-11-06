@@ -1,0 +1,129 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "19bd7b02-b136-48d8-aae5-b029ed2e9ae8",
+  "prevIds": [
+    "64dc178a-1978-460b-8b0a-0bd9a960efb9"
+  ],
+  "footprints": [
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "message_tool_results"
+      ],
+      "writes": [
+        "s|tbl|public.message_tool_results",
+        "n|tbl|public.message_tool_results",
+        "e|tbl|public.message_tool_results",
+        "n|rel|public.message_tool_results",
+        "n|type|public.message_tool_results",
+        "n|rel|public.message_tool_results_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "message_tool_results"
+      ],
+      "writes": [
+        "s|fk|public.message_tool_results.message_tool_results_tool_call_id_message_tool_calls_id_fkey",
+        "n|fk|public.message_tool_results.message_tool_results_tool_call_id_message_tool_calls_id_fkey",
+        "e|fk|public.message_tool_results.message_tool_results_tool_call_id_message_tool_calls_id_fkey",
+        "n|con|public.message_tool_results.message_tool_results_tool_call_id_message_tool_calls_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.message_tool_results",
+        "n|sch|public",
+        "n|tbl|public.message_tool_calls",
+        "n|sch|public",
+        "n|col|public.message_tool_results.tool_call_id",
+        "n|col|public.message_tool_calls.id",
+        "e|uniqueness|public.message_tool_calls.id"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "message_tool_results",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_tool_results",
+        "name": "tool_call_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_tool_results",
+        "name": "result",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_tool_results",
+        "name": "message_tool_results_tool_call_id_message_tool_calls_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "tool_call_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "message_tool_calls",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_tool_results",
+        "name": "message_tool_results_pkey",
+        "columns": [
+          "tool_call_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    }
+  ]
+}

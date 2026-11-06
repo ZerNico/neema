@@ -370,6 +370,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           items: references,
           onRemove: (removed) =>
             setReferences((current) => current.filter((reference) => reference !== removed)),
+          onAdd: (added) =>
+            setReferences((current) =>
+              current.some(
+                (reference) => reference.kind === added.kind && reference.id === added.id,
+              )
+                ? current
+                : [...current, added],
+            ),
         }}
         value={draft}
         onValueChange={(value) => {

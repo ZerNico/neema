@@ -711,14 +711,17 @@ describe("StreamEngine durable clarification handoff", () => {
     const prompt = JSON.parse(gatewayState.calls[1]!.prompt) as {
       content: Array<{ role: string; content: unknown }>;
     };
-    const question = prompt.content.find((message) =>
+    const asked = prompt.content.findIndex((message) =>
       JSON.stringify(message.content).includes("Which level of detail?"),
     );
     const answer = prompt.content.find((message) =>
       JSON.stringify(message.content).includes("Q1: Detailed"),
     );
-    expect(question?.role).toBe("assistant");
-    expect(JSON.stringify(question)).toContain("Detailed: Include examples");
+    // The question replays as the call that asked it and the result it presented.
+    expect(prompt.content[asked]?.role).toBe("assistant");
+    expect(JSON.stringify(prompt.content[asked])).toContain('"name":"ask_user"');
+    expect(prompt.content[asked + 1]?.role).toBe("tool");
+    expect(JSON.stringify(prompt.content[asked + 1])).toContain("Include examples");
     expect(answer?.role).toBe("user");
     expect(JSON.stringify(answer)).not.toContain("Which level of detail?");
     expect(gatewayState.calls[1]?.tools).not.toContain("read_url");

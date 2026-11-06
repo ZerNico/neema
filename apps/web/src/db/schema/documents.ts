@@ -14,7 +14,8 @@ import {
 import { attachments } from "./attachments.ts";
 import { user } from "./auth.ts";
 import { conversations, messages } from "./chat.ts";
-import { projects } from "./projects.ts";
+import { groups } from "./groups.ts";
+import { PROJECT_MEMBER_ROLES, projects } from "./projects.ts";
 
 /** A ProseMirror document or step as its own `toJSON` writes it. */
 type ProseMirrorJson = Record<string, unknown>;
@@ -26,23 +27,25 @@ type ProseMirrorJson = Record<string, unknown>;
  * applied, which is the collab version every editor rebases against.
  * Markdown is made from the tree only where it is wanted, never stored.
  *
- * A document belongs to exactly one conversation or one project. A chat's
- * document records the answer that produced it (`created_by_message_id`), and
- * rewinding past that answer removes the document with it, which is why the
- * cascade is here rather than in application code: edit, message delete and
- * conversation delete all go through it. A project's document outlives any
- * answer and is deleted explicitly.
+ * A document belongs to one person or one project; chats only show it,
+ * through `conversation_documents`. It outlives the answer and the chat that
+ * made it and is deleted explicitly, except one made in a temporary chat and
+ * used nowhere else, which that chat's purge takes.
  */
 export const documents = pgTable(
   "documents",
   {
     id: text().primaryKey(),
-    conversationId: text("conversation_id").references(() => conversations.id, {
-      onDelete: "cascade",
-    }),
+    /** A personal document's owner; null for a project's. */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
-    createdByMessageId: text("created_by_message_id").references(() => messages.id, {
-      onDelete: "cascade",
+    /**
+     * The chat that made it, set once at creation; null for one started
+     * elsewhere or once that chat is gone. Never derived from links: naming a
+     * document in a chat must not make it that chat's.
+     */
+    originConversationId: text("origin_conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
     }),
     title: text().notNull(),
     revision: integer().notNull().default(0),
@@ -56,19 +59,94 @@ export const documents = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("documents_conversation_idx").on(t.conversationId),
+    index("documents_user_idx").on(t.userId),
     index("documents_project_idx").on(t.projectId),
-    // Each deleted message cascades here; retry deletes by it too.
-    index("documents_created_by_message_idx")
-      .on(t.createdByMessageId)
-      .where(sql`${t.createdByMessageId} is not null`),
-    check("documents_one_owner", sql`(${t.conversationId} is null) <> (${t.projectId} is null)`),
-    check(
-      "documents_answer_in_conversation",
-      sql`${t.createdByMessageId} is null or ${t.conversationId} is not null`,
-    ),
+    index("documents_origin_idx")
+      .on(t.originConversationId)
+      .where(sql`${t.originConversationId} is not null`),
+    check("documents_one_owner", sql`(${t.userId} is null) <> (${t.projectId} is null)`),
   ],
 );
+
+/**
+ * The chats that show a document. A link grants nothing: the reader still
+ * needs access to the document itself. `message_id` is the answer whose card
+ * shows it.
+ */
+export const conversationDocuments = pgTable(
+  "conversation_documents",
+  {
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => messages.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.documentId] }),
+    index("conversation_documents_document_idx").on(t.documentId),
+    index("conversation_documents_message_idx")
+      .on(t.messageId)
+      .where(sql`${t.messageId} is not null`),
+  ],
+);
+
+/**
+ * A person's document shared with another account, as viewer or editor.
+ * Project documents are shared by their project instead.
+ */
+export const documentUserGrants = pgTable(
+  "document_user_grants",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text({ enum: PROJECT_MEMBER_ROLES }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.documentId, t.userId] }),
+    index("document_user_grants_user_idx").on(t.userId),
+  ],
+);
+
+/** A person's document shared with every member of a group. */
+export const documentGroupGrants = pgTable(
+  "document_group_grants",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    role: text({ enum: PROJECT_MEMBER_ROLES }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.documentId, t.groupId] }),
+    index("document_group_grants_group_idx").on(t.groupId),
+  ],
+);
+
+/**
+ * A person's document readable by anyone holding the token, without signing
+ * in. One per document; turning it off deletes the row, so a new link is a
+ * new token. It reads only while the owner may still publish.
+ */
+export const documentPublicLinks = pgTable("document_public_links", {
+  documentId: text("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  token: text().notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Every step after the snapshot, one row each; `revision` is the version the
@@ -89,6 +167,29 @@ export const documentSteps = pgTable(
     /** The generation that wrote a model step; null for a person. */
     generationId: text("generation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
+);
+
+/**
+ * The text at the end of a version whose steps were folded into the
+ * snapshot, so history reaches past the steps kept for rebasing. Older ones
+ * are thinned to one a day, then one a week; a named one is kept.
+ */
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    documentId: text("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    revision: integer().notNull(),
+    snapshot: jsonb().$type<ProseMirrorJson>().notNull(),
+    /** Who wrote the version; null for the document's start, which nobody's steps made. */
+    origin: text().$type<"user" | "model">(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    /** When its last step came. */
+    endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+    name: text(),
   },
   (t) => [primaryKey({ columns: [t.documentId, t.revision] })],
 );
