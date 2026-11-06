@@ -435,6 +435,7 @@ describe("branching a conversation", () => {
           id: callId,
           status: "complete",
           result: { sources: [{ url: "https://example.com", title: "Example", status: "ok" }] },
+          modelResult: { pages: [{ url: "https://example.com", text: "The page itself." }] },
         });
         yield* repo.appendChunks(answer.id, [{ seq: 1, kind: "text", delta: "a1" }]);
 
@@ -445,6 +446,7 @@ describe("branching a conversation", () => {
         return {
           cloned,
           original,
+          handed: yield* repo.listToolResults(cloned.map((call) => call.id)),
           clonedChunks: yield* repo.chunksAfter(clonedAnswer.id, 0),
           sourceChunks: yield* repo.chunksAfter(answer.id, 0),
         };
@@ -474,6 +476,9 @@ describe("branching a conversation", () => {
       arguments: { query: "effect 4" },
       result: { sources: [{ url: "https://example.com", title: "Example", status: "ok" }] },
       status: "complete",
+    });
+    expect(result.handed.get(cloned.id)).toEqual({
+      pages: [{ url: "https://example.com", text: "The page itself." }],
     });
     // Chunks only exist so a live stream can be resumed; nothing here is live.
     expect(result.clonedChunks).toEqual([]);

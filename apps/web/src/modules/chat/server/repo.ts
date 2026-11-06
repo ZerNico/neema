@@ -48,6 +48,7 @@ import {
   messageGenerationConfig,
   messages,
   messageToolCalls,
+  messageToolResults,
   messageUiStates,
   schedules,
 } from "~/db/schema/index.ts";
@@ -808,6 +809,8 @@ export class ChatRepo extends Context.Service<
       result: JsonValue;
       status: "complete" | "error";
       error?: { code: string; message: string };
+      /** What the model was handed, for later turns; see `message_tool_results`. */
+      modelResult?: unknown;
     }): Effect.Effect<void>;
     /**
      * Ends a call whose body was written as it ran, so the stored result stands.
@@ -816,6 +819,7 @@ export class ChatRepo extends Context.Service<
       id: string;
       status: "complete" | "error";
       error?: { code: string; message: string };
+      modelResult?: unknown;
     }): Effect.Effect<void>;
     /**
      * Marks calls stuck in "running" as failed (crash/fatal-error cleanup).
@@ -833,6 +837,8 @@ export class ChatRepo extends Context.Service<
      */
     sweepCompletedChunks(): Effect.Effect<number>;
     listToolCalls(messageIds: ReadonlyArray<string>): Effect.Effect<ToolCallRow[]>;
+    /** What these calls handed the model, by call id; never sent to a client. */
+    listToolResults(callIds: ReadonlyArray<string>): Effect.Effect<ReadonlyMap<string, JsonValue>>;
     /** Saved ```ui block state for these answers; the client drops rows whose hash no longer matches. */
     listUiStates(messageIds: ReadonlyArray<string>): Effect.Effect<UiStateRow[]>;
     /**
@@ -2004,6 +2010,16 @@ export class ChatRepo extends Context.Service<
               asc(messageToolCalls.callIndex),
             )
             .pipe(Effect.orDie);
+        }),
+
+        listToolResults: Effect.fn("ChatRepo.listToolResults")(function* (callIds) {
+          if (callIds.length === 0) return new Map<string, JsonValue>();
+          const rows = yield* db
+            .select()
+            .from(messageToolResults)
+            .where(inArray(messageToolResults.toolCallId, [...callIds]))
+            .pipe(Effect.orDie);
+          return new Map(rows.map((row) => [row.toolCallId, row.result]));
         }),
 
         listCompactionEvents: Effect.fn("ChatRepo.listCompactionEvents")(function* (messageIds) {

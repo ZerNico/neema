@@ -327,7 +327,8 @@ export const messageToolCalls = pgTable(
     // never guess it from the name.
     family: text({ enum: TOOL_FAMILY_NAMES }).notNull(),
     arguments: jsonb().$type<JsonValue>().notNull(),
-    // durable summary (query, counts, source urls/titles), not page content
+    // What display and reload show (counts, source urls/titles); what the model
+    // was handed is in `message_tool_results`.
     result: jsonb().$type<JsonValue>(),
     status: text({ enum: ["running", "complete", "error"] }).notNull(),
     error: jsonb().$type<{ code: string; message: string }>(),
@@ -374,6 +375,18 @@ export const toolCallDebugArguments = pgTable("tool_call_debug_arguments", {
     .references(() => messageToolCalls.id, { onDelete: "cascade" }),
   arguments: jsonb().$type<JsonValue>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The result a tool call handed the model, kept so later turns read what was
+ * read (a page's text, not its title). Model-only: display and the client
+ * read `message_tool_calls.result`, never this. Compaction bounds the cost.
+ */
+export const messageToolResults = pgTable("message_tool_results", {
+  toolCallId: text("tool_call_id")
+    .primaryKey()
+    .references(() => messageToolCalls.id, { onDelete: "cascade" }),
+  result: jsonb().$type<JsonValue>().notNull(),
 });
 
 /**

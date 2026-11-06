@@ -8,7 +8,7 @@ import { earlierSkillMessage } from "~/modules/skills/server/tools.ts";
 import { isOfficeFamily, officeFamilyOfFile } from "~/modules/office/families.ts";
 import { INTERACTIVE_UI_SKILL_ID } from "~/modules/genui/skill.ts";
 import { Effect, Option } from "effect";
-import { formatQuestionContext, readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
+import { readPresentedQuestions } from "~/modules/tools/ask-user-schema.ts";
 import { renderPlanReminder } from "~/modules/tools/plan-schema.ts";
 import { Prompt } from "effect/ai";
 import { uuidv7 } from "uuidv7";
@@ -33,6 +33,7 @@ import {
 } from "../compaction.ts";
 import {
   buildHistoryMessages,
+  modelMadeCall,
   loadResumedImages,
   RESUME_REMINDER,
   inlineTextCharsFor,
@@ -217,16 +218,22 @@ export const prepareAttemptPrompt = (env: {
     // Select once, before resolving attachments: the checkpoint replaces
     // its covered prefix entirely, including blobs that may no longer exist.
     // Keep `completed` intact for source authority, usage and memory provenance.
-    const questionContexts = new Map<string, string>();
-    for (const call of priorToolCalls) {
-      if (call.toolName !== "ask_user" || call.status !== "complete") continue;
-      const questions = readPresentedQuestions(call.result);
-      if (questions) questionContexts.set(call.messageId, formatQuestionContext(questions));
-    }
+
+    // Answers that asked the person; the call and its result replay with them.
+    const asked = new Set(
+      priorToolCalls
+        .filter(
+          (call) =>
+            call.toolName === "ask_user" &&
+            call.status === "complete" &&
+            readPresentedQuestions(call.result) !== null,
+        )
+        .map((call) => call.messageId),
+    );
     // Keep an immediate clarification with its answer, including on retry.
     // The bound is a user-led turn start, so no orphan assistant is retained.
     let protectedStart: number | undefined;
-    if (completed.at(-1)?.role === "user" && questionContexts.has(completed.at(-2)?.id ?? "")) {
+    if (completed.at(-1)?.role === "user" && asked.has(completed.at(-2)?.id ?? "")) {
       protectedStart = completed.length - 2;
       while (protectedStart > 0 && completed[protectedStart]?.role !== "user") protectedStart--;
     }
@@ -243,30 +250,35 @@ export const prepareAttemptPrompt = (env: {
     );
     const suffixStart = selected ? selected.index + 1 : 0;
     const maxStartIndex = protectedStart === undefined ? undefined : protectedStart - suffixStart;
-    const historySuffix = completed.slice(suffixStart).map((message) => {
-      const questionContext = questionContexts.get(message.id);
-      return questionContext
-        ? Object.assign({}, message, {
-            content: [message.content, questionContext].filter(Boolean).join("\n\n"),
-          })
-        : message;
-    });
+    const historySuffix = completed.slice(suffixStart);
     // Answers that expand into several prompt messages are built one by
     // one below; their attachments and tool rows are read once here
     // instead of twice per answer per pass.
-    const expandable = historySuffix.filter(
-      (message) =>
+    const callsByMessage = Map.groupBy(
+      priorToolCalls.filter(modelMadeCall),
+      (call) => call.messageId,
+    );
+    // An answer that called tools replays its calls and what they returned,
+    // so it expands like one with files, replay state or steers.
+    const expands = (message: (typeof historySuffix)[number]) =>
+      Boolean(
         message.assistantOutput?.files.length ||
         message.providerReplay?.turns.length ||
-        steersByAnswer.has(message.id),
-    );
+        steersByAnswer.has(message.id) ||
+        (message.role === "assistant" && callsByMessage.has(message.id)),
+      );
+    const expandable = historySuffix.filter(expands);
     const expandedRows = yield* promptDeps.attachments.listWithBlobsForMessages([
       ...expandable.map((message) => message.id),
       ...expandable.flatMap((message) =>
         (steersByAnswer.get(message.id) ?? []).map((steer) => steer.id),
       ),
     ]);
-    const callsByMessage = Map.groupBy(priorToolCalls, (call) => call.messageId);
+    const handedResults = yield* repo.listToolResults(
+      expandable.flatMap((message) =>
+        (callsByMessage.get(message.id) ?? []).map((call) => call.id),
+      ),
+    );
     const expandedDeps: PromptDeps = {
       ...promptDeps,
       attachments: {
@@ -276,6 +288,7 @@ export const prepareAttemptPrompt = (env: {
       },
       chat: {
         listToolCalls: (ids) => Effect.succeed(ids.flatMap((id) => callsByMessage.get(id) ?? [])),
+        listToolResults: () => Effect.succeed(handedResults),
       },
     };
     // What the previous request advertised: families its retained history
@@ -340,12 +353,7 @@ export const prepareAttemptPrompt = (env: {
       );
     // Only one-to-one rows can be indexed by position. File metadata and
     // replay turns expand one stored answer into several prompt messages.
-    const plainHistory = historySuffix.filter(
-      (message) =>
-        !message.assistantOutput?.files.length &&
-        !message.providerReplay?.turns.length &&
-        !steersByAnswer.has(message.id),
-    );
+    const plainHistory = historySuffix.filter((message) => !expands(message));
     const plainMessages = yield* buildHistoryMessages(promptDeps, {
       deferAssistantBytes: true,
       messages: plainHistory,
@@ -387,9 +395,7 @@ export const prepareAttemptPrompt = (env: {
     for (const message of historySuffix) {
       const own = [
         ...skillReplay(message),
-        ...(message.assistantOutput?.files.length ||
-        message.providerReplay?.turns.length ||
-        steersByAnswer.has(message.id)
+        ...(expands(message)
           ? yield* buildHistoryMessages(expandedDeps, {
               messages: [message],
               steers: steersByAnswer,
@@ -482,7 +488,7 @@ export const prepareAttemptPrompt = (env: {
       // The latest copy of each changed data block, by its header line.
       updates: new Map<string, string>(),
       // A source this answer found is in its tool results, until compaction clears
-      // them; a resumed answer's earlier rounds come back as summaries only.
+      // them; a resumed answer's records may keep only summaries.
       ownSourcesShown: !resuming,
     };
     const earlierSources = new Set(priorSources.map((source) => source.index));
@@ -1016,9 +1022,7 @@ export const prepareAttemptPrompt = (env: {
       retainedHistory.set(index, [
         ...openingOf(message),
         ...skillReplay(message),
-        ...(message.assistantOutput?.files.length ||
-        message.providerReplay?.turns.length ||
-        steersByAnswer.has(message.id)
+        ...(expands(message)
           ? yield* buildHistoryMessages(expandedDeps, {
               messages: [message],
               steers: steersByAnswer,
@@ -1091,9 +1095,11 @@ export const prepareAttemptPrompt = (env: {
       modelSupportsVision: model?.capabilities.vision ?? false,
       loadedBytes,
     });
+    const ownResults = yield* repo.listToolResults(ownCalls.map((call) => call.id));
     state.activeRounds = resumedRounds({
       content: sink.text(),
       calls: ownCalls,
+      results: ownResults,
       files: ownFiles,
       imageParts,
       replay: state.replay,

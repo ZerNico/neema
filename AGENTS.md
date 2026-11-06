@@ -463,8 +463,11 @@ Differs from most Effect 3 material online.
   without it goes through the Hermes polyfill (`hermes-tools.ts`), which must stay
   inside the provider boundary and return encoded parts. Malformed JSON and fenced
   examples are re-emitted as text, never as calls.
-- Tool page bodies are never persisted; `message_tool_calls.result` holds the
-  summary and source list only.
+- A call's row has two results: `message_tool_calls.result` is what display, reload
+  and the client read (summary, sources), and `message_tool_results` is what the model
+  was handed, replayed to later turns and never sent to a client. Replaying the summary
+  instead made models retract answers they had read correctly. See
+  [compaction](docs/internals/compaction.md).
 - Every web tool returns `WebToolResult`, so persistence, envelopes and the
   citations UI are written once. `read_url` is the only path through
   `PageExtractor`, which reads HTML, JSON, CSV and Markdown, and PDFs through the

@@ -21,6 +21,7 @@ import {
   messageKnowledgeVersions,
   messages,
   messageToolCalls,
+  messageToolResults,
   messageUiStates,
   conversationIntegrations,
 } from "~/db/schema/index.ts";
@@ -64,6 +65,13 @@ const withClonedFileIds = (
 };
 
 /** A branch's copy of an answer's image results, pointing at the cloned attachments. */
+/** Every id the source names, swapped for the clone's; ids are UUIDs, so no text matches by accident. */
+const withClonedIds = (value: JsonValue, cloned: ReadonlyMap<string, string>): JsonValue => {
+  let text = JSON.stringify(value);
+  for (const [from, to] of cloned) text = text.replaceAll(from, to);
+  return JSON.parse(text) as JsonValue;
+};
+
 const remapUiImages = (images: UiImages, attachmentIds: ReadonlyMap<string, string>): UiImages =>
   Object.fromEntries(
     Object.entries(images).map(([query, result]) => [
@@ -357,6 +365,26 @@ export const branchMethods = ({ db, attachments }: RepoContext) =>
                 )
                 .pipe(Effect.orDie);
             }
+
+            // What the calls handed the model goes too, so the branch's next
+            // turn reads the same history. Files it names are the branch's copies.
+            const handed = toolCalls.length
+              ? yield* tx
+                  .select()
+                  .from(messageToolResults)
+                  .where(inArray(messageToolResults.toolCallId, [...toolIds.keys()]))
+                  .pipe(Effect.orDie)
+              : [];
+            if (handed.length > 0)
+              yield* tx
+                .insert(messageToolResults)
+                .values(
+                  handed.map((row) => ({
+                    toolCallId: toolIds.get(row.toolCallId)!,
+                    result: withClonedIds(row.result, attachmentIds),
+                  })),
+                )
+                .pipe(Effect.orDie);
 
             for (const [toolCallId, runId] of rootRuns)
               if (toolIds.has(toolCallId))

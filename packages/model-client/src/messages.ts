@@ -84,9 +84,23 @@ const toolInput = (params: unknown) => {
   return parsed.ok ? parsed.value : {};
 };
 
+/**
+ * Anthropic takes only `[a-zA-Z0-9_-]` in a tool-use id, and history may hold
+ * another provider's (`functions.read:0`). One that fits passes as it is; any
+ * other is base64url-encoded, so two ids never meet on one spelling.
+ */
+const toolUseId = (id: string) =>
+  /^[a-zA-Z0-9_-]+$/.test(id)
+    ? id
+    : "enc_" +
+      btoa(String.fromCharCode(...new TextEncoder().encode(id)))
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replaceAll("=", "");
+
 const toolUse = (call: Prompt.ToolCallPart): Json => ({
   type: "tool_use",
-  id: call.id,
+  id: toolUseId(call.id),
   name: call.name,
   input: toolInput(call.params),
 });
@@ -198,7 +212,7 @@ export const buildMessagesRequest = (
             content: marked(
               results.map((part) => ({
                 type: "tool_result",
-                tool_use_id: part.id,
+                tool_use_id: toolUseId(part.id),
                 content: toolResultText(part.result),
                 ...(part.isFailure ? { is_error: true } : {}),
               })),

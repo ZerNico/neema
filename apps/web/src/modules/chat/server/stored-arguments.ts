@@ -88,3 +88,24 @@ export function debugArguments(args: unknown): JsonValue {
   if (text === undefined) return null;
   return text.length <= DEBUG_CHARS ? (JSON.parse(text) as JsonValue) : storedArguments(args);
 }
+
+/** Above every family's own cap; a result past it is cut, not dropped. */
+const MODEL_RESULT_CHARS = 200_000;
+
+/**
+ * A result as later turns replay it: what the model was handed, with bytes
+ * named rather than kept (they are in the attachment they became) and an
+ * oversized result cut with the cut said.
+ */
+export function storedModelResult(result: unknown): JsonValue | undefined {
+  const text = JSON.stringify(result, (_key, value: unknown) =>
+    value instanceof Uint8Array
+      ? { $omitted: "bytes", bytes: value.length }
+      : typeof value === "string" && DATA_URL.test(value)
+        ? { $omitted: "bytes", chars: value.length }
+        : value,
+  );
+  if (text === undefined) return undefined;
+  if (text.length <= MODEL_RESULT_CHARS) return JSON.parse(text) as JsonValue;
+  return `${text.slice(0, MODEL_RESULT_CHARS)}\n[… result cut to ${MODEL_RESULT_CHARS.toLocaleString("en-US")} of ${text.length.toLocaleString("en-US")} characters when it was stored]`;
+}

@@ -736,6 +736,8 @@ describe("conversational agent authoring", () => {
         ),
       );
       await collectDraftTurn(again.assistantMessageId);
+      // The next turn reads what the earlier call returned, not only its summary.
+      expect(JSON.stringify(prompts[0]!.prompt)).toContain("row 9876, value 69132");
       const branched = await runtime.runPromise(
         loadConversationDetail(seed.userId, branch.conversationId),
       );
@@ -8670,18 +8672,25 @@ describe("custom tool calls", () => {
             );
           }).pipe(Effect.orDie),
         );
+        // The kept-drafts notice is the offer; earlier results name drafts as history.
+        const notice = (prompt: Prompt.Prompt) =>
+          JSON.stringify(
+            prompt.content.filter((message) =>
+              JSON.stringify(message).includes("Unpublished working files kept"),
+            ),
+          );
         const offered = await promptOf(seed.userId, conversationId);
-        const text = JSON.stringify(offered.prompt);
+        const text = notice(offered.prompt);
         expect(text).toContain(`working:${custom!.workingFileId}@3`);
         // No presentation tools here, so their draft is not advertised.
-        expect(text).not.toContain(deckId);
+        expect(JSON.stringify(offered.prompt)).not.toContain(deckId);
         expect(Object.keys(offered.toolkit?.tools ?? {})).toContain("publish_file");
 
         // Another module's offer does not reach this module's draft.
         await runtime.runPromise(
           CustomToolRepo.use((repo) => repo.setEnabled(toolId, false)).pipe(Effect.orDie),
         );
-        expect(JSON.stringify((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
+        expect(notice((await promptOf(seed.userId, conversationId)).prompt)).not.toContain(
           custom!.workingFileId,
         );
         // With no module offered, its kept drafts are not continued. publish_file stays,
@@ -10005,7 +10014,9 @@ describe("resuming an interrupted answer", () => {
       // replayed native calls, then the one-time reminder.
       expect(resumedPrompt).toContain("Drafting the notes. ");
       expect(resumedPrompt).toContain("<application-record>");
-      expect(resumedPrompt).toContain("- create_document: completed.");
+      expect(resumedPrompt).toContain("- create_document: completed. Result: ");
+      // What the call handed the model, not the row's summary.
+      expect(resumedPrompt).not.toContain("Result summary");
       expect(resumedPrompt).toContain("Half of the");
       expect(resumedPrompt).toContain(RESUME_REMINDER);
       expect(resumedPrompt).not.toContain('"type":"tool-call"');

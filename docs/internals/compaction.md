@@ -16,6 +16,18 @@ touched: compaction only shapes what one attempt sends (`chat/server/compaction.
 
 ## How
 
+- **Earlier answers replay their calls and what those returned.** Each settled call keeps
+  the result the model was handed (`message_tool_results`, bytes named, not kept) apart
+  from the summary the page shows. History replays it as that answer's tool rounds, as
+  Claude and the APIs do, so a follow-up is answered from the page that was read. Replaying
+  only the summary made models conclude a read had returned a title and retract correct
+  answers. Calls settled before results were kept replay their summary marked as one.
+  Rows the application wrote (direct knowledge context, a pinned skill) are not calls and
+  are left out, and a loaded skill shows only its activity, since its text replays beside
+  the answer at its current revision. A result is the record of what was read, kept and
+  deleted with the chat like its messages: access is checked when a tool reads, never
+  again on replay, as in Claude and the provider APIs. Compaction is the bound: a summary
+  of older turns reads those results and replaces them.
 - **Clear before summarizing, inside an answer.** A chat answer over the trigger first
   replaces older tool results with a short stub, all at once so the cache breaks once. The
   newest three results, every receipt short enough that clearing saves nothing, and every
