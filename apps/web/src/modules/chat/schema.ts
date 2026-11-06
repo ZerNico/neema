@@ -367,6 +367,43 @@ export const SteerChunkEnvelope = Schema.Struct({
 });
 export type SteerChunkEnvelope = typeof SteerChunkEnvelope.Type;
 
+/**
+ * Where one model round's reasoning begins, so each round's thinking is drawn
+ * before the calls it led to rather than as one block above them all. A chunk
+ * of kind "reasoning-round" carries one; the finished row keeps the list.
+ */
+export const ReasoningRound = Schema.Struct({
+  turnIndex: Schema.Int,
+  /** UTF-16 offset into the answer's reasoning. */
+  start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The answer's raw text length when the round began. */
+  textOffset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type ReasoningRound = typeof ReasoningRound.Type;
+
+/** Adds a round from its chunk; a replayed or malformed one changes nothing. */
+export const applyReasoningRoundChunk = (
+  rounds: ReadonlyArray<ReasoningRound>,
+  delta: string,
+): ReadonlyArray<ReasoningRound> => {
+  try {
+    const round = Schema.decodeUnknownSync(ReasoningRound)(JSON.parse(delta));
+    return rounds.some((known) => known.turnIndex === round.turnIndex)
+      ? rounds
+      : [...rounds, round];
+  } catch {
+    return rounds;
+  }
+};
+
+/** The rounds an answer's chunks record, the way the reaper reads its text. */
+export const reasoningRoundsOf = (chunks: ReadonlyArray<{ kind: string; delta: string }>) =>
+  chunks.reduce<ReadonlyArray<ReasoningRound>>(
+    (rounds, chunk) =>
+      chunk.kind === "reasoning-round" ? applyReasoningRoundChunk(rounds, chunk.delta) : rounds,
+    [],
+  );
+
 export const CompactionChunkEnvelope = Schema.Union([
   Schema.Struct({
     v: Schema.Literals([1]),

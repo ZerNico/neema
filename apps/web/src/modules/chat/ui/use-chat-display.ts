@@ -339,6 +339,7 @@ export function useChatDisplay({
           tools: stream.tools,
           compactions: stream.compactions,
           steers: stream.steers,
+          reasoningRounds: stream.reasoningRounds,
           text: stream.live,
           status: stream.status,
           reading: stream.reading,
@@ -377,6 +378,7 @@ export function useChatDisplay({
     stream.reading,
     stream.status,
     stream.steers,
+    stream.reasoningRounds,
     stream.tools,
   ]);
 
@@ -504,6 +506,7 @@ interface LiveRow {
   readonly tools: NonNullable<DisplayMessage["toolActivities"]>;
   readonly compactions: NonNullable<DisplayMessage["compactionActivities"]>;
   readonly steers: NonNullable<DisplayMessage["steers"]>;
+  readonly reasoningRounds: NonNullable<DisplayMessage["reasoningRounds"]>;
   readonly text: NonNullable<DisplayMessage["liveStream"]>["text"];
   readonly status: NonNullable<DisplayMessage["liveStream"]>["status"];
   readonly reading: Exclude<DisplayMessage["reading"], undefined>;
@@ -545,6 +548,8 @@ function projectRow(
       ...(projected.steers ?? []),
       ...live.steers.filter((steer) => !projected.steers?.some((known) => known.id === steer.id)),
     ],
+    // Rounds come with the reasoning they mark, so the stream's always describe what it shows.
+    reasoningRounds: live.reasoningRounds,
     liveStream: { text: live.text, status: live.status },
     reading: live.reading,
     uiLookups: mergeLookups(projected.uiLookups ?? NO_LOOKUPS, live.lookups),

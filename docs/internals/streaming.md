@@ -32,6 +32,13 @@ Where the row knows more than the envelope said, the reload is right and the env
 is what changes. A running row keeps only what its start needs again on reload, so a
 few families name a running call more fully live than reloaded.
 
+Reasoning stays one text per answer, but each model round marks where its own begins:
+a `reasoning-round` chunk ahead of its first reasoning chunk, kept on the row as
+`reasoning_rounds`. The answer places each slice by its round, before that round's
+calls, as it places tool rows. Every writer that rebuilds the row from chunks (the
+reaper, a failure, resume) reads the marks too, and a copied answer is seeded with
+them. A row from before the marks has null and draws its reasoning as one block.
+
 Everything else that changes, such as a renamed chat or a new message, reaches other
 tabs and instances through the sync bus, described in
 [notifications and recovery](sync.md).

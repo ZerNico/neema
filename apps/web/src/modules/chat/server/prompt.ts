@@ -597,6 +597,8 @@ export const resumeFirstTurn = (input: {
   steerTurns: ReadonlyArray<number>;
   files: ReadonlyArray<AssistantFile>;
   replay?: ProviderReplay | null | undefined;
+  /** A round stopped mid-thought leaves only its reasoning behind. */
+  reasoningRounds?: ReadonlyArray<{ turnIndex: number }> | null | undefined;
 }) =>
   Math.max(
     -1,
@@ -607,6 +609,7 @@ export const resumeFirstTurn = (input: {
     ...input.steerTurns,
     ...input.files.map((file) => file.turnIndex),
     ...(input.replay?.turns ?? []).map((turn) => turn.turnIndex),
+    ...(input.reasoningRounds ?? []).map((round) => round.turnIndex),
   ) + 1;
 
 export const loadResumedImages = Effect.fn("chat.loadResumedImages")(function* (

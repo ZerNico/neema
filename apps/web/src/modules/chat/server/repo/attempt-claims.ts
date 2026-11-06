@@ -52,6 +52,27 @@ import type {
   ChatRepo,
 } from "../repo.ts";
 import type { DbTx } from "~/server/db.ts";
+import { reasoningRoundsOf, type ReasoningRound } from "../../schema.ts";
+
+/**
+ * A copied answer's reasoning as chunks: each recorded round's marker before
+ * its own text, so the rebuilt stream places them as the original did.
+ */
+const seededReasoning = (
+  reasoning: string,
+  rounds: ReadonlyArray<ReasoningRound> | null,
+): Array<{ kind: "reasoning" | "reasoning-round"; delta: string }> => {
+  if (!reasoning && !rounds?.length) return [];
+  if (!rounds?.length) return [{ kind: "reasoning", delta: reasoning }];
+  const leading = reasoning.slice(0, rounds[0]!.start);
+  return [
+    ...(leading ? [{ kind: "reasoning" as const, delta: leading }] : []),
+    ...rounds.flatMap((round, index) => [
+      { kind: "reasoning-round" as const, delta: JSON.stringify(round) },
+      { kind: "reasoning" as const, delta: reasoning.slice(round.start, rounds[index + 1]?.start) },
+    ]),
+  ];
+};
 
 const matchesHistory = (actual: HistorySnapshot, expected: HistorySnapshot): boolean =>
   actual.length === expected.length &&
@@ -497,6 +518,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 opening: null,
                 content: "",
                 reasoning: "",
+                reasoningRounds: null,
                 usage: null,
                 error: null,
                 completedAt: null,
@@ -691,7 +713,7 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
             // the text, as the reaper reads them.
             if (chunks.length === 0) {
               const seeded = [
-                ...(tail.reasoning ? [{ kind: "reasoning" as const, delta: tail.reasoning }] : []),
+                ...seededReasoning(tail.reasoning, tail.reasoningRounds),
                 ...(tail.content ? [{ kind: "text" as const, delta: tail.content }] : []),
               ];
               if (seeded.length > 0)
@@ -718,7 +740,11 @@ export const attemptClaimMethods = ({ db, attachments }: RepoContext) =>
                 completedAt: null,
                 modelId: input.modelId,
                 ...(chunks.length > 0
-                  ? { content: joined("text"), reasoning: joined("reasoning") }
+                  ? {
+                      content: joined("text"),
+                      reasoning: joined("reasoning"),
+                      reasoningRounds: reasoningRoundsOf(chunks),
+                    }
                   : {}),
                 // Signed image turns belong to the model that wrote them;
                 // another model's turns are never merged into them.

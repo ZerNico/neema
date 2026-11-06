@@ -968,6 +968,7 @@ function makeChatService() {
           .map((row) => row.steerTurnIndex ?? -1),
         files: message.assistantOutput?.files ?? [],
         replay: message.providerReplay,
+        reasoningRounds: message.reasoningRounds,
       });
       if (nextTurn >= RESEARCH_TURN_BASE) {
         return yield* new ResumeNotAllowed({

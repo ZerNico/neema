@@ -8,7 +8,7 @@ import {
 import type { ProviderRepo } from "~/modules/providers/server/repo.ts";
 import type { SyncBus } from "~/modules/sync/server/bus.ts";
 import type { ToolChunkEnvelope } from "~/modules/tools/schema.ts";
-import type { CompactionChunkEnvelope } from "../../schema.ts";
+import type { CompactionChunkEnvelope, ReasoningRound } from "../../schema.ts";
 import { GenerationSettled, type GenerationIdentity } from "../generation-fence.ts";
 import type { ChatRepo, ChunkKind } from "../repo.ts";
 import type { PreviewEvent, StatusEvent, StreamEvent } from "./events.ts";
@@ -75,13 +75,20 @@ export const makeGenerationSink = (input: {
   /** A resumed answer's usage so far, which the row's totals include. */
   earlierUsage: { readonly inputTokens?: number; readonly outputTokens?: number } | null;
   /** Where a resumed answer left off; zero and empty for a new one. */
-  start: { seq: number; text: string; reasoning: string; deliveredFiles: number };
+  start: {
+    seq: number;
+    text: string;
+    reasoning: string;
+    reasoningRounds: ReadonlyArray<ReasoningRound>;
+    deliveredFiles: number;
+  };
 }) =>
   Effect.gen(function* () {
     const { repo, pubsub, statuses, previews, fence, usage } = input;
     let seq = input.start.seq;
     let assembled = input.start.text;
     let assembledReasoning = input.start.reasoning;
+    let reasoningRounds = input.start.reasoningRounds;
     // Anything the answer delivered counts as output, including what a
     // resumed answer already holds, so a files-only answer is not empty.
     let deliveredFiles = input.start.deliveredFiles;
@@ -134,6 +141,20 @@ export const makeGenerationSink = (input: {
       if (kind === "reasoning") assembledReasoning += delta;
       else if (kind === "text") assembled += delta;
       buffer.push({ seq, kind, delta });
+    };
+
+    /** Reasoning of one model round; its first piece marks where the round's begins. */
+    const pushReasoning = (turnIndex: number, delta: string) => {
+      if (!reasoningRounds.some((round) => round.turnIndex === turnIndex)) {
+        const round = {
+          turnIndex,
+          start: assembledReasoning.length,
+          textOffset: assembled.length,
+        };
+        reasoningRounds = [...reasoningRounds, round];
+        push("reasoning-round", JSON.stringify(round));
+      }
+      push("reasoning", delta);
     };
 
     /**
@@ -256,6 +277,7 @@ export const makeGenerationSink = (input: {
           status,
           content: assembled,
           reasoning: assembledReasoning,
+          reasoningRounds,
           ...(totals.sawUsage
             ? {
                 usage: {
@@ -336,6 +358,7 @@ export const makeGenerationSink = (input: {
         deliveredFiles += 1;
       },
       push,
+      pushReasoning,
       flush,
       pushTool,
       pushCompaction,

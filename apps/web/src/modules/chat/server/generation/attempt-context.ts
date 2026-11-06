@@ -124,6 +124,7 @@ export const loadAttemptContext = (
           steerTurns: ownSteers.map((m) => m.steerTurnIndex ?? -1),
           files: ownFiles,
           replay: currentMessage.providerReplay,
+          reasoningRounds: currentMessage.reasoningRounds,
         })
       : 0;
     // Each attempt gets the full budget, bounded only by research's space.
@@ -228,6 +229,7 @@ export const loadAttemptContext = (
         seq: startSeq,
         text: resuming ? currentMessage.content : "",
         reasoning: resuming ? (currentMessage.reasoning ?? "") : "",
+        reasoningRounds: resuming ? (currentMessage.reasoningRounds ?? []) : [],
         deliveredFiles: resuming ? (currentMessage.assistantOutput?.files?.length ?? 0) : 0,
       },
     };

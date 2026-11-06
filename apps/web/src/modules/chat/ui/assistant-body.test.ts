@@ -571,7 +571,7 @@ describe("runs of work", () => {
     const { parts } = projectGrouped({
       content: "abcd",
       streaming: false,
-      reasoning: true,
+      reasoning: { seen: true, rounds: null },
       tools: [web("a", 0), memory(0, 1), web("b", 1, 2), ask, web("c", 3, 4)],
       compactions: [],
     });
@@ -690,5 +690,73 @@ describe("image calls", () => {
     expect(
       parts.flatMap((part) => (part.kind === "file" ? [part.file.attachment.id] : [])),
     ).toEqual(["c"]);
+  });
+});
+
+describe("reasoning by round", () => {
+  const browse = (callId: string, turnIndex: number): ToolActivity => ({
+    ...desktop(callId, "browser_click", 0),
+    turnIndex,
+    textOffset: 0,
+  });
+  const round = (turnIndex: number, start: number, textOffset = 0) => ({
+    turnIndex,
+    start,
+    textOffset,
+  });
+  const steps = (parts: ReturnType<typeof projectAssistantBody>["parts"]) =>
+    parts.map((part) =>
+      part.kind === "reasoning"
+        ? `reasoning ${part.start}-${part.end ?? ""}`
+        : part.kind === "browser"
+          ? `browser ${part.activities.map((call) => call.callId).join(",")}`
+          : part.kind,
+    );
+
+  it("draws each round's thinking before the calls it led to", () => {
+    const { parts } = projectAssistantBody({
+      content: "Done.",
+      streaming: false,
+      tools: [browse("a", 0), browse("b", 1), browse("c", 2)],
+      compactions: [],
+      reasoning: {
+        seen: true,
+        rounds: [round(0, 0), round(1, 10), round(2, 25), round(3, 40, 0)],
+        length: 52,
+      },
+    });
+    expect(steps(parts)).toEqual([
+      "reasoning 0-10",
+      "browser a",
+      "reasoning 10-25",
+      "browser b",
+      "reasoning 25-40",
+      "browser c",
+      "reasoning 40-52",
+      "text",
+    ]);
+  });
+
+  it("keeps the newest round open while it may still grow, and drops rounds that showed nothing", () => {
+    const { parts } = projectAssistantBody({
+      content: "",
+      streaming: true,
+      tools: [browse("a", 0), browse("b", 1)],
+      compactions: [],
+      // Round 1 was hidden by the provider: it begins where round 2 does.
+      reasoning: { seen: true, rounds: [round(0, 0), round(1, 8), round(2, 8)] },
+    });
+    expect(steps(parts)).toEqual(["reasoning 0-8", "browser a,b", "reasoning 8-"]);
+  });
+
+  it("keeps an older answer's reasoning as one block leading its work", () => {
+    const { parts } = projectAssistantBody({
+      content: "Done.",
+      streaming: false,
+      tools: [browse("a", 0), browse("b", 1)],
+      compactions: [],
+      reasoning: { seen: true, rounds: null, length: 30 },
+    });
+    expect(steps(parts)).toEqual(["reasoning 0-", "browser a,b", "text"]);
   });
 });

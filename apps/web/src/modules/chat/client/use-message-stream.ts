@@ -11,7 +11,7 @@ import type { ScheduleDraftActivityResult } from "~/modules/schedules/tool-schem
 import type { ImageQuality } from "@chat/model-client";
 import type { IntegrationSource } from "~/modules/tools/source-schema.ts";
 import { AssistantFile, mergeLookups, NO_LOOKUPS, type UiLookups } from "../assistant-output.ts";
-import { SteerChunkEnvelope } from "../schema.ts";
+import { applyReasoningRoundChunk, type ReasoningRound, SteerChunkEnvelope } from "../schema.ts";
 import type { AssistantSteer } from "../ui/assistant-body.ts";
 import type { KnowledgeActivitySummary } from "~/modules/knowledge/tool-schema.ts";
 import { useQueryClient } from "@tanstack/react-query";
@@ -282,6 +282,8 @@ export interface StreamState {
   compactions: CompactionActivity[];
   /** Queued messages this answer took in, in the order it took them. */
   steers: AssistantSteer[];
+  /** Where each model round's reasoning begins. */
+  reasoningRounds: ReadonlyArray<ReasoningRound>;
   status: "idle" | "streaming" | "complete" | "error" | "aborted";
   /** Scanned pages being read before the answer starts; live only, never replayed. */
   reading: { read: number; total: number } | null;
@@ -298,6 +300,7 @@ type Action =
       tools: ToolActivity[];
       compactions: CompactionActivity[];
       steers?: AssistantSteer[];
+      reasoningRounds?: ReadonlyArray<ReasoningRound>;
       lookups?: UiLookups;
     }
   | {
@@ -440,7 +443,15 @@ export function applyCompactionChunk(
 }
 
 /** Every chunk kind the server writes; see `ChunkKind` in the chat repo. */
-type ChunkKind = "text" | "reasoning" | "tool" | "compaction" | "file" | "steer" | "writing";
+type ChunkKind =
+  | "text"
+  | "reasoning"
+  | "reasoning-round"
+  | "tool"
+  | "compaction"
+  | "file"
+  | "steer"
+  | "writing";
 
 /*
  * Every reducer below hands back the array it was given when a chunk changes
@@ -621,6 +632,10 @@ function applyChunk(
       const steers = applySteerChunk(state.steers, delta);
       return steers === state.steers ? state : { ...state, steers };
     }
+    case "reasoning-round": {
+      const reasoningRounds = applyReasoningRoundChunk(state.reasoningRounds, delta);
+      return reasoningRounds === state.reasoningRounds ? state : { ...state, reasoningRounds };
+    }
     case "writing":
     case "tool": {
       const tools = applyToolActivityChunk(state.tools, kind, delta, at);
@@ -650,6 +665,7 @@ export function streamReducer(state: StreamState, action: Action): StreamState {
         tools: action.tools,
         compactions: action.compactions,
         steers: action.steers ?? [],
+        reasoningRounds: action.reasoningRounds ?? [],
         status: "streaming",
         reading: null,
         lookups: action.lookups ?? NO_LOOKUPS,
@@ -688,6 +704,7 @@ export interface InitialStream {
   tools: ToolActivity[];
   compactions: CompactionActivity[];
   steers?: AssistantSteer[];
+  reasoningRounds?: ReadonlyArray<ReasoningRound>;
   lookups?: UiLookups;
   lastSeq: number;
 }
@@ -719,6 +736,7 @@ export function useMessageStream(
     tools: initial?.tools ?? [],
     compactions: initial?.compactions ?? [],
     steers: initial?.steers ?? [],
+    reasoningRounds: initial?.reasoningRounds ?? [],
     status: messageId ? "streaming" : "idle",
     reading: null,
     lookups: initial?.lookups ?? NO_LOOKUPS,
@@ -739,6 +757,7 @@ export function useMessageStream(
       tools: initial?.tools ?? [],
       compactions: initial?.compactions ?? [],
       steers: initial?.steers ?? [],
+      reasoningRounds: initial?.reasoningRounds ?? [],
       lookups: initial?.lookups ?? NO_LOOKUPS,
     });
   }

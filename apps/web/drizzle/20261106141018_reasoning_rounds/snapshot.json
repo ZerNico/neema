@@ -1,0 +1,47 @@
+{
+  "type": "diff",
+  "version": "9",
+  "dialect": "postgres",
+  "id": "a98981e7-e9ca-4314-9657-b9a1c61e97e3",
+  "prevIds": [
+    "19bd7b02-b136-48d8-aae5-b029ed2e9ae8"
+  ],
+  "footprints": [
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "messages",
+        "reasoning_rounds"
+      ],
+      "writes": [
+        "s|col|public.messages.reasoning_rounds",
+        "n|col|public.messages.reasoning_rounds",
+        "e|col|public.messages.reasoning_rounds"
+      ],
+      "reads": [
+        "n|tbl|public.messages",
+        "n|sch|public"
+      ]
+    }
+  ],
+  "deltas": [
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "messages",
+        "name": "reasoning_rounds",
+        "type": "jsonb",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    }
+  ]
+}

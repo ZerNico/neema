@@ -13,6 +13,15 @@ import { ActivityChevron, ActivityFace } from "./activity-face.tsx";
 import { activityRowClassName } from "./activity-row.ts";
 import { LINK_SAFETY } from "~/ui/link-safety.tsx";
 
+/** One line of a thought, without its Markdown: its first, or while it grows its newest. */
+const thoughtLine = (reasoning: string, newest: boolean) => {
+  const lines = reasoning
+    .split("\n")
+    .map((line) => line.replace(/[*_`#>]+/g, "").trim())
+    .filter(Boolean);
+  return (newest ? lines.at(-1) : lines[0]) ?? "";
+};
+
 /**
  * ChatGPT-style thinking section above an assistant answer.
  *
@@ -22,14 +31,21 @@ import { LINK_SAFETY } from "~/ui/link-safety.tsx";
  * - Visible, finished: collapsed one-line summary, expandable.
  * - Hidden (encrypted/redacted): indicator only while thinking; nothing
  *   expandable afterwards.
+ *
+ * Inside a work line it is one round's thinking among that round's calls: one
+ * folded line, as Claude draws it, so the steps stay what the eye follows.
+ * Folded it shows where the thought starts, or while live its newest line.
  */
 export const ReasoningBlock = memo(function ReasoningBlock({
   reasoning,
   active,
+  inline = false,
 }: {
   reasoning: string;
-  /** True while the model is still thinking (no answer text yet). */
+  /** True while the model is still thinking (nothing follows it yet). */
   active: boolean;
+  /** One step of a work line, folded to a line. */
+  inline?: boolean;
 }) {
   const hasContent = reasoning.trim().length > 0;
   // Automatic behavior: open while the model is visibly thinking, closed once
@@ -37,8 +53,11 @@ export const ReasoningBlock = memo(function ReasoningBlock({
   // made in (`during`), so finishing still collapses a manually opened pane
   // and a new generation re-opens a manually closed one.
   const [override, setOverride] = useState<{ during: boolean; value: boolean } | null>(null);
-  const expanded =
-    override !== null && override.during === active ? override.value : active && hasContent;
+  const expanded = inline
+    ? (override?.value ?? false)
+    : override !== null && override.during === active
+      ? override.value
+      : active && hasContent;
   const paneRef = useRef<HTMLDivElement>(null);
 
   // Keep the newest thought in view while streaming.
@@ -59,6 +78,26 @@ export const ReasoningBlock = memo(function ReasoningBlock({
     );
   }
 
+  const body = (
+    <div
+      ref={paneRef}
+      className={cn(disclosureBodyRailClassName, "max-h-56 overflow-y-auto leading-relaxed")}
+    >
+      <Streamdown
+        linkSafety={LINK_SAFETY}
+        mode={active ? "streaming" : "static"}
+        parseIncompleteMarkdown
+        plugins={markdownPlugins}
+        components={markdownTableComponents}
+        isAnimating={active}
+        animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
+        className="space-y-2"
+      >
+        {reasoning}
+      </Streamdown>
+    </div>
+  );
+
   return (
     <Disclosure
       open={expanded}
@@ -66,31 +105,19 @@ export const ReasoningBlock = memo(function ReasoningBlock({
       className="mb-2"
     >
       <DisclosureTrigger className={disclosureTriggerClassName}>
-        <ActivityFace
-          label={active ? m.chat_thinking() : m.chat_reasoning_done()}
-          status={active ? "running" : "done"}
-        />
+        {inline ? (
+          <span className={cn("min-w-0 truncate", active && "text-shimmer")}>
+            {thoughtLine(reasoning, active)}
+          </span>
+        ) : (
+          <ActivityFace
+            label={active ? m.chat_thinking() : m.chat_reasoning_done()}
+            status={active ? "running" : "done"}
+          />
+        )}
         <ActivityChevron open={expanded} />
       </DisclosureTrigger>
-      <DisclosureContent>
-        <div
-          ref={paneRef}
-          className={cn(disclosureBodyRailClassName, "max-h-56 overflow-y-auto leading-relaxed")}
-        >
-          <Streamdown
-            linkSafety={LINK_SAFETY}
-            mode={active ? "streaming" : "static"}
-            parseIncompleteMarkdown
-            plugins={markdownPlugins}
-            components={markdownTableComponents}
-            isAnimating={active}
-            animated={{ animation: "fadeIn", duration: 200, easing: "ease-out", stagger: 0 }}
-            className="space-y-2"
-          >
-            {reasoning}
-          </Streamdown>
-        </div>
-      </DisclosureContent>
+      <DisclosureContent>{body}</DisclosureContent>
     </Disclosure>
   );
 });

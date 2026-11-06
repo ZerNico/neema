@@ -67,6 +67,7 @@ import { researchSteps } from "./research-steps.ts";
 import { useResearchPanel } from "./use-research-panel.tsx";
 import { researchPosition } from "./research-panel-id.ts";
 import type { SkillSummary } from "~/modules/skills/schema.ts";
+import type { ReasoningRound } from "../schema.ts";
 import type { ReasoningEffort } from "~/modules/providers/model-config.ts";
 import {
   CollectionChip,
@@ -211,6 +212,8 @@ export interface DisplayMessage {
   reasoning: string;
   /** A reasoning phase happened/is happening (even if its content is hidden). */
   reasoningSeen: boolean;
+  /** Where each model round's reasoning begins; null on an answer from before rounds were kept. */
+  reasoningRounds?: ReadonlyArray<ReasoningRound> | null;
   toolActivities: ToolActivity[];
   status: string;
   questionActions?: QuestionActions | undefined;
@@ -771,10 +774,29 @@ const AssistantBody = memo(function AssistantBody({
       ),
     [message.toolActivities],
   );
-  const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>) => {
+  // Each browser run links pages from where the one before it left off.
+  const pageBefore = useMemo(() => {
+    const before = new Map<string, string | undefined>();
+    let url: string | undefined;
+    for (const part of parts.flatMap((item) => (item.kind === "work" ? item.steps : [item])))
+      if (part.kind === "browser") {
+        before.set(part.key, url);
+        url = part.activities.findLast((call) => call.result?.page)?.result?.page?.url ?? url;
+      }
+    return before;
+  }, [parts]);
+  // Only the newest thing in the answer can still be thinking.
+  const lastPart = parts.at(-1);
+  const newest = lastPart?.kind === "work" ? lastPart.steps.at(-1) : lastPart;
+  const renderPart = (part: WorkStep | Exclude<BodyPart, WorkPart>, inWork = false) => {
     if (part.kind === "reasoning")
       return (
-        <ReasoningBlock key={part.key} reasoning={message.reasoning} active={reasoningActive} />
+        <ReasoningBlock
+          key={part.key}
+          reasoning={message.reasoning.slice(part.start, part.end)}
+          active={reasoningActive && part === newest}
+          inline={inWork}
+        />
       );
     if (part.kind === "file")
       return <AssistantFileAttachment key={part.key} file={part.file} fresh={streaming} />;
@@ -824,7 +846,7 @@ const AssistantBody = memo(function AssistantBody({
         <BrowserActivityBlock
           key={part.key}
           activities={part.activities}
-          approvals={message.desktopApprovals}
+          pageBefore={pageBefore.get(part.key)}
         />
       );
     if (part.kind === "compaction") {
@@ -933,7 +955,7 @@ const AssistantBody = memo(function AssistantBody({
             part={part}
             live={live}
             approvals={message.desktopApprovals}
-            renderStep={(step) => renderPart(step)}
+            renderStep={(step) => renderPart(step, true)}
           />
         );
       })}
@@ -1116,17 +1138,19 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
   const openSources = useCallback(() => sourcePanel.current?.(), []);
   const streaming = message.status === "streaming";
   const toolRunning = message.toolActivities.some((a) => a.status === "running");
-  // "Thinking" is the phase before any visible answer text arrives, but not
-  // while a tool is running (the tool block carries the progress feedback).
-  const reasoningActive =
-    streaming && message.content.length === 0 && !message.files?.length && !toolRunning;
+  // Reasoning is live only while nothing follows it, and not while a tool runs
+  // (the tool row carries the progress); the body knows what follows.
+  const reasoningActive = streaming && !toolRunning;
   // "Compacting…" is already the live signal; "Thinking…" underneath it would
   // claim the model is working when nothing has been sent to it yet.
   const compactions = message.compactionActivities ?? EMPTY_COMPACTION_ACTIVITIES;
   const compacting = compactions.some((activity) => activity.status === "running");
   const steers = message.steers ?? EMPTY_STEERS;
-  // Reasoning leads the answer's first run of work, inside its group.
+  // Each round's reasoning leads that round's work, inside its group.
   const showReasoning = message.reasoningSeen || message.reasoning.length > 0;
+  const reasoningRounds = message.reasoningRounds;
+  // Read only once the answer stopped growing, so pacing ticks keep the projection.
+  const reasoningLength = streaming ? undefined : message.reasoning.length;
   // Projected once here: the body renders it and the Thinking line reads it.
   const parts = useMemo(
     () =>
@@ -1138,7 +1162,11 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
         tools: message.toolActivities,
         compactions,
         steers,
-        reasoning: showReasoning,
+        reasoning: {
+          seen: showReasoning,
+          rounds: reasoningRounds,
+          ...(reasoningLength === undefined ? {} : { length: reasoningLength }),
+        },
       }).parts,
     [
       message.content,
@@ -1149,6 +1177,8 @@ function AssistantBubble({ message }: { message: DisplayMessage }) {
       compactions,
       steers,
       showReasoning,
+      reasoningRounds,
+      reasoningLength,
     ],
   );
   // The chat view wires resume only on the last answer.

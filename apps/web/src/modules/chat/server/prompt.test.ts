@@ -1411,6 +1411,16 @@ describe("resumedRounds", () => {
 
   it("numbers a resumed turn past every host position, image turns included", () => {
     expect(resumeFirstTurn({ calls: [], compactions: [], steerTurns: [], files: [] })).toBe(0);
+    // A round stopped mid-thought made no call, yet its reasoning holds its turn.
+    expect(
+      resumeFirstTurn({
+        calls: [{ turnIndex: 0, researchRunId: null }],
+        compactions: [],
+        steerTurns: [],
+        files: [],
+        reasoningRounds: [{ turnIndex: 0 }, { turnIndex: 1 }],
+      }),
+    ).toBe(2);
     expect(
       resumeFirstTurn({
         calls: [
